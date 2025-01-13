@@ -4,13 +4,45 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sports Betting Tracker</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 </head>
 <body>
     <header>
-        <h1>Welcome to Sports Betting Tracker</h1>
+        <h1>Sports Betting Tracker</h1>
+        <nav>
+            <ul>
+                <li><a href="{{ url_for('main.home') }}">Home</a></li>
+                {% if current_user.is_authenticated %}
+                    <li><a href="{{ url_for('main.manage_bets') }}">Bets</a></li>
+                    <li><a href="{{ url_for('main.logout') }}">Logout</a></li>
+                {% else %}
+                    <li><a href="{{ url_for('main.login') }}">Login</a></li>
+                    <li><a href="{{ url_for('main.register') }}">Register</a></li>
+                {% endif %}
+            </ul>
+        </nav>
     </header>
+
     <main>
+        <!-- Flash Messages -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="flash-container">
+                    {% for category, message in messages %}
+                        <div class="flash flash-{{ category }}">
+                            {{ message }}
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+
+        <!-- Page-specific content -->
         {% block content %}{% endblock %}
     </main>
+
+    <footer>
+        <p>&copy; {{ current_year }} Sports Betting Tracker</p>
+    </footer>
 </body>
 </html>

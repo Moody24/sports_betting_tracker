@@ -10,6 +10,31 @@ main = Blueprint('main', __name__)
 def home():
     return render_template('home.html')
 
+@main.route('/register', methods=['GET', 'POST'])
+def register():
+    form = RegisterForm()
+    if request.method == 'POST' and form.validate_on_submit():
+        # Check if email or username is already registered
+        if User.query.filter_by(email=form.email.data).first():
+            flash('Email is already registered. Please log in.', 'danger')
+            return redirect(url_for('main.login'))
+        if User.query.filter_by(username=form.username.data).first():
+            flash('Username is already taken. Please choose another.', 'danger')
+            return redirect(url_for('main.register'))
+
+        # Create a new user
+        new_user = User(
+            username=form.username.data,
+            email=form.email.data,
+        )
+        new_user.set_password(form.password.data)  # Hash password securely
+        db.session.add(new_user)
+        db.session.commit()
+        flash('Account created successfully! You can now log in.', 'success')
+        return redirect(url_for('main.login'))
+    
+    return render_template('register.html', form=form)
+
 @main.route('/bets', methods=['GET', 'POST'])
 @login_required
 def manage_bets():
@@ -62,7 +87,7 @@ def login():
     form = LoginForm()
     if request.method == 'POST' and form.validate_on_submit():
         user = User.query.filter_by(username=form.username.data).first()
-        if user and user.password_hash == form.password.data:  # Simplified for now
+        if user and user.check_password(form.password.data):  # Secure password validation
             login_user(user)
             flash('Logged in successfully!', 'success')
             return redirect(url_for('main.home'))
@@ -75,4 +100,3 @@ def logout():
     logout_user()
     flash('Logged out successfully.', 'success')
     return redirect(url_for('main.home'))
-
