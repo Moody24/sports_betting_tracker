@@ -1,6 +1,6 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash
 from flask_login import login_user, logout_user, login_required, current_user
-from app import db
+from app import db, bcrypt
 from app.models import User, Bet, Match
 from app.forms import LoginForm, RegisterForm, BetForm
 
@@ -12,8 +12,12 @@ def home():
 
 @main.route('/register', methods=['GET', 'POST'])
 def register():
+    if current_user.is_authenticated:
+        flash('You are already logged in!', 'info')
+        return redirect(url_for('main.home'))
+
     form = RegisterForm()
-    if request.method == 'POST' and form.validate_on_submit():
+    if form.validate_on_submit():
         # Check if email or username is already registered
         if User.query.filter_by(email=form.email.data).first():
             flash('Email is already registered. Please log in.', 'danger')
@@ -23,11 +27,12 @@ def register():
             return redirect(url_for('main.register'))
 
         # Create a new user
+        hashed_password = bcrypt.generate_password_hash(form.password.data).decode('utf-8')
         new_user = User(
             username=form.username.data,
             email=form.email.data,
+            password_hash=hashed_password
         )
-        new_user.set_password(form.password.data)  # Hash password securely
         db.session.add(new_user)
         db.session.commit()
         flash('Account created successfully! You can now log in.', 'success')
@@ -39,7 +44,7 @@ def register():
 @login_required
 def manage_bets():
     form = BetForm()
-    if request.method == 'POST' and form.validate_on_submit():
+    if form.validate_on_submit():
         bet = Bet(
             user_id=current_user.id,
             match_id=form.match_id.data,
@@ -61,7 +66,7 @@ def edit_bet(bet_id):
         flash('You do not have permission to edit this bet.', 'danger')
         return redirect(url_for('main.manage_bets'))
     form = BetForm(obj=bet)
-    if request.method == 'POST' and form.validate_on_submit():
+    if form.validate_on_submit():
         bet.match_id = form.match_id.data
         bet.bet_amount = form.bet_amount.data
         bet.outcome = form.outcome.data
@@ -84,13 +89,18 @@ def delete_bet(bet_id):
 
 @main.route('/login', methods=['GET', 'POST'])
 def login():
+    if current_user.is_authenticated:
+        flash('You are already logged in!', 'info')
+        return redirect(url_for('main.home'))
+    
     form = LoginForm()
-    if request.method == 'POST' and form.validate_on_submit():
+    if form.validate_on_submit():
         user = User.query.filter_by(username=form.username.data).first()
-        if user and user.check_password(form.password.data):  # Secure password validation
-            login_user(user)
+        if user and bcrypt.check_password_hash(user.password_hash, form.password.data):
+            login_user(user, remember=True)
             flash('Logged in successfully!', 'success')
-            return redirect(url_for('main.home'))
+            next_page = request.args.get('next')
+            return redirect(next_page) if next_page else redirect(url_for('main.home'))
         flash('Invalid username or password.', 'danger')
     return render_template('login.html', form=form)
 
