@@ -34,6 +34,13 @@ def create_app():
     login_manager.login_view = 'main.login'
     login_manager.login_message_category = 'info'
 
+    # Define the user_loader function
+    from app.models import User
+
+    @login_manager.user_loader
+    def load_user(user_id):
+        return User.query.get(int(user_id))
+
     # Register Blueprints
     from app.routes import main
     app.register_blueprint(main)
