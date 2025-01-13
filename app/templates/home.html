@@ -28,7 +28,7 @@
             <p>Hello, {{ current_user.username }}! Here are some quick stats about your betting history:</p>
             <ul>
                 <li>Total Bets Placed: {{ current_user.bets|length }}</li>
-                <li>Total Amount Wagered: ${{ sum(bet.bet_amount for bet in current_user.bets) }}</li>
+                <li>Total Amount Wagered: ${{ current_user.bets | sum(attribute='bet_amount') }}</li>
                 <li>Win Rate: 
                     {% if current_user.bets|length > 0 %}
                         {{ (sum(1 for bet in current_user.bets if bet.outcome == 'win') / current_user.bets|length) * 100 }}%

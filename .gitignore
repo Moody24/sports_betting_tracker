@@ -1,6 +1,16 @@
-env/
+# Ignore virtual environment folder
+venv/
+
+# Ignore environment variables file at root (sensitive data)
+.env
+
+# Ignore SQLite database file (optional, only if you don't want to track it)
 app/database.db
+
+# Ignore Python bytecode files
 __pycache__/
 *.pyc
+
+# Ignore macOS system files
 .DS_Store
-venv/.env
+
