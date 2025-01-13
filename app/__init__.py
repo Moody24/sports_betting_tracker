@@ -1,11 +1,18 @@
-from flask import flask
+from flask import Flask
+from flask_sqlalchemy import SQLAlchemy
+from flask_migrate import Migrate
+
+db = SQLAlchemy()
 
 def create_app():
-    app =  Flask(__name__)
+    app = Flask(__name__)
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///app.db'
+    app.config['SECRET_KEY'] = 'your-secret-key'
+    
+    db.init_app(app)
+    Migrate(app, db)
 
-    app.config['SQLALCHEMY_TRACKER_MODIFICATIONS'] = false
-
-    from.routes import bp as routes_bp
-    app.register_blueprint(routes_bp)
+    from app.routes import main
+    app.register_blueprint(main)
 
     return app
