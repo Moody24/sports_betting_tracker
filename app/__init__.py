@@ -5,7 +5,6 @@ from flask_login import LoginManager
 from flask_bcrypt import Bcrypt
 from datetime import timedelta
 from dotenv import load_dotenv
-from app import db, app
 import os
 
 # Initialize extensions
@@ -13,7 +12,6 @@ db = SQLAlchemy()
 migrate = Migrate()
 login_manager = LoginManager()
 bcrypt = Bcrypt()
-migrate = Migrate(app, db)
 
 def create_app():
     # Load environment variables from .env file
@@ -41,5 +39,6 @@ def create_app():
     app.register_blueprint(main)
 
     return app
+
 
 

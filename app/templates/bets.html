@@ -1,79 +1,44 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Manage Bets</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
-</head>
-<body>
-    <header>
-        <h1>Manage Your Bets</h1>
-        <nav>
-            <ul>
-                <li><a href="{{ url_for('main.home') }}">Home</a></li>
-                <li><a href="{{ url_for('main.manage_bets') }}">Bets</a></li>
-                {% if current_user.is_authenticated %}
-                    <li><a href="{{ url_for('main.logout') }}">Logout</a></li>
-                {% else %}
-                    <li><a href="{{ url_for('main.login') }}">Login</a></li>
-                {% endif %}
-            </ul>
-        </nav>
-    </header>
+{% extends "base.html" %}
 
-    <main>
-        {% if current_user.is_authenticated %}
-            <h2>Place a New Bet</h2>
-            <form method="POST">
-                {{ form.hidden_tag() }}
-                <label for="match_id">Match ID:</label>
-                {{ form.match_id(size=30) }}<br>
-                
-                <label for="bet_amount">Bet Amount:</label>
-                {{ form.bet_amount() }}<br>
-                
-                <label for="outcome">Outcome:</label>
-                {{ form.outcome() }}<br>
-                
-                {{ form.submit(class="btn") }}
-            </form>
+{% block title %}My Bets{% endblock %}
 
-            <h2>Your Bets</h2>
-            {% if bets %}
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Match</th>
-                            <th>Amount</th>
-                            <th>Outcome</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for bet in bets %}
-                        <tr>
-                            <td>{{ bet.match_id }}</td>
-                            <td>${{ bet.bet_amount }}</td>
-                            <td>{{ bet.outcome }}</td>
-                            <td>
-                                <a href="{{ url_for('main.edit_bet', bet_id=bet.id) }}">Edit</a> |
-                                <a href="{{ url_for('main.delete_bet', bet_id=bet.id) }}" onclick="return confirm('Are you sure you want to delete this bet?')">Delete</a>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            {% else %}
-                <p>You haven't placed any bets yet. Start by placing one!</p>
-            {% endif %}
-        {% else %}
-            <p>Please <a href="{{ url_for('main.login') }}">log in</a> to manage your bets.</p>
-        {% endif %}
-    </main>
+{% block content %}
+<h1 class="mb-4">My Bets</h1>
 
-    <footer>
-        <p>&copy; {{ current_year }} Sports Betting Tracker</p>
-    </footer>
-</body>
-</html>
+<form method="POST" class="mb-4">
+    {{ form.hidden_tag() }}
+    <div class="mb-3">
+        {{ form.match_id.label(class="form-label") }}
+        {{ form.match_id(class="form-control") }}
+    </div>
+    <div class="mb-3">
+        {{ form.bet_amount.label(class="form-label") }}
+        {{ form.bet_amount(class="form-control") }}
+    </div>
+    <div class="mb-3">
+        {{ form.outcome.label(class="form-label") }}
+        {{ form.outcome(class="form-select") }}
+    </div>
+    <button type="submit" class="btn btn-primary">Place Bet</button>
+</form>
+
+<h2>Your Bets</h2>
+<ul class="list-group">
+    {% for bet in bets %}
+        <li class="list-group-item d-flex justify-content-between align-items-center">
+            <div>
+                Match ID: {{ bet.match_id }} <br>
+                Bet Amount: ${{ bet.bet_amount }} <br>
+                Outcome: {{ bet.outcome or "Pending" }}
+            </div>
+            <div>
+                <a href="{{ url_for('main.edit_bet', bet_id=bet.id) }}" class="btn btn-sm btn-warning">Edit</a>
+                <form method="POST" action="{{ url_for('main.delete_bet', bet_id=bet.id) }}" style="display: inline;">
+                    {{ form.hidden_tag() }}
+                    <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+                </form>
+            </div>
+        </li>
+    {% endfor %}
+</ul>
+{% endblock %}

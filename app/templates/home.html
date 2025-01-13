@@ -1,49 +1,16 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sports Betting Tracker</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
-</head>
-<body>
-    <header>
-        <h1>Welcome to the Sports Betting Tracker</h1>
-        <nav>
-            <ul>
-                <li><a href="{{ url_for('main.home') }}">Home</a></li>
-                <li><a href="{{ url_for('main.manage_bets') }}">Bets</a></li>
-                {% if current_user.is_authenticated %}
-                    <li><a href="{{ url_for('main.logout') }}">Logout</a></li>
-                {% else %}
-                    <li><a href="{{ url_for('main.login') }}">Login</a></li>
-                {% endif %}
-            </ul>
-        </nav>
-    </header>
+{% extends "base.html" %}
 
-    <main>
-        <h2>Track Your Bets and Stay Ahead</h2>
-        {% if current_user.is_authenticated %}
-            <p>Hello, {{ current_user.username }}! Here are some quick stats about your betting history:</p>
-            <ul>
-                <li>Total Bets Placed: {{ current_user.bets|length }}</li>
-                <li>Total Amount Wagered: ${{ current_user.bets | sum(attribute='bet_amount') }}</li>
-                <li>Win Rate: 
-                    {% if current_user.bets|length > 0 %}
-                        {{ (sum(1 for bet in current_user.bets if bet.outcome == 'win') / current_user.bets|length) * 100 }}%
-                    {% else %}
-                        0%
-                    {% endif %}
-                </li>
-            </ul>
-        {% else %}
-            <p>Sign up or log in to start tracking your bets and analyzing your performance!</p>
-        {% endif %}
-    </main>
+{% block title %}Home{% endblock %}
 
-    <footer>
-        <p>&copy; {{ current_year }} Sports Betting Tracker</p>
-    </footer>
-</body>
-</html>
+{% block content %}
+<div class="text-center">
+    <h1>Welcome to Sports Betting Tracker</h1>
+    <p>Manage your bets and track your winnings!</p>
+    {% if current_user.is_authenticated %}
+        <a href="{{ url_for('main.manage_bets') }}" class="btn btn-primary">View My Bets</a>
+    {% else %}
+        <a href="{{ url_for('main.login') }}" class="btn btn-success">Login</a>
+        <a href="{{ url_for('main.register') }}" class="btn btn-secondary">Register</a>
+    {% endif %}
+</div>
+{% endblock %}

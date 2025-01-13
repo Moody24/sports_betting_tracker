@@ -1,6 +1,6 @@
 from flask_wtf import FlaskForm
 from wtforms import StringField, PasswordField, FloatField, SubmitField, SelectField, BooleanField
-from wtforms.validators import DataRequired, Email, Length, EqualTo
+from wtforms.validators import DataRequired, Email, Length, EqualTo, NumberRange
 
 class LoginForm(FlaskForm):
     username = StringField('Username', validators=[DataRequired(), Length(min=2, max=20)])
@@ -20,6 +20,6 @@ class RegisterForm(FlaskForm):
 
 class BetForm(FlaskForm):
     match_id = StringField('Match ID', validators=[DataRequired()])
-    bet_amount = FloatField('Bet Amount', validators=[DataRequired()])
+    bet_amount = FloatField('Bet Amount', validators=[DataRequired(), NumberRange(min=1, message='Bet amount must be greater than zero.')])
     outcome = SelectField('Outcome', choices=[('win', 'Win'), ('lose', 'Lose')], validators=[DataRequired()])
     submit = SubmitField('Submit Bet')

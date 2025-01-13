@@ -18,7 +18,6 @@ def register():
 
     form = RegisterForm()
     if form.validate_on_submit():
-        # Check if email or username is already registered
         if User.query.filter_by(email=form.email.data).first():
             flash('Email is already registered. Please log in.', 'danger')
             return redirect(url_for('main.login'))
@@ -26,7 +25,6 @@ def register():
             flash('Username is already taken. Please choose another.', 'danger')
             return redirect(url_for('main.register'))
 
-        # Create a new user
         hashed_password = bcrypt.generate_password_hash(form.password.data).decode('utf-8')
         new_user = User(
             username=form.username.data,
@@ -97,7 +95,7 @@ def login():
     if form.validate_on_submit():
         user = User.query.filter_by(username=form.username.data).first()
         if user and bcrypt.check_password_hash(user.password_hash, form.password.data):
-            login_user(user, remember=True)
+            login_user(user, remember=form.remember.data)
             flash('Logged in successfully!', 'success')
             next_page = request.args.get('next')
             return redirect(next_page) if next_page else redirect(url_for('main.home'))
