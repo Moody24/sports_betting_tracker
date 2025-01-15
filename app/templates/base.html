@@ -3,73 +3,42 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Manage Bets</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <title>{% block title %}Sports Betting Tracker{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+    <script src="{{ url_for('static', filename='js/script.js') }}" defer></script>
 </head>
 <body>
     <header>
-        <h1>Manage Your Bets</h1>
+        <h1>Sports Betting Tracker</h1>
+        <button id="theme-switch">Toggle Theme</button>
         <nav>
-            <ul>
+            <ul id="navbar-menu">
                 <li><a href="{{ url_for('main.home') }}">Home</a></li>
                 <li><a href="{{ url_for('main.manage_bets') }}">Bets</a></li>
                 {% if current_user.is_authenticated %}
                     <li><a href="{{ url_for('main.logout') }}">Logout</a></li>
                 {% else %}
                     <li><a href="{{ url_for('main.login') }}">Login</a></li>
+                    <li><a href="{{ url_for('main.register') }}">Register</a></li>
                 {% endif %}
             </ul>
+            <button id="navbar-toggle">Menu</button>
         </nav>
     </header>
 
     <main>
-        {% if current_user.is_authenticated %}
-            <h2>Place a New Bet</h2>
-            <form method="POST">
-                {{ form.hidden_tag() }}
-                <label for="match_id">Match ID:</label>
-                {{ form.match_id(size=30) }}<br>
-                
-                <label for="bet_amount">Bet Amount:</label>
-                {{ form.bet_amount() }}<br>
-                
-                <label for="outcome">Outcome:</label>
-                {{ form.outcome() }}<br>
-                
-                {{ form.submit(class="btn") }}
-            </form>
-
-            <h2>Your Bets</h2>
-            {% if bets %}
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Match</th>
-                            <th>Amount</th>
-                            <th>Outcome</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for bet in bets %}
-                        <tr>
-                            <td>{{ bet.match_id }}</td>
-                            <td>${{ bet.bet_amount }}</td>
-                            <td>{{ bet.outcome }}</td>
-                            <td>
-                                <a href="{{ url_for('main.edit_bet', bet_id=bet.id) }}">Edit</a> |
-                                <a href="{{ url_for('main.delete_bet', bet_id=bet.id) }}" onclick="return confirm('Are you sure you want to delete this bet?')">Delete</a>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            {% else %}
-                <p>You haven't placed any bets yet. Start by placing one!</p>
+        <!-- Flash Messages -->
+        {% with messages = get_flashed_messages(with_categories=True) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
             {% endif %}
-        {% else %}
-            <p>Please <a href="{{ url_for('main.login') }}">log in</a> to manage your bets.</p>
-        {% endif %}
+        {% endwith %}
+
+        <!-- Dynamic Content -->
+        {% block content %}
+        {% endblock %}
     </main>
 
     <footer>

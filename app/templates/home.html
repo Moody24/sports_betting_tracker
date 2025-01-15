@@ -1,16 +1,13 @@
 {% extends "base.html" %}
-
-{% block title %}Home{% endblock %}
-
 {% block content %}
-<div class="text-center">
-    <h1>Welcome to Sports Betting Tracker</h1>
-    <p>Manage your bets and track your winnings!</p>
-    {% if current_user.is_authenticated %}
-        <a href="{{ url_for('main.manage_bets') }}" class="btn btn-primary">View My Bets</a>
-    {% else %}
-        <a href="{{ url_for('main.login') }}" class="btn btn-success">Login</a>
-        <a href="{{ url_for('main.register') }}" class="btn btn-secondary">Register</a>
-    {% endif %}
-</div>
+<h2>Welcome to the Sports Betting Tracker</h2>
+<p>This is your one-stop solution to track and manage your sports bets.</p>
+
+{% if current_user.is_authenticated %}
+    <p>Welcome back, {{ current_user.username }}!</p>
+    <p><a href="{{ url_for('main.manage_bets') }}">Go to Bets</a></p>
+{% else %}
+    <p>Please <a href="{{ url_for('main.login') }}">log in</a> or <a href="{{ url_for('main.register') }}">register</a> to start tracking your bets.</p>
+{% endif %}
 {% endblock %}
+

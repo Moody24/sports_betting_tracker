@@ -41,11 +41,17 @@ def create_app():
     def load_user(user_id):
         return User.query.get(int(user_id))
 
+    # Global context processor
+    @app.context_processor
+    def inject_user():
+        from datetime import datetime
+        return {
+            'current_user': current_user,
+            'current_year': datetime.utcnow().year
+        }
+
     # Register Blueprints
     from app.routes import main
     app.register_blueprint(main)
 
     return app
-
-
-
