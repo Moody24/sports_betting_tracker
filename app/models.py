@@ -20,26 +20,32 @@ class User(UserMixin, db.Model):
         """Checks if the provided password matches the hashed password."""
         return bcrypt.check_password_hash(self.password_hash, password)
 
+    def total_wins(self):
+        """Returns the total number of winning bets for the user."""
+        return Bet.query.filter_by(user_id=self.id, outcome="win").count()
+
+    def total_losses(self):
+        """Returns the total number of losing bets for the user."""
+        return Bet.query.filter_by(user_id=self.id, outcome="lose").count()
+
+
 class Bet(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    match_id = db.Column(db.Integer, db.ForeignKey('match.id'), nullable=False)
-    bet_amount = db.Column(db.Float, nullable=False)
-    outcome = db.Column(db.String(50), nullable=True)
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    def __repr__(self):
-        return f"<Bet {self.id} - Amount: {self.bet_amount}>"
-
-class Match(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
     team_a = db.Column(db.String(80), nullable=False)
     team_b = db.Column(db.String(80), nullable=False)
     match_date = db.Column(db.DateTime, nullable=False)
-    result = db.Column(db.String(50), nullable=True)
-    bets = db.relationship('Bet', backref='match', lazy=True)
+    bet_amount = db.Column(db.Float, nullable=False)
+    outcome = db.Column(db.String(10), nullable=True, default='pending')  # win/lose/pending
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
     def __repr__(self):
-        return f"<Match {self.team_a} vs {self.team_b} on {self.match_date}>"
+        return f"<Bet {self.id} - {self.team_a} vs {self.team_b} - Amount: {self.bet_amount} - Outcome: {self.outcome}>"
 
+    def is_winning_bet(self):
+        """Checks if the bet was a winning bet."""
+        return self.outcome == "win"
+
+    def is_losing_bet(self):
+        """Checks if the bet was a losing bet."""
+        return self.outcome == "lose"

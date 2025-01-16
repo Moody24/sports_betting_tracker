@@ -1,86 +1,160 @@
-/* General Body Styles */
-body {
-    font-family: Arial, sans-serif;
+/* General Styles */
+* {
     margin: 0;
     padding: 0;
-    background-color: #f9f9f9;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Arial', sans-serif;
+    background-color: #f4f4f9;
     color: #333;
-    line-height: 1.6;
+    display: flex;
+    min-height: 100vh;
+    flex-direction: column;
 }
 
-/* Header Styles */
+/* Header */
 header {
-    background: #333;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background-color: #222;
     color: white;
-    padding: 10px 20px;
-    text-align: center;
+    padding: 15px 20px;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 100;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
+/* Sports Betting Tracker (Title) */
 header h1 {
-    margin: 0;
-    font-size: 1.8em;
+    font-size: 1.8rem;
+    font-weight: bold;
+    letter-spacing: 1px;
+    margin-right: auto; /* Push other content to the right */
 }
 
-/* Navigation Bar */
+/* Centered Navigation Links */
+nav {
+    display: flex;
+    justify-content: center; /* Center the links */
+    flex-grow: 1;
+    margin: 0 20px; /* Add space between title and menu area */
+}
+
 nav ul {
+    display: flex;
     list-style: none;
     padding: 0;
     margin: 0;
-    display: flex;
-    justify-content: center;
-    background-color: #444;
 }
 
 nav ul li {
-    margin: 0;
+    margin: 0 15px; /* Even spacing between navigation items */
 }
 
 nav ul li a {
-    display: block;
-    padding: 10px 15px;
     color: white;
     text-decoration: none;
-    transition: background-color 0.3s;
+    padding: 8px 15px;
+    border-radius: 4px;
+    font-size: 1rem;
+    transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 nav ul li a:hover,
 nav ul li a.active {
     background-color: #007BFF;
-}
-
-/* Button Styles */
-button {
-    background: #007BFF;
     color: white;
-    padding: 10px 15px;
-    border: none;
-    border-radius: 5px;
+}
+
+/* Menu and Toggle Buttons on the Right */
+header .right-section {
+    display: flex;
+    align-items: center; /* Align buttons vertically */
+    gap: 10px; /* Space between Menu and Toggle Theme */
+}
+
+header button {
+    background: transparent;
+    border: 2px solid white;
+    color: white;
+    padding: 7px 15px;
+    border-radius: 20px;
     cursor: pointer;
-    transition: background-color 0.3s;
+    font-size: 0.9rem;
+    transition: all 0.3s ease;
 }
 
-button:hover {
-    background: #0056b3;
+header button:hover {
+    background-color: white;
+    color: #222;
 }
 
-button:disabled {
-    background: #ccc;
-    cursor: not-allowed;
+/* Main Content */
+main {
+    margin-top: 90px; /* Space for the fixed header */
+    padding: 40px;
+    flex-grow: 1;
+    background-color: #ffffff;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    border-radius: 8px;
+    max-width: 1100px;
+    margin-left: auto;
+    margin-right: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center; /* Center content horizontally */
+    justify-content: center; /* Center content vertically (if needed) */
+}
+
+/* Typography Adjustments */
+main h2 {
+    font-size: 2rem;
+    font-weight: bold;
+    margin-bottom: 20px; /* Space below headings */
+    color: #222;
+    text-align: center; /* Center align headings */
+}
+
+main p {
+    font-size: 1.1rem;
+    line-height: 1.8;
+    margin-bottom: 20px;
+    color: #555;
+    text-align: center; /* Center align paragraphs */
+    max-width: 800px; /* Limit paragraph width for better readability */
+}
+
+/* Footer */
+footer {
+    background-color: #222;
+    color: white;
+    text-align: center;
+    padding: 15px;
+    position: relative; /* Ensures footer does not interfere with header or content */
+    font-size: 0.9rem;
+    box-shadow: 0 -2px 4px rgba(0, 0, 0, 0.2);
 }
 
 /* Forms */
 form {
-    max-width: 500px;
-    margin: 20px auto;
-    padding: 20px;
+    max-width: 600px;
+    margin: 30px auto; /* Center form vertically and horizontally */
+    padding: 25px;
     background: white;
     border: 1px solid #ddd;
-    border-radius: 5px;
+    border-radius: 8px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
 }
 
 form label {
     display: block;
-    margin-bottom: 5px;
+    margin-bottom: 10px;
     font-weight: bold;
 }
 
@@ -88,23 +162,43 @@ form input,
 form select,
 form button {
     width: 100%;
-    padding: 10px;
-    margin-bottom: 10px;
+    padding: 12px;
+    margin-bottom: 20px; /* Space between form fields */
     border: 1px solid #ddd;
     border-radius: 5px;
+    font-size: 1rem;
 }
 
 form input:focus,
 form select:focus {
     border-color: #007BFF;
     outline: none;
+    box-shadow: 0 0 4px rgba(0, 123, 255, 0.5);
+}
+
+button {
+    background-color: #007BFF;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    padding: 12px 20px;
+    cursor: pointer;
+    font-size: 1rem;
+    transition: background-color 0.3s ease;
+}
+
+button:hover {
+    background-color: #0056b3;
 }
 
 /* Alerts */
 .alert {
-    padding: 10px;
-    margin: 10px 0;
+    padding: 15px;
     border-radius: 5px;
+    margin-bottom: 25px;
+    font-weight: bold;
+    font-size: 0.95rem;
+    text-align: center; /* Center align alerts */
 }
 
 .alert-success {
@@ -117,91 +211,63 @@ form select:focus {
     color: #721c24;
 }
 
-.alert-info {
-    background-color: #d1ecf1;
-    color: #0c5460;
-}
-
 /* Tables */
 table {
     width: 100%;
     border-collapse: collapse;
-    margin: 20px 0;
+    margin: 30px 0;
     background: white;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
 }
 
 table th,
 table td {
-    padding: 10px;
-    border: 1px solid #ddd;
+    padding: 18px;
     text-align: left;
+    border-bottom: 1px solid #ddd;
+    font-size: 0.95rem;
 }
 
 table th {
-    background: #f4f4f4;
+    background-color: #f4f4f4;
     font-weight: bold;
 }
 
-/* Responsive Design */
-@media (max-width: 768px) {
-    nav ul {
-        flex-direction: column;
-    }
-
-    form {
-        padding: 15px;
-    }
-
-    table th,
-    table td {
-        padding: 8px;
-    }
+table tr:last-child td {
+    border-bottom: none;
 }
 
 /* Dark Mode */
 body.dark-mode {
     background-color: #121212;
-    color: white;
+    color: #f1f1f1;
 }
 
-.dark-mode header {
-    background: #222;
+.dark-mode main p {
+    color: #d1d1d1; /* Ensure paragraphs are visible in dark mode */
 }
 
-.dark-mode nav ul {
-    background-color: #222;
+.dark-mode a {
+    color: #4c8cff; /* Light blue links */
 }
 
-.dark-mode nav ul li a:hover,
-.dark-mode nav ul li a.active {
-    background-color: #0056b3;
+.dark-mode a:hover {
+    color: #80b3ff; /* Brighter blue on hover */
 }
 
-.dark-mode table {
-    background: #1e1e1e;
-    border-color: #444;
-}
+/* Responsive Design */
+@media (max-width: 768px) {
+    nav ul {
+        flex-direction: column; /* Stack links vertically on smaller screens */
+    }
 
-.dark-mode table th,
-.dark-mode table td {
-    border-color: #444;
-}
+    nav ul li {
+        margin-bottom: 10px;
+    }
 
-.dark-mode .alert {
-    border-color: #444;
-}
-
-.dark-mode .alert-success {
-    background-color: #155724;
-    color: #d4edda;
-}
-
-.dark-mode .alert-danger {
-    background-color: #721c24;
-    color: #f8d7da;
-}
-
-.dark-mode .alert-info {
-    background-color: #0c5460;
-    color: #d1ecf1;
+    header h1 {
+        font-size: 1.4rem;
+    }
 }
