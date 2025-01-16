@@ -3,46 +3,42 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Sports Betting Tracker{% endblock %}</title>
+    <title>{% block title %}Bet Tracker{% endblock %}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
-    <script src="{{ url_for('static', filename='js/script.js') }}" defer></script>
 </head>
 <body>
-    <header>
-        <h1>Sports Betting Tracker</h1>
-        <button id="theme-switch">Toggle Theme</button>
-        <nav>
-            <ul id="navbar-menu">
-                <li><a href="{{ url_for('main.home') }}">Home</a></li>
-                <li><a href="{{ url_for('main.manage_bets') }}">Bets</a></li>
-                {% if current_user.is_authenticated %}
-                    <li><a href="{{ url_for('main.logout') }}">Logout</a></li>
-                {% else %}
-                    <li><a href="{{ url_for('main.login') }}">Login</a></li>
-                    <li><a href="{{ url_for('main.register') }}">Register</a></li>
-                {% endif %}
-            </ul>
-            <button id="navbar-toggle">Menu</button>
-        </nav>
-    </header>
 
-    <main>
-        <!-- Flash Messages -->
-        {% with messages = get_flashed_messages(with_categories=True) %}
+    <nav>
+        <ul>
+            <li><a href="{{ url_for('main.home') }}">Home</a></li>
+            {% if current_user.is_authenticated %}
+                <li><a href="{{ url_for('bet.place_bet') }}">Place Bet</a></li>
+                <li><a href="{{ url_for('bet.view_bets') }}">My Bets</a></li>
+                <li><a href="{{ url_for('auth.logout') }}">Logout</a></li>
+            {% else %}
+                <li><a href="{{ url_for('auth.login') }}">Login</a></li>
+                <li><a href="{{ url_for('auth.register') }}">Register</a></li>
+            {% endif %}
+        </ul>
+    </nav>
+
+    <div class="container">
+        {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
-                {% for category, message in messages %}
-                    <div class="alert alert-{{ category }}">{{ message }}</div>
-                {% endfor %}
+                <ul class="flashes">
+                    {% for category, message in messages %}
+                        <li class="{{ category }}">{{ message }}</li>
+                    {% endfor %}
+                </ul>
             {% endif %}
         {% endwith %}
 
-        <!-- Dynamic Content -->
-        {% block content %}
-        {% endblock %}
-    </main>
+        {% block content %}{% endblock %}
+    </div>
 
     <footer>
-        <p>&copy; {{ current_year }} Sports Betting Tracker</p>
+        <p>&copy; {{ current_year }} Bet Tracker</p>
     </footer>
+
 </body>
 </html>

@@ -1,25 +1,28 @@
 {% extends "base.html" %}
+
+{% block title %}Register - Bet Tracker{% endblock %}
+
 {% block content %}
 <h2>Register</h2>
+
 <form method="POST">
     {{ form.hidden_tag() }}
-    <div>
-        <label for="username">Username:</label>
-        {{ form.username(size=30) }}
-    </div>
-    <div>
-        <label for="email">Email:</label>
-        {{ form.email(size=30) }}
-    </div>
-    <div>
-        <label for="password">Password:</label>
-        {{ form.password(size=30) }}
-    </div>
-    <div>
-        <label for="confirm_password">Confirm Password:</label>
-        {{ form.confirm_password(size=30) }}
-    </div>
-    <button type="submit">Register</button>
+
+    <label for="username">Username</label>
+    {{ form.username() }}
+
+    <label for="email">Email</label>
+    {{ form.email() }}
+
+    <label for="password">Password</label>
+    {{ form.password() }}
+
+    <label for="confirm_password">Confirm Password</label>
+    {{ form.confirm_password() }}
+
+    <button type="submit">{{ form.submit.label }}</button>
 </form>
+
+<p>Already have an account? <a href="{{ url_for('auth.login') }}">Login</a></p>
 {% endblock %}
 

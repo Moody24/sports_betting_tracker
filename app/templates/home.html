@@ -1,13 +1,18 @@
 {% extends "base.html" %}
+
+{% block title %}Home - Bet Tracker{% endblock %}
+
 {% block content %}
-<h2>Welcome to the Sports Betting Tracker</h2>
-<p>This is your one-stop solution to track and manage your sports bets.</p>
+<h1>Welcome to Bet Tracker</h1>
+<p>Track your bets and monitor your performance.</p>
 
 {% if current_user.is_authenticated %}
-    <p>Welcome back, {{ current_user.username }}!</p>
-    <p><a href="{{ url_for('main.manage_bets') }}">Go to Bets</a></p>
+    <a href="{{ url_for('bet.place_bet') }}" class="btn">Place a Bet</a>
+    <a href="{{ url_for('bet.view_bets') }}" class="btn">View Bets</a>
 {% else %}
-    <p>Please <a href="{{ url_for('main.login') }}">log in</a> or <a href="{{ url_for('main.register') }}">register</a> to start tracking your bets.</p>
+    <a href="{{ url_for('auth.login') }}" class="btn">Login</a>
+    <a href="{{ url_for('auth.register') }}" class="btn">Register</a>
 {% endif %}
 {% endblock %}
+
 
