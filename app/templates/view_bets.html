@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block title %}My Bets - Bet Tracker{% endblock %}
+
+{% block content %}
+<div class="container">
+    <h2>Your Bets</h2>
+
+    {% if bets %}
+    <table>
+        <tr>
+            <th>Match</th>
+            <th>Date</th>
+            <th>Bet Amount</th>
+            <th>Outcome</th>
+        </tr>
+        {% for bet in bets %}
+        <tr>
+            <td>{{ bet.team_a }} vs {{ bet.team_b }}</td>
+            <td>{{ bet.match_date.strftime('%Y-%m-%d') }}</td>
+            <td>${{ bet.bet_amount }}</td>
+            <td>{{ bet.outcome }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+    {% else %}
+    <p>You have not placed any bets yet.</p>
+    {% endif %}
+
+    <a href="{{ url_for('bet.place_bet') }}" class="btn">Place a New Bet</a>
+</div>
+{% endblock %}

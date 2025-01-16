@@ -18,7 +18,7 @@ def register():
         user.set_password(form.password.data)
         db.session.add(user)
         db.session.commit()
-        flash('Registration successful. Please log in.', 'success')
+        flash('Registration successful. Please log in.', 'success')  # Ensuring flash message is set
         return redirect(url_for('auth.login'))
 
     return render_template('register.html', form=form)
@@ -26,6 +26,7 @@ def register():
 @auth.route('/login', methods=['GET', 'POST'])
 def login():
     if current_user.is_authenticated:
+        flash('You are already logged in!', 'info')
         return redirect(url_for('main.home'))
 
     form = LoginForm()
@@ -33,10 +34,10 @@ def login():
         user = User.query.filter_by(username=form.username.data).first()
         if user and user.check_password(form.password.data):
             login_user(user, remember=form.remember.data)
-            flash('Login successful.', 'success')
+            flash('Login successful.', 'success')  # Ensuring flash message is set
             return redirect(url_for('main.home'))
         else:
-            flash('Invalid username or password.', 'danger')
+            flash('Login failed. Check your username and password.', 'danger')  # Ensuring flash message is set
 
     return render_template('login.html', form=form)
 
@@ -44,5 +45,5 @@ def login():
 @login_required
 def logout():
     logout_user()
-    flash('Logged out successfully.', 'success')
+    flash('Logged out successfully.', 'success')  # Ensuring flash message is set
     return redirect(url_for('main.home'))

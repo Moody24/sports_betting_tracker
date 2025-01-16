@@ -21,7 +21,7 @@ def place_bet():
         )
         db.session.add(bet)
         db.session.commit()
-        flash('Bet recorded successfully!', 'success')
+        flash('Bet recorded successfully!', 'success')  # Ensuring flash message is set
         return redirect(url_for('bet.view_bets'))
 
     return render_template('bets.html', form=form)

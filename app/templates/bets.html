@@ -11,6 +11,7 @@
         <th>Date</th>
         <th>Bet Amount</th>
         <th>Outcome</th>
+        <th>Actions</th>
     </tr>
     {% for bet in bets %}
     <tr>
@@ -18,6 +19,11 @@
         <td>{{ bet.match_date.strftime('%Y-%m-%d') }}</td>
         <td>${{ bet.bet_amount }}</td>
         <td>{{ bet.outcome }}</td>
+        <td>
+            <form class="delete-bet-form" action="{{ url_for('bet.delete_bet', bet_id=bet.id) }}" method="POST">
+                <button type="submit">Delete</button>
+            </form>
+        </td>
     </tr>
     {% endfor %}
 </table>
