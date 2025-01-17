@@ -78,7 +78,7 @@ body {
 /* Main Content */
 .container {
     flex-grow: 1;
-    max-width: 600px;
+    max-width: 700px;
     margin-top: 100px;
     padding: 40px;
     background: white;
@@ -99,32 +99,31 @@ p {
 }
 
 /* Forms */
-form {
+.bet-form {
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 15px;
     width: 100%;
+    max-width: 500px;
+    margin: 0 auto 20px;
 }
 
-form label {
-    font-weight: bold;
+.form-group {
     width: 100%;
     text-align: left;
 }
 
-form input,
-form select,
-form button {
+.form-control {
     width: 100%;
     padding: 10px;
-    margin-bottom: 10px;
+    margin: 5px 0;
     border: 1px solid #ddd;
     border-radius: 5px;
-    font-size: 1rem;
 }
 
-button {
+/* Buttons */
+.btn-submit {
     background-color: #007BFF;
     color: white;
     border: none;
@@ -136,8 +135,57 @@ button {
     width: 100%;
 }
 
-button:hover {
+.btn-submit:hover {
     background-color: #0056b3;
+}
+
+.btn-delete {
+    background-color: #dc3545;
+    color: white;
+    padding: 8px 15px;
+    border-radius: 5px;
+    border: none;
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: background-color 0.3s ease;
+}
+
+.btn-delete:hover {
+    background-color: #b02a37;
+}
+
+/* Table Styling */
+.bets-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 20px;
+}
+
+.bets-table th, .bets-table td {
+    padding: 12px;
+    border: 1px solid #ddd;
+    text-align: center;
+}
+
+.bets-table th {
+    background-color: #007BFF;
+    color: white;
+    font-weight: bold;
+}
+
+/* Fix alignment of the "Place a New Bet" link */
+.bets-table + a.btn {
+    display: block;
+    margin-top: 20px;
+    text-align: center;
+    font-size: 1.2rem;
+    font-weight: bold;
+    color: #007BFF;
+    text-decoration: none;
+}
+
+.bets-table + a.btn:hover {
+    text-decoration: underline;
 }
 
 /* Flash Messages */
@@ -200,4 +248,3 @@ body.dark-mode {
 .dark-mode footer {
     background-color: #1e1e1e;
 }
-

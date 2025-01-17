@@ -3,30 +3,73 @@
 {% block title %}My Bets - Bet Tracker{% endblock %}
 
 {% block content %}
-<h2>Your Bets</h2>
+<div class="container">
+    <h2>Place a New Bet</h2>
 
-<table border="1">
-    <tr>
-        <th>Match</th>
-        <th>Date</th>
-        <th>Bet Amount</th>
-        <th>Outcome</th>
-        <th>Actions</th>
-    </tr>
-    {% for bet in bets %}
-    <tr>
-        <td>{{ bet.team_a }} vs {{ bet.team_b }}</td>
-        <td>{{ bet.match_date.strftime('%Y-%m-%d') }}</td>
-        <td>${{ bet.bet_amount }}</td>
-        <td>{{ bet.outcome }}</td>
-        <td>
-            <form class="delete-bet-form" action="{{ url_for('bet.delete_bet', bet_id=bet.id) }}" method="POST">
-                <button type="submit">Delete</button>
-            </form>
-        </td>
-    </tr>
-    {% endfor %}
-</table>
+    <!-- ✅ Improved Betting Form Layout -->
+    <form method="POST" action="{{ url_for('bet.place_bet') }}" class="bet-form">
+        {{ form.hidden_tag() }}  <!-- CSRF Token to prevent security issues -->
 
-<a href="{{ url_for('bet.place_bet') }}" class="btn">Place a New Bet</a>
+        <div class="form-group">
+            <label for="team_a">Team A:</label>
+            {{ form.team_a(class="form-control") }}
+        </div>
+
+        <div class="form-group">
+            <label for="team_b">Team B:</label>
+            {{ form.team_b(class="form-control") }}
+        </div>
+
+        <div class="form-group">
+            <label for="match_date">Match Date:</label>
+            {{ form.match_date(class="form-control") }}
+        </div>
+
+        <div class="form-group">
+            <label for="bet_amount">Bet Amount:</label>
+            {{ form.bet_amount(class="form-control") }}
+        </div>
+
+        <div class="form-group">
+            <label for="outcome">Outcome:</label>
+            {{ form.outcome(class="form-control") }}
+        </div>
+
+        <button type="submit" class="btn-submit">{{ form.submit.label }}</button>
+    </form>
+
+    <hr>
+
+    <h2>Your Bets</h2>
+
+    <!-- ✅ Improved Table Structure -->
+    <table class="bets-table">
+        <thead>
+            <tr>
+                <th>Match</th>
+                <th>Date</th>
+                <th>Bet Amount</th>
+                <th>Outcome</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for bet in bets %}
+            <tr>
+                <td>{{ bet.team_a }} vs {{ bet.team_b }}</td>
+                <td>{{ bet.match_date.strftime('%Y-%m-%d') }}</td>
+                <td>${{ bet.bet_amount }}</td>
+                <td>{{ bet.outcome }}</td>
+                <td>
+                    <form class="delete-bet-form" action="{{ url_for('bet.delete_bet', bet_id=bet.id) }}" method="POST">
+                        <button type="submit" class="btn-delete">Delete</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+</div>
 {% endblock %}
+

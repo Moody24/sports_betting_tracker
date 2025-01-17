@@ -26,3 +26,4 @@ class BetForm(FlaskForm):
     outcome = SelectField('Outcome', choices=[('pending', 'Pending'), ('win', 'Win'), ('lose', 'Lose')], default='pending', validators=[DataRequired()])
     submit = SubmitField('Submit Bet')
 
+

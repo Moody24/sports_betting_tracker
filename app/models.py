@@ -1,6 +1,6 @@
 from datetime import datetime
 from flask_login import UserMixin
-from app import db, bcrypt
+from . import db, bcrypt  # ✅ Use relative imports to avoid circular import issues
 
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -22,12 +22,11 @@ class User(UserMixin, db.Model):
 
     def total_wins(self):
         """Returns the total number of winning bets for the user."""
-        return Bet.query.filter_by(user_id=self.id, outcome="win").count()
+        return db.session.query(Bet).filter_by(user_id=self.id, outcome="win").count()
 
     def total_losses(self):
         """Returns the total number of losing bets for the user."""
-        return Bet.query.filter_by(user_id=self.id, outcome="lose").count()
-
+        return db.session.query(Bet).filter_by(user_id=self.id, outcome="lose").count()
 
 class Bet(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -49,3 +48,4 @@ class Bet(db.Model):
     def is_losing_bet(self):
         """Checks if the bet was a losing bet."""
         return self.outcome == "lose"
+
