@@ -14,3 +14,4 @@ __pycache__/
 # Ignore macOS system files
 .DS_Store
 
+instance/app.db
