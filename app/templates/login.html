@@ -1,25 +1,45 @@
 {% extends "base.html" %}
 
-{% block title %}Login - Bet Tracker{% endblock %}
+{% block title %}Login · Sports Betting Tracker{% endblock %}
+{% block page_title %}Welcome back{% endblock %}
+{% block page_subtitle %}Sign in to continue tracking your edge.{% endblock %}
 
 {% block content %}
-<h2>Login</h2>
+<div class="row justify-content-center">
+  <div class="col-12 col-md-8 col-lg-5">
+    <div class="card-soft p-4 p-md-5">
+      <h3 class="h5 mb-3">Login</h3>
+      <form method="POST" novalidate class="vstack gap-3">
+        {{ form.hidden_tag() }}
 
-<form method="POST">
-    {{ form.hidden_tag() }}
-    
-    <label for="username">Username</label>
-    {{ form.username() }}
-    
-    <label for="password">Password</label>
-    {{ form.password() }}
-    
-    <div>
-        {{ form.remember() }} Remember Me
+        <div>
+          <label class="form-label" for="username">Username</label>
+          <div class="input-group">
+            <span class="input-group-text"><i class="bi bi-person"></i></span>
+            {{ form.username(class="form-control", id="username", placeholder="Enter username") }}
+          </div>
+        </div>
+
+        <div>
+          <label class="form-label" for="password">Password</label>
+          <div class="input-group">
+            <span class="input-group-text"><i class="bi bi-lock"></i></span>
+            {{ form.password(class="form-control", id="password", placeholder="Enter password") }}
+          </div>
+        </div>
+
+        <div class="form-check">
+          {{ form.remember(class="form-check-input", id="remember") }}
+          <label class="form-check-label" for="remember">Remember me</label>
+        </div>
+
+        {{ form.submit(class="btn btn-primary btn-lg w-100") }}
+      </form>
+
+      <p class="text-secondary small mb-0 mt-3">Don’t have an account?
+        <a class="link-light" href="{{ url_for('auth.register') }}">Create one</a>
+      </p>
     </div>
-
-    <button type="submit">{{ form.submit.label }}</button>
-</form>
-
-<p>Don't have an account? <a href="{{ url_for('auth.register') }}">Register</a></p>
+  </div>
+</div>
 {% endblock %}

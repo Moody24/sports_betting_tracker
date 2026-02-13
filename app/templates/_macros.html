@@ -1,0 +1,9 @@
+{% macro outcome_badge(outcome) -%}
+  {% if outcome == 'win' %}
+    <span class="badge text-bg-success badge-status">Win</span>
+  {% elif outcome == 'lose' %}
+    <span class="badge text-bg-danger badge-status">Loss</span>
+  {% else %}
+    <span class="badge text-bg-secondary badge-status">Pending</span>
+  {% endif %}
+{%- endmacro %}
