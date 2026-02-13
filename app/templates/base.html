@@ -21,6 +21,22 @@
             <p class="text-uppercase text-secondary mb-0 small">Sportsbook</p>
             <h1 class="h6 mb-0 fw-semibold">Betting Tracker</h1>
           </div>
+
+    <nav class="navbar">
+        <div class="nav-container">
+            <ul class="nav-links">
+                <li><a href="{{ url_for('main.home') }}">Home</a></li>
+                {% if current_user.is_authenticated %}
+                    <li><a href="{{ url_for('main.dashboard') }}">Dashboard</a></li>
+                    <li><a href="{{ url_for('bet.place_bet') }}">Place Bet</a></li>
+                    <li><a href="{{ url_for('bet.view_bets') }}">My Bets</a></li>
+                    <li><a href="{{ url_for('auth.logout') }}">Logout</a></li>
+                {% else %}
+                    <li><a href="{{ url_for('auth.login') }}">Login</a></li>
+                    <li><a href="{{ url_for('auth.register') }}">Register</a></li>
+                {% endif %}
+            </ul>
+            <button id="theme-switch">Toggle Theme</button>
         </div>
 
         <nav class="nav nav-pills flex-column gap-1">

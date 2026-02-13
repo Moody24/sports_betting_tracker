@@ -20,6 +20,14 @@ def register():
 
         if existing_user:
             flash('An account with that username or email already exists.', 'danger')
+            return render_template('register.html', form=form)
+
+        existing_user = User.query.filter(
+            (User.username == form.username.data) | (User.email == form.email.data)
+        ).first()
+
+        if existing_user:
+            flash('An account with that username or email already exists.', 'danger')
             return render_template('auth/register.html', form=form)
 
         user = User(username=form.username.data, email=form.email.data)
