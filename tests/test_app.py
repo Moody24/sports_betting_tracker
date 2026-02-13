@@ -1,3 +1,4 @@
+import io
 import unittest
 from datetime import datetime
 
@@ -67,7 +68,18 @@ class BettingAppTestCase(unittest.TestCase):
         self.assertIn(b'Login successful', response.data)
 
     def test_logout(self):
-        response = self.client.get('/auth/logout', follow_redirects=True)
+        with self.app.app_context():
+            user = User(username='logoutuser', email='logout@example.com')
+            user.set_password('password123')
+            db.session.add(user)
+            db.session.commit()
+
+        self.client.post('/auth/login', data={
+            'username': 'logoutuser',
+            'password': 'password123'
+        }, follow_redirects=True)
+
+        response = self.client.post('/auth/logout', follow_redirects=True)
         self.assertEqual(response.status_code, 200)
         self.assertIn(b'Login', response.data)
 

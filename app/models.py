@@ -1,4 +1,5 @@
 from datetime import datetime
+
 from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -39,12 +40,11 @@ class User(UserMixin, db.Model):
         return round(result, 2)
 
     def total_wins(self):
-        """Returns the total number of winning bets for the user."""
-        return db.session.query(Bet).filter_by(user_id=self.id, outcome="win").count()
+        return db.session.query(Bet).filter_by(user_id=self.id, outcome='win').count()
 
     def total_losses(self):
-        """Returns the total number of losing bets for the user."""
-        return db.session.query(Bet).filter_by(user_id=self.id, outcome="lose").count()
+        return db.session.query(Bet).filter_by(user_id=self.id, outcome='lose').count()
+
 
 class Bet(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -54,18 +54,37 @@ class Bet(db.Model):
     match_date = db.Column(db.DateTime, nullable=False)
     bet_amount = db.Column(db.Float, nullable=False)
     outcome = db.Column(db.String(10), nullable=True, default='pending')  # win/lose/pending
+    american_odds = db.Column(db.Integer, nullable=True)
+    is_parlay = db.Column(db.Boolean, nullable=False, default=False)
+    source = db.Column(db.String(40), nullable=False, default='manual')
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
     def __repr__(self):
-        return f"<Bet {self.id} - {self.team_a} vs {self.team_b} - Amount: {self.bet_amount} - Outcome: {self.outcome}>"
+        return (
+            f"<Bet {self.id} - {self.team_a} vs {self.team_b} - Amount: {self.bet_amount} "
+            f"- Outcome: {self.outcome}>"
+        )
 
     def is_winning_bet(self):
-        """Checks if the bet was a winning bet."""
-        return self.outcome == "win"
+        return self.outcome == 'win'
 
     def is_losing_bet(self):
-        """Checks if the bet was a losing bet."""
-        return self.outcome == "lose"
+        return self.outcome == 'lose'
+
+    def expected_profit_for_win(self):
+        if self.american_odds is None:
+            return float(self.bet_amount)
+
+        stake = float(self.bet_amount)
+        odds = int(self.american_odds)
+
+        if odds > 0:
+            return round(stake * odds / 100.0, 2)
+
+        if odds < 0:
+            return round(stake * 100.0 / abs(odds), 2)
+
+        return 0.0
 
     def profit_loss(self):
         """Returns profit/loss value for this bet."""
