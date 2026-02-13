@@ -1,6 +1,6 @@
 from flask import Blueprint, render_template, redirect, url_for, flash, request
 from flask_login import login_user, logout_user, login_required, current_user
-from app import db, bcrypt
+from app import db
 from app.models import User
 from app.forms import LoginForm, RegisterForm
 
@@ -14,6 +14,14 @@ def register():
 
     form = RegisterForm()
     if form.validate_on_submit():
+        existing_user = User.query.filter(
+            (User.username == form.username.data) | (User.email == form.email.data)
+        ).first()
+
+        if existing_user:
+            flash('An account with that username or email already exists.', 'danger')
+            return render_template('register.html', form=form)
+
         user = User(username=form.username.data, email=form.email.data)
         user.set_password(form.password.data)
         db.session.add(user)

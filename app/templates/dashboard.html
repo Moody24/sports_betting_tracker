@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Bet Tracker{% endblock %}
+
+{% block content %}
+<h2>Your Dashboard</h2>
+
+<div class="stats-grid">
+    <div class="stat-card"><h3>Total Bets</h3><p>{{ stats.total_bets }}</p></div>
+    <div class="stat-card"><h3>Wins</h3><p>{{ stats.wins }}</p></div>
+    <div class="stat-card"><h3>Losses</h3><p>{{ stats.losses }}</p></div>
+    <div class="stat-card"><h3>Total Wagered</h3><p>${{ '%.2f'|format(stats.wagered) }}</p></div>
+    <div class="stat-card"><h3>Net P/L</h3><p class="{% if stats.net >= 0 %}success{% else %}danger{% endif %}">${{ '%.2f'|format(stats.net) }}</p></div>
+</div>
+
+<h3>Recent Bets</h3>
+{% if recent_bets %}
+<table class="bets-table">
+    <thead>
+        <tr>
+            <th>Match</th>
+            <th>Date</th>
+            <th>Amount</th>
+            <th>Outcome</th>
+            <th>P/L</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for bet in recent_bets %}
+        <tr>
+            <td>{{ bet.team_a }} vs {{ bet.team_b }}</td>
+            <td>{{ bet.match_date.strftime('%Y-%m-%d') }}</td>
+            <td>${{ '%.2f'|format(bet.bet_amount) }}</td>
+            <td>{{ bet.outcome }}</td>
+            <td>${{ '%.2f'|format(bet.profit_loss()) }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>You haven't placed any bets yet. Head to <a href="{{ url_for('bet.place_bet') }}">Place Bet</a> to get started.</p>
+{% endif %}
+{% endblock %}
