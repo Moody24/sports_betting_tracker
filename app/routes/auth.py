@@ -20,7 +20,7 @@ def register():
 
         if existing_user:
             flash('An account with that username or email already exists.', 'danger')
-            return render_template('auth/register.html', form=form)
+            return render_template('register.html', form=form)
 
         user = User(username=form.username.data, email=form.email.data)
         user.set_password(form.password.data)
@@ -29,7 +29,7 @@ def register():
         flash('Registration successful. Please log in.', 'success')  # Ensuring flash message is set
         return redirect(url_for('auth.login'))
 
-    return render_template('auth/register.html', form=form)
+    return render_template('register.html', form=form)
 
 @auth.route('/login', methods=['GET', 'POST'])
 def login():
@@ -47,7 +47,7 @@ def login():
         else:
             flash('Login failed. Check your username and password.', 'danger')  # Ensuring flash message is set
 
-    return render_template('auth/login.html', form=form)
+    return render_template('login.html', form=form)
 
 @auth.route('/logout')
 @login_required
