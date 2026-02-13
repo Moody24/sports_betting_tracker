@@ -42,12 +42,9 @@
 </div>
 
 <div class="card-soft p-3">
-  <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <div class="d-flex justify-content-between align-items-center mb-3">
     <h3 class="h6 mb-0">All Bets</h3>
-    <div class="d-flex gap-2">
-      <a href="{{ url_for('bet.import_fanduel_bets') }}" class="btn btn-outline-light btn-sm"><i class="bi bi-file-earmark-arrow-up me-1"></i>Import FanDuel</a>
-      <a href="{{ url_for('bet.new_bet') }}" class="btn btn-primary btn-sm"><i class="bi bi-plus-lg me-1"></i>Add Bet</a>
-    </div>
+    <a href="{{ url_for('bet.new_bet') }}" class="btn btn-primary btn-sm"><i class="bi bi-plus-lg me-1"></i>Add Bet</a>
   </div>
 
   <div class="table-wrap">
@@ -57,8 +54,6 @@
           <th>Matchup</th>
           <th>Date</th>
           <th class="text-end">Stake</th>
-          <th class="text-end">American Odds</th>
-          <th>Type</th>
           <th>Status</th>
           <th class="text-end">P/L</th>
           <th class="text-end">Actions</th>
@@ -69,20 +64,11 @@
         <tr>
           <td class="fw-semibold">{{ bet.team_a }} <span class="text-secondary">vs</span> {{ bet.team_b }}</td>
           <td>{{ bet.match_date.strftime('%Y-%m-%d') }}</td>
-          <td class="text-end tabular-num">${{ '%.2f'|format(bet.bet_amount) }}</td>
-          <td class="text-end tabular-num">{{ '+' ~ bet.american_odds if bet.american_odds and bet.american_odds > 0 else (bet.american_odds if bet.american_odds is not none else '—') }}</td>
-          <td>
-            {% if bet.is_parlay %}
-              <span class="badge text-bg-warning">Parlay</span>
-            {% else %}
-              <span class="badge text-bg-secondary">Single</span>
-            {% endif %}
-          </td>
+          <td class="text-end">${{ '%.2f'|format(bet.bet_amount) }}</td>
           <td>{{ outcome_badge(bet.outcome) }}</td>
-          <td class="text-end tabular-num {{ 'text-success' if bet.profit_loss() >= 0 else 'text-danger' }}">${{ '%.2f'|format(bet.profit_loss()) }}</td>
+          <td class="text-end {{ 'text-success' if bet.profit_loss() >= 0 else 'text-danger' }}">${{ '%.2f'|format(bet.profit_loss()) }}</td>
           <td class="text-end">
             <form action="{{ url_for('bet.delete_bet', bet_id=bet.id) }}" method="POST" class="d-inline">
-              {{ delete_form.hidden_tag() }}
               <button type="submit" class="btn btn-sm btn-outline-danger" aria-label="Delete bet {{ bet.id }}">
                 <i class="bi bi-trash"></i>
               </button>
@@ -91,7 +77,7 @@
         </tr>
         {% else %}
         <tr>
-          <td colspan="8" class="text-center py-4 text-secondary">No bets found for selected filters.</td>
+          <td colspan="6" class="text-center py-4 text-secondary">No bets found for selected filters.</td>
         </tr>
         {% endfor %}
       </tbody>

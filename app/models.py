@@ -1,10 +1,9 @@
 from datetime import datetime
 
 from flask_login import UserMixin
-from werkzeug.security import check_password_hash, generate_password_hash
+from werkzeug.security import generate_password_hash, check_password_hash
 
 from . import db
-
 
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -17,19 +16,24 @@ class User(UserMixin, db.Model):
         return f"<User {self.username}>"
 
     def set_password(self, password):
+        """Hashes and sets the user's password."""
         self.password_hash = generate_password_hash(password)
 
     def check_password(self, password):
+        """Checks if the provided password matches the hashed password."""
         return check_password_hash(self.password_hash, password)
 
     def total_bets(self):
+        """Returns the total number of bets placed by the user."""
         return db.session.query(Bet).filter_by(user_id=self.id).count()
 
     def total_amount_wagered(self):
+        """Returns the total amount wagered by the user."""
         total = db.session.query(db.func.sum(Bet.bet_amount)).filter_by(user_id=self.id).scalar()
         return float(total or 0.0)
 
     def net_profit_loss(self):
+        """Returns net profit/loss based on recorded outcomes."""
         result = 0.0
         for bet in db.session.query(Bet).filter_by(user_id=self.id).all():
             result += bet.profit_loss()
@@ -83,9 +87,10 @@ class Bet(db.Model):
         return 0.0
 
     def profit_loss(self):
-        """Returns P/L excluding initial stake for winning days and negative stake for losses."""
-        if self.outcome == 'win':
-            return self.expected_profit_for_win()
-        if self.outcome == 'lose':
+        """Returns profit/loss value for this bet."""
+        if self.outcome == "win":
+            return float(self.bet_amount)
+        if self.outcome == "lose":
             return -float(self.bet_amount)
         return 0.0
+

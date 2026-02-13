@@ -21,6 +21,22 @@
             <p class="text-uppercase text-secondary mb-0 small">Sportsbook</p>
             <h1 class="h6 mb-0 fw-semibold">Betting Tracker</h1>
           </div>
+
+    <nav class="navbar">
+        <div class="nav-container">
+            <ul class="nav-links">
+                <li><a href="{{ url_for('main.home') }}">Home</a></li>
+                {% if current_user.is_authenticated %}
+                    <li><a href="{{ url_for('main.dashboard') }}">Dashboard</a></li>
+                    <li><a href="{{ url_for('bet.place_bet') }}">Place Bet</a></li>
+                    <li><a href="{{ url_for('bet.view_bets') }}">My Bets</a></li>
+                    <li><a href="{{ url_for('auth.logout') }}">Logout</a></li>
+                {% else %}
+                    <li><a href="{{ url_for('auth.login') }}">Login</a></li>
+                    <li><a href="{{ url_for('auth.register') }}">Register</a></li>
+                {% endif %}
+            </ul>
+            <button id="theme-switch">Toggle Theme</button>
         </div>
 
         <nav class="nav nav-pills flex-column gap-1">
@@ -33,19 +49,13 @@
           <a class="nav-link {% if request.endpoint == 'bet.new_bet' %}active{% endif %}" href="{{ url_for('bet.new_bet') if current_user.is_authenticated else url_for('auth.login') }}">
             <i class="bi bi-plus-circle"></i><span>Add Bet</span>
           </a>
-          <a class="nav-link {% if request.endpoint == 'bet.import_fanduel_bets' %}active{% endif %}" href="{{ url_for('bet.import_fanduel_bets') if current_user.is_authenticated else url_for('auth.login') }}">
-            <i class="bi bi-file-earmark-arrow-up"></i><span>Import</span>
-          </a>
           <a class="nav-link" href="{{ url_for('main.home') }}">
             <i class="bi bi-gear"></i><span>Settings</span>
           </a>
           {% if current_user.is_authenticated %}
-          <form method="POST" action="{{ url_for('auth.logout') }}">
-            {{ logout_form.hidden_tag() }}
-            <button type="submit" class="nav-link nav-button text-danger-emphasis w-100">
-              <i class="bi bi-box-arrow-right"></i><span>Logout</span>
-            </button>
-          </form>
+          <a class="nav-link text-danger-emphasis" href="{{ url_for('auth.logout') }}">
+            <i class="bi bi-box-arrow-right"></i><span>Logout</span>
+          </a>
           {% else %}
           <a class="nav-link" href="{{ url_for('auth.login') }}">
             <i class="bi bi-box-arrow-in-right"></i><span>Login</span>
@@ -58,7 +68,7 @@
     </aside>
 
     <main class="main-content">
-      <header class="topbar d-flex justify-content-between align-items-center gap-2 mb-4">
+      <header class="topbar d-flex justify-content-between align-items-center mb-4">
         <div>
           <h2 class="h4 mb-1">{% block page_title %}Overview{% endblock %}</h2>
           <p class="text-secondary mb-0">{% block page_subtitle %}Track performance with confidence.{% endblock %}</p>
@@ -72,12 +82,7 @@
             <li><a class="dropdown-item" href="{{ url_for('main.dashboard') }}">Dashboard</a></li>
             <li><a class="dropdown-item" href="{{ url_for('bet.place_bet') }}">My Bets</a></li>
             <li><hr class="dropdown-divider"></li>
-            <li>
-              <form method="POST" action="{{ url_for('auth.logout') }}" class="px-3 py-1">
-                {{ logout_form.hidden_tag() }}
-                <button type="submit" class="btn btn-link dropdown-item text-danger p-0">Logout</button>
-              </form>
-            </li>
+            <li><a class="dropdown-item text-danger" href="{{ url_for('auth.logout') }}">Logout</a></li>
           </ul>
         </div>
         {% endif %}

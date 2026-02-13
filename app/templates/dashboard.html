@@ -8,7 +8,7 @@
 {% block content %}
 <p class="text-secondary mb-3">Your Dashboard</p>
 <div class="row g-3 mb-4">
-  <div class="col-sm-6 col-xl-2">
+    <div class="col-sm-6 col-xl-2">
     <div class="card-soft kpi-card h-100">
       <p class="kpi-label mb-1">Total Bets</p>
       <p class="kpi-value mb-0">{{ stats.total_bets }}</p>
@@ -32,13 +32,13 @@
       <p class="kpi-value mb-0">{{ '%.1f'|format(stats.win_pct) }}%</p>
     </div>
   </div>
-  <div class="col-sm-6 col-xl-2">
+  <div class="col-sm-6 col-xl-3">
     <div class="card-soft kpi-card h-100">
       <p class="kpi-label mb-1">Total Wagered</p>
       <p class="kpi-value mb-0">${{ '%.2f'|format(stats.wagered) }}</p>
     </div>
   </div>
-  <div class="col-sm-6 col-xl-2">
+  <div class="col-sm-6 col-xl-3">
     <div class="card-soft kpi-card h-100">
       <p class="kpi-label mb-1">Current Streak</p>
       <p class="kpi-value mb-0">{{ stats.current_streak }}</p>
@@ -48,34 +48,10 @@
 
 <div class="card-soft chart-card p-3 mb-4">
   <div class="d-flex justify-content-between align-items-center mb-2">
-    <h3 class="h6 mb-0">Profit/Loss by Day (Excl. Stake on Wins)</h3>
-    <span class="text-secondary small">Last 14 Entries</span>
+    <h3 class="h6 mb-0">Units by Day</h3>
+    <span class="text-secondary small">Last 7 Entries</span>
   </div>
   <canvas id="unitsByDayChart" aria-label="Units won by day" role="img"></canvas>
-</div>
-
-<div class="card-soft p-3 mb-4">
-  <div class="d-flex justify-content-between align-items-center mb-2">
-    <h3 class="h6 mb-0">Bet Calendar · {{ calendar_month }} {{ calendar_year }}</h3>
-    <span class="small text-secondary">Green = profit day, Red = losing day</span>
-  </div>
-  <div class="calendar-grid mb-2">
-    {% for label in weekday_labels %}
-      <div class="calendar-weekday">{{ label }}</div>
-    {% endfor %}
-
-    {% for cell in calendar_cells %}
-      {% if cell %}
-      <div class="calendar-cell calendar-{{ cell.tone }}">
-        <div class="calendar-day">{{ cell.day }}</div>
-        <div class="calendar-meta">Staked: ${{ '%.0f'|format(cell.staked) }}</div>
-        <div class="calendar-meta">P/L: ${{ '%.0f'|format(cell.profit) }}</div>
-      </div>
-      {% else %}
-      <div class="calendar-cell calendar-empty"></div>
-      {% endif %}
-    {% endfor %}
-  </div>
 </div>
 
 <div class="card-soft p-3">
@@ -91,8 +67,6 @@
           <th>Match</th>
           <th>Date</th>
           <th class="text-end">Stake</th>
-          <th class="text-end">Odds</th>
-          <th>Type</th>
           <th>Status</th>
           <th class="text-end">P/L</th>
         </tr>
@@ -103,14 +77,12 @@
           <td class="fw-semibold">{{ bet.team_a }} <span class="text-secondary">vs</span> {{ bet.team_b }}</td>
           <td>{{ bet.match_date.strftime('%b %d, %Y') }}</td>
           <td class="text-end tabular-num">${{ '%.2f'|format(bet.bet_amount) }}</td>
-          <td class="text-end tabular-num">{{ '+' ~ bet.american_odds if bet.american_odds and bet.american_odds > 0 else (bet.american_odds if bet.american_odds is not none else '—') }}</td>
-          <td>{% if bet.is_parlay %}<span class="badge text-bg-warning">Parlay</span>{% else %}<span class="badge text-bg-secondary">Single</span>{% endif %}</td>
           <td>{{ outcome_badge(bet.outcome) }}</td>
-          <td class="text-end tabular-num {{ 'text-success' if bet.profit_loss() >= 0 else 'text-danger' }}">${{ '%.2f'|format(bet.profit_loss()) }}</td>
+          <td class="text-end {{ 'text-success' if bet.profit_loss() >= 0 else 'text-danger' }}">${{ '%.2f'|format(bet.profit_loss()) }}</td>
         </tr>
         {% else %}
         <tr>
-          <td colspan="7" class="text-center text-secondary py-4">No bets yet. Add your first bet to start tracking.</td>
+          <td colspan="5" class="text-center text-secondary py-4">No bets yet. Add your first bet to start tracking.</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -132,7 +104,7 @@
       data: {
         labels,
         datasets: [{
-          label: 'P/L',
+          label: 'Units',
           data: values,
           borderColor: '#4f8cff',
           backgroundColor: 'rgba(79, 140, 255, .2)',
@@ -152,4 +124,45 @@
     });
   }
 </script>
+
+{% block title %}Dashboard - Bet Tracker{% endblock %}
+
+{% block content %}
+<h2>Your Dashboard</h2>
+
+<div class="stats-grid">
+    <div class="stat-card"><h3>Total Bets</h3><p>{{ stats.total_bets }}</p></div>
+    <div class="stat-card"><h3>Wins</h3><p>{{ stats.wins }}</p></div>
+    <div class="stat-card"><h3>Losses</h3><p>{{ stats.losses }}</p></div>
+    <div class="stat-card"><h3>Total Wagered</h3><p>${{ '%.2f'|format(stats.wagered) }}</p></div>
+    <div class="stat-card"><h3>Net P/L</h3><p class="{% if stats.net >= 0 %}success{% else %}danger{% endif %}">${{ '%.2f'|format(stats.net) }}</p></div>
+</div>
+
+<h3>Recent Bets</h3>
+{% if recent_bets %}
+<table class="bets-table">
+    <thead>
+        <tr>
+            <th>Match</th>
+            <th>Date</th>
+            <th>Amount</th>
+            <th>Outcome</th>
+            <th>P/L</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for bet in recent_bets %}
+        <tr>
+            <td>{{ bet.team_a }} vs {{ bet.team_b }}</td>
+            <td>{{ bet.match_date.strftime('%Y-%m-%d') }}</td>
+            <td>${{ '%.2f'|format(bet.bet_amount) }}</td>
+            <td>{{ bet.outcome }}</td>
+            <td>${{ '%.2f'|format(bet.profit_loss()) }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>You haven't placed any bets yet. Head to <a href="{{ url_for('bet.place_bet') }}">Place Bet</a> to get started.</p>
+{% endif %}
 {% endblock %}

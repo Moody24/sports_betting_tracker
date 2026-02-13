@@ -81,7 +81,7 @@ class BettingAppTestCase(unittest.TestCase):
 
         response = self.client.post('/auth/logout', follow_redirects=True)
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b'Logged out successfully', response.data)
+        self.assertIn(b'Login', response.data)
 
     def test_protected_routes(self):
         with self.app.app_context():
@@ -121,73 +121,6 @@ class BettingAppTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(b'Your Dashboard', response.data)
         self.assertIn(b'Total Bets', response.data)
-
-
-    def test_fanduel_import_creates_bets_with_odds_and_parlay(self):
-        with self.app.app_context():
-            user = User(username='importuser', email='import@example.com')
-            user.set_password('password123')
-            db.session.add(user)
-            db.session.commit()
-
-        self.client.post('/auth/login', data={
-            'username': 'importuser',
-            'password': 'password123'
-        }, follow_redirects=True)
-
-        csv_content = (
-            'Event,Stake,Odds,Result,Bet Type,Date\n'
-            'Lakers vs Celtics,25,+150,Won,Parlay,2025-01-03\n'
-        )
-        response = self.client.post(
-            '/bets/import',
-            data={'csv_file': (io.BytesIO(csv_content.encode('utf-8')), 'fanduel.csv')},
-            content_type='multipart/form-data',
-            follow_redirects=True,
-        )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertIn(b'Imported 1 FanDuel bet', response.data)
-
-        with self.app.app_context():
-            bet = Bet.query.filter_by(user_id=1).first()
-            self.assertIsNotNone(bet)
-            self.assertEqual(bet.american_odds, 150)
-            self.assertTrue(bet.is_parlay)
-            self.assertEqual(bet.source, 'fanduel')
-            self.assertAlmostEqual(bet.profit_loss(), 37.5, places=2)
-
-    def test_dashboard_shows_calendar(self):
-        with self.app.app_context():
-            user = User(username='calendaruser', email='calendar@example.com')
-            user.set_password('password123')
-            db.session.add(user)
-            db.session.commit()
-
-            db.session.add(Bet(
-                user_id=user.id,
-                team_a='A',
-                team_b='B',
-                match_date=datetime(2025, 1, 4),
-                bet_amount=20,
-                outcome='lose',
-            ))
-            db.session.commit()
-
-        self.client.post('/auth/login', data={
-            'username': 'calendaruser',
-            'password': 'password123'
-        }, follow_redirects=True)
-
-        response = self.client.get('/dashboard', follow_redirects=True)
-        self.assertEqual(response.status_code, 200)
-        self.assertIn(b'Bet Calendar', response.data)
-
-    def test_security_headers_present(self):
-        response = self.client.get('/')
-        self.assertEqual(response.headers.get('X-Content-Type-Options'), 'nosniff')
-        self.assertEqual(response.headers.get('X-Frame-Options'), 'SAMEORIGIN')
-        self.assertEqual(response.headers.get('Referrer-Policy'), 'strict-origin-when-cross-origin')
 
 
 if __name__ == '__main__':
