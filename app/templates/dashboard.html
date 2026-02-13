@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% from "_macros.html" import outcome_badge %}
+
+{% block title %}Dashboard · Sports Betting Tracker{% endblock %}
+{% block page_title %}Dashboard{% endblock %}
+{% block page_subtitle %}Performance snapshot of your latest betting activity.{% endblock %}
+
+{% block content %}
+<p class="text-secondary mb-3">Your Dashboard</p>
+<div class="row g-3 mb-4">
+    <div class="col-sm-6 col-xl-2">
+    <div class="card-soft kpi-card h-100">
+      <p class="kpi-label mb-1">Total Bets</p>
+      <p class="kpi-value mb-0">{{ stats.total_bets }}</p>
+    </div>
+  </div>
+  <div class="col-sm-6 col-xl-2">
+    <div class="card-soft kpi-card h-100">
+      <p class="kpi-label mb-1">ROI</p>
+      <p class="kpi-value mb-0">{{ '%.1f'|format(stats.roi) }}%</p>
+    </div>
+  </div>
+  <div class="col-sm-6 col-xl-2">
+    <div class="card-soft kpi-card h-100">
+      <p class="kpi-label mb-1">Units Won</p>
+      <p class="kpi-value mb-0">{{ '%.2f'|format(stats.units_won) }}u</p>
+    </div>
+  </div>
+  <div class="col-sm-6 col-xl-2">
+    <div class="card-soft kpi-card h-100">
+      <p class="kpi-label mb-1">Win %</p>
+      <p class="kpi-value mb-0">{{ '%.1f'|format(stats.win_pct) }}%</p>
+    </div>
+  </div>
+  <div class="col-sm-6 col-xl-3">
+    <div class="card-soft kpi-card h-100">
+      <p class="kpi-label mb-1">Total Wagered</p>
+      <p class="kpi-value mb-0">${{ '%.2f'|format(stats.wagered) }}</p>
+    </div>
+  </div>
+  <div class="col-sm-6 col-xl-3">
+    <div class="card-soft kpi-card h-100">
+      <p class="kpi-label mb-1">Current Streak</p>
+      <p class="kpi-value mb-0">{{ stats.current_streak }}</p>
+    </div>
+  </div>
+</div>
+
+<div class="card-soft chart-card p-3 mb-4">
+  <div class="d-flex justify-content-between align-items-center mb-2">
+    <h3 class="h6 mb-0">Units by Day</h3>
+    <span class="text-secondary small">Last 7 Entries</span>
+  </div>
+  <canvas id="unitsByDayChart" aria-label="Units won by day" role="img"></canvas>
+</div>
+
+<div class="card-soft p-3">
+  <div class="d-flex justify-content-between align-items-center mb-2">
+    <h3 class="h6 mb-0">Recent Bets</h3>
+    <a href="{{ url_for('bet.place_bet') }}" class="btn btn-sm btn-outline-light">View All</a>
+  </div>
+
+  <div class="table-wrap">
+    <table class="table table-dark table-hover align-middle mb-0">
+      <thead>
+        <tr>
+          <th>Match</th>
+          <th>Date</th>
+          <th class="text-end">Stake</th>
+          <th>Status</th>
+          <th class="text-end">P/L</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for bet in recent_bets %}
+        <tr>
+          <td class="fw-semibold">{{ bet.team_a }} <span class="text-secondary">vs</span> {{ bet.team_b }}</td>
+          <td>{{ bet.match_date.strftime('%b %d, %Y') }}</td>
+          <td class="text-end tabular-num">${{ '%.2f'|format(bet.bet_amount) }}</td>
+          <td>{{ outcome_badge(bet.outcome) }}</td>
+          <td class="text-end {{ 'text-success' if bet.profit_loss() >= 0 else 'text-danger' }}">${{ '%.2f'|format(bet.profit_loss()) }}</td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="5" class="text-center text-secondary py-4">No bets yet. Add your first bet to start tracking.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script>
+  const labels = {{ chart_labels|tojson }};
+  const values = {{ chart_values|tojson }};
+  const ctx = document.getElementById('unitsByDayChart');
+
+  if (ctx) {
+    new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [{
+          label: 'Units',
+          data: values,
+          borderColor: '#4f8cff',
+          backgroundColor: 'rgba(79, 140, 255, .2)',
+          tension: .35,
+          pointRadius: 3,
+          fill: true
+        }]
+      },
+      options: {
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { color: '#9ba7c2' }, grid: { color: 'rgba(255,255,255,.06)' } },
+          y: { ticks: { color: '#9ba7c2' }, grid: { color: 'rgba(255,255,255,.06)' } }
+        }
+      }
+    });
+  }
+</script>
+{% endblock %}
