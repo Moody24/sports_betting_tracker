@@ -248,3 +248,32 @@ body.dark-mode {
 .dark-mode footer {
     background-color: #1e1e1e;
 }
+
+
+/* Dashboard */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    margin-bottom: 24px;
+}
+
+.stat-card {
+    border: 1px solid #e3e3e3;
+    border-radius: 8px;
+    padding: 12px;
+}
+
+.stat-card h3 {
+    font-size: 1rem;
+    margin-bottom: 8px;
+}
+
+.stat-card p {
+    font-size: 1.4rem;
+    margin: 0;
+}
+
+.danger {
+    color: #721c24;
+}
