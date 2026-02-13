@@ -8,7 +8,7 @@ A web application built with **Flask**, designed to help users manage and track 
 
 - **User Authentication**:
   - User registration and login functionality using **Flask-Login**.
-  - Password hashing for security with **Flask-Bcrypt**.
+  - Password hashing for security with **Werkzeug security utilities**.
 
 - **Bet Management**:
   - Users can place, edit, and delete bets.
@@ -33,7 +33,7 @@ A web application built with **Flask**, designed to help users manage and track 
   - **Flask**: Python web framework.
   - **SQLAlchemy**: ORM for database management.
   - **Flask-Login**: User session management.
-  - **Flask-Bcrypt**: Password hashing.
+  - **Werkzeug security**: Password hashing and verification.
   - **Flask-Migrate**: Database migrations.
   
 - **Frontend**:
@@ -106,7 +106,7 @@ A web application built with **Flask**, designed to help users manage and track 
   - **Database Models**: Defined models for users, bets, and matches.
   
 - **Security**:
-  - Implemented password hashing with **Flask-Bcrypt** to securely store user passwords.
+  - Implemented password hashing with **Werkzeug security** to securely store user passwords.
   
 - **Environment Configuration**:
   - Sensitive data like the secret key and database URL are stored in the `.env` file, which is ignored by Git using `.gitignore`.
@@ -142,11 +142,90 @@ A web application built with **Flask**, designed to help users manage and track 
 
 ---
 
+## Codespaces: Sync & Verification Quick Guide
+
+If you are working in GitHub Codespaces and want to confirm you actually pulled the latest work, use this flow:
+
+1. **Update local refs and check your branch**
+   ```bash
+   git fetch --all --prune
+   git branch --show-current
+   git status
+   ```
+
+2. **Inspect recent commits**
+   ```bash
+   git log --oneline -n 5
+   ```
+
+3. **If you need a specific commit, verify it exists first**
+   ```bash
+   git show --oneline --no-patch <commit-hash>
+   ```
+   If Git returns `fatal: bad revision`, that commit is not present in your local clone or any fetched remote refs.
+
+4. **Do not type angle brackets literally**
+   - `git branch --contains <new_commit_hash>` will fail if copied exactly.
+   - Replace `<new_commit_hash>` with a real hash, e.g.:
+     ```bash
+     git branch --contains 689d5ba
+     ```
+
+5. **If a feature branch already exists locally**
+   ```bash
+   git checkout feature/dashboard-on-main
+   git pull --ff-only origin feature/dashboard-on-main
+   ```
+   Use `git checkout -b ...` only when creating a brand-new branch.
+
+6. **If `main` and the feature branch show the same latest commit**
+   - Example: both `main` and `feature/dashboard-on-main` point to the same hash in `git log` output.
+   - Meaning: there are no new commits on the remote branch to pull yet.
+   - Verify with:
+     ```bash
+     git log --oneline --decorate -n 5
+     git branch -a
+     ```
+   - Next actions:
+     1. Push the missing work from the environment where it was created, **or**
+     2. Re-apply changes in your current branch, commit, and push:
+        ```bash
+        git checkout -b feature/reapply-dashboard
+        # make edits
+        git add .
+        git commit -m "Reapply dashboard and registration improvements"
+        git push -u origin feature/reapply-dashboard
+        ```
+
+7. **If `flask db` fails with `ModuleNotFoundError: No module named 'flask_bcrypt'`**
+   This error means your checkout still has older code that imports `flask_bcrypt` in `app/__init__.py`.
+
+   Fix it with this sequence in Codespaces:
+   ```bash
+   git checkout main
+   git fetch --all --prune
+   git pull origin main
+   pip install -r requirements.txt
+   ```
+
+   Then verify your `app/__init__.py` no longer imports `flask_bcrypt`:
+   ```bash
+   rg "flask_bcrypt|Bcrypt" app/__init__.py
+   ```
+
+   Re-run migrations:
+   ```bash
+   flask --app run.py db upgrade
+   ```
+
+   Why this happens:
+   - `flask db` loads your Flask app first.
+   - If app import fails, Flask cannot register the migrate command, so you also see `Error: No such command 'db'`.
+
+---
+
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ---
-
-
-

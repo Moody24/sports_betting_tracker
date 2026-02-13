@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block title %}{{ 'Edit Bet' if bet else 'Add Bet' }} · Sports Betting Tracker{% endblock %}
+{% block page_title %}{{ 'Edit Bet' if bet else 'Add Bet' }}{% endblock %}
+{% block page_subtitle %}Capture matchup, date, and outcome with clean inputs.{% endblock %}
+
+{% block content %}
+<div class="card-soft p-4 mx-auto form-shell">
+  <form method="POST" novalidate>
+    {{ form.hidden_tag() }}
+    <div class="row g-3">
+      <div class="col-md-6">
+        <label class="form-label" for="team_a">Team A</label>
+        <div class="input-group">
+          <span class="input-group-text bg-dark border-secondary-subtle"><i class="bi bi-flag"></i></span>
+          {{ form.team_a(class='form-control', id='team_a', placeholder='Los Angeles Lakers') }}
+        </div>
+      </div>
+      <div class="col-md-6">
+        <label class="form-label" for="team_b">Team B</label>
+        <div class="input-group">
+          <span class="input-group-text bg-dark border-secondary-subtle"><i class="bi bi-flag-fill"></i></span>
+          {{ form.team_b(class='form-control', id='team_b', placeholder='Boston Celtics') }}
+        </div>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label" for="match_date">Match Date</label>
+        {{ form.match_date(class='form-control', id='match_date') }}
+      </div>
+      <div class="col-md-4">
+        <label class="form-label" for="bet_amount">Stake ($)</label>
+        <div class="input-group">
+          <span class="input-group-text bg-dark border-secondary-subtle">$</span>
+          {{ form.bet_amount(class='form-control', id='bet_amount', placeholder='25.00') }}
+        </div>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label" for="outcome">Status</label>
+        {{ form.outcome(class='form-select', id='outcome') }}
+      </div>
+      <div class="col-12 d-flex gap-2 justify-content-end mt-2">
+        <a href="{{ url_for('bet.place_bet') }}" class="btn btn-outline-light">Cancel</a>
+        <button type="submit" class="btn btn-primary">{{ form.submit.label.text }}</button>
+      </div>
+    </div>
+  </form>
+</div>
+{% endblock %}
