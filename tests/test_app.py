@@ -119,7 +119,7 @@ class BettingAppTestCase(unittest.TestCase):
 
         response = self.client.get('/dashboard', follow_redirects=True)
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b'Your Dashboard', response.data)
+        self.assertIn(b'Dashboard', response.data)
         self.assertIn(b'Total Bets', response.data)
 
 

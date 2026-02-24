@@ -1,50 +1,40 @@
-// Confirm Bet Deletion
-document.querySelectorAll('.delete-bet-form').forEach(form => {
-    form.addEventListener('submit', function (e) {
-        if (!confirm('Are you sure you want to delete this bet?')) {
-            e.preventDefault();
-        }
-    });
+// Confirm bet deletion
+document.querySelectorAll('.delete-bet-form').forEach(function (form) {
+  form.addEventListener('submit', function (e) {
+    if (!confirm('Are you sure you want to delete this bet?')) {
+      e.preventDefault();
+    }
+  });
 });
 
-// Theme Toggle Functionality
-const themeSwitchButton = document.getElementById('theme-switch');
-if (themeSwitchButton) {
-    themeSwitchButton.addEventListener('click', () => {
-        const isDarkMode = document.body.classList.toggle('dark-mode');
-        localStorage.setItem('darkMode', isDarkMode ? 'enabled' : 'disabled');
-    });
+// Mobile sidebar toggle
+(function () {
+  var toggle = document.getElementById('sidebar-toggle');
+  var sidebar = document.getElementById('sidebar');
+  if (!toggle || !sidebar) return;
 
-    // Initialize theme from localStorage
-    if (localStorage.getItem('darkMode') === 'enabled') {
-        document.body.classList.add('dark-mode');
+  // Create overlay element
+  var overlay = document.createElement('div');
+  overlay.className = 'sidebar-overlay';
+  document.body.appendChild(overlay);
+
+  function openSidebar() {
+    sidebar.classList.add('open');
+    overlay.classList.add('show');
+  }
+
+  function closeSidebar() {
+    sidebar.classList.remove('open');
+    overlay.classList.remove('show');
+  }
+
+  toggle.addEventListener('click', function () {
+    if (sidebar.classList.contains('open')) {
+      closeSidebar();
+    } else {
+      openSidebar();
     }
-}
+  });
 
-// Real-Time Clock Display
-const clockElement = document.getElementById('clock');
-if (clockElement) {
-    const updateClock = () => {
-        const now = new Date();
-        clockElement.textContent = now.toLocaleTimeString();
-    };
-    updateClock();
-    setInterval(updateClock, 1000);
-}
-
-// Toggle Navbar on Mobile
-const navbarToggle = document.getElementById('navbar-toggle');
-const navbarMenu = document.getElementById('navbar-menu');
-if (navbarToggle && navbarMenu) {
-    navbarToggle.addEventListener('click', () => {
-        navbarMenu.classList.toggle('open');
-    });
-}
-
-// Highlight Active Navigation Link
-const navLinks = document.querySelectorAll('nav a');
-navLinks.forEach(link => {
-    if (link.href === window.location.href) {
-        link.classList.add('active');
-    }
-});
+  overlay.addEventListener('click', closeSidebar);
+})();

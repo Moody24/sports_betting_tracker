@@ -6,9 +6,8 @@
 {% block page_subtitle %}Performance snapshot of your latest betting activity.{% endblock %}
 
 {% block content %}
-<p class="text-secondary mb-3">Your Dashboard</p>
 <div class="row g-3 mb-4">
-    <div class="col-sm-6 col-xl-2">
+  <div class="col-sm-6 col-xl-2">
     <div class="card-soft kpi-card h-100">
       <p class="kpi-label mb-1">Total Bets</p>
       <p class="kpi-value mb-0">{{ stats.total_bets }}</p>
@@ -17,13 +16,13 @@
   <div class="col-sm-6 col-xl-2">
     <div class="card-soft kpi-card h-100">
       <p class="kpi-label mb-1">ROI</p>
-      <p class="kpi-value mb-0">{{ '%.1f'|format(stats.roi) }}%</p>
+      <p class="kpi-value mb-0 {{ 'text-success' if stats.roi >= 0 else 'text-danger' }}">{{ '%.1f'|format(stats.roi) }}%</p>
     </div>
   </div>
   <div class="col-sm-6 col-xl-2">
     <div class="card-soft kpi-card h-100">
       <p class="kpi-label mb-1">Units Won</p>
-      <p class="kpi-value mb-0">{{ '%.2f'|format(stats.units_won) }}u</p>
+      <p class="kpi-value mb-0 {{ 'text-success' if stats.units_won >= 0 else 'text-danger' }}">{{ '%.2f'|format(stats.units_won) }}u</p>
     </div>
   </div>
   <div class="col-sm-6 col-xl-2">
@@ -32,13 +31,13 @@
       <p class="kpi-value mb-0">{{ '%.1f'|format(stats.win_pct) }}%</p>
     </div>
   </div>
-  <div class="col-sm-6 col-xl-3">
+  <div class="col-sm-6 col-xl-2">
     <div class="card-soft kpi-card h-100">
       <p class="kpi-label mb-1">Total Wagered</p>
       <p class="kpi-value mb-0">${{ '%.2f'|format(stats.wagered) }}</p>
     </div>
   </div>
-  <div class="col-sm-6 col-xl-3">
+  <div class="col-sm-6 col-xl-2">
     <div class="card-soft kpi-card h-100">
       <p class="kpi-label mb-1">Current Streak</p>
       <p class="kpi-value mb-0">{{ stats.current_streak }}</p>
@@ -78,11 +77,11 @@
           <td>{{ bet.match_date.strftime('%b %d, %Y') }}</td>
           <td class="text-end tabular-num">${{ '%.2f'|format(bet.bet_amount) }}</td>
           <td>{{ outcome_badge(bet.outcome) }}</td>
-          <td class="text-end {{ 'text-success' if bet.profit_loss() >= 0 else 'text-danger' }}">${{ '%.2f'|format(bet.profit_loss()) }}</td>
+          <td class="text-end {% if bet.outcome == 'win' %}text-success{% elif bet.outcome == 'lose' %}text-danger{% else %}text-secondary{% endif %}">${{ '%.2f'|format(bet.profit_loss()) }}</td>
         </tr>
         {% else %}
         <tr>
-          <td colspan="5" class="text-center text-secondary py-4">No bets yet. Add your first bet to start tracking.</td>
+          <td colspan="5" class="text-center text-secondary py-4">No bets yet. <a href="{{ url_for('bet.new_bet') }}" class="link-light">Add your first bet</a> to start tracking.</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -124,45 +123,4 @@
     });
   }
 </script>
-
-{% block title %}Dashboard - Bet Tracker{% endblock %}
-
-{% block content %}
-<h2>Your Dashboard</h2>
-
-<div class="stats-grid">
-    <div class="stat-card"><h3>Total Bets</h3><p>{{ stats.total_bets }}</p></div>
-    <div class="stat-card"><h3>Wins</h3><p>{{ stats.wins }}</p></div>
-    <div class="stat-card"><h3>Losses</h3><p>{{ stats.losses }}</p></div>
-    <div class="stat-card"><h3>Total Wagered</h3><p>${{ '%.2f'|format(stats.wagered) }}</p></div>
-    <div class="stat-card"><h3>Net P/L</h3><p class="{% if stats.net >= 0 %}success{% else %}danger{% endif %}">${{ '%.2f'|format(stats.net) }}</p></div>
-</div>
-
-<h3>Recent Bets</h3>
-{% if recent_bets %}
-<table class="bets-table">
-    <thead>
-        <tr>
-            <th>Match</th>
-            <th>Date</th>
-            <th>Amount</th>
-            <th>Outcome</th>
-            <th>P/L</th>
-        </tr>
-    </thead>
-    <tbody>
-        {% for bet in recent_bets %}
-        <tr>
-            <td>{{ bet.team_a }} vs {{ bet.team_b }}</td>
-            <td>{{ bet.match_date.strftime('%Y-%m-%d') }}</td>
-            <td>${{ '%.2f'|format(bet.bet_amount) }}</td>
-            <td>{{ bet.outcome }}</td>
-            <td>${{ '%.2f'|format(bet.profit_loss()) }}</td>
-        </tr>
-        {% endfor %}
-    </tbody>
-</table>
-{% else %}
-<p>You haven't placed any bets yet. Head to <a href="{{ url_for('bet.place_bet') }}">Place Bet</a> to get started.</p>
-{% endif %}
 {% endblock %}

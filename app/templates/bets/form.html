@@ -13,30 +13,45 @@
         <label class="form-label" for="team_a">Team A</label>
         <div class="input-group">
           <span class="input-group-text bg-dark border-secondary-subtle"><i class="bi bi-flag"></i></span>
-          {{ form.team_a(class='form-control', id='team_a', placeholder='Los Angeles Lakers') }}
+          {{ form.team_a(class='form-control' ~ (' is-invalid' if form.team_a.errors else ''), id='team_a', placeholder='Los Angeles Lakers') }}
         </div>
+        {% for error in form.team_a.errors %}
+          <div class="invalid-feedback d-block">{{ error }}</div>
+        {% endfor %}
       </div>
       <div class="col-md-6">
         <label class="form-label" for="team_b">Team B</label>
         <div class="input-group">
           <span class="input-group-text bg-dark border-secondary-subtle"><i class="bi bi-flag-fill"></i></span>
-          {{ form.team_b(class='form-control', id='team_b', placeholder='Boston Celtics') }}
+          {{ form.team_b(class='form-control' ~ (' is-invalid' if form.team_b.errors else ''), id='team_b', placeholder='Boston Celtics') }}
         </div>
+        {% for error in form.team_b.errors %}
+          <div class="invalid-feedback d-block">{{ error }}</div>
+        {% endfor %}
       </div>
       <div class="col-md-4">
         <label class="form-label" for="match_date">Match Date</label>
-        {{ form.match_date(class='form-control', id='match_date') }}
+        {{ form.match_date(class='form-control' ~ (' is-invalid' if form.match_date.errors else ''), id='match_date') }}
+        {% for error in form.match_date.errors %}
+          <div class="invalid-feedback d-block">{{ error }}</div>
+        {% endfor %}
       </div>
       <div class="col-md-4">
         <label class="form-label" for="bet_amount">Stake ($)</label>
         <div class="input-group">
           <span class="input-group-text bg-dark border-secondary-subtle">$</span>
-          {{ form.bet_amount(class='form-control', id='bet_amount', placeholder='25.00') }}
+          {{ form.bet_amount(class='form-control' ~ (' is-invalid' if form.bet_amount.errors else ''), id='bet_amount', placeholder='25.00') }}
         </div>
+        {% for error in form.bet_amount.errors %}
+          <div class="invalid-feedback d-block">{{ error }}</div>
+        {% endfor %}
       </div>
       <div class="col-md-4">
         <label class="form-label" for="outcome">Status</label>
-        {{ form.outcome(class='form-select', id='outcome') }}
+        {{ form.outcome(class='form-select' ~ (' is-invalid' if form.outcome.errors else ''), id='outcome') }}
+        {% for error in form.outcome.errors %}
+          <div class="invalid-feedback d-block">{{ error }}</div>
+        {% endfor %}
       </div>
       <div class="col-12 d-flex gap-2 justify-content-end mt-2">
         <a href="{{ url_for('bet.place_bet') }}" class="btn btn-outline-light">Cancel</a>

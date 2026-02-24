@@ -8,13 +8,7 @@
 {% block content %}
 <div class="card-soft p-3 mb-4 filter-row">
   <form method="GET" class="row g-2 align-items-end">
-    <div class="col-sm-6 col-lg-2">
-      <label class="form-label">Sport</label>
-      <select class="form-select" name="sport">
-        <option value="all" selected>All Sports</option>
-      </select>
-    </div>
-    <div class="col-sm-6 col-lg-2">
+    <div class="col-sm-6 col-lg-3">
       <label class="form-label">Status</label>
       <select class="form-select" name="status">
         <option value="" {% if not filters.status %}selected{% endif %}>All</option>
@@ -31,11 +25,11 @@
       <label class="form-label">To</label>
       <input type="date" class="form-control" name="end_date" value="{{ filters.end_date }}">
     </div>
-    <div class="col-lg-3">
+    <div class="col-sm-6 col-lg-3">
       <label class="form-label">Search</label>
       <input type="search" class="form-control" name="q" value="{{ filters.q }}" placeholder="Team name or matchup">
     </div>
-    <div class="col-lg-1 d-grid">
+    <div class="col-lg-2 d-grid">
       <button class="btn btn-primary" type="submit">Apply</button>
     </div>
   </form>
@@ -63,12 +57,13 @@
         {% for bet in bets %}
         <tr>
           <td class="fw-semibold">{{ bet.team_a }} <span class="text-secondary">vs</span> {{ bet.team_b }}</td>
-          <td>{{ bet.match_date.strftime('%Y-%m-%d') }}</td>
+          <td>{{ bet.match_date.strftime('%b %d, %Y') }}</td>
           <td class="text-end">${{ '%.2f'|format(bet.bet_amount) }}</td>
           <td>{{ outcome_badge(bet.outcome) }}</td>
-          <td class="text-end {{ 'text-success' if bet.profit_loss() >= 0 else 'text-danger' }}">${{ '%.2f'|format(bet.profit_loss()) }}</td>
+          <td class="text-end {% if bet.outcome == 'win' %}text-success{% elif bet.outcome == 'lose' %}text-danger{% else %}text-secondary{% endif %}">${{ '%.2f'|format(bet.profit_loss()) }}</td>
           <td class="text-end">
-            <form action="{{ url_for('bet.delete_bet', bet_id=bet.id) }}" method="POST" class="d-inline">
+            <form action="{{ url_for('bet.delete_bet', bet_id=bet.id) }}" method="POST" class="d-inline delete-bet-form">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button type="submit" class="btn btn-sm btn-outline-danger" aria-label="Delete bet {{ bet.id }}">
                 <i class="bi bi-trash"></i>
               </button>

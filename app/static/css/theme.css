@@ -22,7 +22,7 @@ body {
 
 .app-shell {
   display: grid;
-  grid-template-columns: 280px 1fr;
+  grid-template-columns: 260px 1fr;
   min-height: 100vh;
 }
 
@@ -35,6 +35,8 @@ body {
   position: sticky;
   top: 0;
   height: 100vh;
+  z-index: 100;
+  transition: transform .25s ease;
 }
 
 .brand-dot {
@@ -52,6 +54,8 @@ body {
   align-items: center;
   gap: .65rem;
   padding: .7rem .8rem;
+  text-decoration: none;
+  cursor: pointer;
 }
 
 .nav-link:hover,
@@ -162,15 +166,69 @@ body {
   padding: 1.5rem;
 }
 
-@media (max-width: 991px) {
+.tabular-num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Validation errors */
+.invalid-feedback {
+  font-size: .85rem;
+}
+
+/* Mobile sidebar toggle button */
+.sidebar-toggle {
+  position: fixed;
+  top: 1rem;
+  left: 1rem;
+  z-index: 200;
+  background: var(--bg-soft);
+  border: 1px solid rgba(255,255,255,.1);
+  color: var(--text-main);
+  border-radius: .6rem;
+  padding: .5rem .7rem;
+  font-size: 1.25rem;
+  line-height: 1;
+  display: none;
+  cursor: pointer;
+}
+
+/* Sidebar overlay for mobile */
+.sidebar-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.5);
+  z-index: 90;
+}
+
+.sidebar-overlay.show {
+  display: block;
+}
+
+@media (max-width: 991.98px) {
   .app-shell {
     grid-template-columns: 1fr;
   }
 
   .sidebar {
-    position: static;
-    height: auto;
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 260px;
+    transform: translateX(-100%);
     border-right: 0 !important;
-    border-bottom: 1px solid rgba(255,255,255,.1);
+  }
+
+  .sidebar.open {
+    transform: translateX(0);
+  }
+
+  .sidebar-toggle {
+    display: block;
+  }
+
+  .main-content {
+    padding-top: 4rem;
   }
 }

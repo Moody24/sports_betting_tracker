@@ -1,6 +1,8 @@
-from flask import Blueprint, render_template, redirect, url_for, flash, request
+from flask import Blueprint, render_template, redirect, url_for, flash
 from flask_login import login_user, logout_user, login_required, current_user
+
 from app import db
+from app.forms import LoginForm, LogoutForm, RegisterForm
 from app.models import User
 
 auth = Blueprint('auth', __name__)
@@ -60,5 +62,5 @@ def logout():
         return redirect(url_for('main.home'))
 
     logout_user()
-    flash('Logged out successfully.', 'success')  # Ensuring flash message is set
+    flash('Logged out successfully.', 'success')
     return redirect(url_for('main.home'))
