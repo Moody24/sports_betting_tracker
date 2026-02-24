@@ -9,8 +9,7 @@ from app.models import User, Bet
 class BettingAppTestCase(unittest.TestCase):
 
     def setUp(self):
-        self.app = create_app()
-        self.app.config['TESTING'] = True
+        self.app = create_app(testing=True)
         self.app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
         self.app.config['WTF_CSRF_ENABLED'] = False
         self.client = self.app.test_client()
