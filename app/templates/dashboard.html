@@ -67,6 +67,7 @@
         <tr>
           <th>Match</th>
           <th>Date</th>
+          <th>Type</th>
           <th class="text-end">Stake</th>
           <th>Status</th>
           <th class="text-end">P/L</th>
@@ -77,13 +78,17 @@
         <tr>
           <td class="fw-semibold">{{ bet.team_a }} <span class="text-secondary">vs</span> {{ bet.team_b }}</td>
           <td>{{ bet.match_date.strftime('%b %d, %Y') }}</td>
+          <td>
+            <span class="badge text-bg-dark">{{ bet.bet_type|capitalize }}</span>
+            {% if bet.over_under_line %}<span class="small text-secondary">{{ bet.over_under_line }}</span>{% endif %}
+          </td>
           <td class="text-end tabular-num">${{ '%.2f'|format(bet.bet_amount) }}</td>
           <td>{{ outcome_badge(bet.outcome) }}</td>
           <td class="text-end {% if bet.outcome == 'win' %}text-success{% elif bet.outcome == 'lose' %}text-danger{% else %}text-secondary{% endif %}">${{ '%.2f'|format(bet.profit_loss()) }}</td>
         </tr>
         {% else %}
         <tr>
-          <td colspan="5" class="text-center text-secondary py-4">No bets yet. <a href="{{ url_for('bet.new_bet') }}" class="link-light">Add your first bet</a> to start tracking.</td>
+          <td colspan="6" class="text-center text-secondary py-4">No bets yet. <a href="{{ url_for('bet.new_bet') }}" class="link-light">Add your first bet</a> to start tracking.</td>
         </tr>
         {% endfor %}
       </tbody>

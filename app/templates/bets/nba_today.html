@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+
+{% block title %}NBA Today · Sports Betting Tracker{% endblock %}
+{% block page_title %}NBA Today{% endblock %}
+{% block page_subtitle %}Live NBA games with over/under lines. Click a game to place a bet.{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <p class="text-secondary mb-0">{{ games|length }} game{{ 's' if games|length != 1 }} scheduled</p>
+  <form action="{{ url_for('bet.nba_update_results') }}" method="POST" class="d-inline">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-sm btn-outline-light">
+      <i class="bi bi-arrow-repeat me-1"></i>Update Results
+    </button>
+  </form>
+</div>
+
+{% if not games %}
+<div class="card-soft p-4 text-center text-secondary">
+  <i class="bi bi-calendar-x" style="font-size:2rem"></i>
+  <p class="mt-2 mb-0">No NBA games scheduled today.</p>
+</div>
+{% endif %}
+
+<div class="row g-3">
+  {% for game in games %}
+  <div class="col-md-6 col-xl-4">
+    <div class="card-soft p-3 h-100 d-flex flex-column">
+      {# ── Status badge ── #}
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        {% if game.status == 'STATUS_FINAL' %}
+          <span class="badge text-bg-secondary">Final</span>
+        {% elif game.status == 'STATUS_IN_PROGRESS' %}
+          <span class="badge text-bg-success">Live &middot; Q{{ game.period }} {{ game.clock }}</span>
+        {% else %}
+          <span class="badge text-bg-info">{{ game.status_detail }}</span>
+        {% endif %}
+
+        {% if game.over_under_line %}
+          <span class="small text-secondary">O/U <strong class="text-light">{{ game.over_under_line }}</strong></span>
+        {% else %}
+          <span class="small text-secondary">O/U &mdash;</span>
+        {% endif %}
+      </div>
+
+      {# ── Matchup ── #}
+      <div class="d-flex align-items-center justify-content-between mb-3">
+        <div class="text-center" style="width:40%">
+          {% if game.away.logo %}
+          <img src="{{ game.away.logo }}" alt="{{ game.away.abbr }}" width="40" height="40" class="mb-1">
+          {% endif %}
+          <div class="small fw-semibold">{{ game.away.name }}</div>
+          <div class="h5 mb-0">{{ game.away.score }}</div>
+        </div>
+        <div class="text-secondary fw-bold">@</div>
+        <div class="text-center" style="width:40%">
+          {% if game.home.logo %}
+          <img src="{{ game.home.logo }}" alt="{{ game.home.abbr }}" width="40" height="40" class="mb-1">
+          {% endif %}
+          <div class="small fw-semibold">{{ game.home.name }}</div>
+          <div class="h5 mb-0">{{ game.home.score }}</div>
+        </div>
+      </div>
+
+      {# ── Total tracker ── #}
+      {% if game.status != 'STATUS_SCHEDULED' %}
+      <div class="small text-center mb-2">
+        <span class="text-secondary">Combined:</span>
+        <strong class="text-light">{{ game.total_score }}</strong>
+        {% if game.over_under_line %}
+          {% set diff = game.total_score - game.over_under_line %}
+          {% if diff > 0 %}
+            <span class="text-success">(+{{ '%.1f'|format(diff) }} over)</span>
+          {% elif diff < 0 %}
+            <span class="text-danger">({{ '%.1f'|format(diff) }} under)</span>
+          {% else %}
+            <span class="text-warning">(push)</span>
+          {% endif %}
+        {% endif %}
+      </div>
+      {% endif %}
+
+      {# ── Tracked bet indicator ── #}
+      {% if tracked.get(game.espn_id) %}
+        {% set tb = tracked[game.espn_id] %}
+        <div class="small text-center py-1 px-2 rounded mb-2" style="background:var(--accent-soft)">
+          <i class="bi bi-eye"></i>
+          Tracking <strong>{{ tb.bet_type|capitalize }}</strong> {{ tb.over_under_line }} &middot; ${{ '%.2f'|format(tb.bet_amount) }}
+        </div>
+      {% endif %}
+
+      {# ── Quick-add buttons ── #}
+      {% if game.over_under_line and not tracked.get(game.espn_id) %}
+      <div class="mt-auto d-flex gap-2">
+        <a href="{{ url_for('bet.new_bet',
+            team_a=game.away.name,
+            team_b=game.home.name,
+            match_date=game.start_time[:10],
+            bet_type='over',
+            over_under_line=game.over_under_line,
+            game_id=game.espn_id) }}"
+           class="btn btn-sm btn-outline-success flex-fill">
+          <i class="bi bi-arrow-up me-1"></i>Over {{ game.over_under_line }}
+        </a>
+        <a href="{{ url_for('bet.new_bet',
+            team_a=game.away.name,
+            team_b=game.home.name,
+            match_date=game.start_time[:10],
+            bet_type='under',
+            over_under_line=game.over_under_line,
+            game_id=game.espn_id) }}"
+           class="btn btn-sm btn-outline-danger flex-fill">
+          <i class="bi bi-arrow-down me-1"></i>Under {{ game.over_under_line }}
+        </a>
+      </div>
+      {% elif not game.over_under_line %}
+      <div class="mt-auto">
+        <a href="{{ url_for('bet.new_bet',
+            team_a=game.away.name,
+            team_b=game.home.name,
+            match_date=game.start_time[:10],
+            game_id=game.espn_id) }}"
+           class="btn btn-sm btn-outline-light w-100">
+          <i class="bi bi-plus-lg me-1"></i>Place Bet
+        </a>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+{% if not _get_odds_api_key is defined %}
+<div class="card-soft p-3 mt-4 small text-secondary">
+  <i class="bi bi-info-circle me-1"></i>
+  <strong>Tip:</strong> Set the <code>ODDS_API_KEY</code> environment variable with a free key from
+  <a href="https://the-odds-api.com" class="link-light" target="_blank">the-odds-api.com</a>
+  to see over/under lines on each game.
+</div>
+{% endif %}
+{% endblock %}

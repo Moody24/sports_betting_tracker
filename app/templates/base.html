@@ -37,6 +37,9 @@
           <a class="nav-link {% if request.endpoint == 'bet.new_bet' %}active{% endif %}" href="{{ url_for('bet.new_bet') }}">
             <i class="bi bi-plus-circle"></i><span>Add Bet</span>
           </a>
+          <a class="nav-link {% if request.endpoint == 'bet.nba_today' %}active{% endif %}" href="{{ url_for('bet.nba_today') }}">
+            <i class="bi bi-dribbble"></i><span>NBA Today</span>
+          </a>
           {% endif %}
         </nav>
 

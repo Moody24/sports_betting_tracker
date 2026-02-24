@@ -53,6 +53,10 @@ class Bet(db.Model):
     american_odds = db.Column(db.Integer, nullable=True)
     is_parlay = db.Column(db.Boolean, nullable=False, default=False)
     source = db.Column(db.String(40), nullable=False, default='manual')
+    bet_type = db.Column(db.String(20), nullable=False, default='moneyline')
+    over_under_line = db.Column(db.Float, nullable=True)
+    actual_total = db.Column(db.Float, nullable=True)
+    external_game_id = db.Column(db.String(80), nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
     def __repr__(self):
@@ -88,3 +92,9 @@ class Bet(db.Model):
         if self.outcome == "lose":
             return -float(self.bet_amount)
         return 0.0
+
+    @property
+    def margin(self):
+        if self.over_under_line is not None and self.actual_total is not None:
+            return round(self.actual_total - self.over_under_line, 1)
+        return None
