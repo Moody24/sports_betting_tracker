@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 from flask import Flask
 from flask_login import LoginManager, current_user
-from flask_migrate import Migrate
+from flask_migrate import Migrate, upgrade as _upgrade
 from flask_sqlalchemy import SQLAlchemy
 from flask_wtf.csrf import CSRFProtect
 
@@ -12,7 +12,7 @@ migrate = Migrate()
 login_manager = LoginManager()
 csrf = CSRFProtect()
 
-def create_app():
+def create_app(testing=False):
     app = Flask(__name__)
     app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'your-default-secret-key')
     app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'sqlite:///app.db')
@@ -20,6 +20,9 @@ def create_app():
     app.config['WTF_CSRF_ENABLED'] = True
     app.config['SESSION_COOKIE_HTTPONLY'] = True
     app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+
+    if testing:
+        app.config['TESTING'] = True
 
     db.init_app(app)
     migrate.init_app(app, db)
@@ -58,5 +61,9 @@ def create_app():
     app.register_blueprint(auth, url_prefix='/auth')
     app.register_blueprint(bet)
     app.register_blueprint(main)
+
+    if not app.config.get('TESTING'):
+        with app.app_context():
+            _upgrade()
 
     return app
