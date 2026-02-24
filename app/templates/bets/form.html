@@ -8,6 +8,7 @@
 <div class="card-soft p-4 mx-auto" style="max-width: 760px;">
   <form method="POST" novalidate>
     {{ form.hidden_tag() }}
+    {{ form.external_game_id() }}
     <div class="row g-3">
       <div class="col-md-6">
         <label class="form-label" for="team_a">Team A</label>
@@ -47,6 +48,23 @@
         {% endfor %}
       </div>
       <div class="col-md-4">
+        <label class="form-label" for="bet_type">Bet Type</label>
+        {{ form.bet_type(class='form-select' ~ (' is-invalid' if form.bet_type.errors else ''), id='bet_type') }}
+        {% for error in form.bet_type.errors %}
+          <div class="invalid-feedback d-block">{{ error }}</div>
+        {% endfor %}
+      </div>
+      <div class="col-md-4" id="ou-line-group" style="{% if form.bet_type.data not in ('over', 'under') %}display:none{% endif %}">
+        <label class="form-label" for="over_under_line">O/U Line</label>
+        <div class="input-group">
+          <span class="input-group-text bg-dark border-secondary-subtle"><i class="bi bi-bullseye"></i></span>
+          {{ form.over_under_line(class='form-control' ~ (' is-invalid' if form.over_under_line.errors else ''), id='over_under_line', placeholder='220.5', step='0.5') }}
+        </div>
+        {% for error in form.over_under_line.errors %}
+          <div class="invalid-feedback d-block">{{ error }}</div>
+        {% endfor %}
+      </div>
+      <div class="col-md-4">
         <label class="form-label" for="outcome">Status</label>
         {{ form.outcome(class='form-select' ~ (' is-invalid' if form.outcome.errors else ''), id='outcome') }}
         {% for error in form.outcome.errors %}
@@ -60,4 +78,16 @@
     </div>
   </form>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  var betType = document.getElementById('bet_type');
+  var ouGroup = document.getElementById('ou-line-group');
+  if (betType && ouGroup) {
+    betType.addEventListener('change', function () {
+      ouGroup.style.display = (this.value === 'over' || this.value === 'under') ? '' : 'none';
+    });
+  }
+</script>
 {% endblock %}

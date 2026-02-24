@@ -1,7 +1,7 @@
 from flask_wtf import FlaskForm
 from flask_wtf.file import FileField, FileRequired, FileAllowed
-from wtforms import StringField, PasswordField, FloatField, SubmitField, BooleanField, DateField, SelectField
-from wtforms.validators import DataRequired, Length, EqualTo, NumberRange
+from wtforms import StringField, PasswordField, FloatField, SubmitField, BooleanField, DateField, SelectField, HiddenField
+from wtforms.validators import DataRequired, Length, EqualTo, NumberRange, Optional
 
 
 class LoginForm(FlaskForm):
@@ -30,12 +30,20 @@ class BetForm(FlaskForm):
         'Bet Amount',
         validators=[DataRequired(), NumberRange(min=1, message='Bet amount must be greater than zero.')],
     )
+    bet_type = SelectField(
+        'Bet Type',
+        choices=[('moneyline', 'Moneyline'), ('over', 'Over'), ('under', 'Under')],
+        default='moneyline',
+        validators=[DataRequired()],
+    )
+    over_under_line = FloatField('O/U Line', validators=[Optional()])
     outcome = SelectField(
         'Outcome',
         choices=[('pending', 'Pending'), ('win', 'Win'), ('lose', 'Lose')],
         default='pending',
         validators=[DataRequired()],
     )
+    external_game_id = HiddenField('Game ID')
     submit = SubmitField('Submit Bet')
 
 
