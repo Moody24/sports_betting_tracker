@@ -1,7 +1,3 @@
-from flask import Flask
-from flask_sqlalchemy import SQLAlchemy
-from flask_migrate import Migrate
-from flask_login import LoginManager, current_user
 import os
 from datetime import datetime, timezone
 
@@ -10,7 +6,6 @@ from flask_login import LoginManager, current_user
 from flask_migrate import Migrate
 from flask_sqlalchemy import SQLAlchemy
 
-# ✅ Initialize extensions first
 db = SQLAlchemy()
 migrate = Migrate()
 login_manager = LoginManager()
@@ -24,7 +19,6 @@ def create_app():
     app.config['SESSION_COOKIE_HTTPONLY'] = True
     app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 
-    # ✅ Initialize extensions AFTER app is created
     db.init_app(app)
     migrate.init_app(app, db)
     login_manager.init_app(app)
@@ -32,9 +26,8 @@ def create_app():
     login_manager.login_view = 'auth.login'
     login_manager.login_message_category = 'info'
 
-    # ✅ Import models AFTER initializing db (avoiding circular import)
     from app.forms import LogoutForm
-    from app.models import Bet, User
+    from app.models import User
 
     @login_manager.user_loader
     def load_user(user_id):
@@ -55,13 +48,12 @@ def create_app():
         response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
         return response
 
-    # ✅ Import Blueprints AFTER initializing everything
     from app.routes.auth import auth
     from app.routes.bet import bet
     from app.routes.main import main
 
     app.register_blueprint(auth, url_prefix='/auth')
-    app.register_blueprint(bet)  # ✅ No url_prefix to keep `/bets`
+    app.register_blueprint(bet)
     app.register_blueprint(main)
 
     return app
