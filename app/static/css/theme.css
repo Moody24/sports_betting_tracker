@@ -152,6 +152,15 @@ body {
 
 .chart-card {
   min-height: 320px;
+  max-height: 400px;
+  display: flex;
+  flex-direction: column;
+}
+
+.chart-area {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 0;
 }
 
 .auth-wrap {
