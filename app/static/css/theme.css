@@ -216,6 +216,48 @@ body {
 
 /* ── Player Props ────────────────────────────────────────────── */
 
+/* Scrollable props container — prevents cards from stretching sibling cards */
+.props-container {
+  max-height: 300px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 2px;
+}
+
+.props-container::-webkit-scrollbar {
+  width: 4px;
+}
+
+.props-container::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.props-container::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, .2);
+  border-radius: 4px;
+}
+
+/* Scrollable inner wrapper for snapshot props collapse */
+.snap-props-scroll {
+  max-height: 260px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 2px;
+}
+
+.snap-props-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+
+.snap-props-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.snap-props-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, .2);
+  border-radius: 4px;
+}
+
 .prop-market-group {
   margin-bottom: .75rem;
 }
@@ -229,6 +271,10 @@ body {
   border-bottom: 1px solid rgba(255,255,255,.06);
   margin-bottom: .35rem;
   font-weight: 600;
+  position: sticky;
+  top: 0;
+  background: var(--bg-elev);
+  z-index: 1;
 }
 
 .prop-row {
@@ -255,11 +301,13 @@ body {
   font-weight: 600;
   min-width: 2.5rem;
   text-align: center;
+  flex-shrink: 0;
 }
 
 .prop-actions {
   display: flex;
   gap: .3rem;
+  flex-shrink: 0;
 }
 
 .btn-xs {
