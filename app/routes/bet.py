@@ -1,10 +1,11 @@
+import csv
 import io
 import json
 import logging
 import re
 from datetime import datetime, date as date_type, timezone, timedelta
 
-from flask import Blueprint, render_template, redirect, url_for, flash, request, jsonify
+from flask import Blueprint, render_template, redirect, url_for, flash, request, jsonify, Response
 from flask_login import login_required, current_user
 
 from app import db
@@ -76,11 +77,24 @@ def place_bet():
         'start_date': start_date,
         'end_date': end_date,
     }
+
+    # Summary stats for the current filtered view
+    graded = [b for b in bets if b.outcome in ('win', 'lose')]
+    filter_stats = {
+        'count': len(bets),
+        'wins': sum(1 for b in bets if b.outcome == 'win'),
+        'losses': sum(1 for b in bets if b.outcome == 'lose'),
+        'pending': sum(1 for b in bets if b.outcome == 'pending'),
+        'wagered': sum(b.bet_amount for b in bets),
+        'net': sum(b.profit_loss() for b in bets),
+    }
+
     return render_template(
         'bets/list.html',
         bets=bets,
         filters=filters,
         parlay_status=parlay_status,
+        filter_stats=filter_stats,
     )
 
 
@@ -147,6 +161,7 @@ def new_bet():
             prop_line=prop_line_val,
             picked_team=picked_team if form.bet_type.data == BetType.MONEYLINE.value else None,
             bonus_multiplier=bonus_mult,
+            notes=form.notes.data or None,
         )
         db.session.add(bet_obj)
         db.session.commit()
@@ -644,3 +659,69 @@ def delete_bet(bet_id):
     db.session.commit()
     flash('Bet deleted successfully!', 'success')
     return redirect(url_for('bet.place_bet'))
+
+
+@bet.route('/bets/export')
+@login_required
+def export_bets():
+    """Export all (optionally filtered) bets for the current user as a CSV file."""
+    query = Bet.query.filter_by(user_id=current_user.id)
+
+    status = request.args.get('status', '').strip()
+    search_query = request.args.get('q', '').strip()
+    start_date = request.args.get('start_date', '').strip()
+    end_date = request.args.get('end_date', '').strip()
+
+    if status:
+        query = query.filter(Bet.outcome == status)
+    if search_query:
+        query = query.filter(
+            (Bet.team_a.ilike(f'%{search_query}%')) | (Bet.team_b.ilike(f'%{search_query}%'))
+        )
+    if start_date:
+        try:
+            query = query.filter(Bet.match_date >= datetime.strptime(start_date, '%Y-%m-%d'))
+        except ValueError:
+            pass
+    if end_date:
+        try:
+            query = query.filter(Bet.match_date <= datetime.strptime(end_date, '%Y-%m-%d'))
+        except ValueError:
+            pass
+
+    bets = query.order_by(Bet.match_date.desc()).all()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        'Date', 'Away Team', 'Home Team', 'Bet Type', 'Stake',
+        'Odds', 'O/U Line', 'Player', 'Prop Type', 'Prop Line',
+        'Picked Team', 'Outcome', 'P/L', 'Parlay', 'Bonus Mult', 'Notes',
+    ])
+    for b in bets:
+        writer.writerow([
+            b.match_date.strftime('%Y-%m-%d'),
+            b.team_a,
+            b.team_b,
+            b.bet_type,
+            f'{b.bet_amount:.2f}',
+            b.american_odds or '',
+            b.over_under_line or '',
+            b.player_name or '',
+            b.prop_type or '',
+            b.prop_line or '',
+            b.picked_team or '',
+            b.outcome,
+            f'{b.profit_loss():.2f}',
+            'Yes' if b.is_parlay else 'No',
+            f'{b.bonus_multiplier:.2f}',
+            b.notes or '',
+        ])
+
+    output.seek(0)
+    filename = f'bets_{current_user.username}_{date_type.today().isoformat()}.csv'
+    return Response(
+        output.getvalue(),
+        mimetype='text/csv',
+        headers={'Content-Disposition': f'attachment; filename="{filename}"'},
+    )

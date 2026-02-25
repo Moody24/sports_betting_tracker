@@ -15,14 +15,16 @@
   </div>
   <div class="col-sm-6 col-xl-2">
     <div class="card-soft kpi-card h-100">
-      <p class="kpi-label mb-1">ROI</p>
-      <p class="kpi-value mb-0 {{ 'text-success' if stats.roi >= 0 else 'text-danger' }}">{{ '%.1f'|format(stats.roi) }}%</p>
+      <p class="kpi-label mb-1">Net P/L</p>
+      <p class="kpi-value mb-0 {{ 'text-success' if stats.net >= 0 else 'text-danger' }}">
+        {{ '+' if stats.net >= 0 else '' }}${{ '%.2f'|format(stats.net) }}
+      </p>
     </div>
   </div>
   <div class="col-sm-6 col-xl-2">
     <div class="card-soft kpi-card h-100">
-      <p class="kpi-label mb-1">Units Won</p>
-      <p class="kpi-value mb-0 {{ 'text-success' if stats.units_won >= 0 else 'text-danger' }}">{{ '%.2f'|format(stats.units_won) }}u</p>
+      <p class="kpi-label mb-1">ROI</p>
+      <p class="kpi-value mb-0 {{ 'text-success' if stats.roi >= 0 else 'text-danger' }}">{{ '%.1f'|format(stats.roi) }}%</p>
     </div>
   </div>
   <div class="col-sm-6 col-xl-2">
@@ -45,13 +47,28 @@
   </div>
 </div>
 
-<div class="card-soft chart-card p-3 mb-4">
-  <div class="d-flex justify-content-between align-items-center mb-2">
-    <h3 class="h6 mb-0">Units by Day</h3>
-    <span class="text-secondary small">Last 7 Entries</span>
+<div class="row g-3 mb-4">
+  <div class="col-lg-6">
+    <div class="card-soft chart-card p-3 h-100">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h3 class="h6 mb-0">P/L by Day</h3>
+        <span class="text-secondary small">Last 7 Entries</span>
+      </div>
+      <div class="chart-area">
+        <canvas id="unitsByDayChart" aria-label="P/L by day" role="img"></canvas>
+      </div>
+    </div>
   </div>
-  <div class="chart-area">
-    <canvas id="unitsByDayChart" aria-label="Units won by day" role="img"></canvas>
+  <div class="col-lg-6">
+    <div class="card-soft chart-card p-3 h-100">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h3 class="h6 mb-0">Cumulative P/L</h3>
+        <span class="text-secondary small">All-time (last 30 graded)</span>
+      </div>
+      <div class="chart-area">
+        <canvas id="cumulativePLChart" aria-label="Cumulative profit/loss" role="img"></canvas>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -100,31 +117,78 @@
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <script>
+  const chartDefaults = {
+    maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { ticks: { color: '#9ba7c2' }, grid: { color: 'rgba(255,255,255,.06)' } },
+      y: { ticks: { color: '#9ba7c2' }, grid: { color: 'rgba(255,255,255,.06)' } }
+    }
+  };
+
+  // P/L by Day chart
   const labels = {{ chart_labels|tojson }};
   const values = {{ chart_values|tojson }};
   const ctx = document.getElementById('unitsByDayChart');
-
   if (ctx) {
     new Chart(ctx, {
-      type: 'line',
+      type: 'bar',
       data: {
         labels,
         datasets: [{
-          label: 'Units',
+          label: 'P/L',
           data: values,
-          borderColor: '#4f8cff',
-          backgroundColor: 'rgba(79, 140, 255, .2)',
-          tension: .35,
-          pointRadius: 3,
-          fill: true
+          backgroundColor: values.map(v => v >= 0 ? 'rgba(34,197,94,.55)' : 'rgba(239,68,68,.55)'),
+          borderColor:      values.map(v => v >= 0 ? 'rgba(34,197,94,.9)'  : 'rgba(239,68,68,.9)'),
+          borderWidth: 1,
+          borderRadius: 3,
+        }]
+      },
+      options: chartDefaults,
+    });
+  }
+
+  // Cumulative P/L chart
+  const cumulLabels = {{ cumul_labels|tojson }};
+  const cumulValues = {{ cumul_values|tojson }};
+  const ctx2 = document.getElementById('cumulativePLChart');
+  if (ctx2) {
+    const lastVal = cumulValues.length ? cumulValues[cumulValues.length - 1] : 0;
+    const lineColor = lastVal >= 0 ? '#22c55e' : '#ef4444';
+    const fillColor = lastVal >= 0 ? 'rgba(34,197,94,.15)' : 'rgba(239,68,68,.15)';
+    new Chart(ctx2, {
+      type: 'line',
+      data: {
+        labels: cumulLabels,
+        datasets: [{
+          label: 'Cumulative P/L',
+          data: cumulValues,
+          borderColor: lineColor,
+          backgroundColor: fillColor,
+          tension: .3,
+          pointRadius: 2,
+          fill: true,
         }]
       },
       options: {
-        maintainAspectRatio: false,
-        plugins: { legend: { display: false } },
+        ...chartDefaults,
+        plugins: {
+          ...chartDefaults.plugins,
+          tooltip: {
+            callbacks: {
+              label: ctx => `$${ctx.parsed.y >= 0 ? '+' : ''}${ctx.parsed.y.toFixed(2)}`
+            }
+          }
+        },
         scales: {
-          x: { ticks: { color: '#9ba7c2' }, grid: { color: 'rgba(255,255,255,.06)' } },
-          y: { ticks: { color: '#9ba7c2' }, grid: { color: 'rgba(255,255,255,.06)' } }
+          ...chartDefaults.scales,
+          y: {
+            ...chartDefaults.scales.y,
+            ticks: {
+              ...chartDefaults.scales.y.ticks,
+              callback: v => `$${v >= 0 ? '+' : ''}${v}`
+            }
+          }
         }
       }
     });

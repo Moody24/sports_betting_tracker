@@ -54,6 +54,19 @@ def dashboard():
     chart_labels = list(grouped_units.keys())
     chart_values = [round(v, 2) for v in grouped_units.values()]
 
+    # Cumulative P/L over all graded bets (oldest first)
+    graded_bets = [b for b in reversed(user_bets) if b.outcome in ('win', 'lose')]
+    cumulative = 0.0
+    cumul_labels = []
+    cumul_values = []
+    for b in graded_bets:
+        cumulative = round(cumulative + b.profit_loss(), 2)
+        cumul_labels.append(b.match_date.strftime('%b %d'))
+        cumul_values.append(cumulative)
+    # Keep last 30 points to avoid overly dense chart
+    cumul_labels = cumul_labels[-30:]
+    cumul_values = cumul_values[-30:]
+
     stats = {
         'total_bets': total_bets,
         'wins': wins,
@@ -72,4 +85,6 @@ def dashboard():
         recent_bets=recent_bets,
         chart_labels=chart_labels,
         chart_values=chart_values,
+        cumul_labels=cumul_labels,
+        cumul_values=cumul_values,
     )

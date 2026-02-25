@@ -1,6 +1,6 @@
 from flask_wtf import FlaskForm
 from flask_wtf.file import FileField, FileRequired, FileAllowed
-from wtforms import StringField, PasswordField, FloatField, SubmitField, BooleanField, DateField, SelectField, HiddenField
+from wtforms import StringField, PasswordField, FloatField, SubmitField, BooleanField, DateField, SelectField, HiddenField, TextAreaField
 from wtforms.validators import DataRequired, Length, EqualTo, NumberRange, Optional
 
 
@@ -45,6 +45,7 @@ class BetForm(FlaskForm):
     )
     picked_team = StringField('Picked Team (Moneyline)', validators=[Optional(), Length(max=80)])
     external_game_id = HiddenField('Game ID')
+    notes = TextAreaField('Notes / Reasoning', validators=[Optional(), Length(max=1000)])
     submit = SubmitField('Submit Bet')
 
 
