@@ -2,11 +2,14 @@
 
 {% block title %}NBA Today · Sports Betting Tracker{% endblock %}
 {% block page_title %}NBA Today{% endblock %}
-{% block page_subtitle %}Live NBA games with player props. Build singles or parlays from the bet slip.{% endblock %}
+{% block page_subtitle %}Live dashboard — active games auto-archive when final with odds &amp; props locked at snapshot time.{% endblock %}
 
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
-  <p class="text-secondary mb-0">{{ games|length }} game{{ 's' if games|length != 1 }} today</p>
+  <p class="text-secondary mb-0">
+    {{ games|length }} active game{{ 's' if games|length != 1 }} &middot;
+    {{ completed_snaps|length }} completed
+  </p>
   <form action="{{ url_for('bet.nba_update_results') }}" method="POST" class="d-inline">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <button type="submit" class="btn btn-sm btn-outline-light">
@@ -15,28 +18,33 @@
   </form>
 </div>
 
-{% if not games %}
+{# ══════════════════════════════════════════════════════════════
+   ACTIVE GAMES
+══════════════════════════════════════════════════════════════ #}
+{% if not games and not completed_snaps %}
 <div class="card-soft p-4 text-center text-secondary mb-4">
   <i class="bi bi-calendar-x" style="font-size:2rem"></i>
   <p class="mt-2 mb-0">No NBA games scheduled today.</p>
 </div>
 {% endif %}
 
-{# ── Today's games ── #}
+{% if games %}
+<h2 class="h5 mb-3">
+  <i class="bi bi-broadcast me-2 text-success"></i>Active Games
+  <span class="badge text-bg-success ms-2" style="font-size:.75rem">{{ games|length }}</span>
+</h2>
 <div class="row g-3 mb-5">
   {% for game in games %}
   <div class="col-md-6 col-xl-4">
     <div class="card-soft p-3 h-100 d-flex flex-column">
-      {# Status badge #}
+
+      {# Status badge + O/U line #}
       <div class="d-flex justify-content-between align-items-center mb-2">
-        {% if game.status == 'STATUS_FINAL' %}
-          <span class="badge text-bg-secondary">Final</span>
-        {% elif game.status == 'STATUS_IN_PROGRESS' %}
+        {% if game.status == 'STATUS_IN_PROGRESS' %}
           <span class="badge text-bg-success">Live &middot; Q{{ game.period }} {{ game.clock }}</span>
         {% else %}
           <span class="badge text-bg-info">{{ game.status_detail }}</span>
         {% endif %}
-
         {% if game.over_under_line %}
           <span class="small text-secondary">O/U <strong class="text-light">{{ game.over_under_line }}</strong></span>
         {% else %}
@@ -45,13 +53,20 @@
       </div>
 
       {# Matchup #}
-      <div class="d-flex align-items-center justify-content-between mb-3">
+      <div class="d-flex align-items-center justify-content-between mb-2">
         <div class="text-center" style="width:40%">
           {% if game.away.logo %}
           <img src="{{ game.away.logo }}" alt="{{ game.away.abbr }}" width="40" height="40" class="mb-1">
           {% endif %}
           <div class="small fw-semibold">{{ game.away.name }}</div>
           <div class="h5 mb-0">{{ game.away.score }}</div>
+          {% if game.moneyline_away %}
+            <div class="small mt-1" style="color:var(--text-muted)">
+              ML <span class="{{ 'text-success' if game.moneyline_away > 0 else 'text-danger' }}">
+                {{ '%+d'|format(game.moneyline_away) }}
+              </span>
+            </div>
+          {% endif %}
         </div>
         <div class="text-secondary fw-bold">@</div>
         <div class="text-center" style="width:40%">
@@ -60,11 +75,18 @@
           {% endif %}
           <div class="small fw-semibold">{{ game.home.name }}</div>
           <div class="h5 mb-0">{{ game.home.score }}</div>
+          {% if game.moneyline_home %}
+            <div class="small mt-1" style="color:var(--text-muted)">
+              ML <span class="{{ 'text-success' if game.moneyline_home > 0 else 'text-danger' }}">
+                {{ '%+d'|format(game.moneyline_home) }}
+              </span>
+            </div>
+          {% endif %}
         </div>
       </div>
 
       {# Total tracker #}
-      {% if game.status != 'STATUS_SCHEDULED' %}
+      {% if game.status == 'STATUS_IN_PROGRESS' %}
       <div class="small text-center mb-2">
         <span class="text-secondary">Combined:</span>
         <strong class="text-light">{{ game.total_score }}</strong>
@@ -86,7 +108,9 @@
         {% set tb = tracked[game.espn_id] %}
         <div class="small text-center py-1 px-2 rounded mb-2" style="background:var(--accent-soft)">
           <i class="bi bi-eye"></i>
-          Tracking <strong>{{ tb.bet_type|capitalize }}</strong> {{ tb.over_under_line }} &middot; ${{ '%.2f'|format(tb.bet_amount) }}
+          Tracking <strong>{{ tb.bet_type|capitalize }}</strong>
+          {% if tb.over_under_line %} {{ tb.over_under_line }}{% endif %}
+          &middot; ${{ '%.2f'|format(tb.bet_amount) }}
         </div>
       {% endif %}
 
@@ -147,8 +171,148 @@
   </div>
   {% endfor %}
 </div>
+{% endif %}
 
-{# ── Tomorrow's games ── #}
+{# ══════════════════════════════════════════════════════════════
+   COMPLETED GAMES (archived snapshots)
+══════════════════════════════════════════════════════════════ #}
+{% if completed_snaps %}
+<h2 class="h5 mb-3 text-secondary">
+  <i class="bi bi-archive me-2"></i>Completed Games
+  <span class="badge text-bg-dark ms-2" style="font-size:.75rem">{{ completed_snaps|length }}</span>
+  <span class="small fw-normal ms-2" style="font-size:.75rem; color:var(--text-muted)">
+    &mdash; odds &amp; props locked at snapshot time
+  </span>
+</h2>
+<div class="row g-3 mb-5">
+  {% for snap in completed_snaps %}
+  <div class="col-md-6 col-xl-4">
+    <div class="card-soft p-3 h-100 d-flex flex-column" style="border-color:rgba(255,255,255,.05); opacity:.92">
+
+      {# Header #}
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <span class="badge text-bg-secondary">Final</span>
+        <span class="small text-secondary" title="Snapshot time: {{ snap.snapshot_time.strftime('%H:%M UTC') }}">
+          <i class="bi bi-camera me-1"></i>
+          Snapped {{ snap.snapshot_time.strftime('%H:%M') }} UTC
+        </span>
+      </div>
+
+      {# Matchup + final score #}
+      <div class="d-flex align-items-center justify-content-between mb-2">
+        <div class="text-center" style="width:40%">
+          {% if snap.away_logo %}
+          <img src="{{ snap.away_logo }}" alt="" width="36" height="36" class="mb-1">
+          {% endif %}
+          <div class="small fw-semibold">{{ snap.away_team }}</div>
+          <div class="h5 mb-0">{{ snap.away_score or 0 }}</div>
+        </div>
+        <div class="text-secondary fw-bold">@</div>
+        <div class="text-center" style="width:40%">
+          {% if snap.home_logo %}
+          <img src="{{ snap.home_logo }}" alt="" width="36" height="36" class="mb-1">
+          {% endif %}
+          <div class="small fw-semibold">{{ snap.home_team }}</div>
+          <div class="h5 mb-0">{{ snap.home_score or 0 }}</div>
+        </div>
+      </div>
+
+      {# Final total vs snapshot O/U #}
+      <div class="small text-center mb-2">
+        <span class="text-secondary">Final total: </span>
+        <strong class="text-light">{{ snap.total_score }}</strong>
+        {% if snap.over_under_line %}
+          {% set diff = snap.total_score - snap.over_under_line %}
+          &nbsp;
+          {% if diff > 0 %}
+            <span class="text-success">(Over +{{ '%.1f'|format(diff) }})</span>
+          {% elif diff < 0 %}
+            <span class="text-danger">(Under {{ '%.1f'|format(diff) }})</span>
+          {% else %}
+            <span class="text-warning">(Push)</span>
+          {% endif %}
+        {% endif %}
+      </div>
+
+      {# Snapshot odds row #}
+      <div class="d-flex justify-content-center gap-3 mb-2 small">
+        <div class="text-center">
+          <div class="text-secondary" style="font-size:.7rem">O/U LINE</div>
+          <div class="text-light fw-semibold">
+            {{ snap.over_under_line if snap.over_under_line else '—' }}
+          </div>
+        </div>
+        {% if snap.moneyline_away %}
+        <div class="text-center">
+          <div class="text-secondary" style="font-size:.7rem">{{ snap.away_team | truncate(10, True, '') }} ML</div>
+          <div class="{{ 'text-success' if snap.moneyline_away > 0 else 'text-danger' }} fw-semibold">
+            {{ '%+d'|format(snap.moneyline_away) }}
+          </div>
+        </div>
+        {% endif %}
+        {% if snap.moneyline_home %}
+        <div class="text-center">
+          <div class="text-secondary" style="font-size:.7rem">{{ snap.home_team | truncate(10, True, '') }} ML</div>
+          <div class="{{ 'text-success' if snap.moneyline_home > 0 else 'text-danger' }} fw-semibold">
+            {{ '%+d'|format(snap.moneyline_home) }}
+          </div>
+        </div>
+        {% endif %}
+      </div>
+
+      {# Snapshot props (collapsible) #}
+      {% set snap_props = snap.props %}
+      {% if snap_props %}
+      <div class="mt-auto">
+        <button class="btn btn-sm btn-outline-secondary w-100 collapsed"
+                type="button"
+                data-bs-toggle="collapse"
+                data-bs-target="#snap-props-{{ snap.id }}">
+          <i class="bi bi-lock me-1"></i>Snapshot Props
+          <i class="bi bi-chevron-down ms-1" style="font-size:.7rem"></i>
+        </button>
+        <div class="collapse mt-2" id="snap-props-{{ snap.id }}">
+          {% for market_key, market_list in snap_props.items() %}
+            {% set market_label = {
+              'player_points': 'Points',
+              'player_rebounds': 'Rebounds',
+              'player_assists': 'Assists',
+              'player_threes': '3-Pointers',
+              'player_blocks': 'Blocks',
+              'player_steals': 'Steals',
+            }.get(market_key, market_key | replace('player_', '') | replace('_', ' ') | title) %}
+            <div class="prop-market-label small text-secondary mt-2">{{ market_label }}</div>
+            {% for prop in market_list[:5] %}
+            <div class="prop-row">
+              <div class="prop-player">{{ prop.player }}</div>
+              <div class="prop-line">{{ prop.line }}</div>
+              <div class="prop-actions">
+                <span class="badge text-bg-success me-1">O {{ '%+d'|format(prop.over_odds) if prop.over_odds else '?' }}</span>
+                <span class="badge text-bg-danger">U {{ '%+d'|format(prop.under_odds) if prop.under_odds else '?' }}</span>
+              </div>
+            </div>
+            {% endfor %}
+            {% if market_list|length > 5 %}
+            <div class="small text-secondary mt-1">+{{ market_list|length - 5 }} more…</div>
+            {% endif %}
+          {% endfor %}
+        </div>
+      </div>
+      {% else %}
+      <div class="mt-auto small text-secondary text-center">
+        <i class="bi bi-info-circle me-1"></i>No props were snapshotted for this game.
+      </div>
+      {% endif %}
+
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{# ══════════════════════════════════════════════════════════════
+   UPCOMING GAMES (tomorrow)
+══════════════════════════════════════════════════════════════ #}
 {% if upcoming_games %}
 <h2 class="h5 mb-3 text-secondary">
   <i class="bi bi-calendar-event me-2"></i>Coming Up Tomorrow
@@ -216,7 +380,9 @@
 </div>
 {% endif %}
 
-{# ── Bet Slip (floating panel) ── #}
+{# ══════════════════════════════════════════════════════════════
+   Bet Slip (floating panel)
+══════════════════════════════════════════════════════════════ #}
 <div id="bet-slip" class="bet-slip" style="display:none">
   <div class="bet-slip-header d-flex justify-content-between align-items-center">
     <h6 class="mb-0"><i class="bi bi-receipt me-1"></i>Bet Slip <span id="slip-count" class="badge text-bg-info ms-1">0</span></h6>
@@ -233,6 +399,8 @@
 
     <div id="slip-controls" style="display:none">
       <hr class="border-secondary my-2">
+
+      {# Parlay toggle #}
       <div class="d-flex align-items-center gap-2 mb-2">
         <div class="form-check form-switch">
           <input class="form-check-input" type="checkbox" id="parlay-toggle">
@@ -240,10 +408,30 @@
         </div>
         <div id="parlay-odds-display" class="small text-info ms-auto" style="display:none"></div>
       </div>
+
+      {# Bonus bet multiplier #}
+      <div class="mb-2">
+        <label class="form-label small mb-1 text-secondary">
+          <i class="bi bi-lightning-charge me-1"></i>Bonus Multiplier
+          <span id="slip-bonus-label" class="text-warning ms-1"></span>
+        </label>
+        <div class="input-group input-group-sm">
+          <span class="input-group-text bg-dark border-secondary-subtle">×</span>
+          <input type="number" class="form-control" id="slip-bonus-multiplier"
+                 placeholder="1.00" value="1.00" min="1" step="0.05">
+        </div>
+        <div id="slip-bonus-payout" class="small text-warning mt-1" style="display:none"></div>
+      </div>
+
+      {# Stake #}
       <div class="input-group input-group-sm mb-2">
         <span class="input-group-text bg-dark border-secondary-subtle">$</span>
         <input type="number" class="form-control" id="slip-stake" placeholder="25.00" min="1" step="0.01">
       </div>
+
+      {# Estimated payout #}
+      <div id="slip-payout-info" class="small text-secondary mb-2" style="display:none"></div>
+
       <div class="d-flex gap-2">
         <button class="btn btn-sm btn-outline-danger flex-fill" id="slip-clear">
           <i class="bi bi-trash3 me-1"></i>Clear
@@ -260,8 +448,8 @@
 {% block scripts %}
 <script>
 var CSRF_TOKEN = '{{ csrf_token() }}';
-var PROPS_URL = '{{ url_for("bet.nba_props", espn_id="__ESPN_ID__") }}';
-var PLACE_URL = '{{ url_for("bet.nba_place_bets") }}';
+var PROPS_URL  = '{{ url_for("bet.nba_props", espn_id="__ESPN_ID__") }}';
+var PLACE_URL  = '{{ url_for("bet.nba_place_bets") }}';
 </script>
 <script src="{{ url_for('static', filename='js/betslip.js') }}"></script>
 {% endblock %}

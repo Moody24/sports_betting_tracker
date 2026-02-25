@@ -1,5 +1,6 @@
+import json
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date as date_type
 from typing import Optional
 
 from flask_login import UserMixin
@@ -73,6 +74,7 @@ class Bet(db.Model):
     prop_line = db.Column(db.Float, nullable=True)
     parlay_id = db.Column(db.String(40), nullable=True)
     picked_team = db.Column(db.String(80), nullable=True)
+    bonus_multiplier = db.Column(db.Float, nullable=False, default=1.0)
     created_at = db.Column(
         db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
     )
@@ -90,17 +92,21 @@ class Bet(db.Model):
         return self.outcome == Outcome.LOSE.value
 
     def expected_profit_for_win(self) -> float:
-        if self.american_odds is None:
-            return float(self.bet_amount)
-
         stake = float(self.bet_amount)
-        odds = int(self.american_odds)
+        multiplier = float(self.bonus_multiplier or 1.0)
 
+        if self.american_odds is None:
+            return round(stake * multiplier, 2)
+
+        odds = int(self.american_odds)
         if odds > 0:
-            return round(stake * odds / 100.0, 2)
-        if odds < 0:
-            return round(stake * 100.0 / abs(odds), 2)
-        return 0.0
+            profit = round(stake * odds / 100.0, 2)
+        elif odds < 0:
+            profit = round(stake * 100.0 / abs(odds), 2)
+        else:
+            profit = 0.0
+
+        return round(profit * multiplier, 2)
 
     def profit_loss(self) -> float:
         if self.outcome == Outcome.WIN.value:
@@ -137,3 +143,50 @@ class Bet(db.Model):
     @staticmethod
     def generate_parlay_id() -> str:
         return uuid.uuid4().hex[:16]
+
+
+class GameSnapshot(db.Model):
+    """Persistent archive of a game's odds/props captured at first view.
+
+    Odds and props are locked at the time the game is first seen so that
+    completed games always display the lines that were available at the time,
+    regardless of what the live API returns later.
+    """
+
+    id = db.Column(db.Integer, primary_key=True)
+    espn_id = db.Column(db.String(80), nullable=False, index=True)
+    game_date = db.Column(db.Date, nullable=False)
+    home_team = db.Column(db.String(100), nullable=False)
+    away_team = db.Column(db.String(100), nullable=False)
+    home_logo = db.Column(db.String(300), nullable=True)
+    away_logo = db.Column(db.String(300), nullable=True)
+    home_score = db.Column(db.Integer, nullable=True)
+    away_score = db.Column(db.Integer, nullable=True)
+    status = db.Column(db.String(40), nullable=False, default="STATUS_SCHEDULED")
+    # Odds locked at first snapshot — never overwritten
+    over_under_line = db.Column(db.Float, nullable=True)
+    moneyline_home = db.Column(db.Integer, nullable=True)
+    moneyline_away = db.Column(db.Integer, nullable=True)
+    # Props JSON locked when first fetched via the props endpoint
+    props_json = db.Column(db.Text, nullable=True)
+    snapshot_time = db.Column(
+        db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    is_final = db.Column(db.Boolean, nullable=False, default=False)
+
+    def __repr__(self) -> str:
+        return f"<GameSnapshot {self.espn_id} {self.game_date}>"
+
+    @property
+    def props(self) -> dict:
+        """Deserialise stored props JSON; return empty dict if none."""
+        if self.props_json:
+            try:
+                return json.loads(self.props_json)
+            except (ValueError, TypeError):
+                return {}
+        return {}
+
+    @property
+    def total_score(self) -> int:
+        return (self.home_score or 0) + (self.away_score or 0)

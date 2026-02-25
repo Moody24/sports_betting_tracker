@@ -156,10 +156,20 @@ def fetch_espn_boxscore(espn_id: str) -> dict:
 
 def fetch_odds() -> dict:
     """Return over/under lines from The Odds API (needs ODDS_API_KEY env var)."""
+    totals, _ = fetch_odds_combined()
+    return totals
+
+
+def fetch_odds_combined() -> tuple:
+    """Return (totals_map, h2h_map) from a single Odds API request.
+
+    totals_map: {matchup_key -> over_under_line (float)}
+    h2h_map:    {matchup_key -> {"home": int, "away": int}}
+    """
     api_key = _get_odds_api_key()
     if not api_key:
-        logger.warning("ODDS_API_KEY not set – over/under lines unavailable")
-        return {}
+        logger.warning("ODDS_API_KEY not set – odds unavailable")
+        return {}, {}
 
     try:
         resp = requests.get(
@@ -167,7 +177,7 @@ def fetch_odds() -> dict:
             params={
                 "apiKey": api_key,
                 "regions": "us",
-                "markets": "totals",
+                "markets": "totals,h2h",
                 "oddsFormat": "american",
             },
             timeout=10,
@@ -175,32 +185,48 @@ def fetch_odds() -> dict:
         resp.raise_for_status()
         data = resp.json()
     except (requests.RequestException, ValueError) as exc:
-        logger.error("Odds API (totals) fetch failed: %s", exc)
-        return {}
+        logger.error("Odds API (combined) fetch failed: %s", exc)
+        return {}, {}
 
-    odds_map = {}
+    totals_map: dict = {}
+    h2h_map: dict = {}
+
     for game in data:
-        home = game.get("home_team", "")
-        away = game.get("away_team", "")
-        key = _matchup_key(home, away)
+        home_team = game.get("home_team", "")
+        away_team = game.get("away_team", "")
+        key = _matchup_key(home_team, away_team)
 
-        line = None
+        ou_line = None
+        home_ml = away_ml = None
+
         for bookmaker in game.get("bookmakers", []):
             for market in bookmaker.get("markets", []):
-                if market.get("key") == "totals":
+                mkey = market.get("key", "")
+
+                if mkey == "totals" and ou_line is None:
                     for outcome in market.get("outcomes", []):
                         if outcome.get("name") == "Over" and outcome.get("point"):
-                            line = float(outcome["point"])
+                            ou_line = float(outcome["point"])
                             break
-                if line is not None:
-                    break
-            if line is not None:
+
+                if mkey == "h2h" and home_ml is None:
+                    for outcome in market.get("outcomes", []):
+                        name = outcome.get("name", "")
+                        price = outcome.get("price")
+                        if name == home_team:
+                            home_ml = price
+                        elif name == away_team:
+                            away_ml = price
+
+            if ou_line is not None and home_ml is not None:
                 break
 
-        if line is not None:
-            odds_map[key] = line
+        if ou_line is not None:
+            totals_map[key] = ou_line
+        if home_ml is not None or away_ml is not None:
+            h2h_map[key] = {"home": home_ml, "away": away_ml}
 
-    return odds_map
+    return totals_map, h2h_map
 
 
 # ── Merge scores + odds ─────────────────────────────────────────────
@@ -399,15 +425,18 @@ def fetch_player_props_for_event(odds_event_id: str) -> dict:
 
 
 def get_todays_games() -> list[dict]:
-    """Combined view: ESPN live scores merged with Odds API over/under lines."""
+    """Combined view: ESPN live scores merged with Odds API lines + moneylines."""
     games = fetch_espn_scoreboard()
-    odds = fetch_odds()
+    totals, h2h = fetch_odds_combined()
     events = fetch_odds_events()
 
     for game in games:
         key = _matchup_key(game["home"]["name"], game["away"]["name"])
-        game["over_under_line"] = odds.get(key)
+        game["over_under_line"] = totals.get(key)
         game["odds_event_id"] = events.get(key, "")
+        ml = h2h.get(key, {})
+        game["moneyline_home"] = ml.get("home")
+        game["moneyline_away"] = ml.get("away")
 
     return games
 
