@@ -91,7 +91,9 @@ def create_app(testing=False):
         db.session.rollback()
         return render_template('errors/500.html'), 500
 
-    if not app.config.get('TESTING'):
+    auto_upgrade = os.getenv('AUTO_DB_UPGRADE', 'false').lower() == 'true'
+
+    if not app.config.get('TESTING') and auto_upgrade:
         with app.app_context():
             _upgrade()
 
