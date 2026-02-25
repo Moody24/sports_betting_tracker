@@ -33,7 +33,7 @@
   <i class="bi bi-broadcast me-2 text-success"></i>Active Games
   <span class="badge text-bg-success ms-2" style="font-size:.75rem">{{ games|length }}</span>
 </h2>
-<div class="row g-3 mb-5">
+<div class="row g-3 mb-5 align-items-start">
   {% for game in games %}
   <div class="col-md-6 col-xl-4">
     <div class="card-soft p-3 h-100 d-flex flex-column">
@@ -184,7 +184,7 @@
     &mdash; odds &amp; props locked at snapshot time
   </span>
 </h2>
-<div class="row g-3 mb-5">
+<div class="row g-3 mb-5 align-items-start">
   {% for snap in completed_snaps %}
   <div class="col-md-6 col-xl-4">
     <div class="card-soft p-3 h-100 d-flex flex-column" style="border-color:rgba(255,255,255,.05); opacity:.92">
@@ -272,6 +272,7 @@
           <i class="bi bi-chevron-down ms-1" style="font-size:.7rem"></i>
         </button>
         <div class="collapse mt-2" id="snap-props-{{ snap.id }}">
+          <div class="snap-props-scroll">
           {% for market_key, market_list in snap_props.items() %}
             {% set market_label = {
               'player_points': 'Points',
@@ -296,6 +297,7 @@
             <div class="small text-secondary mt-1">+{{ market_list|length - 5 }} more…</div>
             {% endif %}
           {% endfor %}
+          </div>
         </div>
       </div>
       {% else %}
@@ -318,7 +320,7 @@
   <i class="bi bi-calendar-event me-2"></i>Coming Up Tomorrow
   <span class="badge text-bg-dark ms-2" style="font-size:.75rem">{{ upcoming_games|length }} game{{ 's' if upcoming_games|length != 1 }}</span>
 </h2>
-<div class="row g-3">
+<div class="row g-3 align-items-start">
   {% for game in upcoming_games %}
   <div class="col-md-6 col-xl-4">
     <div class="card-soft p-3 h-100 d-flex flex-column" style="border-color: rgba(255,255,255,.06)">
