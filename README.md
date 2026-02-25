@@ -78,12 +78,15 @@ A web application built with **Flask**, designed to help users manage and track 
      DATABASE_URL=sqlite:///app.db
      FLASK_ENV=development
      FLASK_DEBUG=1
+     AUTO_DB_UPGRADE=false
      ```
 
 5. **Run the application**:
    ```bash
    python run.py
    ```
+
+   > By default, startup no longer auto-runs migrations. Set `AUTO_DB_UPGRADE=true` only if you explicitly want boot-time migrations.
 
 6. **Database Initialization** (if necessary):
    - Run the following to initialize the database (if you’re using migrations):
