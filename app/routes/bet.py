@@ -25,6 +25,11 @@ logger = logging.getLogger(__name__)
 bet = Blueprint('bet', __name__)
 
 
+def _escape_like(value: str) -> str:
+    """Escape LIKE special characters so user input is treated as a literal string."""
+    return value.replace('\\', '\\\\').replace('%', r'\%').replace('_', r'\_')
+
+
 @bet.route('/bets', methods=['GET'])
 @login_required
 def place_bet():
@@ -38,7 +43,11 @@ def place_bet():
     if status:
         query = query.filter(Bet.outcome == status)
     if search_query:
-        query = query.filter((Bet.team_a.ilike(f'%{search_query}%')) | (Bet.team_b.ilike(f'%{search_query}%')))
+        safe_q = _escape_like(search_query)
+        query = query.filter(
+            Bet.team_a.ilike(f'%{safe_q}%', escape='\\') |
+            Bet.team_b.ilike(f'%{safe_q}%', escape='\\')
+        )
     if start_date:
         try:
             start_dt = datetime.strptime(start_date, '%Y-%m-%d')
@@ -349,18 +358,25 @@ def nba_place_bets():
         return jsonify({"error": "Invalid request"}), 400
 
     legs = data.get("legs", [])
-    stake = data.get("stake")
-    is_parlay = data.get("is_parlay", False)
-    bonus_mult = float(data.get("bonus_multiplier", 1.0) or 1.0)
-    if bonus_mult < 1.0:
-        bonus_mult = 1.0
+    is_parlay = bool(data.get("is_parlay", False))
 
     if not legs:
         return jsonify({"error": "No selections provided"}), 400
-    if not stake or float(stake) <= 0:
+
+    try:
+        stake = float(data.get("stake") or 0)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Stake must be a number"}), 400
+    if stake <= 0:
         return jsonify({"error": "Stake must be greater than zero"}), 400
 
-    stake = float(stake)
+    try:
+        bonus_mult = float(data.get("bonus_multiplier") or 1.0)
+        if bonus_mult < 1.0:
+            bonus_mult = 1.0
+    except (TypeError, ValueError):
+        bonus_mult = 1.0
+
     parlay_id = Bet.generate_parlay_id() if is_parlay else None
 
     created = []
@@ -370,6 +386,16 @@ def nba_place_bets():
         except ValueError:
             match_date = datetime.now(timezone.utc)
 
+        try:
+            prop_line_val = float(leg["prop_line"]) if leg.get("prop_line") is not None else None
+        except (TypeError, ValueError):
+            prop_line_val = None
+
+        try:
+            american_odds_val = int(leg["american_odds"]) if leg.get("american_odds") is not None else None
+        except (TypeError, ValueError):
+            american_odds_val = None
+
         bet_obj = Bet(
             user_id=current_user.id,
             team_a=leg.get("team_a", ""),
@@ -378,12 +404,12 @@ def nba_place_bets():
             bet_amount=stake,
             outcome=Outcome.PENDING.value,
             bet_type=leg.get("bet_type", BetType.OVER.value),
-            over_under_line=float(leg["prop_line"]) if leg.get("prop_line") else None,
-            american_odds=int(leg["american_odds"]) if leg.get("american_odds") else None,
+            over_under_line=prop_line_val,
+            american_odds=american_odds_val,
             external_game_id=leg.get("game_id") or None,
             player_name=leg.get("player_name", ""),
             prop_type=leg.get("prop_type", ""),
-            prop_line=float(leg["prop_line"]) if leg.get("prop_line") else None,
+            prop_line=prop_line_val,
             is_parlay=is_parlay,
             parlay_id=parlay_id,
             source=BetSource.NBA_PROPS.value,
@@ -432,15 +458,17 @@ def manual_parlay():
         return jsonify({"error": "Invalid request"}), 400
 
     legs = data.get("legs", [])
-    stake = data.get("stake")
     outcome = data.get("outcome", Outcome.PENDING.value)
 
     if not legs:
         return jsonify({"error": "Add at least one leg"}), 400
-    if not stake or float(stake) <= 0:
-        return jsonify({"error": "Stake must be greater than zero"}), 400
 
-    stake = float(stake)
+    try:
+        stake = float(data.get("stake") or 0)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Stake must be a number"}), 400
+    if stake <= 0:
+        return jsonify({"error": "Stake must be greater than zero"}), 400
     parlay_id = Bet.generate_parlay_id()
 
     for leg in legs:
@@ -675,8 +703,10 @@ def export_bets():
     if status:
         query = query.filter(Bet.outcome == status)
     if search_query:
+        safe_q = _escape_like(search_query)
         query = query.filter(
-            (Bet.team_a.ilike(f'%{search_query}%')) | (Bet.team_b.ilike(f'%{search_query}%'))
+            Bet.team_a.ilike(f'%{safe_q}%', escape='\\') |
+            Bet.team_b.ilike(f'%{safe_q}%', escape='\\')
         )
     if start_date:
         try:

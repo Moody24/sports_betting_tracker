@@ -4,7 +4,7 @@ from datetime import datetime, timezone, date as date_type
 from typing import Optional
 
 from flask_login import UserMixin
-from sqlalchemy import case, func
+from sqlalchemy import func
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from . import db
@@ -36,17 +36,9 @@ class User(UserMixin, db.Model):
         return float(total or 0.0)
 
     def net_profit_loss(self) -> float:
-        """Return net P/L using a single SQL aggregation instead of a Python loop."""
-        result = db.session.query(
-            func.sum(
-                case(
-                    (Bet.outcome == Outcome.WIN.value, Bet.bet_amount),
-                    (Bet.outcome == Outcome.LOSE.value, -Bet.bet_amount),
-                    else_=0.0,
-                )
-            )
-        ).filter(Bet.user_id == self.id).scalar()
-        return round(float(result or 0.0), 2)
+        """Return net P/L, accounting for American odds and bonus multiplier."""
+        bets = db.session.query(Bet).filter_by(user_id=self.id).all()
+        return round(sum(b.profit_loss() for b in bets), 2)
 
     def total_wins(self) -> int:
         return db.session.query(Bet).filter_by(user_id=self.id, outcome=Outcome.WIN.value).count()
@@ -112,7 +104,7 @@ class Bet(db.Model):
 
     def profit_loss(self) -> float:
         if self.outcome == Outcome.WIN.value:
-            return float(self.bet_amount)
+            return self.expected_profit_for_win()
         if self.outcome == Outcome.LOSE.value:
             return -float(self.bet_amount)
         return 0.0
