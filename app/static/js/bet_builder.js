@@ -1,21 +1,34 @@
-/* bet_builder.js — powers the 3-tab bet builder at /bets/new */
+/* bet_builder.js — powers the 3-tab + screenshot bet builder at /bets/new */
 (function () {
   'use strict';
 
+  var MARKET_LABELS = {
+    player_points: 'Points',
+    player_rebounds: 'Rebounds',
+    player_assists: 'Assists',
+    player_threes: '3-Pointers',
+    player_blocks: 'Blocks',
+    player_steals: 'Steals',
+    player_points_rebounds_assists: 'PTS+REB+AST',
+    player_points_rebounds: 'PTS+REB',
+    player_points_assists: 'PTS+AST',
+    player_rebounds_assists: 'REB+AST',
+  };
+
   // ── Tab switching ─────────────────────────────────────────────────
-  const tabs = document.querySelectorAll('[data-bb-tab]');
+  const tabs   = document.querySelectorAll('[data-bb-tab]');
   const panels = document.querySelectorAll('[data-bb-panel]');
 
   function showTab(name) {
+    const validTabs = ['single', 'prop', 'parlay', 'screenshot'];
     tabs.forEach(t => t.classList.toggle('active', t.dataset.bbTab === name));
     panels.forEach(p => p.classList.toggle('d-none', p.dataset.bbPanel !== name));
   }
 
   tabs.forEach(t => t.addEventListener('click', () => showTab(t.dataset.bbTab)));
 
-  // Show the tab highlighted in the URL hash, or default to 'single'
   const hash = location.hash.replace('#', '') || 'single';
-  showTab(['single', 'prop', 'parlay'].includes(hash) ? hash : 'single');
+  showTab(['single', 'prop', 'parlay', 'screenshot'].includes(hash) ? hash : 'single');
 
   // ── Game picker (shared datalist) ─────────────────────────────────
   var upcomingGames = [];
@@ -32,7 +45,7 @@
         dl.appendChild(opt);
       });
     })
-    .catch(() => {}); // silently ignore if API is unavailable
+    .catch(() => {});
 
   function autofillFromPicker(inputEl, teamAEl, teamBEl, dateEl, gameIdEl, ouLineEl) {
     if (!inputEl) return;
@@ -49,7 +62,6 @@
     });
   }
 
-  // Wire up each tab's picker
   autofillFromPicker(
     document.getElementById('single-game-picker'),
     document.getElementById('single-team-a'),
@@ -70,8 +82,8 @@
 
   // ── Single tab: show/hide O/U line & Picked Team fields ──────────
   const singleBetType = document.getElementById('single-bet-type');
-  const ouGroup = document.getElementById('single-ou-group');
-  const pickedGroup = document.getElementById('single-picked-group');
+  const ouGroup       = document.getElementById('single-ou-group');
+  const pickedGroup   = document.getElementById('single-picked-group');
 
   function updateSingleFields() {
     if (!singleBetType) return;
@@ -83,6 +95,53 @@
     singleBetType.addEventListener('change', updateSingleFields);
     updateSingleFields();
   }
+
+  // ── Bonus multiplier previews ─────────────────────────────────────
+  function calcProfit(stake, odds) {
+    if (!stake || !odds) return null;
+    if (odds > 0) return stake * odds / 100;
+    if (odds < 0) return stake * 100 / Math.abs(odds);
+    return 0;
+  }
+
+  function makeBonusPreview(multInputId, stakeInputId, oddsInputId, previewId) {
+    const multEl    = document.getElementById(multInputId);
+    const stakeEl   = document.getElementById(stakeInputId);
+    const oddsEl    = oddsInputId ? document.getElementById(oddsInputId) : null;
+    const previewEl = document.getElementById(previewId);
+    if (!multEl || !previewEl) return;
+
+    function update() {
+      const mult  = parseFloat(multEl.value) || 1.0;
+      const stake = parseFloat(stakeEl ? stakeEl.value : '0') || 0;
+      const odds  = oddsEl ? (parseInt(oddsEl.value) || null) : null;
+
+      if (mult <= 1.0 || !stake) {
+        previewEl.textContent = '';
+        return;
+      }
+
+      var base = calcProfit(stake, odds);
+      if (base !== null) {
+        var boosted = base * mult;
+        previewEl.textContent =
+          'Base profit: $' + base.toFixed(2) +
+          ' → Boosted: $' + boosted.toFixed(2) +
+          ' (\xd7' + mult.toFixed(2) + ')';
+        previewEl.className = 'small text-warning';
+      } else {
+        previewEl.textContent = 'Bonus \xd7' + mult.toFixed(2) + ' will be applied.';
+        previewEl.className = 'small text-warning';
+      }
+    }
+
+    multEl.addEventListener('input', update);
+    if (stakeEl) stakeEl.addEventListener('input', update);
+    if (oddsEl)  oddsEl.addEventListener('input', update);
+  }
+
+  makeBonusPreview('single-bonus-mult', 'bet_amount', null, 'single-bonus-preview');
+  makeBonusPreview('prop-bonus-mult',   'prop-stake', null, 'prop-bonus-preview');
 
   // ── Parlay builder ────────────────────────────────────────────────
   let legCount = 0;
@@ -139,6 +198,8 @@
                 <option value="player_rebounds">Rebounds</option>
                 <option value="player_assists">Assists</option>
                 <option value="player_threes">3-Pointers Made</option>
+                <option value="player_blocks">Blocks</option>
+                <option value="player_steals">Steals</option>
               </select>
             </div>
             <div class="col-6">
@@ -153,7 +214,6 @@
   }
 
   function bindLegEvents(legEl) {
-    // Game picker autofill
     const picker = legEl.querySelector('.leg-game-picker');
     const teamA  = legEl.querySelector('.leg-team-a');
     const teamB  = legEl.querySelector('.leg-team-b');
@@ -173,7 +233,6 @@
       });
     }
 
-    // Bet type toggle
     const betType  = legEl.querySelector('.leg-bet-type');
     const ouGroup  = legEl.querySelector('.leg-ou-group');
     const mlGroup  = legEl.querySelector('.leg-ml-group');
@@ -190,7 +249,6 @@
     betType.addEventListener('change', updateLegFields);
     updateLegFields();
 
-    // Remove button
     legEl.querySelector('.remove-leg-btn').addEventListener('click', function () {
       legEl.remove();
       renumberLegs();
@@ -214,20 +272,20 @@
       bindLegEvents(newLeg);
     });
 
-    // Add first leg on load
     legsContainer.insertAdjacentHTML('beforeend', makeLegHTML(legCount++));
     bindLegEvents(legsContainer.lastElementChild);
   }
 
   // ── Parlay submit ─────────────────────────────────────────────────
-  const parlayForm = document.getElementById('parlay-form');
+  const parlayForm     = document.getElementById('parlay-form');
   const parlayFeedback = document.getElementById('parlay-feedback');
 
   if (parlayForm) {
     parlayForm.addEventListener('submit', function (e) {
       e.preventDefault();
-      const stake = parseFloat(document.getElementById('parlay-stake').value);
+      const stake   = parseFloat(document.getElementById('parlay-stake').value);
       const outcome = document.getElementById('parlay-outcome').value;
+      const bonusMult = parseFloat(document.getElementById('parlay-bonus-mult').value) || 1.0;
 
       if (!stake || stake <= 0) {
         showFeedback('Enter a stake amount.', 'danger');
@@ -243,17 +301,14 @@
       const legs = [];
       let valid = true;
       legEls.forEach(function (legEl) {
-        const teamA = legEl.querySelector('.leg-team-a').value.trim();
-        const teamB = legEl.querySelector('.leg-team-b').value.trim();
-        const date  = legEl.querySelector('.leg-date').value;
-        const sel   = legEl.querySelector('.leg-bet-type');
+        const teamA   = legEl.querySelector('.leg-team-a').value.trim();
+        const teamB   = legEl.querySelector('.leg-team-b').value.trim();
+        const date    = legEl.querySelector('.leg-date').value;
+        const sel     = legEl.querySelector('.leg-bet-type');
         const betType = sel.value;
         const isProp  = sel.options[sel.selectedIndex].dataset.prop === '1';
 
-        if (!teamA || !teamB || !date) {
-          valid = false;
-          return;
-        }
+        if (!teamA || !teamB || !date) { valid = false; return; }
 
         const leg = {
           team_a: teamA,
@@ -288,11 +343,8 @@
 
       fetch(PARLAY_URL, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-CSRFToken': CSRF_TOKEN,
-        },
-        body: JSON.stringify({ stake, outcome, legs }),
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF_TOKEN },
+        body: JSON.stringify({ stake, outcome, legs, bonus_multiplier: bonusMult }),
       })
         .then(r => r.json())
         .then(data => {
@@ -316,4 +368,246 @@
     parlayFeedback.textContent = msg;
     parlayFeedback.classList.remove('d-none');
   }
+
+  // ── Props Browser (Tab 2) ─────────────────────────────────────────
+  var allPropsData = null;
+  var allPropsLoaded = false;
+
+  const loadPropsBtn    = document.getElementById('load-all-props-btn');
+  const propsBrowser    = document.getElementById('props-browser');
+  const propsSearchInp  = document.getElementById('props-search-input');
+
+  if (loadPropsBtn) {
+    loadPropsBtn.addEventListener('click', function () {
+      if (allPropsLoaded) {
+        propsBrowser.style.display = '';
+        propsSearchInp.style.display = '';
+        return;
+      }
+
+      loadPropsBtn.disabled = true;
+      loadPropsBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Loading...';
+
+      fetch(ALL_PROPS_URL)
+        .then(r => r.json())
+        .then(data => {
+          allPropsData = data;
+          allPropsLoaded = true;
+          renderPropsBrowser(data);
+          propsBrowser.style.display = '';
+          propsSearchInp.style.display = '';
+          loadPropsBtn.innerHTML = '<i class="bi bi-check-lg me-1"></i>Loaded ' + data.length + ' props';
+        })
+        .catch(() => {
+          loadPropsBtn.disabled = false;
+          loadPropsBtn.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>Failed — retry';
+          showFeedback('Could not load props. Check that ODDS_API_KEY is set.', 'warning');
+        });
+    });
+  }
+
+  if (propsSearchInp) {
+    propsSearchInp.addEventListener('input', function () {
+      if (!allPropsData) return;
+      var q = this.value.toLowerCase().trim();
+      var filtered = q
+        ? allPropsData.filter(p =>
+            p.player.toLowerCase().includes(q) ||
+            (MARKET_LABELS[p.market] || p.market).toLowerCase().includes(q))
+        : allPropsData;
+      renderPropsBrowser(filtered);
+    });
+  }
+
+  function renderPropsBrowser(props) {
+    if (!propsBrowser) return;
+    if (!props.length) {
+      propsBrowser.innerHTML = '<p class="small text-secondary text-center py-2">No props match your search.</p>';
+      return;
+    }
+
+    var html = '<table class="table table-sm table-dark table-hover mb-0" style="font-size:.8rem">';
+    html += '<thead><tr>'
+      + '<th>Player</th><th>Market</th><th>Line</th>'
+      + '<th class="text-success">Over</th><th class="text-danger">Under</th>'
+      + '<th></th>'
+      + '</tr></thead><tbody>';
+
+    props.forEach(function (p) {
+      var marketLabel = MARKET_LABELS[p.market] || p.market.replace('player_', '');
+      var overOdds  = p.over_odds  > 0 ? '+' + p.over_odds  : p.over_odds;
+      var underOdds = p.under_odds > 0 ? '+' + p.under_odds : p.under_odds;
+      html += '<tr>'
+        + '<td>' + p.player + '</td>'
+        + '<td class="text-secondary">' + marketLabel + '</td>'
+        + '<td>' + p.line + '</td>'
+        + '<td class="text-success">' + overOdds + '</td>'
+        + '<td class="text-danger">' + underOdds + '</td>'
+        + '<td>'
+        + '<button class="btn btn-xs btn-outline-success me-1 prop-browse-btn"'
+        + ' data-player="' + p.player + '" data-market="' + p.market + '"'
+        + ' data-line="' + p.line + '" data-odds="' + p.over_odds + '"'
+        + ' data-side="over"'
+        + ' data-team-a="' + p.team_a + '" data-team-b="' + p.team_b + '"'
+        + ' data-date="' + p.match_date + '" data-game-id="' + p.game_id + '">O</button>'
+        + '<button class="btn btn-xs btn-outline-danger prop-browse-btn"'
+        + ' data-player="' + p.player + '" data-market="' + p.market + '"'
+        + ' data-line="' + p.line + '" data-odds="' + p.under_odds + '"'
+        + ' data-side="under"'
+        + ' data-team-a="' + p.team_a + '" data-team-b="' + p.team_b + '"'
+        + ' data-date="' + p.match_date + '" data-game-id="' + p.game_id + '">U</button>'
+        + '</td>'
+        + '</tr>';
+    });
+
+    html += '</tbody></table>';
+    propsBrowser.innerHTML = html;
+
+    propsBrowser.querySelectorAll('.prop-browse-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        // Autofill the prop form
+        const side = btn.dataset.side;
+        const propTypeEl = document.getElementById('prop-prop-type');
+        const playerEl   = document.getElementById('prop-player-name');
+        const lineEl     = document.getElementById('prop-prop-line');
+        const betTypeEl  = document.getElementById('prop-bet-type');
+        const teamAEl    = document.getElementById('prop-team-a');
+        const teamBEl    = document.getElementById('prop-team-b');
+        const dateEl     = document.getElementById('prop-match-date');
+        const gameIdEl   = document.getElementById('prop-game-id');
+
+        if (playerEl)   playerEl.value   = btn.dataset.player;
+        if (propTypeEl) propTypeEl.value  = btn.dataset.market;
+        if (lineEl)     lineEl.value      = btn.dataset.line;
+        if (betTypeEl)  betTypeEl.value   = side;
+        if (teamAEl)    teamAEl.value     = btn.dataset.teamA;
+        if (teamBEl)    teamBEl.value     = btn.dataset.teamB;
+        if (dateEl)     dateEl.value      = btn.dataset.date;
+        if (gameIdEl)   gameIdEl.value    = btn.dataset.gameId;
+
+        // Scroll to form and focus stake
+        document.getElementById('prop-stake').scrollIntoView({ behavior: 'smooth', block: 'center' });
+        document.getElementById('prop-stake').focus();
+
+        // Visual feedback
+        btn.classList.add('active');
+        setTimeout(() => btn.classList.remove('active'), 800);
+      });
+    });
+  }
+
+  // ── Screenshot OCR (Tab 4) ────────────────────────────────────────
+  const ocrDropzone   = document.getElementById('ocr-dropzone');
+  const ocrFileInput  = document.getElementById('ocr-file-input');
+  const ocrPreview    = document.getElementById('ocr-preview');
+  const ocrPreviewImg = document.getElementById('ocr-preview-img');
+  const ocrStatus     = document.getElementById('ocr-status');
+  const ocrSection    = document.getElementById('ocr-form-section');
+
+  if (ocrDropzone) {
+    ocrDropzone.addEventListener('click', () => ocrFileInput.click());
+
+    ocrDropzone.addEventListener('dragover', e => {
+      e.preventDefault();
+      ocrDropzone.style.borderColor = 'var(--bs-info)';
+    });
+    ocrDropzone.addEventListener('dragleave', () => {
+      ocrDropzone.style.borderColor = '';
+    });
+    ocrDropzone.addEventListener('drop', e => {
+      e.preventDefault();
+      ocrDropzone.style.borderColor = '';
+      const file = e.dataTransfer.files[0];
+      if (file) processOcrFile(file);
+    });
+
+    ocrFileInput.addEventListener('change', function () {
+      if (this.files[0]) processOcrFile(this.files[0]);
+    });
+  }
+
+  function showOcrStatus(msg, type) {
+    if (!ocrStatus) return;
+    ocrStatus.className = 'alert alert-' + type + ' py-2 small mb-3';
+    ocrStatus.textContent = msg;
+    ocrStatus.classList.remove('d-none');
+  }
+
+  function processOcrFile(file) {
+    // Validate
+    const allowed = ['image/png', 'image/jpeg', 'image/webp', 'image/bmp'];
+    if (!allowed.includes(file.type)) {
+      showOcrStatus('Unsupported file type. Please upload a PNG, JPG, or WEBP image.', 'warning');
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      showOcrStatus('File is too large (max 10 MB).', 'warning');
+      return;
+    }
+
+    // Show preview
+    const reader = new FileReader();
+    reader.onload = e => {
+      if (ocrPreviewImg) ocrPreviewImg.src = e.target.result;
+      if (ocrPreview)    ocrPreview.style.display = '';
+    };
+    reader.readAsDataURL(file);
+
+    showOcrStatus('Processing image with OCR…', 'info');
+    if (ocrSection) ocrSection.style.display = 'none';
+
+    const fd = new FormData();
+    fd.append('screenshot', file);
+
+    fetch(OCR_URL, {
+      method: 'POST',
+      headers: { 'X-CSRFToken': CSRF_TOKEN },
+      body: fd,
+    })
+      .then(r => r.json())
+      .then(data => {
+        if (data.error) {
+          showOcrStatus('OCR error: ' + data.error, 'danger');
+          return;
+        }
+
+        // Autofill fields
+        setVal('ocr-player',    data.player_name);
+        setVal('ocr-prop-line', data.prop_line);
+        setVal('ocr-odds',      data.american_odds);
+        setVal('ocr-stake',     data.stake);
+        setVal('ocr-team-a',    data.team_a);
+        setVal('ocr-team-b',    data.team_b);
+
+        const ocrBetType = document.getElementById('ocr-bet-type');
+        if (ocrBetType && data.bet_type) ocrBetType.value = data.bet_type;
+
+        const ocrPropType = document.getElementById('ocr-prop-type');
+        if (ocrPropType && data.prop_type) ocrPropType.value = data.prop_type;
+
+        const rawPre = document.getElementById('ocr-raw-pre');
+        if (rawPre) rawPre.textContent = data.raw_text || '';
+
+        // Set today's date as default if missing
+        const ocrDate = document.getElementById('ocr-match-date');
+        if (ocrDate && !ocrDate.value) {
+          ocrDate.value = new Date().toISOString().slice(0, 10);
+        }
+
+        if (ocrSection) ocrSection.style.display = '';
+        showOcrStatus(
+          'OCR complete — review the fields below and adjust before saving.',
+          'success'
+        );
+      })
+      .catch(() => {
+        showOcrStatus('Network error during OCR. Please try again.', 'danger');
+      });
+  }
+
+  function setVal(id, val) {
+    const el = document.getElementById(id);
+    if (el && val !== null && val !== undefined) el.value = val;
+  }
+
 })();

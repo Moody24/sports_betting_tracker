@@ -1,3 +1,7 @@
+import io
+import json
+import logging
+import re
 from datetime import datetime, date as date_type, timezone, timedelta
 
 from flask import Blueprint, render_template, redirect, url_for, flash, request, jsonify
@@ -6,13 +10,16 @@ from flask_login import login_required, current_user
 from app import db
 from app.enums import BetSource, BetType, Outcome
 from app.forms import BetForm
-from app.models import Bet
+from app.models import Bet, GameSnapshot
 from app.services.nba_service import (
     get_todays_games,
     fetch_upcoming_games,
+    fetch_player_props_for_event,
     resolve_pending_bets,
     get_player_props,
 )
+
+logger = logging.getLogger(__name__)
 
 bet = Blueprint('bet', __name__)
 
@@ -115,6 +122,14 @@ def new_bet():
 
         picked_team = form.picked_team.data or None
 
+        bonus_mult = 1.0
+        try:
+            bm = float(request.form.get('bonus_multiplier', '1.0') or '1.0')
+            if bm >= 1.0:
+                bonus_mult = bm
+        except (ValueError, TypeError):
+            pass
+
         bet_obj = Bet(
             user_id=current_user.id,
             team_a=form.team_a.data,
@@ -131,6 +146,7 @@ def new_bet():
             prop_type=prop_type,
             prop_line=prop_line_val,
             picked_team=picked_team if form.bet_type.data == BetType.MONEYLINE.value else None,
+            bonus_multiplier=bonus_mult,
         )
         db.session.add(bet_obj)
         db.session.commit()
@@ -148,6 +164,55 @@ def new_bet():
 def nba_today():
     games = get_todays_games()
     upcoming_games = fetch_upcoming_games()
+    today = date_type.today()
+
+    # ── Upsert snapshots for today's games ──────────────────────────
+    for game in games:
+        snap = GameSnapshot.query.filter_by(
+            espn_id=game['espn_id'], game_date=today
+        ).first()
+
+        if snap is None:
+            # First view: lock in odds/moneyline now
+            snap = GameSnapshot(
+                espn_id=game['espn_id'],
+                game_date=today,
+                home_team=game['home']['name'],
+                away_team=game['away']['name'],
+                home_logo=game['home'].get('logo', ''),
+                away_logo=game['away'].get('logo', ''),
+                home_score=game['home']['score'],
+                away_score=game['away']['score'],
+                status=game['status'],
+                over_under_line=game.get('over_under_line'),
+                moneyline_home=game.get('moneyline_home'),
+                moneyline_away=game.get('moneyline_away'),
+                is_final=(game['status'] == 'STATUS_FINAL'),
+            )
+            db.session.add(snap)
+        else:
+            # Subsequent view: update live data but never overwrite locked odds
+            snap.home_score = game['home']['score']
+            snap.away_score = game['away']['score']
+            snap.status = game['status']
+            if game['status'] == 'STATUS_FINAL':
+                snap.is_final = True
+            # Backfill logos/moneyline if they were missing before
+            if not snap.home_logo:
+                snap.home_logo = game['home'].get('logo', '')
+            if not snap.away_logo:
+                snap.away_logo = game['away'].get('logo', '')
+
+    db.session.commit()
+
+    # Separate active (non-final) vs completed today
+    active_games = [g for g in games if g['status'] != 'STATUS_FINAL']
+    completed_snaps = (
+        GameSnapshot.query
+        .filter_by(game_date=today, is_final=True)
+        .order_by(GameSnapshot.snapshot_time)
+        .all()
+    )
 
     # Gather user's pending bets keyed by external_game_id
     pending = Bet.query.filter_by(
@@ -157,7 +222,8 @@ def nba_today():
 
     return render_template(
         'bets/nba_today.html',
-        games=games,
+        games=active_games,
+        completed_snaps=completed_snaps,
         upcoming_games=upcoming_games,
         tracked=tracked,
     )
@@ -226,8 +292,16 @@ def nba_upcoming_games():
 @bet.route('/nba/props/<espn_id>')
 @login_required
 def nba_props(espn_id):
-    """Return player props for a game as JSON."""
+    """Return player props for a game as JSON and persist them to snapshot."""
     props = get_player_props(espn_id)
+
+    # Save props to today's snapshot if not already stored
+    today = date_type.today()
+    snap = GameSnapshot.query.filter_by(espn_id=espn_id, game_date=today).first()
+    if snap and snap.props_json is None and props:
+        snap.props_json = json.dumps(props)
+        db.session.commit()
+
     return jsonify(props)
 
 
@@ -262,6 +336,9 @@ def nba_place_bets():
     legs = data.get("legs", [])
     stake = data.get("stake")
     is_parlay = data.get("is_parlay", False)
+    bonus_mult = float(data.get("bonus_multiplier", 1.0) or 1.0)
+    if bonus_mult < 1.0:
+        bonus_mult = 1.0
 
     if not legs:
         return jsonify({"error": "No selections provided"}), 400
@@ -295,6 +372,7 @@ def nba_place_bets():
             is_parlay=is_parlay,
             parlay_id=parlay_id,
             source=BetSource.NBA_PROPS.value,
+            bonus_multiplier=bonus_mult,
         )
         db.session.add(bet_obj)
         created.append(bet_obj)
@@ -399,6 +477,152 @@ def manual_parlay():
         "message": f"Parlay with {len(legs)} leg(s) saved — ${stake:.2f} wagered!",
         "redirect": url_for('bet.place_bet'),
     })
+
+
+@bet.route('/nba/all-props')
+@login_required
+def nba_all_props():
+    """Return a flat list of all player props across today's games for the prop browser."""
+    games = get_todays_games()
+    all_props = []
+    for game in games:
+        event_id = game.get('odds_event_id', '')
+        if not event_id:
+            continue
+        props = fetch_player_props_for_event(event_id)
+        for market_key, market_props in props.items():
+            for prop in market_props:
+                all_props.append({
+                    'player': prop['player'],
+                    'market': market_key,
+                    'line': prop['line'],
+                    'over_odds': prop['over_odds'],
+                    'under_odds': prop['under_odds'],
+                    'game_id': game['espn_id'],
+                    'team_a': game['away']['name'],
+                    'team_b': game['home']['name'],
+                    'match_date': game['start_time'][:10] if game.get('start_time') else '',
+                })
+    return jsonify(all_props)
+
+
+def _parse_ocr_text(text: str) -> dict:
+    """Parse raw OCR text from a bet screenshot into structured fields."""
+    result: dict = {
+        'player_name': None,
+        'prop_type': None,
+        'bet_type': None,
+        'prop_line': None,
+        'american_odds': None,
+        'stake': None,
+        'team_a': None,
+        'team_b': None,
+        'legs': [],
+    }
+
+    # Over / Under with a line number
+    ou_match = re.search(r'\b(over|under)\s+([\d]+\.?\d*)\b', text, re.IGNORECASE)
+    if ou_match:
+        result['bet_type'] = ou_match.group(1).lower()
+        result['prop_line'] = float(ou_match.group(2))
+
+    # American odds (+/-NNN)
+    odds_matches = re.findall(r'([+\-]\d{3,4})', text)
+    if odds_matches:
+        result['american_odds'] = int(odds_matches[0])
+
+    # Dollar stake
+    stake_matches = re.findall(r'\$\s*([\d]+\.?\d*)', text)
+    if stake_matches:
+        result['stake'] = float(stake_matches[0])
+
+    # Matchup: "Team A @ Team B" or "Team A vs Team B"
+    vs_match = re.search(
+        r'([A-Za-z][A-Za-z\s]{2,25})\s+(?:@|vs\.?)\s+([A-Za-z][A-Za-z\s]{2,25})',
+        text, re.IGNORECASE,
+    )
+    if vs_match:
+        t1 = vs_match.group(1).strip()
+        t2 = vs_match.group(2).strip()
+        if 3 < len(t1) < 30 and 3 < len(t2) < 30:
+            result['team_a'] = t1
+            result['team_b'] = t2
+
+    # Stat type detection
+    stat_map = [
+        (r'\bpoints?\b', 'player_points'),
+        (r'\brebs?\b|\brebounds?\b', 'player_rebounds'),
+        (r'\basts?\b|\bassists?\b', 'player_assists'),
+        (r'\b3[- ]?pointers?\b|\bthrees?\b|\b3pts?\b', 'player_threes'),
+        (r'\bblocks?\b|\bblks?\b', 'player_blocks'),
+        (r'\bsteals?\b|\bstls?\b', 'player_steals'),
+    ]
+    for pattern, stat_type in stat_map:
+        if re.search(pattern, text, re.IGNORECASE):
+            result['prop_type'] = stat_type
+            break
+
+    # Player name: first line with two or more title-case words
+    non_player = {
+        'Over', 'Under', 'Game', 'Player', 'Total', 'Points', 'Rebounds',
+        'Assists', 'Parlay', 'Bet', 'Same', 'Alternate', 'Combo', 'Spread',
+    }
+    for m in re.finditer(r'^([A-Z][a-z]+(?:\s+[A-Z][a-z\']+)+)', text, re.MULTILINE):
+        candidate = m.group(1).strip()
+        if candidate not in non_player and len(candidate.split()) >= 2:
+            result['player_name'] = candidate
+            break
+
+    return result
+
+
+@bet.route('/bets/ocr-screenshot', methods=['POST'])
+@login_required
+def ocr_screenshot():
+    """Accept a PNG/JPG screenshot, OCR it, and return parsed bet fields as JSON."""
+    if 'screenshot' not in request.files:
+        return jsonify({'error': 'No file provided'}), 400
+
+    file = request.files['screenshot']
+    if not file or not file.filename:
+        return jsonify({'error': 'No file selected'}), 400
+
+    allowed_ext = ('.png', '.jpg', '.jpeg', '.webp', '.bmp')
+    if not file.filename.lower().endswith(allowed_ext):
+        return jsonify({'error': 'Only PNG/JPG/WEBP images are supported'}), 400
+
+    try:
+        from PIL import Image
+        import pytesseract
+    except ImportError:
+        return jsonify({
+            'error': (
+                'OCR requires pytesseract + Pillow. '
+                'Run: pip install pytesseract Pillow  '
+                'and install the tesseract-ocr system package.'
+            )
+        }), 503
+
+    try:
+        img_bytes = file.read()
+        img = Image.open(io.BytesIO(img_bytes))
+        if img.mode not in ('RGB', 'L'):
+            img = img.convert('RGB')
+
+        # Upscale small images — OCR works better at ≥150 DPI equivalent
+        w, h = img.size
+        if w < 800:
+            scale = 800 / w
+            img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+
+        raw_text = pytesseract.image_to_string(img, config='--psm 3')
+        parsed = _parse_ocr_text(raw_text)
+        parsed['raw_text'] = raw_text[:3000]
+        return jsonify({'success': True, **parsed})
+
+    except Exception as exc:
+        logger.error("OCR processing failed: %s", exc)
+        return jsonify({'error': f'OCR failed: {exc}'}), 500
 
 
 @bet.route('/view_bets')

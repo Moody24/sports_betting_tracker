@@ -4,14 +4,15 @@
  * Handles:
  *  - Loading player props per game via AJAX
  *  - Adding/removing props to a floating bet slip
+ *  - Bonus bet multiplier with live payout preview
  *  - Placing single bets or parlays via JSON POST
  */
 (function () {
   'use strict';
 
   // ── State ──────────────────────────────────────────────────────
-  var slip = [];          // Array of leg objects in the slip
-  var propsCache = {};    // Cache fetched props by espn_id
+  var slip = [];
+  var propsCache = {};
   var MARKET_LABELS = {
     player_points: 'Points',
     player_rebounds: 'Rebounds',
@@ -26,16 +27,20 @@
   };
 
   // ── DOM refs ───────────────────────────────────────────────────
-  var slipEl       = document.getElementById('bet-slip');
-  var slipLegsEl   = document.getElementById('slip-legs');
-  var slipEmptyEl  = document.getElementById('slip-empty');
-  var slipControls = document.getElementById('slip-controls');
-  var slipCount    = document.getElementById('slip-count');
-  var slipStake    = document.getElementById('slip-stake');
-  var parlayToggle = document.getElementById('parlay-toggle');
-  var parlayOdds   = document.getElementById('parlay-odds-display');
-  var slipBody     = document.getElementById('slip-body');
-  var slipToggle   = document.getElementById('slip-toggle-btn');
+  var slipEl          = document.getElementById('bet-slip');
+  var slipLegsEl      = document.getElementById('slip-legs');
+  var slipEmptyEl     = document.getElementById('slip-empty');
+  var slipControls    = document.getElementById('slip-controls');
+  var slipCount       = document.getElementById('slip-count');
+  var slipStake       = document.getElementById('slip-stake');
+  var slipBonusMult   = document.getElementById('slip-bonus-multiplier');
+  var slipBonusLabel  = document.getElementById('slip-bonus-label');
+  var slipBonusPayout = document.getElementById('slip-bonus-payout');
+  var slipPayoutInfo  = document.getElementById('slip-payout-info');
+  var parlayToggle    = document.getElementById('parlay-toggle');
+  var parlayOdds      = document.getElementById('parlay-odds-display');
+  var slipBody        = document.getElementById('slip-body');
+  var slipToggle      = document.getElementById('slip-toggle-btn');
 
   // ── Bet Slip: toggle collapse ──────────────────────────────────
   var slipCollapsed = false;
@@ -52,7 +57,6 @@
       var espnId = btn.dataset.espnId;
       var container = document.getElementById('props-' + espnId);
 
-      // Toggle visibility
       if (container.style.display !== 'none') {
         container.style.display = 'none';
         btn.classList.remove('active');
@@ -61,13 +65,11 @@
       container.style.display = '';
       btn.classList.add('active');
 
-      // Already loaded?
       if (propsCache[espnId]) {
         renderProps(espnId, propsCache[espnId], btn);
         return;
       }
 
-      // Fetch from server
       var url = PROPS_URL.replace('__ESPN_ID__', espnId);
       fetch(url)
         .then(function (r) { return r.json(); })
@@ -113,7 +115,6 @@
         html += '  <div class="prop-line">' + prop.line + '</div>';
         html += '  <div class="prop-actions">';
 
-        // Over button
         var overActive = inSlip && slip.some(function (l) { return l.id === legId && l.bet_type === 'over'; });
         html += '    <button class="btn btn-xs prop-btn ' + (overActive ? 'prop-btn-active' : 'btn-outline-success') + '"'
           + ' data-leg-id="' + legId + '"'
@@ -128,7 +129,6 @@
           + ' data-date="' + matchDate + '"'
           + '>O ' + formatOdds(prop.over_odds) + '</button>';
 
-        // Under button
         var underActive = inSlip && slip.some(function (l) { return l.id === legId && l.bet_type === 'under'; });
         html += '    <button class="btn btn-xs prop-btn ' + (underActive ? 'prop-btn-active' : 'btn-outline-danger') + '"'
           + ' data-leg-id="' + legId + '"'
@@ -151,8 +151,6 @@
     });
 
     container.innerHTML = html;
-
-    // Bind prop button clicks
     container.querySelectorAll('.prop-btn').forEach(function (b) {
       b.addEventListener('click', function () { handlePropClick(b); });
     });
@@ -167,22 +165,16 @@
   function handlePropClick(btn) {
     var legId = btn.dataset.legId;
     var side = btn.dataset.side;
-    var compositeId = legId + '_' + side;
 
-    // Check if already in slip (same prop same side)
     var existIdx = -1;
     slip.forEach(function (l, i) {
       if (l.id === legId && l.bet_type === side) existIdx = i;
     });
 
     if (existIdx >= 0) {
-      // Remove from slip
       slip.splice(existIdx, 1);
     } else {
-      // Remove opposite side if present
       slip = slip.filter(function (l) { return l.id !== legId; });
-
-      // Add to slip
       slip.push({
         id: legId,
         player_name: btn.dataset.player,
@@ -253,7 +245,6 @@
     });
     slipLegsEl.innerHTML = html;
 
-    // Bind remove buttons
     slipLegsEl.querySelectorAll('.slip-remove').forEach(function (btn) {
       btn.addEventListener('click', function () {
         slip.splice(parseInt(btn.dataset.index, 10), 1);
@@ -262,10 +253,9 @@
       });
     });
 
-    // Update parlay odds display
     updateParlayOdds();
+    updatePayoutPreview();
 
-    // Show/hide parlay toggle based on number of legs
     if (slip.length < 2) {
       parlayToggle.checked = false;
       parlayToggle.parentElement.style.display = 'none';
@@ -275,13 +265,13 @@
     }
   }
 
+  // ── Parlay odds display ────────────────────────────────────────
   function updateParlayOdds() {
     if (!parlayToggle.checked || slip.length < 2) {
       parlayOdds.style.display = 'none';
       return;
     }
 
-    // Calculate combined decimal odds then convert back to American
     var decimalProduct = 1;
     slip.forEach(function (leg) {
       var dec;
@@ -306,7 +296,79 @@
     parlayOdds.textContent = 'Parlay Odds: ' + american;
   }
 
-  parlayToggle.addEventListener('change', updateParlayOdds);
+  // ── Bonus multiplier + payout preview ─────────────────────────
+  function getBonusMultiplier() {
+    if (!slipBonusMult) return 1.0;
+    var v = parseFloat(slipBonusMult.value);
+    return (isNaN(v) || v < 1) ? 1.0 : v;
+  }
+
+  function updatePayoutPreview() {
+    var stake = parseFloat(slipStake ? slipStake.value : '0') || 0;
+    var mult = getBonusMultiplier();
+    var isParlay = parlayToggle && parlayToggle.checked && slip.length >= 2;
+
+    if (slipBonusLabel) {
+      slipBonusLabel.textContent = mult > 1.0 ? '×' + mult.toFixed(2) + ' active' : '';
+    }
+
+    if (slipBonusPayout) {
+      if (mult > 1.0 && stake > 0) {
+        slipBonusPayout.style.display = '';
+        slipBonusPayout.textContent = 'Bonus active — payouts multiplied by ' + mult.toFixed(2);
+      } else {
+        slipBonusPayout.style.display = 'none';
+      }
+    }
+
+    if (!slipPayoutInfo) return;
+    if (!stake || !slip.length) {
+      slipPayoutInfo.style.display = 'none';
+      return;
+    }
+
+    var payoutText = '';
+    if (isParlay) {
+      var decProd = 1;
+      slip.forEach(function (leg) {
+        if (leg.american_odds > 0) {
+          decProd *= 1 + leg.american_odds / 100;
+        } else if (leg.american_odds < 0) {
+          decProd *= 1 + 100 / Math.abs(leg.american_odds);
+        }
+      });
+      var profit = stake * (decProd - 1) * mult;
+      payoutText = 'Est. profit: $' + profit.toFixed(2) +
+        (mult > 1 ? ' (\xd7' + mult.toFixed(2) + ' bonus)' : '');
+    } else if (slip.length === 1) {
+      var leg = slip[0];
+      var legProfit = 0;
+      if (leg.american_odds > 0) {
+        legProfit = stake * leg.american_odds / 100;
+      } else if (leg.american_odds < 0) {
+        legProfit = stake * 100 / Math.abs(leg.american_odds);
+      }
+      legProfit *= mult;
+      payoutText = 'Est. profit: $' + legProfit.toFixed(2) +
+        (mult > 1 ? ' (\xd7' + mult.toFixed(2) + ' bonus)' : '');
+    } else {
+      payoutText = slip.length + ' singles \xb7 $' + (stake * slip.length).toFixed(2) + ' total wagered';
+    }
+
+    slipPayoutInfo.style.display = '';
+    slipPayoutInfo.textContent = payoutText;
+  }
+
+  if (slipBonusMult) {
+    slipBonusMult.addEventListener('input', updatePayoutPreview);
+  }
+  if (slipStake) {
+    slipStake.addEventListener('input', updatePayoutPreview);
+  }
+  parlayToggle.addEventListener('change', function () {
+    updateParlayOdds();
+    updatePayoutPreview();
+  });
 
   // ── Clear slip ─────────────────────────────────────────────────
   document.getElementById('slip-clear').addEventListener('click', function () {
@@ -324,10 +386,12 @@
     }
 
     var isParlay = parlayToggle.checked && slip.length >= 2;
+    var bonusMult = getBonusMultiplier();
 
     var payload = {
       stake: stake,
       is_parlay: isParlay,
+      bonus_multiplier: bonusMult,
       legs: slip.map(function (l) {
         return {
           player_name: l.player_name,
@@ -358,7 +422,6 @@
     .then(function (r) { return r.json(); })
     .then(function (data) {
       if (data.success) {
-        // Show success
         slipLegsEl.innerHTML =
           '<div class="text-center py-3 text-success">'
           + '<i class="bi bi-check-circle" style="font-size:1.5rem"></i>'
@@ -369,7 +432,6 @@
         slipCount.textContent = '0';
         refreshPropButtons();
 
-        // Hide after short delay
         setTimeout(function () {
           refreshSlipUI();
         }, 2500);
