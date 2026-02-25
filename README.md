@@ -142,6 +142,22 @@ A web application built with **Flask**, designed to help users manage and track 
 
 ---
 
+
+### Codespaces: install Docker + Compose quickly
+
+If your Codespace does not already have Docker available, run:
+
+```bash
+./scripts/install_docker_codespaces.sh
+```
+
+Then restart the terminal session (or run `newgrp docker`) and verify:
+
+```bash
+docker --version
+docker compose version
+```
+
 ## Codespaces: Sync & Verification Quick Guide
 
 If you are working in GitHub Codespaces and want to confirm you actually pulled the latest work, use this flow:
