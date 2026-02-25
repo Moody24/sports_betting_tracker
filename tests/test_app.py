@@ -924,6 +924,11 @@ class TestNBAService(unittest.TestCase):
         fb = FakeBet()
         fb.bet_type = bet_type
         fb.over_under_line = line
+        fb.picked_team = None
+        fb.is_player_prop = False
+        fb.player_name = None
+        fb.prop_type = None
+        fb.prop_line = None
         return fb
 
     def test_resolve_over_win(self):

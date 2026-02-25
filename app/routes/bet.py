@@ -1,4 +1,4 @@
-from datetime import datetime, date as date_type, timezone
+from datetime import datetime, date as date_type, timezone, timedelta
 
 from flask import Blueprint, render_template, redirect, url_for, flash, request, jsonify
 from flask_login import login_required, current_user
@@ -9,6 +9,7 @@ from app.forms import BetForm
 from app.models import Bet
 from app.services.nba_service import (
     get_todays_games,
+    fetch_upcoming_games,
     resolve_pending_bets,
     get_player_props,
 )
@@ -45,13 +46,35 @@ def place_bet():
 
     bets = query.order_by(Bet.match_date.desc()).all()
 
+    # Group parlay legs so the template can render them together
+    parlay_groups: dict = {}
+    for b in bets:
+        if b.is_parlay and b.parlay_id:
+            parlay_groups.setdefault(b.parlay_id, []).append(b)
+
+    # Compute per-parlay overall outcome for display
+    parlay_status: dict = {}
+    for pid, legs in parlay_groups.items():
+        outcomes = [l.outcome for l in legs]
+        if any(o == Outcome.LOSE.value for o in outcomes):
+            parlay_status[pid] = 'lose'
+        elif all(o == Outcome.WIN.value for o in outcomes):
+            parlay_status[pid] = 'win'
+        else:
+            parlay_status[pid] = 'pending'
+
     filters = {
         'status': status,
         'q': search_query,
         'start_date': start_date,
         'end_date': end_date,
     }
-    return render_template('bets/list.html', bets=bets, filters=filters)
+    return render_template(
+        'bets/list.html',
+        bets=bets,
+        filters=filters,
+        parlay_status=parlay_status,
+    )
 
 
 @bet.route('/bets/new', methods=['GET', 'POST'])
@@ -90,6 +113,8 @@ def new_bet():
             except (ValueError, TypeError):
                 pass
 
+        picked_team = form.picked_team.data or None
+
         bet_obj = Bet(
             user_id=current_user.id,
             team_a=form.team_a.data,
@@ -105,6 +130,7 @@ def new_bet():
             player_name=player_name,
             prop_type=prop_type,
             prop_line=prop_line_val,
+            picked_team=picked_team if form.bet_type.data == BetType.MONEYLINE.value else None,
         )
         db.session.add(bet_obj)
         db.session.commit()
@@ -121,31 +147,35 @@ def new_bet():
 @login_required
 def nba_today():
     games = get_todays_games()
+    upcoming_games = fetch_upcoming_games()
 
-    # Gather user's pending O/U bets keyed by external_game_id
+    # Gather user's pending bets keyed by external_game_id
     pending = Bet.query.filter_by(
         user_id=current_user.id, outcome=Outcome.PENDING.value
     ).filter(Bet.external_game_id.isnot(None)).all()
     tracked = {b.external_game_id: b for b in pending}
 
-    return render_template('bets/nba_today.html', games=games, tracked=tracked)
+    return render_template(
+        'bets/nba_today.html',
+        games=games,
+        upcoming_games=upcoming_games,
+        tracked=tracked,
+    )
 
 
 @bet.route('/nba/update-results', methods=['POST'])
 @login_required
 def nba_update_results():
+    # Resolve ALL pending bets that have an external_game_id
     pending = Bet.query.filter_by(
         user_id=current_user.id, outcome=Outcome.PENDING.value
-    ).filter(
-        Bet.external_game_id.isnot(None),
-        Bet.bet_type.in_([BetType.OVER.value, BetType.UNDER.value]),
-    ).all()
+    ).filter(Bet.external_game_id.isnot(None)).all()
 
     resolved = resolve_pending_bets(pending)
     count = 0
-    for bet_obj, outcome, actual_total in resolved:
+    for bet_obj, outcome, actual_value in resolved:
         bet_obj.outcome = outcome
-        bet_obj.actual_total = actual_total
+        bet_obj.actual_total = actual_value
         count += 1
 
     if count:
@@ -154,7 +184,40 @@ def nba_update_results():
     else:
         flash('No pending bets could be resolved yet.', 'info')
 
-    return redirect(url_for('bet.nba_today'))
+    return redirect(request.referrer or url_for('bet.place_bet'))
+
+
+# ── Upcoming Games API (for bet builder game picker) ─────────────────
+
+
+@bet.route('/nba/upcoming-games')
+@login_required
+def nba_upcoming_games():
+    """Return today's + tomorrow's games as JSON for the bet builder picker."""
+    today_games = get_todays_games()
+    tomorrow_games = fetch_upcoming_games()
+
+    results = []
+    for g in today_games:
+        results.append({
+            'label': f"{g['away']['name']} @ {g['home']['name']}",
+            'team_a': g['away']['name'],
+            'team_b': g['home']['name'],
+            'match_date': g['start_time'][:10] if g.get('start_time') else '',
+            'game_id': g['espn_id'],
+            'over_under_line': g.get('over_under_line'),
+        })
+    for g in tomorrow_games:
+        results.append({
+            'label': f"{g['away']['name']} @ {g['home']['name']} (Tomorrow)",
+            'team_a': g['away']['name'],
+            'team_b': g['home']['name'],
+            'match_date': g.get('match_date', ''),
+            'game_id': g['espn_id'],
+            'over_under_line': g.get('over_under_line'),
+        })
+
+    return jsonify(results)
 
 
 # ── Player Props API ──────────────────────────────────────────────
@@ -244,6 +307,98 @@ def nba_place_bets():
         msg = f"{len(created)} bet(s) placed — ${stake * len(created):.2f} total wagered!"
 
     return jsonify({"success": True, "message": msg, "count": len(created)})
+
+
+@bet.route('/bets/parlay', methods=['POST'])
+@login_required
+def manual_parlay():
+    """Place a manually-built parlay from the bet builder.
+
+    Accepts JSON:
+    {
+        "stake": 25.0,
+        "outcome": "pending",
+        "legs": [
+            {
+                "team_a": "Lakers",
+                "team_b": "Celtics",
+                "match_date": "2026-02-25",
+                "bet_type": "over",
+                "over_under_line": 218.5,
+                "player_name": "",
+                "prop_type": "",
+                "prop_line": null,
+                "picked_team": "",
+                "game_id": ""
+            }
+        ]
+    }
+    """
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "Invalid request"}), 400
+
+    legs = data.get("legs", [])
+    stake = data.get("stake")
+    outcome = data.get("outcome", Outcome.PENDING.value)
+
+    if not legs:
+        return jsonify({"error": "Add at least one leg"}), 400
+    if not stake or float(stake) <= 0:
+        return jsonify({"error": "Stake must be greater than zero"}), 400
+
+    stake = float(stake)
+    parlay_id = Bet.generate_parlay_id()
+
+    for leg in legs:
+        try:
+            match_date = datetime.strptime(leg.get("match_date", ""), "%Y-%m-%d")
+        except ValueError:
+            match_date = datetime.now(timezone.utc)
+
+        bet_type = leg.get("bet_type", BetType.MONEYLINE.value)
+        player_name = leg.get("player_name") or None
+        prop_type = leg.get("prop_type") or None
+        prop_line = None
+        if leg.get("prop_line"):
+            try:
+                prop_line = float(leg["prop_line"])
+            except (ValueError, TypeError):
+                pass
+
+        ou_line = None
+        if bet_type in (BetType.OVER.value, BetType.UNDER.value) and not player_name:
+            try:
+                ou_line = float(leg["over_under_line"]) if leg.get("over_under_line") else None
+            except (ValueError, TypeError):
+                pass
+
+        bet_obj = Bet(
+            user_id=current_user.id,
+            team_a=leg.get("team_a", ""),
+            team_b=leg.get("team_b", ""),
+            match_date=match_date,
+            bet_amount=stake,
+            outcome=outcome,
+            bet_type=bet_type,
+            over_under_line=ou_line,
+            prop_line=prop_line,
+            player_name=player_name,
+            prop_type=prop_type,
+            picked_team=leg.get("picked_team") or None,
+            external_game_id=leg.get("game_id") or None,
+            is_parlay=True,
+            parlay_id=parlay_id,
+            source=BetSource.MANUAL.value,
+        )
+        db.session.add(bet_obj)
+
+    db.session.commit()
+    return jsonify({
+        "success": True,
+        "message": f"Parlay with {len(legs)} leg(s) saved — ${stake:.2f} wagered!",
+        "redirect": url_for('bet.place_bet'),
+    })
 
 
 @bet.route('/view_bets')

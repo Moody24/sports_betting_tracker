@@ -1,6 +1,6 @@
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 import requests
@@ -11,6 +11,9 @@ logger = logging.getLogger(__name__)
 
 ESPN_SCOREBOARD_URL = (
     "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard"
+)
+ESPN_SUMMARY_URL = (
+    "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/summary"
 )
 ODDS_API_URL = "https://api.the-odds-api.com/v4/sports/basketball_nba/odds/"
 ODDS_API_EVENTS_URL = "https://api.the-odds-api.com/v4/sports/basketball_nba/events/"
@@ -24,6 +27,14 @@ PLAYER_PROP_MARKETS = [
     "player_threes",
 ]
 
+# Maps prop_type value → ESPN box score column header
+_PROP_STAT_COLUMN = {
+    "player_points": "PTS",
+    "player_rebounds": "REB",
+    "player_assists": "AST",
+    "player_threes": "3PT",  # "M-A" format; we take the made count
+}
+
 
 def _get_odds_api_key() -> str:
     return os.getenv("ODDS_API_KEY", "")
@@ -32,10 +43,17 @@ def _get_odds_api_key() -> str:
 # ── ESPN: live scores ────────────────────────────────────────────────
 
 
-def fetch_espn_scoreboard() -> list[dict]:
-    """Return today's NBA games from the free ESPN scoreboard endpoint."""
+def fetch_espn_scoreboard(date_str: Optional[str] = None) -> list[dict]:
+    """Return NBA games from the ESPN scoreboard endpoint.
+
+    Pass date_str as 'YYYYMMDD' to fetch a specific date; omit for today.
+    """
+    params = {}
+    if date_str:
+        params["dates"] = date_str
+
     try:
-        resp = requests.get(ESPN_SCOREBOARD_URL, timeout=10)
+        resp = requests.get(ESPN_SCOREBOARD_URL, params=params, timeout=10)
         resp.raise_for_status()
         data = resp.json()
     except (requests.RequestException, ValueError) as exc:
@@ -83,6 +101,54 @@ def fetch_espn_scoreboard() -> list[dict]:
         )
 
     return games
+
+
+def fetch_espn_boxscore(espn_id: str) -> dict:
+    """Fetch final player stats for a completed game.
+
+    Returns a dict keyed by player display name, each value being a dict of
+    {prop_type: stat_value} e.g. {"LeBron James": {"player_points": 28, ...}}.
+    """
+    try:
+        resp = requests.get(ESPN_SUMMARY_URL, params={"event": espn_id}, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+    except (requests.RequestException, ValueError) as exc:
+        logger.error("ESPN summary fetch failed for event %s: %s", espn_id, exc)
+        return {}
+
+    player_stats: dict = {}
+
+    for team_block in data.get("boxscore", {}).get("players", []):
+        for stat_block in team_block.get("statistics", []):
+            column_names: list[str] = stat_block.get("names", [])
+            for athlete in stat_block.get("athletes", []):
+                name = athlete.get("athlete", {}).get("displayName", "")
+                if not name:
+                    continue
+                raw_stats: list[str] = athlete.get("stats", [])
+                entry: dict = {}
+                for prop_type, col_header in _PROP_STAT_COLUMN.items():
+                    if col_header not in column_names:
+                        continue
+                    idx = column_names.index(col_header)
+                    if idx >= len(raw_stats):
+                        continue
+                    raw = raw_stats[idx]
+                    # "3PT" comes as "M-A"; take made count
+                    if "-" in str(raw):
+                        try:
+                            raw = raw.split("-")[0]
+                        except Exception:
+                            continue
+                    try:
+                        entry[prop_type] = float(raw)
+                    except (ValueError, TypeError):
+                        pass
+                if entry:
+                    player_stats[name] = entry
+
+    return player_stats
 
 
 # ── The Odds API: over/under lines ──────────────────────────────────
@@ -140,7 +206,7 @@ def fetch_odds() -> dict:
 # ── Merge scores + odds ─────────────────────────────────────────────
 
 
-def _matchup_key(team_a: str, team_b: str) -> tuple[str, str]:
+def _matchup_key(team_a: str, team_b: str) -> tuple:
     """Normalised key for matching ESPN names with Odds API names."""
     return tuple(sorted([team_a.lower().strip(), team_b.lower().strip()]))
 
@@ -172,6 +238,86 @@ def fetch_odds_events() -> dict:
         event_map[key] = event.get("id", "")
 
     return event_map
+
+
+def fetch_upcoming_games() -> list[dict]:
+    """Return tomorrow's NBA games from The Odds API (pre-game lines available).
+
+    Returns a list of dicts with team names, date, event id, and O/U line.
+    """
+    api_key = _get_odds_api_key()
+    if not api_key:
+        logger.warning("ODDS_API_KEY not set – upcoming games unavailable")
+        return []
+
+    now = datetime.now(timezone.utc)
+    tomorrow = now.date() + timedelta(days=1)
+    day_after = tomorrow + timedelta(days=1)
+
+    try:
+        resp = requests.get(
+            ODDS_API_URL,
+            params={
+                "apiKey": api_key,
+                "regions": "us",
+                "markets": "totals",
+                "oddsFormat": "american",
+                "commenceTimeFrom": tomorrow.isoformat() + "T00:00:00Z",
+                "commenceTimeTo": day_after.isoformat() + "T00:00:00Z",
+            },
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except (requests.RequestException, ValueError) as exc:
+        logger.error("Odds API (upcoming games) fetch failed: %s", exc)
+        return []
+
+    games = []
+    for game in data:
+        home = game.get("home_team", "")
+        away = game.get("away_team", "")
+        commence = game.get("commence_time", "")
+
+        line = None
+        for bookmaker in game.get("bookmakers", []):
+            for market in bookmaker.get("markets", []):
+                if market.get("key") == "totals":
+                    for outcome in market.get("outcomes", []):
+                        if outcome.get("name") == "Over" and outcome.get("point"):
+                            line = float(outcome["point"])
+                            break
+                if line is not None:
+                    break
+            if line is not None:
+                break
+
+        # Parse commence_time to a date string for the form
+        match_date = tomorrow.isoformat()
+        if commence:
+            try:
+                match_date = datetime.fromisoformat(
+                    commence.replace("Z", "+00:00")
+                ).date().isoformat()
+            except ValueError:
+                pass
+
+        games.append({
+            "espn_id": game.get("id", ""),
+            "home": {"name": home, "score": 0, "logo": "", "abbr": ""},
+            "away": {"name": away, "score": 0, "logo": "", "abbr": ""},
+            "start_time": commence,
+            "match_date": match_date,
+            "status": "STATUS_SCHEDULED",
+            "status_detail": "Tomorrow",
+            "clock": "",
+            "period": 0,
+            "total_score": 0,
+            "over_under_line": line,
+            "odds_event_id": game.get("id", ""),
+        })
+
+    return games
 
 
 def fetch_player_props_for_event(odds_event_id: str) -> dict:
@@ -285,15 +431,19 @@ def get_player_props(espn_id: str, games: Optional[list[dict]] = None) -> dict:
 
 
 def resolve_pending_bets(pending_bets: list) -> list[tuple]:
-    """Check ESPN for final scores and resolve over/under bets.
+    """Check ESPN for final scores and resolve all pending bet types.
 
-    Returns list of (bet, new_outcome, actual_total) for bets that can be graded.
+    Handles over/under, moneyline, and player prop bets.
+    Returns list of (bet, new_outcome, actual_value) for bets that can be graded.
     """
     games = fetch_espn_scoreboard()
 
-    espn_lookup = {}
+    espn_lookup: dict = {}
     for g in games:
         espn_lookup[g["espn_id"]] = g
+
+    # Cache box scores so we only fetch each game once
+    boxscore_cache: dict = {}
 
     results = []
     for bet in pending_bets:
@@ -305,17 +455,69 @@ def resolve_pending_bets(pending_bets: list) -> list[tuple]:
         if game["status"] != _STATUS_FINAL:
             continue
 
-        actual_total = float(game["total_score"])
+        # ── Over / Under ─────────────────────────────────────────────
+        if bet.bet_type in (BetType.OVER.value, BetType.UNDER.value) and not bet.is_player_prop:
+            if bet.over_under_line is None:
+                continue
+            actual_total = float(game["total_score"])
+            if actual_total == bet.over_under_line:
+                outcome = Outcome.PUSH.value
+            elif bet.bet_type == BetType.OVER.value:
+                outcome = Outcome.WIN.value if actual_total > bet.over_under_line else Outcome.LOSE.value
+            else:
+                outcome = Outcome.WIN.value if actual_total < bet.over_under_line else Outcome.LOSE.value
+            results.append((bet, outcome, actual_total))
 
-        if actual_total == bet.over_under_line:
-            outcome = Outcome.PUSH.value
-        elif bet.bet_type == BetType.OVER.value:
-            outcome = Outcome.WIN.value if actual_total > bet.over_under_line else Outcome.LOSE.value
-        elif bet.bet_type == BetType.UNDER.value:
-            outcome = Outcome.WIN.value if actual_total < bet.over_under_line else Outcome.LOSE.value
-        else:
-            continue
+        # ── Moneyline ────────────────────────────────────────────────
+        elif bet.bet_type == BetType.MONEYLINE.value:
+            if not bet.picked_team:
+                continue
+            home = game["home"]
+            away = game["away"]
+            if home["score"] > away["score"]:
+                winner = home["name"]
+            elif away["score"] > home["score"]:
+                winner = away["name"]
+            else:
+                # Tie (unlikely in NBA)
+                results.append((bet, Outcome.PUSH.value, 0.0))
+                continue
+            picked_lower = bet.picked_team.lower().strip()
+            winner_lower = winner.lower().strip()
+            outcome = Outcome.WIN.value if picked_lower in winner_lower or winner_lower in picked_lower else Outcome.LOSE.value
+            results.append((bet, outcome, float(home["score"] if home["name"] == winner else away["score"])))
 
-        results.append((bet, outcome, actual_total))
+        # ── Player Prop ──────────────────────────────────────────────
+        elif bet.is_player_prop:
+            if not bet.player_name or not bet.prop_type or bet.prop_line is None:
+                continue
+            espn_id = bet.external_game_id
+            if espn_id not in boxscore_cache:
+                boxscore_cache[espn_id] = fetch_espn_boxscore(espn_id)
+            boxscore = boxscore_cache[espn_id]
+
+            # Fuzzy match player name
+            actual_stat = None
+            bet_name_lower = bet.player_name.lower().strip()
+            for player_name, stats in boxscore.items():
+                if bet_name_lower in player_name.lower() or player_name.lower() in bet_name_lower:
+                    actual_stat = stats.get(bet.prop_type)
+                    break
+
+            if actual_stat is None:
+                logger.warning(
+                    "Could not find stat %s for player %s in game %s",
+                    bet.prop_type, bet.player_name, espn_id,
+                )
+                continue
+
+            if actual_stat == bet.prop_line:
+                outcome = Outcome.PUSH.value
+            elif bet.bet_type == BetType.OVER.value:
+                outcome = Outcome.WIN.value if actual_stat > bet.prop_line else Outcome.LOSE.value
+            else:
+                outcome = Outcome.WIN.value if actual_stat < bet.prop_line else Outcome.LOSE.value
+
+            results.append((bet, outcome, actual_stat))
 
     return results

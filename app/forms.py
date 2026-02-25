@@ -43,6 +43,7 @@ class BetForm(FlaskForm):
         default='pending',
         validators=[DataRequired()],
     )
+    picked_team = StringField('Picked Team (Moneyline)', validators=[Optional(), Length(max=80)])
     external_game_id = HiddenField('Game ID')
     submit = SubmitField('Submit Bet')
 

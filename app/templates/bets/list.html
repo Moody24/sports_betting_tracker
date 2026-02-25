@@ -6,15 +6,35 @@
 {% block page_subtitle %}Filter and review all your wagers in one clean table.{% endblock %}
 
 {% block content %}
+
+{# ── Pending quick-resolve ── #}
+{% set pending_bets = bets | selectattr('outcome', 'equalto', 'pending') | list %}
+{% if pending_bets %}
+<div class="card-soft p-3 mb-4 d-flex flex-wrap align-items-center justify-content-between gap-2">
+  <div>
+    <span class="fw-semibold">{{ pending_bets|length }} pending bet{{ 's' if pending_bets|length != 1 }}</span>
+    <span class="text-secondary small ms-2">— click to check for final results</span>
+  </div>
+  <form action="{{ url_for('bet.nba_update_results') }}" method="POST" class="d-inline">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-sm btn-outline-light">
+      <i class="bi bi-arrow-repeat me-1"></i>Update Results
+    </button>
+  </form>
+</div>
+{% endif %}
+
+{# ── Filters ── #}
 <div class="card-soft p-3 mb-4 filter-row">
   <form method="GET" class="row g-2 align-items-end">
     <div class="col-sm-6 col-lg-3">
       <label class="form-label">Status</label>
       <select class="form-select" name="status">
         <option value="" {% if not filters.status %}selected{% endif %}>All</option>
-        <option value="win" {% if filters.status == 'win' %}selected{% endif %}>Win</option>
-        <option value="lose" {% if filters.status == 'lose' %}selected{% endif %}>Loss</option>
+        <option value="win"     {% if filters.status == 'win' %}selected{% endif %}>Win</option>
+        <option value="lose"    {% if filters.status == 'lose' %}selected{% endif %}>Loss</option>
         <option value="pending" {% if filters.status == 'pending' %}selected{% endif %}>Pending</option>
+        <option value="push"    {% if filters.status == 'push' %}selected{% endif %}>Push</option>
       </select>
     </div>
     <div class="col-sm-6 col-lg-2">
@@ -38,7 +58,9 @@
 <div class="card-soft p-3">
   <div class="d-flex justify-content-between align-items-center mb-3">
     <h3 class="h6 mb-0">All Bets</h3>
-    <a href="{{ url_for('bet.new_bet') }}" class="btn btn-primary btn-sm"><i class="bi bi-plus-lg me-1"></i>Add Bet</a>
+    <a href="{{ url_for('bet.new_bet') }}" class="btn btn-primary btn-sm">
+      <i class="bi bi-plus-lg me-1"></i>Add Bet
+    </a>
   </div>
 
   <div class="table-wrap">
@@ -55,45 +77,88 @@
         </tr>
       </thead>
       <tbody>
-        {% for bet in bets %}
-        <tr>
-          <td>
-            <div class="fw-semibold">{{ bet.team_a }} <span class="text-secondary">vs</span> {{ bet.team_b }}</div>
-            {% if bet.is_player_prop %}
-              <div class="small text-info"><i class="bi bi-person-fill me-1"></i>{{ bet.prop_display }}</div>
-            {% endif %}
-            {% if bet.is_parlay %}
-              <span class="badge text-bg-warning badge-status" style="font-size:.65rem">PARLAY</span>
-            {% endif %}
-          </td>
-          <td>{{ bet.match_date.strftime('%b %d, %Y') }}</td>
-          <td>
-            <span class="badge text-bg-dark">{{ bet.bet_type|capitalize }}</span>
-            {% if bet.over_under_line and not bet.is_player_prop %}
-              <span class="small text-secondary">{{ bet.over_under_line }}</span>
-            {% endif %}
-            {% if bet.margin is not none %}
-              {% if bet.margin > 0 %}
-                <span class="small text-success">(+{{ bet.margin }})</span>
-              {% elif bet.margin < 0 %}
-                <span class="small text-danger">({{ bet.margin }})</span>
-              {% else %}
-                <span class="small text-warning">(push)</span>
+        {# Track which parlay_ids we've already rendered a header for #}
+        {% set rendered_parlays = namespace(ids=[]) %}
+
+        {% for b in bets %}
+
+          {# ── Parlay group header ── #}
+          {% if b.is_parlay and b.parlay_id and b.parlay_id not in rendered_parlays.ids %}
+            {% set _ = rendered_parlays.ids.append(b.parlay_id) %}
+            {% set p_status = parlay_status.get(b.parlay_id, 'pending') %}
+            <tr class="table-secondary">
+              <td colspan="5" class="small fw-semibold py-1 ps-3">
+                <i class="bi bi-list-check me-1"></i>Parlay &middot;
+                {% if p_status == 'win' %}
+                  <span class="text-success">All legs won</span>
+                {% elif p_status == 'lose' %}
+                  <span class="text-danger">At least one leg lost</span>
+                {% else %}
+                  <span class="text-warning">In progress</span>
+                {% endif %}
+                <span class="text-secondary ms-2">· ${{ '%.2f'|format(b.bet_amount) }} staked</span>
+              </td>
+              <td class="text-end py-1">
+                {% if p_status == 'win' %}
+                  <span class="text-success fw-semibold">+${{ '%.2f'|format(b.bet_amount) }}</span>
+                {% elif p_status == 'lose' %}
+                  <span class="text-danger fw-semibold">-${{ '%.2f'|format(b.bet_amount) }}</span>
+                {% else %}
+                  <span class="text-secondary">—</span>
+                {% endif %}
+              </td>
+              <td></td>
+            </tr>
+          {% endif %}
+
+          {# ── Bet row ── #}
+          <tr {% if b.is_parlay %}class="parlay-leg-row"{% endif %}>
+            <td>
+              {% if b.is_parlay %}
+                <span class="text-secondary small me-1">↳</span>
               {% endif %}
-            {% endif %}
-          </td>
-          <td class="text-end">${{ '%.2f'|format(bet.bet_amount) }}</td>
-          <td>{{ outcome_badge(bet.outcome) }}</td>
-          <td class="text-end {% if bet.outcome == 'win' %}text-success{% elif bet.outcome == 'lose' %}text-danger{% else %}text-secondary{% endif %}">${{ '%.2f'|format(bet.profit_loss()) }}</td>
-          <td class="text-end">
-            <form action="{{ url_for('bet.delete_bet', bet_id=bet.id) }}" method="POST" class="d-inline delete-bet-form">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <button type="submit" class="btn btn-sm btn-outline-danger" aria-label="Delete bet {{ bet.id }}">
-                <i class="bi bi-trash"></i>
-              </button>
-            </form>
-          </td>
-        </tr>
+              <div class="fw-semibold">{{ b.team_a }} <span class="text-secondary">vs</span> {{ b.team_b }}</div>
+              {% if b.is_player_prop %}
+                <div class="small text-info"><i class="bi bi-person-fill me-1"></i>{{ b.prop_display }}</div>
+              {% endif %}
+              {% if b.picked_team and b.bet_type == 'moneyline' %}
+                <div class="small text-secondary"><i class="bi bi-hand-thumbs-up me-1"></i>{{ b.picked_team }}</div>
+              {% endif %}
+            </td>
+            <td>{{ b.match_date.strftime('%b %d, %Y') }}</td>
+            <td>
+              <span class="badge text-bg-dark">{{ b.bet_type|capitalize }}</span>
+              {# O/U line + margin #}
+              {% if b.over_under_line and not b.is_player_prop %}
+                <span class="small text-secondary">{{ b.over_under_line }}</span>
+              {% endif %}
+              {% if b.margin is not none %}
+                {% if b.margin > 0 %}
+                  <span class="small text-success">(+{{ b.margin }})</span>
+                {% elif b.margin < 0 %}
+                  <span class="small text-danger">({{ b.margin }})</span>
+                {% else %}
+                  <span class="small text-warning">(push)</span>
+                {% endif %}
+              {% endif %}
+            </td>
+            <td class="text-end">${{ '%.2f'|format(b.bet_amount) }}</td>
+            <td>{{ outcome_badge(b.outcome) }}</td>
+            <td class="text-end {% if b.outcome == 'win' %}text-success{% elif b.outcome == 'lose' %}text-danger{% else %}text-secondary{% endif %}">
+              ${{ '%.2f'|format(b.profit_loss()) }}
+            </td>
+            <td class="text-end">
+              <form action="{{ url_for('bet.delete_bet', bet_id=b.id) }}" method="POST"
+                    class="d-inline delete-bet-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-sm btn-outline-danger"
+                        aria-label="Delete bet {{ b.id }}">
+                  <i class="bi bi-trash"></i>
+                </button>
+              </form>
+            </td>
+          </tr>
+
         {% else %}
         <tr>
           <td colspan="7" class="text-center py-4 text-secondary">No bets found for selected filters.</td>

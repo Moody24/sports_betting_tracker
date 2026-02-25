@@ -1,93 +1,263 @@
 {% extends "base.html" %}
 
-{% block title %}{{ 'Edit Bet' if bet else 'Add Bet' }} · Sports Betting Tracker{% endblock %}
-{% block page_title %}{{ 'Edit Bet' if bet else 'Add Bet' }}{% endblock %}
-{% block page_subtitle %}Capture matchup, date, and outcome with clean inputs.{% endblock %}
+{% block title %}Bet Builder · Sports Betting Tracker{% endblock %}
+{% block page_title %}Bet Builder{% endblock %}
+{% block page_subtitle %}Add a single bet, player prop, or build a parlay — live or retroactive.{% endblock %}
 
 {% block content %}
-<div class="card-soft p-4 mx-auto" style="max-width: 760px;">
-  <form method="POST" novalidate>
-    {{ form.hidden_tag() }}
-    {{ form.external_game_id() }}
-    <div class="row g-3">
-      <div class="col-md-6">
-        <label class="form-label" for="team_a">Team A</label>
-        <div class="input-group">
-          <span class="input-group-text bg-dark border-secondary-subtle"><i class="bi bi-flag"></i></span>
-          {{ form.team_a(class='form-control' ~ (' is-invalid' if form.team_a.errors else ''), id='team_a', placeholder='Los Angeles Lakers') }}
+{# Shared game datalist — populated by bet_builder.js #}
+<datalist id="game-datalist"></datalist>
+
+{# ── Tab pills ── #}
+<ul class="nav nav-pills mb-4 gap-2">
+  <li class="nav-item">
+    <button class="nav-link" data-bb-tab="single">
+      <i class="bi bi-bar-chart me-1"></i>Single Game
+    </button>
+  </li>
+  <li class="nav-item">
+    <button class="nav-link" data-bb-tab="prop">
+      <i class="bi bi-person-fill me-1"></i>Player Prop
+    </button>
+  </li>
+  <li class="nav-item">
+    <button class="nav-link" data-bb-tab="parlay">
+      <i class="bi bi-list-check me-1"></i>Parlay Builder
+    </button>
+  </li>
+</ul>
+
+{# ══════════════════════════════════════════════════════════════════
+   TAB 1 — Single Game (Moneyline or Over/Under)
+══════════════════════════════════════════════════════════════════ #}
+<div data-bb-panel="single">
+  <div class="card-soft p-4 mx-auto" style="max-width:720px">
+    <form method="POST" novalidate>
+      {{ form.hidden_tag() }}
+      {{ form.external_game_id(id='single-game-id') }}
+
+      {# Game picker #}
+      <div class="mb-3">
+        <label class="form-label">Search Game <span class="text-secondary small">(or type teams manually below)</span></label>
+        <input type="text" id="single-game-picker" class="form-control"
+          placeholder="e.g. Lakers @ Celtics" list="game-datalist" autocomplete="off">
+      </div>
+
+      <div class="row g-3">
+        <div class="col-md-6">
+          <label class="form-label">Away Team</label>
+          <div class="input-group">
+            <span class="input-group-text bg-dark border-secondary-subtle"><i class="bi bi-flag"></i></span>
+            {{ form.team_a(class='form-control' ~ (' is-invalid' if form.team_a.errors else ''),
+               id='single-team-a', placeholder='Los Angeles Lakers') }}
+          </div>
+          {% for e in form.team_a.errors %}<div class="invalid-feedback d-block">{{ e }}</div>{% endfor %}
         </div>
-        {% for error in form.team_a.errors %}
-          <div class="invalid-feedback d-block">{{ error }}</div>
-        {% endfor %}
-      </div>
-      <div class="col-md-6">
-        <label class="form-label" for="team_b">Team B</label>
-        <div class="input-group">
-          <span class="input-group-text bg-dark border-secondary-subtle"><i class="bi bi-flag-fill"></i></span>
-          {{ form.team_b(class='form-control' ~ (' is-invalid' if form.team_b.errors else ''), id='team_b', placeholder='Boston Celtics') }}
+        <div class="col-md-6">
+          <label class="form-label">Home Team</label>
+          <div class="input-group">
+            <span class="input-group-text bg-dark border-secondary-subtle"><i class="bi bi-flag-fill"></i></span>
+            {{ form.team_b(class='form-control' ~ (' is-invalid' if form.team_b.errors else ''),
+               id='single-team-b', placeholder='Boston Celtics') }}
+          </div>
+          {% for e in form.team_b.errors %}<div class="invalid-feedback d-block">{{ e }}</div>{% endfor %}
         </div>
-        {% for error in form.team_b.errors %}
-          <div class="invalid-feedback d-block">{{ error }}</div>
-        {% endfor %}
-      </div>
-      <div class="col-md-4">
-        <label class="form-label" for="match_date">Match Date</label>
-        {{ form.match_date(class='form-control' ~ (' is-invalid' if form.match_date.errors else ''), id='match_date') }}
-        {% for error in form.match_date.errors %}
-          <div class="invalid-feedback d-block">{{ error }}</div>
-        {% endfor %}
-      </div>
-      <div class="col-md-4">
-        <label class="form-label" for="bet_amount">Stake ($)</label>
-        <div class="input-group">
-          <span class="input-group-text bg-dark border-secondary-subtle">$</span>
-          {{ form.bet_amount(class='form-control' ~ (' is-invalid' if form.bet_amount.errors else ''), id='bet_amount', placeholder='25.00') }}
+
+        <div class="col-md-4">
+          <label class="form-label">Date</label>
+          {{ form.match_date(class='form-control' ~ (' is-invalid' if form.match_date.errors else ''),
+             id='single-match-date') }}
+          {% for e in form.match_date.errors %}<div class="invalid-feedback d-block">{{ e }}</div>{% endfor %}
         </div>
-        {% for error in form.bet_amount.errors %}
-          <div class="invalid-feedback d-block">{{ error }}</div>
-        {% endfor %}
-      </div>
-      <div class="col-md-4">
-        <label class="form-label" for="bet_type">Bet Type</label>
-        {{ form.bet_type(class='form-select' ~ (' is-invalid' if form.bet_type.errors else ''), id='bet_type') }}
-        {% for error in form.bet_type.errors %}
-          <div class="invalid-feedback d-block">{{ error }}</div>
-        {% endfor %}
-      </div>
-      <div class="col-md-4" id="ou-line-group" style="{% if form.bet_type.data not in ('over', 'under') %}display:none{% endif %}">
-        <label class="form-label" for="over_under_line">O/U Line</label>
-        <div class="input-group">
-          <span class="input-group-text bg-dark border-secondary-subtle"><i class="bi bi-bullseye"></i></span>
-          {{ form.over_under_line(class='form-control' ~ (' is-invalid' if form.over_under_line.errors else ''), id='over_under_line', placeholder='220.5', step='0.5') }}
+
+        <div class="col-md-4">
+          <label class="form-label">Bet Type</label>
+          {{ form.bet_type(class='form-select', id='single-bet-type') }}
         </div>
-        {% for error in form.over_under_line.errors %}
-          <div class="invalid-feedback d-block">{{ error }}</div>
-        {% endfor %}
+
+        <div class="col-md-4">
+          <label class="form-label">Stake ($)</label>
+          <div class="input-group">
+            <span class="input-group-text bg-dark border-secondary-subtle">$</span>
+            {{ form.bet_amount(class='form-control' ~ (' is-invalid' if form.bet_amount.errors else ''),
+               id='bet_amount', placeholder='25.00') }}
+          </div>
+          {% for e in form.bet_amount.errors %}<div class="invalid-feedback d-block">{{ e }}</div>{% endfor %}
+        </div>
+
+        {# O/U line — shown only for over/under #}
+        <div class="col-md-4" id="single-ou-group">
+          <label class="form-label">O/U Line</label>
+          <div class="input-group">
+            <span class="input-group-text bg-dark border-secondary-subtle"><i class="bi bi-bullseye"></i></span>
+            {{ form.over_under_line(class='form-control', id='single-ou-line', placeholder='218.5', step='0.5') }}
+          </div>
+        </div>
+
+        {# Picked team — shown only for moneyline #}
+        <div class="col-md-4 d-none" id="single-picked-group">
+          <label class="form-label">Picked Winner</label>
+          {{ form.picked_team(class='form-control', id='single-picked-team', placeholder='Team you bet on') }}
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label">Status</label>
+          {{ form.outcome(class='form-select') }}
+        </div>
+
+        <div class="col-12 d-flex gap-2 justify-content-end mt-2">
+          <a href="{{ url_for('bet.place_bet') }}" class="btn btn-outline-light">Cancel</a>
+          <button type="submit" class="btn btn-primary">
+            <i class="bi bi-plus-lg me-1"></i>Record Bet
+          </button>
+        </div>
       </div>
-      <div class="col-md-4">
-        <label class="form-label" for="outcome">Status</label>
-        {{ form.outcome(class='form-select' ~ (' is-invalid' if form.outcome.errors else ''), id='outcome') }}
-        {% for error in form.outcome.errors %}
-          <div class="invalid-feedback d-block">{{ error }}</div>
-        {% endfor %}
+    </form>
+  </div>
+</div>
+
+{# ══════════════════════════════════════════════════════════════════
+   TAB 2 — Player Prop (single prop bet, not a parlay)
+══════════════════════════════════════════════════════════════════ #}
+<div data-bb-panel="prop" class="d-none">
+  <div class="card-soft p-4 mx-auto" style="max-width:720px">
+    <form method="POST" novalidate>
+      {{ form.hidden_tag() }}
+      <input type="hidden" name="bet_type" value="over">
+      <input type="hidden" id="prop-game-id" name="external_game_id" value="">
+
+      <div class="mb-3">
+        <label class="form-label">Search Game <span class="text-secondary small">(or type teams manually below)</span></label>
+        <input type="text" id="prop-game-picker" class="form-control"
+          placeholder="e.g. Lakers @ Celtics" list="game-datalist" autocomplete="off">
       </div>
-      <div class="col-12 d-flex gap-2 justify-content-end mt-2">
-        <a href="{{ url_for('bet.place_bet') }}" class="btn btn-outline-light">Cancel</a>
-        <button type="submit" class="btn btn-primary">{{ form.submit.label.text }}</button>
+
+      <div class="row g-3">
+        <div class="col-md-6">
+          <label class="form-label">Away Team</label>
+          <div class="input-group">
+            <span class="input-group-text bg-dark border-secondary-subtle"><i class="bi bi-flag"></i></span>
+            <input type="text" id="prop-team-a" name="team_a" class="form-control"
+              placeholder="Los Angeles Lakers" required>
+          </div>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Home Team</label>
+          <div class="input-group">
+            <span class="input-group-text bg-dark border-secondary-subtle"><i class="bi bi-flag-fill"></i></span>
+            <input type="text" id="prop-team-b" name="team_b" class="form-control"
+              placeholder="Boston Celtics" required>
+          </div>
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label">Date</label>
+          <input type="date" id="prop-match-date" name="match_date" class="form-control" required>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Player</label>
+          <input type="text" name="player_name" class="form-control" placeholder="LeBron James">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Stat</label>
+          <select name="prop_type" class="form-select">
+            <option value="player_points">Points</option>
+            <option value="player_rebounds">Rebounds</option>
+            <option value="player_assists">Assists</option>
+            <option value="player_threes">3-Pointers Made</option>
+          </select>
+        </div>
+
+        <div class="col-md-3">
+          <label class="form-label">Line</label>
+          <input type="number" name="prop_line" class="form-control" placeholder="25.5" step="0.5">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Over / Under</label>
+          <select name="bet_type" class="form-select">
+            <option value="over">Over</option>
+            <option value="under">Under</option>
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Stake ($)</label>
+          <div class="input-group">
+            <span class="input-group-text bg-dark border-secondary-subtle">$</span>
+            <input type="number" name="bet_amount" class="form-control" placeholder="25.00" min="1" step="0.01" required>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Status</label>
+          <select name="outcome" class="form-select">
+            <option value="pending">Pending</option>
+            <option value="win">Win</option>
+            <option value="lose">Lose</option>
+          </select>
+        </div>
+
+        <div class="col-12 d-flex gap-2 justify-content-end mt-2">
+          <a href="{{ url_for('bet.place_bet') }}" class="btn btn-outline-light">Cancel</a>
+          <button type="submit" class="btn btn-primary">
+            <i class="bi bi-plus-lg me-1"></i>Record Prop Bet
+          </button>
+        </div>
       </div>
+    </form>
+  </div>
+</div>
+
+{# ══════════════════════════════════════════════════════════════════
+   TAB 3 — Parlay Builder
+══════════════════════════════════════════════════════════════════ #}
+<div data-bb-panel="parlay" class="d-none">
+  <div class="mx-auto" style="max-width:760px">
+
+    <div id="parlay-legs" class="mb-3"></div>
+
+    <button type="button" id="add-leg-btn" class="btn btn-outline-info btn-sm mb-4">
+      <i class="bi bi-plus-lg me-1"></i>Add Leg
+    </button>
+
+    <div id="parlay-feedback" class="alert d-none py-2 small"></div>
+
+    <form id="parlay-form" class="card-soft p-4">
+      <div class="row g-3 align-items-end">
+        <div class="col-md-4">
+          <label class="form-label">Total Stake ($)</label>
+          <div class="input-group">
+            <span class="input-group-text bg-dark border-secondary-subtle">$</span>
+            <input type="number" id="parlay-stake" class="form-control"
+              placeholder="25.00" min="1" step="0.01" required>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Status</label>
+          <select id="parlay-outcome" class="form-select">
+            <option value="pending">Pending (game hasn't happened yet)</option>
+            <option value="win">Win (retroactive entry)</option>
+            <option value="lose">Lose (retroactive entry)</option>
+          </select>
+        </div>
+        <div class="col-md-4 d-grid">
+          <button type="submit" class="btn btn-primary">
+            <i class="bi bi-check-lg me-1"></i>Submit Parlay
+          </button>
+        </div>
+      </div>
+    </form>
+
+    <div class="mt-3">
+      <a href="{{ url_for('bet.place_bet') }}" class="btn btn-outline-light btn-sm">Cancel</a>
     </div>
-  </form>
+  </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-  var betType = document.getElementById('bet_type');
-  var ouGroup = document.getElementById('ou-line-group');
-  if (betType && ouGroup) {
-    betType.addEventListener('change', function () {
-      ouGroup.style.display = (this.value === 'over' || this.value === 'under') ? '' : 'none';
-    });
-  }
+  var CSRF_TOKEN        = '{{ csrf_token() }}';
+  var UPCOMING_GAMES_URL = '{{ url_for("bet.nba_upcoming_games") }}';
+  var PARLAY_URL        = '{{ url_for("bet.manual_parlay") }}';
 </script>
+<script src="{{ url_for('static', filename='js/bet_builder.js') }}"></script>
 {% endblock %}

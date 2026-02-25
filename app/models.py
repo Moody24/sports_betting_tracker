@@ -72,6 +72,7 @@ class Bet(db.Model):
     prop_type = db.Column(db.String(40), nullable=True)
     prop_line = db.Column(db.Float, nullable=True)
     parlay_id = db.Column(db.String(40), nullable=True)
+    picked_team = db.Column(db.String(80), nullable=True)
     created_at = db.Column(
         db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
     )
@@ -110,7 +111,11 @@ class Bet(db.Model):
 
     @property
     def margin(self) -> Optional[float]:
-        if self.over_under_line is not None and self.actual_total is not None:
+        if self.actual_total is None:
+            return None
+        if self.is_player_prop and self.prop_line is not None:
+            return round(self.actual_total - self.prop_line, 1)
+        if self.over_under_line is not None:
             return round(self.actual_total - self.over_under_line, 1)
         return None
 
