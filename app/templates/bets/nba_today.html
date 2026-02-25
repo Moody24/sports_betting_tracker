@@ -2,7 +2,7 @@
 
 {% block title %}NBA Today · Sports Betting Tracker{% endblock %}
 {% block page_title %}NBA Today{% endblock %}
-{% block page_subtitle %}Live NBA games with over/under lines. Click a game to place a bet.{% endblock %}
+{% block page_subtitle %}Live NBA games with player props. Build singles or parlays from the bet slip.{% endblock %}
 
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
@@ -89,9 +89,9 @@
         </div>
       {% endif %}
 
-      {# ── Quick-add buttons ── #}
+      {# ── Quick-add O/U buttons ── #}
       {% if game.over_under_line and not tracked.get(game.espn_id) %}
-      <div class="mt-auto d-flex gap-2">
+      <div class="d-flex gap-2 mb-2">
         <a href="{{ url_for('bet.new_bet',
             team_a=game.away.name,
             team_b=game.home.name,
@@ -114,7 +114,7 @@
         </a>
       </div>
       {% elif not game.over_under_line %}
-      <div class="mt-auto">
+      <div class="mb-2">
         <a href="{{ url_for('bet.new_bet',
             team_a=game.away.name,
             team_b=game.home.name,
@@ -125,9 +125,66 @@
         </a>
       </div>
       {% endif %}
+
+      {# ── Player Props toggle ── #}
+      <div class="mt-auto">
+        <button class="btn btn-sm btn-outline-info w-100 props-toggle"
+                data-espn-id="{{ game.espn_id }}"
+                data-away="{{ game.away.name }}"
+                data-home="{{ game.home.name }}"
+                data-date="{{ game.start_time[:10] }}">
+          <i class="bi bi-person-lines-fill me-1"></i>Player Props
+        </button>
+        <div class="props-container mt-2" id="props-{{ game.espn_id }}" style="display:none">
+          <div class="text-center py-3">
+            <div class="spinner-border spinner-border-sm text-info" role="status"></div>
+            <span class="small text-secondary ms-2">Loading props...</span>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
   {% endfor %}
+</div>
+
+{# ── Bet Slip (floating panel) ── #}
+<div id="bet-slip" class="bet-slip" style="display:none">
+  <div class="bet-slip-header d-flex justify-content-between align-items-center">
+    <h6 class="mb-0"><i class="bi bi-receipt me-1"></i>Bet Slip <span id="slip-count" class="badge text-bg-info ms-1">0</span></h6>
+    <button class="btn btn-sm btn-outline-secondary border-0" id="slip-toggle-btn">
+      <i class="bi bi-chevron-down"></i>
+    </button>
+  </div>
+  <div class="bet-slip-body" id="slip-body">
+    <div id="slip-legs"></div>
+    <div id="slip-empty" class="text-center text-secondary small py-3">
+      <i class="bi bi-hand-index-thumb" style="font-size:1.2rem"></i>
+      <p class="mb-0 mt-1">Click props above to add them here</p>
+    </div>
+
+    <div id="slip-controls" style="display:none">
+      <hr class="border-secondary my-2">
+      <div class="d-flex align-items-center gap-2 mb-2">
+        <div class="form-check form-switch">
+          <input class="form-check-input" type="checkbox" id="parlay-toggle">
+          <label class="form-check-label small" for="parlay-toggle">Parlay</label>
+        </div>
+        <div id="parlay-odds-display" class="small text-info ms-auto" style="display:none"></div>
+      </div>
+      <div class="input-group input-group-sm mb-2">
+        <span class="input-group-text bg-dark border-secondary-subtle">$</span>
+        <input type="number" class="form-control" id="slip-stake" placeholder="25.00" min="1" step="0.01">
+      </div>
+      <div class="d-flex gap-2">
+        <button class="btn btn-sm btn-outline-danger flex-fill" id="slip-clear">
+          <i class="bi bi-trash3 me-1"></i>Clear
+        </button>
+        <button class="btn btn-sm btn-primary flex-fill" id="slip-submit">
+          <i class="bi bi-check-lg me-1"></i>Place Bet
+        </button>
+      </div>
+    </div>
+  </div>
 </div>
 
 {% if not _get_odds_api_key is defined %}
@@ -135,7 +192,16 @@
   <i class="bi bi-info-circle me-1"></i>
   <strong>Tip:</strong> Set the <code>ODDS_API_KEY</code> environment variable with a free key from
   <a href="https://the-odds-api.com" class="link-light" target="_blank">the-odds-api.com</a>
-  to see over/under lines on each game.
+  to see over/under lines and player props on each game.
 </div>
 {% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+var CSRF_TOKEN = '{{ csrf_token() }}';
+var PROPS_URL = '{{ url_for("bet.nba_props", espn_id="__ESPN_ID__") }}';
+var PLACE_URL = '{{ url_for("bet.nba_place_bets") }}';
+</script>
+<script src="{{ url_for('static', filename='js/betslip.js') }}"></script>
 {% endblock %}
