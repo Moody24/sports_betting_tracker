@@ -880,9 +880,9 @@ class TestNBAService(unittest.TestCase):
 
     # get_todays_games
     @patch("app.services.nba_service.fetch_espn_scoreboard")
-    @patch("app.services.nba_service.fetch_odds")
+    @patch("app.services.nba_service.fetch_odds_combined")
     @patch("app.services.nba_service.fetch_odds_events")
-    def test_get_todays_games_merges_correctly(self, mock_events, mock_odds, mock_espn):
+    def test_get_todays_games_merges_correctly(self, mock_events, mock_odds_combined, mock_espn):
         mock_espn.return_value = [{
             "espn_id": "espn123",
             "home": {"name": "Los Angeles Lakers"},
@@ -891,7 +891,7 @@ class TestNBAService(unittest.TestCase):
             "status": "STATUS_FINAL",
         }]
         key = nba_service._matchup_key("Los Angeles Lakers", "Boston Celtics")
-        mock_odds.return_value = {key: 215.5}
+        mock_odds_combined.return_value = ({key: 215.5}, {})
         mock_events.return_value = {key: "odds_event_abc"}
 
         games = nba_service.get_todays_games()
@@ -900,7 +900,7 @@ class TestNBAService(unittest.TestCase):
         self.assertEqual(games[0]["odds_event_id"], "odds_event_abc")
 
     @patch("app.services.nba_service.fetch_espn_scoreboard")
-    @patch("app.services.nba_service.fetch_odds", return_value={})
+    @patch("app.services.nba_service.fetch_odds_combined", return_value=({}, {}))
     @patch("app.services.nba_service.fetch_odds_events", return_value={})
     def test_get_todays_games_no_odds_match(self, _e, _o, mock_espn):
         mock_espn.return_value = [{
