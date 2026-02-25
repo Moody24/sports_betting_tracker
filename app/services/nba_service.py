@@ -7,6 +7,14 @@ ESPN_SCOREBOARD_URL = (
     "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard"
 )
 ODDS_API_URL = "https://api.the-odds-api.com/v4/sports/basketball_nba/odds/"
+ODDS_API_EVENTS_URL = "https://api.the-odds-api.com/v4/sports/basketball_nba/events/"
+
+PLAYER_PROP_MARKETS = [
+    "player_points",
+    "player_rebounds",
+    "player_assists",
+    "player_threes",
+]
 
 
 def _get_odds_api_key():
@@ -126,16 +134,137 @@ def _matchup_key(team_a, team_b):
     return tuple(sorted([team_a.lower().strip(), team_b.lower().strip()]))
 
 
+def fetch_odds_events():
+    """Return Odds API events with their IDs, mapped by matchup key."""
+    api_key = _get_odds_api_key()
+    if not api_key:
+        return {}
+
+    try:
+        resp = requests.get(
+            ODDS_API_EVENTS_URL,
+            params={"apiKey": api_key},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except (requests.RequestException, ValueError):
+        return {}
+
+    event_map = {}
+    for event in data:
+        home = event.get("home_team", "")
+        away = event.get("away_team", "")
+        key = _matchup_key(home, away)
+        event_map[key] = event.get("id", "")
+
+    return event_map
+
+
+def fetch_player_props_for_event(odds_event_id):
+    """Fetch player prop lines for a specific Odds API event.
+
+    Returns a dict keyed by market name, each containing a list of
+    {player, line, over_odds, under_odds} dicts.
+    """
+    api_key = _get_odds_api_key()
+    if not api_key or not odds_event_id:
+        return {}
+
+    url = f"{ODDS_API_EVENTS_URL}{odds_event_id}/odds"
+    try:
+        resp = requests.get(
+            url,
+            params={
+                "apiKey": api_key,
+                "regions": "us",
+                "markets": ",".join(PLAYER_PROP_MARKETS),
+                "oddsFormat": "american",
+            },
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except (requests.RequestException, ValueError):
+        return {}
+
+    props = {}
+    seen = {}  # track best line per (market, player) to dedupe bookmakers
+
+    for bookmaker in data.get("bookmakers", []):
+        for market in bookmaker.get("markets", []):
+            market_key = market.get("key", "")
+            if market_key not in PLAYER_PROP_MARKETS:
+                continue
+
+            outcomes = market.get("outcomes", [])
+            # Group outcomes by player
+            player_lines = {}
+            for outcome in outcomes:
+                player = outcome.get("description", "")
+                if not player:
+                    continue
+                if player not in player_lines:
+                    player_lines[player] = {}
+                side = outcome.get("name", "").lower()
+                player_lines[player][side] = {
+                    "odds": outcome.get("price", 0),
+                    "point": outcome.get("point"),
+                }
+
+            for player, sides in player_lines.items():
+                dedup_key = (market_key, player)
+                if dedup_key in seen:
+                    continue
+                seen[dedup_key] = True
+
+                over = sides.get("over", {})
+                under = sides.get("under", {})
+                line = over.get("point") or under.get("point")
+                if line is None:
+                    continue
+
+                props.setdefault(market_key, []).append({
+                    "player": player,
+                    "line": float(line),
+                    "over_odds": over.get("odds", 0),
+                    "under_odds": under.get("odds", 0),
+                })
+
+    # Sort each market by player name
+    for market_key in props:
+        props[market_key].sort(key=lambda p: p["player"])
+
+    return props
+
+
 def get_todays_games():
     """Combined view: ESPN live scores merged with Odds API over/under lines."""
     games = fetch_espn_scoreboard()
     odds = fetch_odds()
+    events = fetch_odds_events()
 
     for game in games:
         key = _matchup_key(game["home"]["name"], game["away"]["name"])
         game["over_under_line"] = odds.get(key)
+        game["odds_event_id"] = events.get(key, "")
 
     return games
+
+
+def get_player_props(espn_id, games=None):
+    """Get player props for a game identified by ESPN ID.
+
+    Looks up the Odds API event ID via team-name matching, then fetches props.
+    """
+    if games is None:
+        games = get_todays_games()
+
+    for game in games:
+        if game["espn_id"] == espn_id:
+            return fetch_player_props_for_event(game.get("odds_event_id", ""))
+
+    return {}
 
 
 # ── Result checker ───────────────────────────────────────────────────

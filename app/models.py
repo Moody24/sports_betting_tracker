@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime, timezone
 
 from flask_login import UserMixin
@@ -57,6 +58,10 @@ class Bet(db.Model):
     over_under_line = db.Column(db.Float, nullable=True)
     actual_total = db.Column(db.Float, nullable=True)
     external_game_id = db.Column(db.String(80), nullable=True)
+    player_name = db.Column(db.String(100), nullable=True)
+    prop_type = db.Column(db.String(40), nullable=True)
+    prop_line = db.Column(db.Float, nullable=True)
+    parlay_id = db.Column(db.String(40), nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
     def __repr__(self):
@@ -98,3 +103,20 @@ class Bet(db.Model):
         if self.over_under_line is not None and self.actual_total is not None:
             return round(self.actual_total - self.over_under_line, 1)
         return None
+
+    @property
+    def is_player_prop(self):
+        return bool(self.player_name and self.prop_type)
+
+    @property
+    def prop_display(self):
+        """Human-readable prop description, e.g. 'LeBron James Over 25.5 Points'."""
+        if not self.is_player_prop:
+            return None
+        label = self.prop_type.replace('player_', '').replace('_', ' ').title()
+        direction = self.bet_type.capitalize() if self.bet_type in ('over', 'under') else ''
+        return f"{self.player_name} {direction} {self.prop_line} {label}".strip()
+
+    @staticmethod
+    def generate_parlay_id():
+        return uuid.uuid4().hex[:16]
