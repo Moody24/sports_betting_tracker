@@ -1,0 +1,18 @@
+{% extends 'base.html' %}
+
+{% block title %}500 · Sports Betting Tracker{% endblock %}
+{% block page_title %}Server Error{% endblock %}
+{% block page_subtitle %}Something went wrong on our end.{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-column align-items-center justify-content-center py-5 text-center">
+  <p class="display-1 fw-bold text-secondary mb-0">500</p>
+  <h2 class="h4 mb-3">Internal server error</h2>
+  <p class="text-secondary mb-4">
+    An unexpected error occurred. Please try again in a moment.
+  </p>
+  <a href="{{ url_for('main.home') }}" class="btn btn-primary">
+    <i class="bi bi-house me-2"></i>Back to Home
+  </a>
+</div>
+{% endblock %}

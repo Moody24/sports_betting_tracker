@@ -1,9 +1,10 @@
-from datetime import datetime, date as date_type
+from datetime import datetime, date as date_type, timezone
 
 from flask import Blueprint, render_template, redirect, url_for, flash, request, jsonify
 from flask_login import login_required, current_user
 
 from app import db
+from app.enums import BetSource, BetType, Outcome
 from app.forms import BetForm
 from app.models import Bet
 from app.services.nba_service import (
@@ -97,7 +98,9 @@ def new_bet():
             bet_amount=form.bet_amount.data,
             outcome=form.outcome.data,
             bet_type=form.bet_type.data,
-            over_under_line=form.over_under_line.data if form.bet_type.data in ('over', 'under') else None,
+            over_under_line=form.over_under_line.data if form.bet_type.data in (
+                BetType.OVER.value, BetType.UNDER.value
+            ) else None,
             external_game_id=form.external_game_id.data or None,
             player_name=player_name,
             prop_type=prop_type,
@@ -121,7 +124,7 @@ def nba_today():
 
     # Gather user's pending O/U bets keyed by external_game_id
     pending = Bet.query.filter_by(
-        user_id=current_user.id, outcome='pending'
+        user_id=current_user.id, outcome=Outcome.PENDING.value
     ).filter(Bet.external_game_id.isnot(None)).all()
     tracked = {b.external_game_id: b for b in pending}
 
@@ -132,10 +135,10 @@ def nba_today():
 @login_required
 def nba_update_results():
     pending = Bet.query.filter_by(
-        user_id=current_user.id, outcome='pending'
+        user_id=current_user.id, outcome=Outcome.PENDING.value
     ).filter(
         Bet.external_game_id.isnot(None),
-        Bet.bet_type.in_(['over', 'under']),
+        Bet.bet_type.in_([BetType.OVER.value, BetType.UNDER.value]),
     ).all()
 
     resolved = resolve_pending_bets(pending)
@@ -210,7 +213,7 @@ def nba_place_bets():
         try:
             match_date = datetime.strptime(leg.get("match_date", ""), "%Y-%m-%d")
         except ValueError:
-            match_date = datetime.now()
+            match_date = datetime.now(timezone.utc)
 
         bet_obj = Bet(
             user_id=current_user.id,
@@ -218,8 +221,8 @@ def nba_place_bets():
             team_b=leg.get("team_b", ""),
             match_date=match_date,
             bet_amount=stake,
-            outcome="pending",
-            bet_type=leg.get("bet_type", "over"),
+            outcome=Outcome.PENDING.value,
+            bet_type=leg.get("bet_type", BetType.OVER.value),
             over_under_line=float(leg["prop_line"]) if leg.get("prop_line") else None,
             american_odds=int(leg["american_odds"]) if leg.get("american_odds") else None,
             external_game_id=leg.get("game_id") or None,
@@ -228,7 +231,7 @@ def nba_place_bets():
             prop_line=float(leg["prop_line"]) if leg.get("prop_line") else None,
             is_parlay=is_parlay,
             parlay_id=parlay_id,
-            source="nba_props",
+            source=BetSource.NBA_PROPS.value,
         )
         db.session.add(bet_obj)
         created.append(bet_obj)

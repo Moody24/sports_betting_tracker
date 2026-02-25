@@ -1,13 +1,21 @@
+import logging
 import os
 from datetime import datetime, timezone
+from typing import Optional
 
 import requests
+
+from app.enums import BetType, Outcome
+
+logger = logging.getLogger(__name__)
 
 ESPN_SCOREBOARD_URL = (
     "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard"
 )
 ODDS_API_URL = "https://api.the-odds-api.com/v4/sports/basketball_nba/odds/"
 ODDS_API_EVENTS_URL = "https://api.the-odds-api.com/v4/sports/basketball_nba/events/"
+
+_STATUS_FINAL = "STATUS_FINAL"
 
 PLAYER_PROP_MARKETS = [
     "player_points",
@@ -17,20 +25,21 @@ PLAYER_PROP_MARKETS = [
 ]
 
 
-def _get_odds_api_key():
+def _get_odds_api_key() -> str:
     return os.getenv("ODDS_API_KEY", "")
 
 
 # ── ESPN: live scores ────────────────────────────────────────────────
 
 
-def fetch_espn_scoreboard():
+def fetch_espn_scoreboard() -> list[dict]:
     """Return today's NBA games from the free ESPN scoreboard endpoint."""
     try:
         resp = requests.get(ESPN_SCOREBOARD_URL, timeout=10)
         resp.raise_for_status()
         data = resp.json()
-    except (requests.RequestException, ValueError):
+    except (requests.RequestException, ValueError) as exc:
+        logger.error("ESPN scoreboard fetch failed: %s", exc)
         return []
 
     games = []
@@ -79,10 +88,11 @@ def fetch_espn_scoreboard():
 # ── The Odds API: over/under lines ──────────────────────────────────
 
 
-def fetch_odds():
+def fetch_odds() -> dict:
     """Return over/under lines from The Odds API (needs ODDS_API_KEY env var)."""
     api_key = _get_odds_api_key()
     if not api_key:
+        logger.warning("ODDS_API_KEY not set – over/under lines unavailable")
         return {}
 
     try:
@@ -98,7 +108,8 @@ def fetch_odds():
         )
         resp.raise_for_status()
         data = resp.json()
-    except (requests.RequestException, ValueError):
+    except (requests.RequestException, ValueError) as exc:
+        logger.error("Odds API (totals) fetch failed: %s", exc)
         return {}
 
     odds_map = {}
@@ -129,15 +140,16 @@ def fetch_odds():
 # ── Merge scores + odds ─────────────────────────────────────────────
 
 
-def _matchup_key(team_a, team_b):
+def _matchup_key(team_a: str, team_b: str) -> tuple[str, str]:
     """Normalised key for matching ESPN names with Odds API names."""
     return tuple(sorted([team_a.lower().strip(), team_b.lower().strip()]))
 
 
-def fetch_odds_events():
+def fetch_odds_events() -> dict:
     """Return Odds API events with their IDs, mapped by matchup key."""
     api_key = _get_odds_api_key()
     if not api_key:
+        logger.warning("ODDS_API_KEY not set – player props unavailable")
         return {}
 
     try:
@@ -148,7 +160,8 @@ def fetch_odds_events():
         )
         resp.raise_for_status()
         data = resp.json()
-    except (requests.RequestException, ValueError):
+    except (requests.RequestException, ValueError) as exc:
+        logger.error("Odds API (events) fetch failed: %s", exc)
         return {}
 
     event_map = {}
@@ -161,7 +174,7 @@ def fetch_odds_events():
     return event_map
 
 
-def fetch_player_props_for_event(odds_event_id):
+def fetch_player_props_for_event(odds_event_id: str) -> dict:
     """Fetch player prop lines for a specific Odds API event.
 
     Returns a dict keyed by market name, each containing a list of
@@ -185,7 +198,8 @@ def fetch_player_props_for_event(odds_event_id):
         )
         resp.raise_for_status()
         data = resp.json()
-    except (requests.RequestException, ValueError):
+    except (requests.RequestException, ValueError) as exc:
+        logger.error("Odds API (player props) fetch failed for event %s: %s", odds_event_id, exc)
         return {}
 
     props = {}
@@ -238,7 +252,7 @@ def fetch_player_props_for_event(odds_event_id):
     return props
 
 
-def get_todays_games():
+def get_todays_games() -> list[dict]:
     """Combined view: ESPN live scores merged with Odds API over/under lines."""
     games = fetch_espn_scoreboard()
     odds = fetch_odds()
@@ -252,7 +266,7 @@ def get_todays_games():
     return games
 
 
-def get_player_props(espn_id, games=None):
+def get_player_props(espn_id: str, games: Optional[list[dict]] = None) -> dict:
     """Get player props for a game identified by ESPN ID.
 
     Looks up the Odds API event ID via team-name matching, then fetches props.
@@ -270,7 +284,7 @@ def get_player_props(espn_id, games=None):
 # ── Result checker ───────────────────────────────────────────────────
 
 
-def resolve_pending_bets(pending_bets):
+def resolve_pending_bets(pending_bets: list) -> list[tuple]:
     """Check ESPN for final scores and resolve over/under bets.
 
     Returns list of (bet, new_outcome, actual_total) for bets that can be graded.
@@ -288,15 +302,17 @@ def resolve_pending_bets(pending_bets):
         game = espn_lookup.get(bet.external_game_id)
         if not game:
             continue
-        if game["status"] != "STATUS_FINAL":
+        if game["status"] != _STATUS_FINAL:
             continue
 
         actual_total = float(game["total_score"])
 
-        if bet.bet_type == "over":
-            outcome = "win" if actual_total > bet.over_under_line else "lose"
-        elif bet.bet_type == "under":
-            outcome = "win" if actual_total < bet.over_under_line else "lose"
+        if actual_total == bet.over_under_line:
+            outcome = Outcome.PUSH.value
+        elif bet.bet_type == BetType.OVER.value:
+            outcome = Outcome.WIN.value if actual_total > bet.over_under_line else Outcome.LOSE.value
+        elif bet.bet_type == BetType.UNDER.value:
+            outcome = Outcome.WIN.value if actual_total < bet.over_under_line else Outcome.LOSE.value
         else:
             continue
 

@@ -1,7 +1,8 @@
 from flask import Blueprint, render_template, redirect, url_for, flash
 from flask_login import login_user, logout_user, login_required, current_user
+from sqlalchemy.exc import IntegrityError
 
-from app import db
+from app import db, limiter
 from app.forms import LoginForm, LogoutForm, RegisterForm
 from app.models import User
 
@@ -9,6 +10,7 @@ auth = Blueprint('auth', __name__)
 
 
 @auth.route('/register', methods=['GET', 'POST'])
+@limiter.limit("5 per minute")
 def register():
     if current_user.is_authenticated:
         flash('You are already logged in!', 'info')
@@ -26,8 +28,13 @@ def register():
 
         user = User(username=form.username.data, email=form.email.data)
         user.set_password(form.password.data)
-        db.session.add(user)
-        db.session.commit()
+        try:
+            db.session.add(user)
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            flash('An account with that username or email already exists.', 'danger')
+            return render_template('register.html', form=form)
         flash('Registration successful. Please log in.', 'success')
         return redirect(url_for('auth.login'))
 
@@ -35,6 +42,7 @@ def register():
 
 
 @auth.route('/login', methods=['GET', 'POST'])
+@limiter.limit("10 per minute")
 def login():
     if current_user.is_authenticated:
         flash('You are already logged in!', 'info')

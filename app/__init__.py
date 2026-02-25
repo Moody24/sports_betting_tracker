@@ -1,20 +1,38 @@
+import logging
 import os
 from datetime import datetime, timezone
 
-from flask import Flask
+from flask import Flask, render_template
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from flask_login import LoginManager, current_user
 from flask_migrate import Migrate, upgrade as _upgrade
 from flask_sqlalchemy import SQLAlchemy
 from flask_wtf.csrf import CSRFProtect
 
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s %(levelname)s %(name)s: %(message)s',
+)
+
 db = SQLAlchemy()
 migrate = Migrate()
 login_manager = LoginManager()
 csrf = CSRFProtect()
+limiter = Limiter(key_func=get_remote_address, default_limits=[])
 
 def create_app(testing=False):
     app = Flask(__name__)
-    app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'your-default-secret-key')
+    secret_key = os.getenv('SECRET_KEY')
+    if not secret_key:
+        if testing:
+            secret_key = 'test-only-insecure-key'
+        else:
+            raise RuntimeError(
+                "SECRET_KEY environment variable is not set. "
+                "Set it before starting the application."
+            )
+    app.config['SECRET_KEY'] = secret_key
     app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'sqlite:///app.db')
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     app.config['WTF_CSRF_ENABLED'] = True
@@ -23,11 +41,13 @@ def create_app(testing=False):
 
     if testing:
         app.config['TESTING'] = True
+        app.config['RATELIMIT_ENABLED'] = False
 
     db.init_app(app)
     migrate.init_app(app, db)
     login_manager.init_app(app)
     csrf.init_app(app)
+    limiter.init_app(app)
 
     login_manager.login_view = 'auth.login'
     login_manager.login_message_category = 'info'
@@ -61,6 +81,15 @@ def create_app(testing=False):
     app.register_blueprint(auth, url_prefix='/auth')
     app.register_blueprint(bet)
     app.register_blueprint(main)
+
+    @app.errorhandler(404)
+    def not_found_error(e):
+        return render_template('errors/404.html'), 404
+
+    @app.errorhandler(500)
+    def internal_error(e):
+        db.session.rollback()
+        return render_template('errors/500.html'), 500
 
     if not app.config.get('TESTING'):
         with app.app_context():
