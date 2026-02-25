@@ -26,4 +26,4 @@ USER appuser
 
 EXPOSE 8000
 
-CMD ["gunicorn", "--config", "gunicorn.conf.py", "run:app"]
+CMD ["./docker-entrypoint.sh"]

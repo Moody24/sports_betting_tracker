@@ -93,8 +93,9 @@ A web application built with **Flask**, designed to help users manage and track 
      ```bash
      flask db init
      flask db migrate
-     flask db upgrade
+     flask db upgrade heads
      ```
+   - In Docker, the container entrypoint runs `flask --app run.py db upgrade heads` automatically before Gunicorn starts.
 
 ---
 
