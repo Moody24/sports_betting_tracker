@@ -19,7 +19,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Run as a non-root user for security
-RUN adduser --disabled-password --gecos "" appuser && chown -R appuser /app
+RUN adduser --disabled-password --gecos "" appuser \
+    && mkdir -p /app/instance \
+    && chown -R appuser /app
 USER appuser
 
 EXPOSE 8000
