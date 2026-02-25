@@ -134,6 +134,16 @@
           </div>
         </div>
 
+        {# Notes / Reasoning #}
+        <div class="col-12">
+          <label class="form-label">
+            <i class="bi bi-journal-text me-1 text-secondary"></i>Notes / Reasoning
+            <span class="text-secondary small ms-1">(optional)</span>
+          </label>
+          {{ form.notes(class='form-control', id='single-notes', rows=2,
+             placeholder='Why are you making this bet? e.g. "Back-to-back road game, lean under"') }}
+        </div>
+
         <div class="col-12 d-flex gap-2 justify-content-end mt-2">
           <a href="{{ url_for('bet.place_bet') }}" class="btn btn-outline-light">Cancel</a>
           <button type="submit" class="btn btn-primary">
