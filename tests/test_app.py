@@ -1228,5 +1228,425 @@ class TestSecurity(BaseTestCase):
             self.assertIsNotNone(still_there)
 
 
+class TestCoverageGap(BaseTestCase):
+    """Tests that cover previously untested code paths to reach ≥80% coverage."""
+
+    # ── bet route: /nba/upcoming-games ───────────────────────────────
+
+    def test_nba_upcoming_games_requires_auth(self):
+        resp = self.client.get("/nba/upcoming-games", follow_redirects=False)
+        self.assertEqual(resp.status_code, 302)
+
+    @patch("app.routes.bet.get_todays_games", return_value=[])
+    @patch("app.routes.bet.fetch_upcoming_games", return_value=[])
+    def test_nba_upcoming_games_empty(self, _mock_upcoming, _mock_today):
+        self.register_and_login()
+        resp = self.client.get("/nba/upcoming-games")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(json.loads(resp.data), [])
+
+    @patch("app.routes.bet.get_todays_games")
+    @patch("app.routes.bet.fetch_upcoming_games")
+    def test_nba_upcoming_games_returns_json(self, mock_upcoming, mock_today):
+        self.register_and_login()
+        mock_today.return_value = [{
+            "espn_id": "espn1",
+            "home": {"name": "Lakers"},
+            "away": {"name": "Celtics"},
+            "start_time": "2026-02-25T00:00:00Z",
+            "over_under_line": 215.5,
+        }]
+        mock_upcoming.return_value = [{
+            "espn_id": "espn2",
+            "home": {"name": "Warriors"},
+            "away": {"name": "Heat"},
+            "match_date": "2026-02-26",
+            "over_under_line": 220.0,
+        }]
+        resp = self.client.get("/nba/upcoming-games")
+        self.assertEqual(resp.status_code, 200)
+        data = json.loads(resp.data)
+        self.assertEqual(len(data), 2)
+        self.assertIn("Lakers", data[0]["label"])
+        self.assertIn("Tomorrow", data[1]["label"])
+
+    # ── bet route: /bets/parlay (manual_parlay) ───────────────────────
+
+    def test_manual_parlay_no_body(self):
+        self.register_and_login()
+        resp = self.client.post(
+            "/bets/parlay", data="not-json", content_type="text/plain"
+        )
+        self.assertEqual(resp.status_code, 400)
+
+    def test_manual_parlay_empty_legs(self):
+        self.register_and_login()
+        resp = self.client.post("/bets/parlay", json={"stake": 25.0, "legs": []})
+        self.assertEqual(resp.status_code, 400)
+
+    def test_manual_parlay_zero_stake(self):
+        self.register_and_login()
+        resp = self.client.post(
+            "/bets/parlay",
+            json={
+                "stake": 0,
+                "legs": [{"team_a": "A", "team_b": "B",
+                          "match_date": "2026-02-25", "bet_type": "moneyline"}],
+            },
+        )
+        self.assertEqual(resp.status_code, 400)
+
+    def test_manual_parlay_success(self):
+        self.register_and_login()
+        resp = self.client.post(
+            "/bets/parlay",
+            json={
+                "stake": 25.0,
+                "legs": [{
+                    "team_a": "Lakers",
+                    "team_b": "Celtics",
+                    "match_date": "2026-02-25",
+                    "bet_type": "over",
+                    "over_under_line": 215.5,
+                    "player_name": "",
+                    "prop_type": "",
+                    "prop_line": None,
+                    "picked_team": "",
+                    "game_id": "",
+                }],
+            },
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(json.loads(resp.data)["success"])
+
+    def test_manual_parlay_invalid_date_uses_fallback(self):
+        self.register_and_login()
+        resp = self.client.post(
+            "/bets/parlay",
+            json={
+                "stake": 10.0,
+                "legs": [{"team_a": "A", "team_b": "B",
+                          "match_date": "bad-date", "bet_type": "moneyline"}],
+            },
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(json.loads(resp.data)["success"])
+
+    def test_manual_parlay_with_player_prop_leg(self):
+        """prop_line float parsing and ou_line skip when player_name present."""
+        self.register_and_login()
+        resp = self.client.post(
+            "/bets/parlay",
+            json={
+                "stake": 15.0,
+                "legs": [{
+                    "team_a": "Lakers",
+                    "team_b": "Celtics",
+                    "match_date": "2026-02-25",
+                    "bet_type": "over",
+                    "over_under_line": 215.5,
+                    "player_name": "LeBron James",
+                    "prop_type": "player_points",
+                    "prop_line": 25.5,
+                    "picked_team": "",
+                    "game_id": "",
+                }],
+            },
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(json.loads(resp.data)["success"])
+
+    # ── bet route: parlay grouping in bet list ────────────────────────
+
+    def test_bets_list_parlay_all_wins(self):
+        user_id = self.register_and_login()
+        with self.app.app_context():
+            pid = "parlayWin0001"
+            db.session.add(make_bet(user_id, outcome="win", is_parlay=True, parlay_id=pid))
+            db.session.add(make_bet(user_id, outcome="win", is_parlay=True, parlay_id=pid))
+            db.session.commit()
+        resp = self.client.get("/bets")
+        self.assertEqual(resp.status_code, 200)
+
+    def test_bets_list_parlay_any_lose(self):
+        user_id = self.register_and_login()
+        with self.app.app_context():
+            pid = "parlayLose001"
+            db.session.add(make_bet(user_id, outcome="win", is_parlay=True, parlay_id=pid))
+            db.session.add(make_bet(user_id, outcome="lose", is_parlay=True, parlay_id=pid))
+            db.session.commit()
+        resp = self.client.get("/bets")
+        self.assertEqual(resp.status_code, 200)
+
+    # ── nba_service: fetch_espn_scoreboard with date_str ─────────────
+
+    @patch("app.services.nba_service.requests.get")
+    def test_fetch_espn_scoreboard_with_date_str(self, mock_get):
+        """date_str branch passes dates param to the ESPN endpoint (line 53)."""
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status.return_value = None
+        mock_resp.json.return_value = {"events": []}
+        mock_get.return_value = mock_resp
+
+        result = nba_service.fetch_espn_scoreboard(date_str="20260225")
+        self.assertEqual(result, [])
+        self.assertEqual(mock_get.call_args[1]["params"]["dates"], "20260225")
+
+    # ── nba_service: fetch_espn_boxscore ─────────────────────────────
+
+    @patch("app.services.nba_service.requests.get")
+    def test_fetch_espn_boxscore_network_error(self, mock_get):
+        mock_get.side_effect = nba_service.requests.RequestException("timeout")
+        self.assertEqual(nba_service.fetch_espn_boxscore("espn123"), {})
+
+    @patch("app.services.nba_service.requests.get")
+    def test_fetch_espn_boxscore_success(self, mock_get):
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status.return_value = None
+        mock_resp.json.return_value = {
+            "boxscore": {
+                "players": [{
+                    "statistics": [{
+                        "names": ["PTS", "REB", "AST"],
+                        "athletes": [{
+                            "athlete": {"displayName": "LeBron James"},
+                            "stats": ["30", "8", "7"],
+                        }],
+                    }],
+                }],
+            }
+        }
+        mock_get.return_value = mock_resp
+
+        result = nba_service.fetch_espn_boxscore("espn123")
+        self.assertIn("LeBron James", result)
+        self.assertAlmostEqual(result["LeBron James"]["player_points"], 30.0)
+
+    @patch("app.services.nba_service.requests.get")
+    def test_fetch_espn_boxscore_three_point_parsing(self, mock_get):
+        """3PT column 'M-A' format is parsed to made-count."""
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status.return_value = None
+        mock_resp.json.return_value = {
+            "boxscore": {
+                "players": [{
+                    "statistics": [{
+                        "names": ["PTS", "3PT"],
+                        "athletes": [{
+                            "athlete": {"displayName": "Steph Curry"},
+                            "stats": ["35", "7-12"],
+                        }],
+                    }],
+                }],
+            }
+        }
+        mock_get.return_value = mock_resp
+
+        result = nba_service.fetch_espn_boxscore("espn123")
+        self.assertIn("Steph Curry", result)
+        self.assertAlmostEqual(result["Steph Curry"]["player_threes"], 7.0)
+
+    @patch("app.services.nba_service.requests.get")
+    def test_fetch_espn_boxscore_skips_empty_name(self, mock_get):
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status.return_value = None
+        mock_resp.json.return_value = {
+            "boxscore": {
+                "players": [{
+                    "statistics": [{
+                        "names": ["PTS"],
+                        "athletes": [{
+                            "athlete": {"displayName": ""},
+                            "stats": ["20"],
+                        }],
+                    }],
+                }],
+            }
+        }
+        mock_get.return_value = mock_resp
+        self.assertEqual(nba_service.fetch_espn_boxscore("espn123"), {})
+
+    # ── nba_service: fetch_upcoming_games ────────────────────────────
+
+    @patch.dict(os.environ, {}, clear=True)
+    def test_fetch_upcoming_games_no_api_key(self):
+        os.environ.pop("ODDS_API_KEY", None)
+        self.assertEqual(nba_service.fetch_upcoming_games(), [])
+
+    @patch.dict(os.environ, {"ODDS_API_KEY": "test-key"})
+    @patch("app.services.nba_service.requests.get")
+    def test_fetch_upcoming_games_network_error(self, mock_get):
+        mock_get.side_effect = nba_service.requests.RequestException("timeout")
+        self.assertEqual(nba_service.fetch_upcoming_games(), [])
+
+    @patch.dict(os.environ, {"ODDS_API_KEY": "test-key"})
+    @patch("app.services.nba_service.requests.get")
+    def test_fetch_upcoming_games_success(self, mock_get):
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status.return_value = None
+        mock_resp.json.return_value = [{
+            "id": "odds_event_1",
+            "home_team": "Los Angeles Lakers",
+            "away_team": "Boston Celtics",
+            "commence_time": "2026-02-26T19:00:00Z",
+            "bookmakers": [{
+                "markets": [{
+                    "key": "totals",
+                    "outcomes": [
+                        {"name": "Over", "point": 215.5},
+                        {"name": "Under", "point": 215.5},
+                    ],
+                }],
+            }],
+        }]
+        mock_get.return_value = mock_resp
+
+        games = nba_service.fetch_upcoming_games()
+        self.assertEqual(len(games), 1)
+        self.assertEqual(games[0]["home"]["name"], "Los Angeles Lakers")
+        self.assertAlmostEqual(games[0]["over_under_line"], 215.5)
+
+    # ── nba_service: resolve_pending_bets — over/under no line ───────
+
+    def test_resolve_over_no_line_skipped(self):
+        """Over bet with over_under_line=None is skipped (line 461)."""
+        class FakeBet:
+            external_game_id = "espn123"
+            bet_type = "over"
+            over_under_line = None
+            picked_team = None
+            is_player_prop = False
+            player_name = None
+            prop_type = None
+            prop_line = None
+
+        game = [{"espn_id": "espn123", "status": "STATUS_FINAL", "total_score": 215}]
+        with patch("app.services.nba_service.fetch_espn_scoreboard", return_value=game):
+            results = nba_service.resolve_pending_bets([FakeBet()])
+        self.assertEqual(results, [])
+
+    # ── nba_service: resolve_pending_bets — moneyline ────────────────
+
+    def _ml_game(self, home_score=120, away_score=95, status="STATUS_FINAL"):
+        return [{
+            "espn_id": "espn123",
+            "status": status,
+            "total_score": home_score + away_score,
+            "home": {"name": "Los Angeles Lakers", "score": home_score},
+            "away": {"name": "Boston Celtics", "score": away_score},
+        }]
+
+    def _ml_bet(self, picked_team="Los Angeles Lakers"):
+        class FakeBet:
+            external_game_id = "espn123"
+            bet_type = "moneyline"
+            over_under_line = None
+            is_player_prop = False
+            player_name = None
+            prop_type = None
+            prop_line = None
+        fb = FakeBet()
+        fb.picked_team = picked_team
+        return fb
+
+    def test_resolve_moneyline_picked_team_wins(self):
+        with patch("app.services.nba_service.fetch_espn_scoreboard",
+                   return_value=self._ml_game(home_score=120, away_score=95)):
+            results = nba_service.resolve_pending_bets([self._ml_bet("Los Angeles Lakers")])
+        self.assertEqual(len(results), 1)
+        _, outcome, _ = results[0]
+        self.assertEqual(outcome, "win")
+
+    def test_resolve_moneyline_picked_team_loses(self):
+        with patch("app.services.nba_service.fetch_espn_scoreboard",
+                   return_value=self._ml_game(home_score=120, away_score=95)):
+            results = nba_service.resolve_pending_bets([self._ml_bet("Boston Celtics")])
+        _, outcome, _ = results[0]
+        self.assertEqual(outcome, "lose")
+
+    def test_resolve_moneyline_away_team_wins(self):
+        with patch("app.services.nba_service.fetch_espn_scoreboard",
+                   return_value=self._ml_game(home_score=90, away_score=115)):
+            results = nba_service.resolve_pending_bets([self._ml_bet("Boston Celtics")])
+        _, outcome, _ = results[0]
+        self.assertEqual(outcome, "win")
+
+    def test_resolve_moneyline_tie_is_push(self):
+        with patch("app.services.nba_service.fetch_espn_scoreboard",
+                   return_value=self._ml_game(home_score=100, away_score=100)):
+            results = nba_service.resolve_pending_bets([self._ml_bet()])
+        _, outcome, _ = results[0]
+        self.assertEqual(outcome, "push")
+
+    # ── nba_service: resolve_pending_bets — player props ─────────────
+
+    def _prop_game(self):
+        return [{
+            "espn_id": "espn123",
+            "status": "STATUS_FINAL",
+            "total_score": 215,
+        }]
+
+    def _prop_bet(self, bet_type="over", prop_line=25.5):
+        class FakeBet:
+            external_game_id = "espn123"
+            over_under_line = None
+            picked_team = None
+            is_player_prop = True
+            player_name = "LeBron James"
+            prop_type = "player_points"
+        fb = FakeBet()
+        fb.bet_type = bet_type
+        fb.prop_line = prop_line
+        return fb
+
+    @patch("app.services.nba_service.fetch_espn_boxscore")
+    def test_resolve_player_prop_over_win(self, mock_boxscore):
+        mock_boxscore.return_value = {"LeBron James": {"player_points": 30.0}}
+        with patch("app.services.nba_service.fetch_espn_scoreboard",
+                   return_value=self._prop_game()):
+            results = nba_service.resolve_pending_bets([self._prop_bet("over", 25.5)])
+        self.assertEqual(len(results), 1)
+        _, outcome, actual = results[0]
+        self.assertEqual(outcome, "win")
+        self.assertAlmostEqual(actual, 30.0)
+
+    @patch("app.services.nba_service.fetch_espn_boxscore")
+    def test_resolve_player_prop_under_win(self, mock_boxscore):
+        mock_boxscore.return_value = {"LeBron James": {"player_points": 20.0}}
+        with patch("app.services.nba_service.fetch_espn_scoreboard",
+                   return_value=self._prop_game()):
+            results = nba_service.resolve_pending_bets([self._prop_bet("under", 25.5)])
+        _, outcome, _ = results[0]
+        self.assertEqual(outcome, "win")
+
+    @patch("app.services.nba_service.fetch_espn_boxscore")
+    def test_resolve_player_prop_push(self, mock_boxscore):
+        mock_boxscore.return_value = {"LeBron James": {"player_points": 25.5}}
+        with patch("app.services.nba_service.fetch_espn_scoreboard",
+                   return_value=self._prop_game()):
+            results = nba_service.resolve_pending_bets([self._prop_bet("over", 25.5)])
+        _, outcome, _ = results[0]
+        self.assertEqual(outcome, "push")
+
+    @patch("app.services.nba_service.fetch_espn_boxscore")
+    def test_resolve_player_prop_player_not_found(self, mock_boxscore):
+        mock_boxscore.return_value = {"Other Player": {"player_points": 20.0}}
+        with patch("app.services.nba_service.fetch_espn_scoreboard",
+                   return_value=self._prop_game()):
+            results = nba_service.resolve_pending_bets([self._prop_bet()])
+        self.assertEqual(results, [])
+
+    @patch("app.services.nba_service.fetch_espn_boxscore")
+    def test_resolve_player_prop_missing_player_name_skipped(self, mock_boxscore):
+        bet = self._prop_bet()
+        bet.player_name = None
+        with patch("app.services.nba_service.fetch_espn_scoreboard",
+                   return_value=self._prop_game()):
+            results = nba_service.resolve_pending_bets([bet])
+        self.assertEqual(results, [])
+        mock_boxscore.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
