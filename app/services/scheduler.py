@@ -7,12 +7,16 @@ creates its own app context since they execute on background threads.
 import logging
 from datetime import datetime, timezone
 
-from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.cron import CronTrigger
+try:
+    from apscheduler.schedulers.background import BackgroundScheduler
+    from apscheduler.triggers.cron import CronTrigger
+except ModuleNotFoundError:  # pragma: no cover - handled in environments without optional deps
+    BackgroundScheduler = None
+    CronTrigger = None
 
 logger = logging.getLogger(__name__)
 
-scheduler = BackgroundScheduler(timezone="US/Eastern")
+scheduler = BackgroundScheduler(timezone="US/Eastern") if BackgroundScheduler else None
 
 
 def _log_job(job_name, func):
@@ -148,6 +152,10 @@ def retrain_models():
 
 def init_scheduler(app):
     """Register all scheduled jobs.  Called once from create_app()."""
+    if scheduler is None or CronTrigger is None:
+        logger.warning("APScheduler not installed; background jobs disabled")
+        return
+
     if scheduler.running:
         return
 
