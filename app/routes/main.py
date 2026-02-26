@@ -1,3 +1,4 @@
+import logging
 from collections import defaultdict
 
 from flask import Blueprint, render_template
@@ -7,6 +8,8 @@ from sqlalchemy import func, case
 from app import db
 from app.enums import Outcome
 from app.models import Bet
+
+logger = logging.getLogger(__name__)
 
 main = Blueprint('main', __name__)
 
@@ -105,6 +108,17 @@ def dashboard():
         'current_streak': current_streak,
     }
 
+    # ── Today's top plays from the analysis engine ──────────────────
+    top_plays = []
+    try:
+        from app.services.projection_engine import ProjectionEngine
+        from app.services.value_detector import ValueDetector
+        engine = ProjectionEngine()
+        detector = ValueDetector(engine)
+        top_plays = detector.get_top_plays(min_edge=0.08, max_plays=5)
+    except Exception as exc:
+        logger.debug("Top plays unavailable: %s", exc)
+
     return render_template(
         'dashboard.html',
         stats=stats,
@@ -113,4 +127,5 @@ def dashboard():
         chart_values=chart_values,
         cumul_labels=cumul_labels,
         cumul_values=cumul_values,
+        top_plays=top_plays,
     )

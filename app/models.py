@@ -4,7 +4,7 @@ from datetime import datetime, timezone, date as date_type
 from typing import Optional
 
 from flask_login import UserMixin
-from sqlalchemy import func
+from sqlalchemy import func, UniqueConstraint
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from . import db
@@ -184,3 +184,163 @@ class GameSnapshot(db.Model):
     @property
     def total_score(self) -> int:
         return (self.home_score or 0) + (self.away_score or 0)
+
+
+class PlayerGameLog(db.Model):
+    """Cached player game log fetched from NBA API.
+
+    Only stores rows for players on tonight's slate.  Rows older than
+    ``cache_expires`` are pruned by the scheduler.
+    """
+
+    id = db.Column(db.Integer, primary_key=True)
+    player_id = db.Column(db.String(20), nullable=False, index=True)
+    player_name = db.Column(db.String(120), nullable=False)
+    team_abbr = db.Column(db.String(10), nullable=True)
+    game_date = db.Column(db.Date, nullable=False)
+    matchup = db.Column(db.String(40), nullable=True)
+    minutes = db.Column(db.Float, nullable=True)
+    pts = db.Column(db.Float, default=0)
+    reb = db.Column(db.Float, default=0)
+    ast = db.Column(db.Float, default=0)
+    stl = db.Column(db.Float, default=0)
+    blk = db.Column(db.Float, default=0)
+    tov = db.Column(db.Float, default=0)
+    fgm = db.Column(db.Float, default=0)
+    fga = db.Column(db.Float, default=0)
+    ftm = db.Column(db.Float, default=0)
+    fta = db.Column(db.Float, default=0)
+    fg3m = db.Column(db.Float, default=0)
+    fg3a = db.Column(db.Float, default=0)
+    plus_minus = db.Column(db.Float, default=0)
+    home_away = db.Column(db.String(4), nullable=True)
+    win_loss = db.Column(db.String(1), nullable=True)
+    context_flags = db.Column(db.Text, nullable=True)
+    cache_expires = db.Column(db.DateTime, nullable=True)
+    fetched_at = db.Column(
+        db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    __table_args__ = (
+        UniqueConstraint('player_id', 'game_date', name='uq_player_game_date'),
+    )
+
+    def __repr__(self) -> str:
+        return f"<PlayerGameLog {self.player_name} {self.game_date}>"
+
+
+class TeamDefenseSnapshot(db.Model):
+    """Daily snapshot of a team's defensive profile."""
+
+    id = db.Column(db.Integer, primary_key=True)
+    team_id = db.Column(db.String(20), nullable=False)
+    team_name = db.Column(db.String(100), nullable=False)
+    team_abbr = db.Column(db.String(10), nullable=True)
+    snapshot_date = db.Column(db.Date, nullable=False)
+    opp_pts_pg = db.Column(db.Float, nullable=True)
+    opp_reb_pg = db.Column(db.Float, nullable=True)
+    opp_ast_pg = db.Column(db.Float, nullable=True)
+    opp_3pm_pg = db.Column(db.Float, nullable=True)
+    opp_stl_pg = db.Column(db.Float, nullable=True)
+    opp_blk_pg = db.Column(db.Float, nullable=True)
+    opp_tov_pg = db.Column(db.Float, nullable=True)
+    pace = db.Column(db.Float, nullable=True)
+    def_rating = db.Column(db.Float, nullable=True)
+    opp_pts_allowed_pg = db.Column(db.Float, nullable=True)
+    opp_pts_allowed_sg = db.Column(db.Float, nullable=True)
+    opp_pts_allowed_sf = db.Column(db.Float, nullable=True)
+    opp_pts_allowed_pf = db.Column(db.Float, nullable=True)
+    opp_pts_allowed_c = db.Column(db.Float, nullable=True)
+    fetched_at = db.Column(
+        db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    __table_args__ = (
+        UniqueConstraint('team_id', 'snapshot_date', name='uq_team_defense_date'),
+    )
+
+    def __repr__(self) -> str:
+        return f"<TeamDefenseSnapshot {self.team_name} {self.snapshot_date}>"
+
+
+class InjuryReport(db.Model):
+    """Current injury designations for NBA players."""
+
+    id = db.Column(db.Integer, primary_key=True)
+    player_name = db.Column(db.String(120), nullable=False)
+    team = db.Column(db.String(100), nullable=True)
+    status = db.Column(db.String(20), nullable=False)
+    detail = db.Column(db.String(300), nullable=True)
+    date_reported = db.Column(db.Date, nullable=False)
+    fetched_at = db.Column(
+        db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    def __repr__(self) -> str:
+        return f"<InjuryReport {self.player_name} {self.status}>"
+
+
+class PickContext(db.Model):
+    """Snapshot of analysis context at bet placement time for Model 2 training."""
+
+    id = db.Column(db.Integer, primary_key=True)
+    bet_id = db.Column(
+        db.Integer, db.ForeignKey('bet.id'), nullable=False, unique=True
+    )
+    context_json = db.Column(db.Text, nullable=False)
+    projected_stat = db.Column(db.Float, nullable=True)
+    projected_edge = db.Column(db.Float, nullable=True)
+    confidence_tier = db.Column(db.String(20), nullable=True)
+    created_at = db.Column(
+        db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    bet = db.relationship('Bet', backref=db.backref('pick_context', uselist=False))
+
+    def __repr__(self) -> str:
+        return f"<PickContext bet_id={self.bet_id}>"
+
+    @property
+    def context(self) -> dict:
+        if self.context_json:
+            try:
+                return json.loads(self.context_json)
+            except (ValueError, TypeError):
+                return {}
+        return {}
+
+
+class ModelMetadata(db.Model):
+    """Tracks trained ML model versions."""
+
+    id = db.Column(db.Integer, primary_key=True)
+    model_name = db.Column(db.String(80), nullable=False)
+    model_type = db.Column(db.String(40), nullable=False)
+    version = db.Column(db.String(40), nullable=False)
+    file_path = db.Column(db.String(300), nullable=False)
+    training_date = db.Column(db.DateTime, nullable=False)
+    training_samples = db.Column(db.Integer, nullable=True)
+    val_mae = db.Column(db.Float, nullable=True)
+    val_accuracy = db.Column(db.Float, nullable=True)
+    is_active = db.Column(db.Boolean, nullable=False, default=True)
+    metadata_json = db.Column(db.Text, nullable=True)
+    created_at = db.Column(
+        db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    def __repr__(self) -> str:
+        return f"<ModelMetadata {self.model_name} v{self.version}>"
+
+
+class JobLog(db.Model):
+    """Audit log for scheduled background job executions."""
+
+    id = db.Column(db.Integer, primary_key=True)
+    job_name = db.Column(db.String(80), nullable=False)
+    started_at = db.Column(db.DateTime, nullable=False)
+    finished_at = db.Column(db.DateTime, nullable=True)
+    status = db.Column(db.String(20), nullable=False, default='running')
+    message = db.Column(db.Text, nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<JobLog {self.job_name} {self.status}>"

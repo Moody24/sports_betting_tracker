@@ -1,0 +1,263 @@
+"""Feature engineering for ML models.
+
+Builds feature vectors for both the projection model (Model 1) and the
+pick quality classifier (Model 2).
+"""
+
+import logging
+from datetime import date as date_type
+
+from app.services.stats_service import get_cached_logs, get_player_stats_summary
+from app.services.matchup_service import get_team_defense, get_matchup_adjustment, get_pace_factor
+from app.services.context_service import check_back_to_back, get_days_rest, get_player_injury_status
+
+logger = logging.getLogger(__name__)
+
+
+def build_projection_features(
+    player_id: str,
+    prop_type: str,
+    opponent_name: str = '',
+    is_home: bool = True,
+    prop_line: float = 0,
+) -> dict:
+    """Build feature dict for Model 1 (stat projection).
+
+    Features per player-prop prediction:
+    - avg_stat_last_5, avg_stat_last_10, avg_stat_season
+    - std_stat_last_5, std_stat_last_10
+    - min_last_3_avg
+    - home_away (binary)
+    - back_to_back (binary)
+    - days_rest
+    - opp_def_rating
+    - opp_stat_allowed_vs_position
+    - opp_pace
+    - games_played_this_season
+    - streak_zscore
+    - prop_line
+    """
+    logs = get_cached_logs(player_id, last_n=82)
+    summary = get_player_stats_summary(player_id, logs)
+
+    stat_key = _prop_to_stat_key(prop_type)
+    games_played = summary['games_played']
+
+    # Stat averages
+    avg_last_5 = summary['last_5'].get(stat_key, 0)
+    avg_last_10 = summary['last_10'].get(stat_key, 0)
+    avg_season = summary['season'].get(stat_key, 0)
+
+    # Variance
+    std_last_5 = _compute_std(logs[:5], stat_key)
+    std_last_10 = _compute_std(logs[:10], stat_key)
+
+    # Minutes trend (last 3)
+    min_last_3 = _average_stat(logs[:3], 'minutes')
+
+    # Defense
+    defense = get_team_defense(opponent_name) if opponent_name else {}
+    def_rating = defense.get('def_rating', 0)
+    matchup_adj = get_matchup_adjustment(opponent_name, prop_type) if opponent_name else 1.0
+    pace = get_pace_factor(opponent_name) if opponent_name else 1.0
+
+    # Streak z-score
+    z_score = _compute_streak_zscore(logs, stat_key)
+
+    return {
+        'avg_stat_last_5': avg_last_5,
+        'avg_stat_last_10': avg_last_10,
+        'avg_stat_season': avg_season,
+        'std_stat_last_5': std_last_5,
+        'std_stat_last_10': std_last_10,
+        'min_last_3_avg': min_last_3,
+        'home_away': 1 if is_home else 0,
+        'back_to_back': 0,  # Filled by caller with team context
+        'days_rest': 2,      # Default, filled by caller
+        'opp_def_rating': def_rating,
+        'opp_stat_allowed': matchup_adj,
+        'opp_pace': pace,
+        'games_played_this_season': games_played,
+        'streak_zscore': z_score,
+        'prop_line': prop_line,
+    }
+
+
+def build_pick_context_features(
+    player_name: str,
+    player_id: str,
+    prop_type: str,
+    prop_line: float,
+    american_odds: int,
+    projected_stat: float,
+    projected_edge: float,
+    confidence_tier: str,
+    opponent_name: str = '',
+    team_name: str = '',
+    is_home: bool = True,
+) -> dict:
+    """Build the full context snapshot for Model 2 (pick quality classifier).
+
+    This dict is stored as JSON in ``PickContext.context_json`` at bet
+    placement time.
+    """
+    logs = get_cached_logs(player_id, last_n=82)
+    summary = get_player_stats_summary(player_id, logs)
+    stat_key = _prop_to_stat_key(prop_type)
+
+    # Player context
+    season_avg = summary['season'].get(stat_key, 0)
+    std_dev = summary['std_dev'].get(stat_key, 0)
+    games = summary['games_played']
+    z_score = _compute_streak_zscore(logs, stat_key)
+
+    # Determine trend
+    if z_score > 1.5:
+        trend = 'hot'
+    elif z_score < -1.5:
+        trend = 'cold'
+    else:
+        trend = 'neutral'
+
+    # Hit rate vs this line (historical)
+    hit_rate = _compute_hit_rate(logs, stat_key, prop_line)
+
+    # Minutes trend
+    min_last_5 = _average_stat(logs[:5], 'minutes')
+    min_season = _average_stat(logs, 'minutes')
+    if min_season > 0:
+        min_ratio = min_last_5 / min_season
+        if min_ratio < 0.85:
+            min_trend = 'decreasing'
+        elif min_ratio > 1.15:
+            min_trend = 'increasing'
+        else:
+            min_trend = 'stable'
+    else:
+        min_trend = 'stable'
+
+    # Defense rank (approximate — use def_rating)
+    defense = get_team_defense(opponent_name) if opponent_name else {}
+    def_rating = defense.get('def_rating', 0)
+    pace = defense.get('pace', 0)
+
+    # Injury returning
+    injury = get_player_injury_status(player_name)
+    injury_returning = injury.get('status', '') in ('questionable', 'probable')
+
+    # B2B
+    b2b = check_back_to_back(team_name) if team_name else False
+    days_rest = 0 if b2b else (get_days_rest(team_name) if team_name else 2)
+
+    # Context flags
+    flags = []
+    matchup_adj = get_matchup_adjustment(opponent_name, prop_type) if opponent_name else 1.0
+    if matchup_adj > 1.05:
+        flags.append('favorable_matchup')
+    elif matchup_adj < 0.95:
+        flags.append('tough_matchup')
+    if trend == 'hot':
+        flags.append('hot_streak')
+    if trend == 'cold':
+        flags.append('cold_streak')
+    pace_factor = get_pace_factor(opponent_name) if opponent_name else 1.0
+    if pace_factor > 1.03:
+        flags.append('pace_boost')
+    if b2b:
+        flags.append('back_to_back')
+
+    return {
+        # Model 1 outputs
+        'projected_stat': projected_stat,
+        'projected_edge': projected_edge,
+        'confidence_tier': confidence_tier,
+        'model1_vs_line_diff': round(projected_stat - prop_line, 1),
+
+        # Player context
+        'player_last5_trend': trend,
+        'player_variance': round(std_dev, 2),
+        'player_games_this_season': games,
+        'player_hit_rate_vs_line': round(hit_rate, 3),
+
+        # Matchup context
+        'opp_defense_rating': round(def_rating, 1),
+        'opp_pace': round(pace, 1),
+        'opp_matchup_adj': round(matchup_adj, 3),
+
+        # Situational context
+        'back_to_back': b2b,
+        'home_game': is_home,
+        'days_rest': days_rest,
+        'minutes_trend': min_trend,
+        'injury_returning': injury_returning,
+
+        # Market context
+        'prop_line': prop_line,
+        'american_odds': american_odds,
+        'line_vs_season_avg': round(prop_line - season_avg, 1) if season_avg else 0,
+        'prop_type': prop_type,
+
+        # Context flags
+        'context_flags': flags,
+    }
+
+
+def _prop_to_stat_key(prop_type: str) -> str:
+    """Map prop market key to internal stat key."""
+    mapping = {
+        'player_points': 'pts',
+        'player_rebounds': 'reb',
+        'player_assists': 'ast',
+        'player_threes': 'fg3m',
+        'player_steals': 'stl',
+        'player_blocks': 'blk',
+    }
+    return mapping.get(prop_type, 'pts')
+
+
+def _compute_std(logs: list, stat_key: str) -> float:
+    """Compute standard deviation for a stat over a set of logs."""
+    if len(logs) < 2:
+        return 0.0
+    vals = [getattr(l, stat_key, 0) or 0 for l in logs]
+    mean = sum(vals) / len(vals)
+    variance = sum((v - mean) ** 2 for v in vals) / len(vals)
+    return round(variance ** 0.5, 2)
+
+
+def _average_stat(logs: list, stat_key: str) -> float:
+    """Compute average of a stat over a set of logs."""
+    if not logs:
+        return 0.0
+    vals = [getattr(l, stat_key, 0) or 0 for l in logs]
+    return round(sum(vals) / len(vals), 1) if vals else 0.0
+
+
+def _compute_streak_zscore(logs: list, stat_key: str, recent_n: int = 3) -> float:
+    """Calculate z-score of recent games vs season average."""
+    if len(logs) < 10:
+        return 0.0
+
+    recent_vals = [getattr(l, stat_key, 0) or 0 for l in logs[:recent_n]]
+    all_vals = [getattr(l, stat_key, 0) or 0 for l in logs]
+
+    recent_mean = sum(recent_vals) / len(recent_vals) if recent_vals else 0
+    season_mean = sum(all_vals) / len(all_vals) if all_vals else 0
+    season_std = (
+        (sum((v - season_mean) ** 2 for v in all_vals) / len(all_vals)) ** 0.5
+        if all_vals else 0
+    )
+
+    if season_std == 0:
+        return 0.0
+
+    return round((recent_mean - season_mean) / season_std, 2)
+
+
+def _compute_hit_rate(logs: list, stat_key: str, line: float) -> float:
+    """What percentage of games did the player exceed this line?"""
+    if not logs or line <= 0:
+        return 0.5
+
+    hits = sum(1 for l in logs if (getattr(l, stat_key, 0) or 0) > line)
+    return hits / len(logs)

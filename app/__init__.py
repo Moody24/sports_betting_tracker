@@ -95,10 +95,23 @@ def create_app(testing=False):
         db.session.rollback()
         return render_template('errors/500.html'), 500
 
+    # ── Register CLI commands ───────────────────────────────────
+    from app.cli import register_cli
+    register_cli(app)
+
+    # ── Auto-upgrade migrations (Docker entrypoint) ──────────────
     auto_upgrade = os.getenv('AUTO_DB_UPGRADE', 'false').lower() == 'true'
 
     if not app.config.get('TESTING') and auto_upgrade:
         with app.app_context():
             _upgrade()
+
+    # ── Start background scheduler (production only) ─────────────
+    if (
+        not app.config.get('TESTING')
+        and os.getenv('SCHEDULER_ENABLED', 'false').lower() == 'true'
+    ):
+        from app.services.scheduler import init_scheduler
+        init_scheduler(app)
 
     return app
