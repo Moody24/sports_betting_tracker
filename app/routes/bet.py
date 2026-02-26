@@ -19,6 +19,9 @@ from app.services.nba_service import (
     resolve_pending_bets,
     get_player_props,
 )
+from app.services.projection_engine import ProjectionEngine
+from app.services.value_detector import ValueDetector, quarter_kelly
+from app.services.stats_service import find_player_id, get_cached_logs, get_player_stats_summary
 
 logger = logging.getLogger(__name__)
 
@@ -768,3 +771,74 @@ def export_bets():
         mimetype='text/csv',
         headers={'Content-Disposition': f'attachment; filename="{filename}"'},
     )
+
+
+# ── NBA Prop Analysis ────────────────────────────────────────
+
+
+@bet.route('/nba/analysis')
+@login_required
+def nba_analysis():
+    """Display model-driven prop analysis with value detection."""
+    engine = ProjectionEngine()
+    detector = ValueDetector(engine)
+
+    try:
+        value_plays = detector.get_top_plays(min_edge=0.03, max_plays=50)
+    except Exception as exc:
+        logger.error("Analysis engine error: %s", exc)
+        value_plays = []
+
+    strong_count = sum(1 for p in value_plays if p.get('confidence_tier') == 'strong')
+    moderate_count = sum(1 for p in value_plays if p.get('confidence_tier') == 'moderate')
+    games_count = len(set(p.get('game_id', '') for p in value_plays if p.get('game_id')))
+
+    return render_template(
+        'bets/nba_analysis.html',
+        value_plays=value_plays,
+        strong_count=strong_count,
+        moderate_count=moderate_count,
+        games_count=games_count,
+    )
+
+
+@bet.route('/nba/player-analysis/<player_name>')
+@login_required
+def nba_player_analysis(player_name):
+    """Return detailed analysis data for a player as JSON (used by modal)."""
+    prop_type = request.args.get('prop_type', 'player_points')
+
+    player_id = find_player_id(player_name)
+    if not player_id:
+        return jsonify({'error': 'Player not found', 'game_log': [], 'breakdown': {}})
+
+    logs = get_cached_logs(player_id, last_n=10)
+    summary = get_player_stats_summary(player_id, logs)
+
+    engine = ProjectionEngine()
+    projection = engine.project_stat(player_name, prop_type)
+
+    game_log = []
+    for log in logs:
+        game_log.append({
+            'date': log.game_date.strftime('%b %d') if log.game_date else '',
+            'matchup': log.matchup or '',
+            'minutes': round(log.minutes or 0, 1),
+            'pts': int(log.pts or 0),
+            'reb': int(log.reb or 0),
+            'ast': int(log.ast or 0),
+            'fg3m': int(log.fg3m or 0),
+        })
+
+    return jsonify({
+        'player': player_name,
+        'prop_type': prop_type,
+        'game_log': game_log,
+        'summary': summary.get('season', {}),
+        'breakdown': projection.get('breakdown', {}),
+        'context_notes': projection.get('context_notes', []),
+        'projection': projection.get('projection', 0),
+        'std_dev': projection.get('std_dev', 0),
+        'z_score': projection.get('z_score', 0),
+        'games_played': projection.get('games_played', 0),
+    })
