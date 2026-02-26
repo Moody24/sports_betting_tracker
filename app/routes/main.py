@@ -1,9 +1,9 @@
 import logging
 from collections import defaultdict
 
-from flask import Blueprint, render_template
+from flask import Blueprint, jsonify, render_template
 from flask_login import current_user, login_required
-from sqlalchemy import func, case
+from sqlalchemy import func, case, text
 
 from app import db
 from app.enums import Outcome
@@ -12,6 +12,17 @@ from app.models import Bet
 logger = logging.getLogger(__name__)
 
 main = Blueprint('main', __name__)
+
+
+@main.route('/health')
+def health():
+    """Health check endpoint used by Railway to verify the service is running."""
+    try:
+        db.session.execute(text('SELECT 1'))
+        return jsonify(status='healthy', database='connected'), 200
+    except Exception as exc:
+        logger.error('Health check failed: %s', exc)
+        return jsonify(status='unhealthy', database='disconnected'), 503
 
 
 @main.route('/')
