@@ -135,6 +135,7 @@ class ValueDetector:
             'z_score': proj.get('z_score', 0),
             'games_played': games_played,
             'confidence': proj.get('confidence', 'low'),
+            'projection_source': proj.get('projection_source', 'heuristic'),
             'breakdown': proj.get('breakdown', {}),
             'game_id': game_id,
         }
@@ -177,6 +178,7 @@ class ValueDetector:
             'z_score': 0,
             'games_played': 0,
             'confidence': 'low',
+            'projection_source': 'heuristic',
             'breakdown': {},
             'game_id': game_id,
         }

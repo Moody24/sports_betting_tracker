@@ -265,7 +265,18 @@ def retrain_all_models() -> dict:
     """Retrain all stat-type models.  Called weekly by the scheduler."""
     results = {}
     for stat_type in STAT_TYPES:
-        results[stat_type] = train_model(stat_type)
+        model_result = train_model(stat_type)
+        results[stat_type] = model_result
+        if model_result.get('error'):
+            logger.info('Model %s skipped: %s', stat_type, model_result['error'])
+        else:
+            logger.info(
+                'Model %s trained with %s samples (val=%s, mae=%s)',
+                stat_type,
+                model_result.get('train_samples', 0),
+                model_result.get('val_samples', 0),
+                model_result.get('mae'),
+            )
     return results
 
 

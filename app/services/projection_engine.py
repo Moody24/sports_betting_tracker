@@ -6,6 +6,7 @@ performance, seasonal averages, matchup context, and situational modifiers.
 
 import logging
 import math
+import os
 from typing import Optional
 
 from app.models import PlayerGameLog
@@ -28,6 +29,13 @@ PROP_STAT_MAP = {
     'player_threes': 'fg3m',
     'player_steals': 'stl',
     'player_blocks': 'blk',
+}
+
+ML_STAT_MAP = {
+    'player_points': 'player_points',
+    'player_rebounds': 'player_rebounds',
+    'player_assists': 'player_assists',
+    'player_threes': 'player_threes',
 }
 
 
@@ -169,6 +177,16 @@ class ProjectionEngine:
         # Confidence based on sample size and variance
         confidence = self._compute_confidence(games_played, std_dev, season_avg)
 
+        projection_source = 'heuristic'
+        if self._use_ml_projections() and games_played >= 10 and prop_type in ML_STAT_MAP:
+            ml_features = self._build_ml_features(logs, stat_key, is_home)
+            if ml_features:
+                from app.services.ml_model import predict_stat
+                ml_prediction = predict_stat(ML_STAT_MAP[prop_type], ml_features)
+                if ml_prediction > 0:
+                    final_projection = ml_prediction
+                    projection_source = 'ml'
+
         return {
             'projection': final_projection,
             'confidence': confidence,
@@ -176,6 +194,7 @@ class ProjectionEngine:
             'std_dev': round(std_dev, 2),
             'z_score': round(z_score, 2),
             'games_played': games_played,
+            'projection_source': projection_source,
             'breakdown': {
                 'last_5_avg': round(last_5_avg, 1),
                 'last_10_avg': round(last_10_avg, 1),
@@ -245,6 +264,39 @@ class ProjectionEngine:
 
         return 'medium'
 
+    def _use_ml_projections(self) -> bool:
+        return os.getenv('USE_ML_PROJECTIONS', 'false').lower() == 'true'
+
+    def _build_ml_features(self, logs: list, stat_key: str, is_home: bool) -> dict:
+        if len(logs) < 10:
+            return {}
+
+        recent = logs[:10]
+        last_5 = recent[:5]
+        last_10 = recent[:10]
+
+        def _avg(game_list, key):
+            vals = [getattr(g, key, 0) or 0 for g in game_list]
+            return sum(vals) / len(vals) if vals else 0
+
+        def _std(game_list, key):
+            vals = [getattr(g, key, 0) or 0 for g in game_list]
+            if len(vals) < 2:
+                return 0
+            mean = sum(vals) / len(vals)
+            return (sum((v - mean) ** 2 for v in vals) / len(vals)) ** 0.5
+
+        return {
+            'avg_stat_last_5': _avg(last_5, stat_key),
+            'avg_stat_last_10': _avg(last_10, stat_key),
+            'avg_stat_season': _avg(logs, stat_key),
+            'std_stat_last_5': _std(last_5, stat_key),
+            'std_stat_last_10': _std(last_10, stat_key),
+            'min_last_3_avg': _avg(logs[:3], 'minutes'),
+            'home_away': 1 if is_home else 0,
+            'games_played': len(logs),
+        }
+
     def _empty_projection(self) -> dict:
         return {
             'projection': 0,
@@ -253,6 +305,7 @@ class ProjectionEngine:
             'std_dev': 0,
             'z_score': 0,
             'games_played': 0,
+            'projection_source': 'heuristic',
             'breakdown': {},
         }
 

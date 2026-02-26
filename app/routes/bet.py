@@ -841,4 +841,5 @@ def nba_player_analysis(player_name):
         'std_dev': projection.get('std_dev', 0),
         'z_score': projection.get('z_score', 0),
         'games_played': projection.get('games_played', 0),
+        'projection_source': projection.get('projection_source', 'heuristic'),
     })
