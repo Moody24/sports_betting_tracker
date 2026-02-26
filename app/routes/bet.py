@@ -30,15 +30,17 @@ def _escape_like(value: str) -> str:
     return value.replace('\\', '\\\\').replace('%', r'\%').replace('_', r'\_')
 
 
-@bet.route('/bets', methods=['GET'])
-@login_required
-def place_bet():
-    query = Bet.query.filter_by(user_id=current_user.id)
+def _filtered_bets_query(user_id: int, args) -> "db.Query":
+    """Build a filtered Bet query from request args.
 
-    status = request.args.get('status', '').strip()
-    search_query = request.args.get('q', '').strip()
-    start_date = request.args.get('start_date', '').strip()
-    end_date = request.args.get('end_date', '').strip()
+    Shared by the bet list and CSV export endpoints to avoid duplication.
+    """
+    query = Bet.query.filter_by(user_id=user_id)
+
+    status = args.get('status', '').strip()
+    search_query = args.get('q', '').strip()
+    start_date = args.get('start_date', '').strip()
+    end_date = args.get('end_date', '').strip()
 
     if status:
         query = query.filter(Bet.outcome == status)
@@ -53,15 +55,27 @@ def place_bet():
             start_dt = datetime.strptime(start_date, '%Y-%m-%d')
             query = query.filter(Bet.match_date >= start_dt)
         except ValueError:
-            start_date = ''
+            pass
     if end_date:
         try:
             end_dt = datetime.strptime(end_date, '%Y-%m-%d')
             query = query.filter(Bet.match_date <= end_dt)
         except ValueError:
-            end_date = ''
+            pass
 
+    return query
+
+
+@bet.route('/bets', methods=['GET'])
+@login_required
+def place_bet():
+    query = _filtered_bets_query(current_user.id, request.args)
     bets = query.order_by(Bet.match_date.desc()).all()
+
+    status = request.args.get('status', '').strip()
+    search_query = request.args.get('q', '').strip()
+    start_date = request.args.get('start_date', '').strip()
+    end_date = request.args.get('end_date', '').strip()
 
     # Group parlay legs so the template can render them together
     parlay_groups: dict = {}
@@ -380,7 +394,15 @@ def nba_place_bets():
     parlay_id = Bet.generate_parlay_id() if is_parlay else None
 
     created = []
-    for leg in legs:
+    errors = []
+    for i, leg in enumerate(legs):
+        if not isinstance(leg, dict):
+            errors.append(f"Leg {i + 1}: must be an object")
+            continue
+        if not leg.get("team_a") or not leg.get("team_b"):
+            errors.append(f"Leg {i + 1}: team_a and team_b are required")
+            continue
+
         try:
             match_date = datetime.strptime(leg.get("match_date", ""), "%Y-%m-%d")
         except ValueError:
@@ -398,8 +420,8 @@ def nba_place_bets():
 
         bet_obj = Bet(
             user_id=current_user.id,
-            team_a=leg.get("team_a", ""),
-            team_b=leg.get("team_b", ""),
+            team_a=str(leg["team_a"])[:80],
+            team_b=str(leg["team_b"])[:80],
             match_date=match_date,
             bet_amount=stake,
             outcome=Outcome.PENDING.value,
@@ -407,8 +429,8 @@ def nba_place_bets():
             over_under_line=prop_line_val,
             american_odds=american_odds_val,
             external_game_id=leg.get("game_id") or None,
-            player_name=leg.get("player_name", ""),
-            prop_type=leg.get("prop_type", ""),
+            player_name=str(leg.get("player_name", ""))[:100],
+            prop_type=str(leg.get("prop_type", ""))[:40],
             prop_line=prop_line_val,
             is_parlay=is_parlay,
             parlay_id=parlay_id,
@@ -417,6 +439,10 @@ def nba_place_bets():
         )
         db.session.add(bet_obj)
         created.append(bet_obj)
+
+    if errors:
+        db.session.rollback()
+        return jsonify({"error": "; ".join(errors)}), 400
 
     db.session.commit()
 
@@ -471,15 +497,23 @@ def manual_parlay():
         return jsonify({"error": "Stake must be greater than zero"}), 400
     parlay_id = Bet.generate_parlay_id()
 
-    for leg in legs:
+    errors = []
+    for i, leg in enumerate(legs):
+        if not isinstance(leg, dict):
+            errors.append(f"Leg {i + 1}: must be an object")
+            continue
+        if not leg.get("team_a") or not leg.get("team_b"):
+            errors.append(f"Leg {i + 1}: team_a and team_b are required")
+            continue
+
         try:
             match_date = datetime.strptime(leg.get("match_date", ""), "%Y-%m-%d")
         except ValueError:
             match_date = datetime.now(timezone.utc)
 
         bet_type = leg.get("bet_type", BetType.MONEYLINE.value)
-        player_name = leg.get("player_name") or None
-        prop_type = leg.get("prop_type") or None
+        player_name = str(leg.get("player_name") or "")[:100] or None
+        prop_type = str(leg.get("prop_type") or "")[:40] or None
         prop_line = None
         if leg.get("prop_line"):
             try:
@@ -496,8 +530,8 @@ def manual_parlay():
 
         bet_obj = Bet(
             user_id=current_user.id,
-            team_a=leg.get("team_a", ""),
-            team_b=leg.get("team_b", ""),
+            team_a=str(leg["team_a"])[:80],
+            team_b=str(leg["team_b"])[:80],
             match_date=match_date,
             bet_amount=stake,
             outcome=outcome,
@@ -506,13 +540,17 @@ def manual_parlay():
             prop_line=prop_line,
             player_name=player_name,
             prop_type=prop_type,
-            picked_team=leg.get("picked_team") or None,
+            picked_team=str(leg.get("picked_team") or "")[:80] or None,
             external_game_id=leg.get("game_id") or None,
             is_parlay=True,
             parlay_id=parlay_id,
             source=BetSource.MANUAL.value,
         )
         db.session.add(bet_obj)
+
+    if errors:
+        db.session.rollback()
+        return jsonify({"error": "; ".join(errors)}), 400
 
     db.session.commit()
     return jsonify({
@@ -693,32 +731,7 @@ def delete_bet(bet_id):
 @login_required
 def export_bets():
     """Export all (optionally filtered) bets for the current user as a CSV file."""
-    query = Bet.query.filter_by(user_id=current_user.id)
-
-    status = request.args.get('status', '').strip()
-    search_query = request.args.get('q', '').strip()
-    start_date = request.args.get('start_date', '').strip()
-    end_date = request.args.get('end_date', '').strip()
-
-    if status:
-        query = query.filter(Bet.outcome == status)
-    if search_query:
-        safe_q = _escape_like(search_query)
-        query = query.filter(
-            Bet.team_a.ilike(f'%{safe_q}%', escape='\\') |
-            Bet.team_b.ilike(f'%{safe_q}%', escape='\\')
-        )
-    if start_date:
-        try:
-            query = query.filter(Bet.match_date >= datetime.strptime(start_date, '%Y-%m-%d'))
-        except ValueError:
-            pass
-    if end_date:
-        try:
-            query = query.filter(Bet.match_date <= datetime.strptime(end_date, '%Y-%m-%d'))
-        except ValueError:
-            pass
-
+    query = _filtered_bets_query(current_user.id, request.args)
     bets = query.order_by(Bet.match_date.desc()).all()
 
     output = io.StringIO()

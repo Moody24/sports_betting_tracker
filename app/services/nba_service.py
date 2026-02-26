@@ -6,6 +6,7 @@ from typing import Optional
 import requests
 
 from app.enums import BetType, Outcome
+from app.services.base import SportService, SPORT_REGISTRY
 
 logger = logging.getLogger(__name__)
 
@@ -550,3 +551,52 @@ def resolve_pending_bets(pending_bets: list) -> list[tuple]:
             results.append((bet, outcome, actual_stat))
 
     return results
+
+
+# ── Concrete SportService implementation ─────────────────────────────
+
+
+class NBAService(SportService):
+    """NBA-specific implementation backed by ESPN + The Odds API."""
+
+    @property
+    def sport_key(self) -> str:
+        return "nba"
+
+    @property
+    def display_name(self) -> str:
+        return "NBA"
+
+    def fetch_scoreboard(self, date_str: Optional[str] = None) -> list[dict]:
+        return fetch_espn_scoreboard(date_str)
+
+    def fetch_boxscore(self, game_id: str) -> dict:
+        return fetch_espn_boxscore(game_id)
+
+    def fetch_odds_combined(self) -> tuple:
+        return fetch_odds_combined()
+
+    def fetch_odds_events(self) -> dict:
+        return fetch_odds_events()
+
+    def fetch_upcoming_games(self) -> list[dict]:
+        return fetch_upcoming_games()
+
+    def fetch_player_props(self, event_id: str) -> dict:
+        return fetch_player_props_for_event(event_id)
+
+    def get_todays_games(self) -> list[dict]:
+        return get_todays_games()
+
+    def get_player_props_for_game(self, game_id: str, games: Optional[list[dict]] = None) -> dict:
+        return get_player_props(game_id, games)
+
+    def resolve_pending_bets(self, pending_bets: list) -> list[tuple]:
+        return resolve_pending_bets(pending_bets)
+
+    def get_prop_markets(self) -> list[str]:
+        return list(PLAYER_PROP_MARKETS)
+
+
+# Register so other code can do  get_sport_service("nba")
+SPORT_REGISTRY["nba"] = NBAService()
