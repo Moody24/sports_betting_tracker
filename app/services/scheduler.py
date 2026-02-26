@@ -4,6 +4,7 @@ Jobs run inside the Flask app process on Railway.  Each job function
 creates its own app context since they execute on background threads.
 """
 
+import fcntl
 import logging
 from datetime import datetime, timezone
 
@@ -17,6 +18,28 @@ except ModuleNotFoundError:  # pragma: no cover - handled in environments withou
 logger = logging.getLogger(__name__)
 
 scheduler = BackgroundScheduler(timezone="US/Eastern") if BackgroundScheduler else None
+
+
+_scheduler_lock_fd = None
+
+
+def _acquire_scheduler_lock(lock_path='/tmp/sports_betting_scheduler.lock'):
+    """Ensure only one process in the container starts APScheduler."""
+    global _scheduler_lock_fd
+
+    if _scheduler_lock_fd is not None:
+        return True
+
+    lock_fd = open(lock_path, 'w', encoding='utf-8')
+    try:
+        fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        lock_fd.close()
+        return False
+
+    _scheduler_lock_fd = lock_fd
+    return True
+
 
 
 def _log_job(job_name, func):
@@ -157,6 +180,10 @@ def init_scheduler(app):
         return
 
     if scheduler.running:
+        return
+
+    if not _acquire_scheduler_lock():
+        logger.info("Skipping APScheduler startup in this process (lock already held)")
         return
 
     # Morning data refresh (10:00 AM ET)
