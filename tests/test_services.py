@@ -82,6 +82,26 @@ def _seed_defense(team_name='Boston Celtics', team_abbr='BOS',
     return snap
 
 
+
+
+class _FakeDataFrame:
+    """Minimal DataFrame-like object for nba_api endpoint mocks in tests."""
+
+    def __init__(self, rows):
+        self._rows = list(rows)
+
+    @property
+    def empty(self):
+        return len(self._rows) == 0
+
+    def head(self, n):
+        return _FakeDataFrame(self._rows[:n])
+
+    def iterrows(self):
+        for idx, row in enumerate(self._rows):
+            yield idx, row
+
+
 def _seed_injury(player_name='LeBron James', status='questionable'):
     report = InjuryReport(
         player_name=player_name,
@@ -224,10 +244,9 @@ class TestStatsService(BaseTestCase):
     # -- fetch_player_game_logs --
 
     def test_fetch_player_game_logs_success(self):
-        import pandas as pd
         from app.services import stats_service
 
-        df = pd.DataFrame([{
+        df = _FakeDataFrame([{
             'PLAYER_NAME': 'LeBron James', 'TEAM_ABBREVIATION': 'LAL',
             'GAME_DATE': 'Feb 20, 2026', 'MATCHUP': 'LAL vs. BOS',
             'MIN': '35:00', 'PTS': 28, 'REB': 7, 'AST': 8,
@@ -621,10 +640,9 @@ class TestMatchupService(BaseTestCase):
     # -- fetch_team_defense_stats --
 
     def test_fetch_team_defense_stats_success(self):
-        import pandas as pd
         from app.services import matchup_service
 
-        df = pd.DataFrame([{
+        df = _FakeDataFrame([{
             'TEAM_ID': 1, 'TEAM_NAME': 'Boston Celtics',
             'TEAM_ABBREVIATION': 'BOS',
             'OPP_PTS': 108, 'OPP_REB': 42, 'OPP_AST': 24,
