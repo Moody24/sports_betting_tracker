@@ -1,6 +1,6 @@
-from flask import Blueprint, render_template, redirect, url_for, flash
-from flask_login import login_user, logout_user, login_required, current_user
-from sqlalchemy.exc import IntegrityError
+from flask import Blueprint, render_template, redirect, request, url_for, flash
+from flask_login import login_user, logout_user, current_user
+from sqlalchemy.exc import DBAPIError, IntegrityError, OperationalError
 
 from app import db, limiter
 from app.forms import LoginForm, LogoutForm, RegisterForm
@@ -61,14 +61,21 @@ def login():
     return render_template('login.html', form=form)
 
 
-@auth.route('/logout', methods=['POST'])
-@login_required
+@auth.route('/logout', methods=['GET', 'POST'])
 def logout():
     form = LogoutForm()
-    if not form.validate_on_submit():
+    if current_user.is_authenticated and request.method == 'POST' and not form.validate_on_submit():
         flash('Invalid logout request.', 'danger')
-        return redirect(url_for('main.home'))
+        return redirect(url_for('auth.login'))
 
-    logout_user()
-    flash('Logged out successfully.', 'success')
-    return redirect(url_for('main.home'))
+    try:
+        if current_user.is_authenticated:
+            logout_user()
+            flash('Logged out successfully.', 'success')
+        else:
+            flash('You are already logged out.', 'info')
+    except (OperationalError, DBAPIError):
+        db.session.rollback()
+        flash('Session ended. Please log in again.', 'info')
+
+    return redirect(url_for('auth.login'))

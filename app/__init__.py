@@ -9,6 +9,7 @@ from flask_login import LoginManager, current_user
 from flask_migrate import Migrate, upgrade as _upgrade
 from flask_sqlalchemy import SQLAlchemy
 from flask_wtf.csrf import CSRFProtect
+from sqlalchemy.exc import DBAPIError, OperationalError
 
 logging.basicConfig(
     level=logging.INFO,
@@ -43,6 +44,15 @@ def create_app(testing=False):
         db_url = db_url.replace('postgres://', 'postgresql://', 1)
     app.config['SQLALCHEMY_DATABASE_URI'] = db_url
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+    engine_options = dict(app.config.get('SQLALCHEMY_ENGINE_OPTIONS', {}))
+    engine_options.update(
+        {
+            'pool_pre_ping': True,
+            'pool_recycle': 300,
+            'pool_timeout': 30,
+        }
+    )
+    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = engine_options
     app.config['WTF_CSRF_ENABLED'] = True
     app.config['SESSION_COOKIE_HTTPONLY'] = True
     app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
@@ -65,7 +75,11 @@ def create_app(testing=False):
 
     @login_manager.user_loader
     def load_user(user_id):
-        return db.session.get(User, int(user_id))
+        try:
+            return db.session.get(User, int(user_id))
+        except (OperationalError, DBAPIError):
+            db.session.rollback()
+            return None
 
     @app.context_processor
     def inject_user():
