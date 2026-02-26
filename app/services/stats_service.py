@@ -98,7 +98,7 @@ def _parse_minutes(min_str) -> float:
         return 0.0
 
 
-def fetch_player_game_logs(player_id: str, season: str = None, last_n: int = 15):
+def fetch_player_game_logs(player_id: str, season: str = None, last_n: Optional[int] = 15):
     """Fetch recent game logs for a player from the NBA API.
 
     Returns a list of dicts with normalised stat keys, or an empty list
@@ -131,7 +131,9 @@ def fetch_player_game_logs(player_id: str, season: str = None, last_n: int = 15)
         return []
 
     rows = []
-    for _, row in df.head(last_n).iterrows():
+    frame = df if last_n is None else df.head(last_n)
+
+    for _, row in frame.iterrows():
         matchup = str(row.get('MATCHUP', ''))
         home_away = 'home' if 'vs.' in matchup else 'away'
         rows.append({
@@ -204,13 +206,21 @@ def find_player_id(player_name: str) -> Optional[str]:
     return None
 
 
-def cache_player_logs(player_id: str, game_logs: list, ttl_days: int = 7):
+def cache_player_logs(
+    player_id: str,
+    game_logs: list,
+    ttl_days: int = 7,
+    commit: bool = True,
+) -> dict:
     """Upsert game logs into the database cache.
 
     Existing rows for the same player+date are updated; new rows are inserted.
     Sets cache_expires to ``ttl_days`` from now.
     """
     expires = datetime.now(timezone.utc) + timedelta(days=ttl_days)
+
+    inserted = 0
+    updated = 0
 
     for log in game_logs:
         existing = PlayerGameLog.query.filter_by(
@@ -224,6 +234,7 @@ def cache_player_logs(player_id: str, game_logs: list, ttl_days: int = 7):
                     setattr(existing, key, val)
             existing.cache_expires = expires
             existing.fetched_at = datetime.now(timezone.utc)
+            updated += 1
         else:
             row = PlayerGameLog(
                 player_id=str(player_id),
@@ -251,8 +262,12 @@ def cache_player_logs(player_id: str, game_logs: list, ttl_days: int = 7):
                 cache_expires=expires,
             )
             db.session.add(row)
+            inserted += 1
 
-    db.session.commit()
+    if commit:
+        db.session.commit()
+
+    return {'inserted': inserted, 'updated': updated, 'total': inserted + updated}
 
 
 def get_cached_logs(player_id: str, last_n: int = 15) -> list:

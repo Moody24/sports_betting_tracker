@@ -116,8 +116,10 @@ def create_app(testing=False):
             _upgrade()
 
     # ── Start background scheduler (production only) ─────────────
+    running_cli = os.getenv('FLASK_RUN_FROM_CLI', 'false').lower() == 'true' or os.getenv('RUNNING_CLI', '0') == '1'
     if (
         not app.config.get('TESTING')
+        and not running_cli
         and os.getenv('SCHEDULER_ENABLED', 'false').lower() == 'true'
     ):
         from app.services.scheduler import init_scheduler

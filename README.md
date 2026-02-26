@@ -240,3 +240,67 @@ If you are working in GitHub Codespaces and want to confirm you actually pulled 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ---
+
+## NBA Backfill + ML Training Bootstrap
+
+### Backfill historical game logs
+Use the new CLI command to ingest full-season NBA player game logs into `PlayerGameLog`:
+
+```bash
+flask --app run.py backfill_player_logs --seasons 2023-24 2024-25 2025-26
+```
+
+Useful options:
+
+```bash
+# only active players (default) and cap for smoke tests
+flask --app run.py backfill_player_logs --seasons 2024-25 --players active --max-players 5
+
+# all players, slower but broader historical data
+flask --app run.py backfill_player_logs --seasons 2023-24 2024-25 --players all --sleep 0.8
+
+# explicit players only
+flask --app run.py backfill_player_logs --seasons 2024-25 --player-ids "2544,201935"
+
+# dry run
+flask --app run.py backfill_player_logs --seasons 2025-26 --max-players 20 --dry-run
+
+# run training after backfill
+flask --app run.py backfill_player_logs --seasons 2023-24 2024-25 2025-26 --train-after
+```
+
+Notes:
+- `--resume` is enabled by default and skips seasons that already have rows for that player.
+- Runs are idempotent (upsert on `player_id + game_date`).
+- NBA API can rate limit bursts; recommended `--sleep` is `0.6` or higher in production.
+
+### Train models
+You can retrain separately at any time:
+
+```bash
+flask --app run.py retrain
+```
+
+Model files are saved under `app/ml_models/`, and metadata is recorded in `ModelMetadata`.
+
+### Inspect status
+Use diagnostics command:
+
+```bash
+flask --app run.py model_status
+```
+
+It prints:
+- `PlayerGameLog` row and unique-player counts.
+- recent `ModelMetadata` records (including active models).
+- last 20 `JobLog` rows (including `backfill_player_logs` runs).
+- current `USE_ML_PROJECTIONS` mode.
+
+### Optional ML projection usage in analysis
+ML projection usage is opt-in for safety:
+
+```bash
+USE_ML_PROJECTIONS=true
+```
+
+When enabled and a trained model is available, analysis can use ML predictions for points/rebounds/assists/3PM; otherwise it falls back to heuristic projections. Analysis payloads include `projection_source` (`"ml"` or `"heuristic"`).
