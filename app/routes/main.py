@@ -2,7 +2,10 @@ from collections import defaultdict
 
 from flask import Blueprint, render_template
 from flask_login import current_user, login_required
+from sqlalchemy import func, case
 
+from app import db
+from app.enums import Outcome
 from app.models import Bet
 
 main = Blueprint('main', __name__)
@@ -16,27 +19,45 @@ def home():
 @main.route('/dashboard')
 @login_required
 def dashboard():
-    user_bets = (
-        Bet.query.filter_by(user_id=current_user.id)
+    uid = current_user.id
+
+    # ── Aggregate stats in a single SQL query ─────────────────────────
+    agg = db.session.query(
+        func.count(Bet.id).label('total'),
+        func.coalesce(func.sum(case((Bet.outcome == Outcome.WIN.value, 1), else_=0)), 0).label('wins'),
+        func.coalesce(func.sum(case((Bet.outcome == Outcome.LOSE.value, 1), else_=0)), 0).label('losses'),
+        func.coalesce(func.sum(Bet.bet_amount), 0.0).label('wagered'),
+    ).filter_by(user_id=uid).one()
+
+    total_bets = int(agg.total)
+    wins = int(agg.wins)
+    losses = int(agg.losses)
+    wagered = float(agg.wagered)
+
+    # ── Recent bets (capped by SQL LIMIT) ─────────────────────────────
+    recent_bets = (
+        Bet.query.filter_by(user_id=uid)
+        .order_by(Bet.created_at.desc())
+        .limit(7)
+        .all()
+    )
+
+    # ── Net P/L (needs per-bet odds calculation, but only graded bets) ─
+    units_won = current_user.net_profit_loss()
+    roi = (units_won / wagered * 100) if wagered else 0
+    graded_count = wins + losses
+    win_pct = (wins / graded_count * 100) if graded_count else 0
+
+    # ── Streak (only need recent graded bets until streak breaks) ─────
+    streak = 0
+    streak_type = 'No streak'
+    streak_bets = (
+        Bet.query.filter_by(user_id=uid)
+        .filter(Bet.outcome.in_([Outcome.WIN.value, Outcome.LOSE.value]))
         .order_by(Bet.created_at.desc())
         .all()
     )
-    recent_bets = user_bets[:7]
-
-    total_bets = current_user.total_bets()
-    wins = current_user.total_wins()
-    losses = current_user.total_losses()
-    wagered = current_user.total_amount_wagered()
-    units_won = current_user.net_profit_loss()
-    roi = (units_won / wagered * 100) if wagered else 0
-    graded_bets = wins + losses
-    win_pct = (wins / graded_bets * 100) if graded_bets else 0
-
-    streak = 0
-    streak_type = 'No streak'
-    for b in user_bets:
-        if b.outcome not in {'win', 'lose'}:
-            continue
+    for b in streak_bets:
         if streak == 0:
             streak = 1
             streak_type = b.outcome
@@ -46,6 +67,7 @@ def dashboard():
             break
     current_streak = f"{streak} {streak_type.title()}" if streak else 'No streak'
 
+    # ── Daily P/L chart (recent bets only) ────────────────────────────
     grouped_units = defaultdict(float)
     for b in reversed(recent_bets):
         label = b.match_date.strftime('%b %d')
@@ -54,18 +76,22 @@ def dashboard():
     chart_labels = list(grouped_units.keys())
     chart_values = [round(v, 2) for v in grouped_units.values()]
 
-    # Cumulative P/L over all graded bets (oldest first)
-    graded_bets = [b for b in reversed(user_bets) if b.outcome in ('win', 'lose')]
+    # ── Cumulative P/L (last 30 graded bets, oldest first) ───────────
+    cumul_bets = (
+        Bet.query.filter_by(user_id=uid)
+        .filter(Bet.outcome.in_([Outcome.WIN.value, Outcome.LOSE.value]))
+        .order_by(Bet.match_date.desc())
+        .limit(30)
+        .all()
+    )
+    cumul_bets.reverse()  # oldest first
     cumulative = 0.0
     cumul_labels = []
     cumul_values = []
-    for b in graded_bets:
+    for b in cumul_bets:
         cumulative = round(cumulative + b.profit_loss(), 2)
         cumul_labels.append(b.match_date.strftime('%b %d'))
         cumul_values.append(cumulative)
-    # Keep last 30 points to avoid overly dense chart
-    cumul_labels = cumul_labels[-30:]
-    cumul_values = cumul_values[-30:]
 
     stats = {
         'total_bets': total_bets,
