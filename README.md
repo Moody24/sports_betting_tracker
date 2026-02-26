@@ -95,9 +95,16 @@ A web application built with **Flask**, designed to help users manage and track 
      flask db migrate
      flask db upgrade heads
      ```
-   - In Docker, the container entrypoint runs `flask --app run.py db upgrade heads` automatically before Gunicorn starts.
+   - In Docker/Railway, the container entrypoint runs `SCHEDULER_ENABLED=false flask --app run.py db upgrade heads` automatically before Gunicorn starts, then starts Gunicorn with your normal runtime env.
 
 ---
+
+
+
+## Deployment
+
+- **Railway** is sufficient to deploy and run this app (Docker build + Gunicorn).
+- **Vercel is optional**. In this repo, `vercel.json` is only a proxy/edge layer to a Railway backend. You can remove Vercel entirely if you do not need Vercel-specific DNS/edge features.
 
 ## What Has Been Done So Far
 
