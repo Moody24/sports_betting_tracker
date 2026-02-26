@@ -33,7 +33,11 @@ def create_app(testing=False):
                 "Set it before starting the application."
             )
     app.config['SECRET_KEY'] = secret_key
-    app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'sqlite:///app.db')
+    db_url = os.getenv('DATABASE_URL', 'sqlite:///app.db')
+    # Railway Postgres URLs may start with postgres:// — SQLAlchemy 2.x requires postgresql://
+    if db_url.startswith('postgres://'):
+        db_url = db_url.replace('postgres://', 'postgresql://', 1)
+    app.config['SQLALCHEMY_DATABASE_URI'] = db_url
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     app.config['WTF_CSRF_ENABLED'] = True
     app.config['SESSION_COOKIE_HTTPONLY'] = True

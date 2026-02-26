@@ -1,11 +1,12 @@
 """Gunicorn configuration for production deployment."""
-import multiprocessing
+import os
 
-# Network
-bind = "0.0.0.0:8000"
+# Network — Railway sets PORT dynamically; fall back to 8000 for local Docker
+bind = f"0.0.0.0:{os.getenv('PORT', '8000')}"
 
-# Workers: (2 x CPU cores) + 1 is the recommended starting point
-workers = multiprocessing.cpu_count() * 2 + 1
+# Workers: keep low on Railway's hobby tier (512MB RAM)
+# Each sync worker uses ~50-80MB; 2 workers is safe and leaves headroom
+workers = int(os.getenv('WEB_CONCURRENCY', 2))
 worker_class = "sync"
 
 # Timeouts
