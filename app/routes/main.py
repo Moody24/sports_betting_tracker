@@ -14,9 +14,9 @@ logger = logging.getLogger(__name__)
 main = Blueprint('main', __name__)
 
 
-@main.route('/health')
-def health():
-    """Health check endpoint used by Railway to verify the service is running."""
+@main.route('/ready')
+def ready():
+    """Readiness endpoint that verifies dependencies like the database."""
     try:
         db.session.execute(text('SELECT 1'))
         return jsonify(status='healthy', database='connected'), 200

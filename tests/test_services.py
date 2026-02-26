@@ -1586,18 +1586,17 @@ class TestCLI(BaseTestCase):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# health endpoint tests
+# health/readiness endpoint tests
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TestHealthEndpoint(BaseTestCase):
     """Tests for the /health endpoint."""
 
-    def test_health_returns_200_with_db(self):
+    def test_health_returns_200(self):
         resp = self.client.get('/health')
         self.assertEqual(resp.status_code, 200)
         data = resp.get_json()
         self.assertEqual(data['status'], 'healthy')
-        self.assertEqual(data['database'], 'connected')
 
     def test_health_returns_200_when_db_down(self):
         with patch.object(db.session, 'execute', side_effect=Exception("DB down")):
@@ -1605,6 +1604,20 @@ class TestHealthEndpoint(BaseTestCase):
             self.assertEqual(resp.status_code, 200)
             data = resp.get_json()
             self.assertEqual(data['status'], 'healthy')
+
+    def test_ready_returns_200_with_db(self):
+        resp = self.client.get('/ready')
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertEqual(data['status'], 'healthy')
+        self.assertEqual(data['database'], 'connected')
+
+    def test_ready_returns_503_when_db_down(self):
+        with patch.object(db.session, 'execute', side_effect=Exception("DB down")):
+            resp = self.client.get('/ready')
+            self.assertEqual(resp.status_code, 503)
+            data = resp.get_json()
+            self.assertEqual(data['status'], 'unhealthy')
             self.assertEqual(data['database'], 'disconnected')
 
 

@@ -82,16 +82,10 @@ def create_app(testing=False):
         response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
         return response
 
-    # ── Health check (returns 200 even if DB is temporarily down) ────
+    # ── Liveness check (fast, always 200) ────────────────────────────
     @app.route('/health')
     def health():
-        payload = {'status': 'healthy'}
-        try:
-            db.session.execute(db.text('SELECT 1'))
-            payload['database'] = 'connected'
-        except Exception:
-            payload['database'] = 'disconnected'
-        return payload, 200
+        return {'status': 'healthy'}, 200
 
     from app.routes.auth import auth
     from app.routes.bet import bet
