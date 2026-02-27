@@ -7,6 +7,7 @@ performance, seasonal averages, matchup context, and situational modifiers.
 import logging
 import math
 import os
+from copy import deepcopy
 from typing import Optional
 
 from app.models import PlayerGameLog
@@ -62,6 +63,14 @@ class ProjectionEngine:
     HOT_STREAK_THRESHOLD = 1.5
     COLD_STREAK_THRESHOLD = -1.5
 
+    def __init__(self):
+        # Request-local memoization for analysis endpoints.
+        # A fresh engine instance is created per request, so this does not
+        # introduce cross-request staleness.
+        self._projection_cache = {}
+        self._player_state_cache = {}
+        self._context_cache = {}
+
     def project_stat(
         self,
         player_name: str,
@@ -80,20 +89,37 @@ class ProjectionEngine:
             z_score: float     -- hot/cold streak indicator
             breakdown: dict    -- component projections for transparency
         """
+        cache_key = (
+            str(player_name).strip().lower(),
+            str(prop_type).strip().lower(),
+            str(opponent_name).strip().lower(),
+            str(team_name).strip().lower(),
+            bool(is_home),
+        )
+        if cache_key in self._projection_cache:
+            return deepcopy(self._projection_cache[cache_key])
+
         stat_key = PROP_STAT_MAP.get(prop_type)
         if not stat_key:
             return self._empty_projection()
 
-        # Look up player and fetch cached logs
-        player_id = find_player_id(player_name)
-        if not player_id:
-            return self._empty_projection()
+        # Look up player and baseline stats once per player.
+        player_cache_key = str(player_name).strip().lower()
+        player_state = self._player_state_cache.get(player_cache_key)
+        if player_state is None:
+            player_id = find_player_id(player_name)
+            if not player_id:
+                return self._empty_projection()
 
-        logs = get_cached_logs(player_id, last_n=82)
-        if not logs:
-            return self._empty_projection()
+            logs = get_cached_logs(player_id, last_n=82)
+            if not logs:
+                return self._empty_projection()
 
-        summary = get_player_stats_summary(player_id, logs)
+            summary = get_player_stats_summary(player_id, logs)
+            player_state = (player_id, logs, summary)
+            self._player_state_cache[player_cache_key] = player_state
+
+        _, logs, summary = player_state
         games_played = summary['games_played']
 
         last_5_avg = summary['last_10'].get(stat_key, 0) if games_played < 5 else summary['last_5'].get(stat_key, 0)
@@ -120,7 +146,11 @@ class ProjectionEngine:
 
         # Game context
         if team_name:
-            ctx = get_game_context(player_name, team_name)
+            ctx_key = (str(player_name).strip().lower(), str(team_name).strip().lower())
+            ctx = self._context_cache.get(ctx_key)
+            if ctx is None:
+                ctx = get_game_context(player_name, team_name)
+                self._context_cache[ctx_key] = ctx
 
             if ctx.get('back_to_back'):
                 modifier *= self.B2B_FACTOR
@@ -187,7 +217,7 @@ class ProjectionEngine:
                     final_projection = ml_prediction
                     projection_source = 'ml'
 
-        return {
+        result = {
             'projection': final_projection,
             'confidence': confidence,
             'context_notes': context_notes,
@@ -206,6 +236,8 @@ class ProjectionEngine:
                 'base_projection': round(base_projection, 1),
             },
         }
+        self._projection_cache[cache_key] = result
+        return deepcopy(result)
 
     def _compute_z_score(self, logs: list, stat_key: str, last_n: int = 3) -> float:
         """Calculate z-score of recent games vs season average."""
