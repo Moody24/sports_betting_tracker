@@ -161,6 +161,11 @@ class TestNBAService(unittest.TestCase):
         key2 = nba_service._matchup_key("lakers", "CELTICS")
         self.assertEqual(key1, key2)
 
+    def test_matchup_key_normalises_common_team_aliases(self):
+        key1 = nba_service._matchup_key("LA Clippers", "NY Knicks")
+        key2 = nba_service._matchup_key("Los Angeles Clippers", "New York Knicks")
+        self.assertEqual(key1, key2)
+
     # get_todays_games
     @patch("app.services.nba_service.fetch_espn_scoreboard")
     @patch("app.services.nba_service.fetch_odds_combined")

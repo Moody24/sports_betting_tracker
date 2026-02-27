@@ -2,6 +2,7 @@ import logging
 import os
 from datetime import datetime, timezone, timedelta
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -9,6 +10,7 @@ from app.enums import BetType, Outcome
 from app.services.base import SportService, SPORT_REGISTRY
 
 logger = logging.getLogger(__name__)
+APP_TIMEZONE = ZoneInfo("America/New_York")
 
 ESPN_SCOREBOARD_URL = (
     "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard"
@@ -235,7 +237,23 @@ def fetch_odds_combined() -> tuple:
 
 def _matchup_key(team_a: str, team_b: str) -> tuple:
     """Normalised key for matching ESPN names with Odds API names."""
-    return tuple(sorted([team_a.lower().strip(), team_b.lower().strip()]))
+    return tuple(sorted([_normalize_team_name(team_a), _normalize_team_name(team_b)]))
+
+
+def _normalize_team_name(name: str) -> str:
+    """Normalize team names across ESPN/Odds API variants."""
+    if not name:
+        return ""
+    norm = " ".join(str(name).lower().strip().split())
+    aliases = {
+        "la clippers": "los angeles clippers",
+        "la lakers": "los angeles lakers",
+        "ny knicks": "new york knicks",
+        "okc thunder": "oklahoma city thunder",
+        "gs warriors": "golden state warriors",
+        "no pelicans": "new orleans pelicans",
+    }
+    return aliases.get(norm, norm)
 
 
 def fetch_odds_events() -> dict:
@@ -277,9 +295,15 @@ def fetch_upcoming_games() -> list[dict]:
         logger.warning("ODDS_API_KEY not set – upcoming games unavailable")
         return []
 
-    now = datetime.now(timezone.utc)
-    tomorrow = now.date() + timedelta(days=1)
+    now_et = datetime.now(APP_TIMEZONE)
+    tomorrow = now_et.date() + timedelta(days=1)
     day_after = tomorrow + timedelta(days=1)
+
+    # Query the Odds API using a UTC window that corresponds to "tomorrow" in ET.
+    start_et = datetime.combine(tomorrow, datetime.min.time(), tzinfo=APP_TIMEZONE)
+    end_et = datetime.combine(day_after, datetime.min.time(), tzinfo=APP_TIMEZONE)
+    start_utc = start_et.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    end_utc = end_et.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
     try:
         resp = requests.get(
@@ -289,8 +313,8 @@ def fetch_upcoming_games() -> list[dict]:
                 "regions": "us",
                 "markets": "totals",
                 "oddsFormat": "american",
-                "commenceTimeFrom": tomorrow.isoformat() + "T00:00:00Z",
-                "commenceTimeTo": day_after.isoformat() + "T00:00:00Z",
+                "commenceTimeFrom": start_utc,
+                "commenceTimeTo": end_utc,
             },
             timeout=10,
         )
@@ -427,7 +451,8 @@ def fetch_player_props_for_event(odds_event_id: str) -> dict:
 
 def get_todays_games() -> list[dict]:
     """Combined view: ESPN live scores merged with Odds API lines + moneylines."""
-    games = fetch_espn_scoreboard()
+    today_et = datetime.now(APP_TIMEZONE).strftime("%Y%m%d")
+    games = fetch_espn_scoreboard(date_str=today_et)
     totals, h2h = fetch_odds_combined()
     events = fetch_odds_events()
 
