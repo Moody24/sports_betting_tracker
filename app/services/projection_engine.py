@@ -324,6 +324,28 @@ class ProjectionEngine:
             mean = sum(vals) / len(vals)
             return (sum((v - mean) ** 2 for v in vals) / len(vals)) ** 0.5
 
+        def _sum(game_list, key):
+            return sum(getattr(g, key, 0) or 0 for g in game_list)
+
+        def _ratio_sum(game_list, num_key, den_key):
+            den = _sum(game_list, den_key)
+            if den <= 0:
+                return 0.0
+            return _sum(game_list, num_key) / den
+
+        def _true_shooting_pct(game_list):
+            pts = _sum(game_list, 'pts')
+            fga = _sum(game_list, 'fga')
+            fta = _sum(game_list, 'fta')
+            denom = 2 * (fga + 0.44 * fta)
+            if denom <= 0:
+                return 0.0
+            return pts / denom
+
+        home_logs = [g for g in logs if (g.home_away or '').lower() == 'home']
+        away_logs = [g for g in logs if (g.home_away or '').lower() == 'away']
+        context_logs = home_logs if is_home else away_logs
+
         return {
             'avg_stat_last_5': _avg(last_5, stat_key),
             'avg_stat_last_10': _avg(last_10, stat_key),
@@ -333,6 +355,15 @@ class ProjectionEngine:
             'min_last_3_avg': _avg(logs[:3], 'minutes'),
             'home_away': 1 if is_home else 0,
             'games_played': len(logs),
+            'home_split_stat_avg': _avg(home_logs, stat_key),
+            'away_split_stat_avg': _avg(away_logs, stat_key),
+            'context_split_stat_avg': _avg(context_logs, stat_key),
+            'fg_pct_last_10': _ratio_sum(last_10, 'fgm', 'fga'),
+            'ts_pct_last_10': _true_shooting_pct(last_10),
+            'fga_last_5_avg': _avg(last_5, 'fga'),
+            'fg3a_last_5_avg': _avg(last_5, 'fg3a'),
+            'fg3m_last_5_avg': _avg(last_5, 'fg3m'),
+            'fta_last_5_avg': _avg(last_5, 'fta'),
         }
 
     def _empty_projection(self) -> dict:

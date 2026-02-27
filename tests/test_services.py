@@ -1238,6 +1238,29 @@ class TestProjectionEngine(BaseTestCase):
             self.assertIn('player_rebounds', results)
             self.assertIn('player_assists', results)
 
+    def test_build_ml_features_includes_efficiency_and_splits(self):
+        from app.services.projection_engine import ProjectionEngine
+        from app.services.stats_service import get_cached_logs
+        with self.app.app_context():
+            _seed_player_logs(count=20, player_id='208')
+            logs = get_cached_logs('208', last_n=82)
+            features = ProjectionEngine()._build_ml_features(logs, 'pts', is_home=True)
+            for key in (
+                'home_split_stat_avg',
+                'away_split_stat_avg',
+                'context_split_stat_avg',
+                'fg_pct_last_10',
+                'ts_pct_last_10',
+                'fga_last_5_avg',
+                'fg3a_last_5_avg',
+                'fg3m_last_5_avg',
+                'fta_last_5_avg',
+            ):
+                self.assertIn(key, features)
+            self.assertGreaterEqual(features['fg_pct_last_10'], 0.0)
+            self.assertLessEqual(features['fg_pct_last_10'], 1.0)
+            self.assertGreaterEqual(features['ts_pct_last_10'], 0.0)
+
     # -- _compute_confidence --
 
     def test_compute_confidence_low_games(self):
