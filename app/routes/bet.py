@@ -784,18 +784,22 @@ def nba_analysis():
     detector = ValueDetector(engine)
 
     try:
-        value_plays = detector.get_top_plays(min_edge=0.03, max_plays=50)
+        eligible_plays = detector.filter_plays(detector.score_all_todays_props(), min_edge=0.03)
+        value_plays = eligible_plays[:50]
     except Exception as exc:
         logger.error("Analysis engine error: %s", exc)
+        eligible_plays = []
         value_plays = []
 
-    strong_count = sum(1 for p in value_plays if p.get('confidence_tier') == 'strong')
-    moderate_count = sum(1 for p in value_plays if p.get('confidence_tier') == 'moderate')
-    games_count = len(set(p.get('game_id', '') for p in value_plays if p.get('game_id')))
+    value_play_count = len(eligible_plays)
+    strong_count = sum(1 for p in eligible_plays if p.get('confidence_tier') == 'strong')
+    moderate_count = sum(1 for p in eligible_plays if p.get('confidence_tier') == 'moderate')
+    games_count = len(set(p.get('game_id', '') for p in eligible_plays if p.get('game_id')))
 
     return render_template(
         'bets/nba_analysis.html',
         value_plays=value_plays,
+        value_play_count=value_play_count,
         strong_count=strong_count,
         moderate_count=moderate_count,
         games_count=games_count,

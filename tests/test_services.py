@@ -1213,6 +1213,18 @@ class TestProjectionEngine(BaseTestCase):
                                              is_home=True)
             self.assertIn('minutes increasing', result['context_notes'])
 
+    def test_project_stat_ml_failure_falls_back_to_heuristic(self):
+        from app.services.projection_engine import ProjectionEngine
+        with self.app.app_context():
+            self._setup_engine_data()
+            engine = ProjectionEngine()
+            with patch('app.services.projection_engine.find_player_id', return_value='201'):
+                with patch('app.services.ml_model.predict_stat', side_effect=RuntimeError('bad model')):
+                    with patch.dict('os.environ', {'USE_ML_PROJECTIONS': 'true'}):
+                        result = engine.project_stat('LeBron James', 'player_points', is_home=True)
+            self.assertGreater(result['projection'], 0)
+            self.assertEqual(result['projection_source'], 'heuristic')
+
     def test_project_all_props_for_player(self):
         from app.services.projection_engine import ProjectionEngine
         with self.app.app_context():
@@ -1410,6 +1422,12 @@ class TestValueDetector(BaseTestCase):
         self.assertAlmostEqual(implied_prob(100), 0.5)
         self.assertAlmostEqual(implied_prob(-100), 0.5)
 
+    def test_devig_probs_balanced_market(self):
+        from app.services.value_detector import devig_probs
+        over, under = devig_probs(-110, -110)
+        self.assertAlmostEqual(over, 0.5, places=3)
+        self.assertAlmostEqual(under, 0.5, places=3)
+
     # -- decimal_odds --
 
     def test_decimal_odds_zero(self):
@@ -1505,6 +1523,52 @@ class TestValueDetector(BaseTestCase):
             with patch.object(detector, 'score_all_todays_props', return_value=mock_scores):
                 top = detector.get_top_plays(min_edge=0.03)
             self.assertEqual(len(top), 1)
+
+    def test_score_prop_strong_requires_projection_confidence(self):
+        from app.services.value_detector import ValueDetector
+        detector = ValueDetector()
+        detector.engine = MagicMock()
+        detector.engine.project_stat.return_value = {
+            'projection': 40.0,
+            'std_dev': 4.0,
+            'games_played': 20,
+            'confidence': 'low',
+            'context_notes': [],
+            'z_score': 0,
+            'projection_source': 'heuristic',
+            'breakdown': {},
+        }
+        result = detector.score_prop(
+            player_name='Test Player',
+            prop_type='player_points',
+            line=20.5,
+            over_odds=-110,
+            under_odds=-110,
+        )
+        self.assertEqual(result['confidence_tier'], 'moderate')
+
+    def test_score_prop_strong_when_confidence_medium_or_high(self):
+        from app.services.value_detector import ValueDetector
+        detector = ValueDetector()
+        detector.engine = MagicMock()
+        detector.engine.project_stat.return_value = {
+            'projection': 40.0,
+            'std_dev': 4.0,
+            'games_played': 20,
+            'confidence': 'high',
+            'context_notes': [],
+            'z_score': 0,
+            'projection_source': 'heuristic',
+            'breakdown': {},
+        }
+        result = detector.score_prop(
+            player_name='Test Player',
+            prop_type='player_points',
+            line=20.5,
+            over_odds=-110,
+            under_odds=-110,
+        )
+        self.assertEqual(result['confidence_tier'], 'strong')
 
     # -- _model_prob_over --
 

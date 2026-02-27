@@ -211,11 +211,17 @@ class ProjectionEngine:
         if self._use_ml_projections() and games_played >= 10 and prop_type in ML_STAT_MAP:
             ml_features = self._build_ml_features(logs, stat_key, is_home)
             if ml_features:
-                from app.services.ml_model import predict_stat
-                ml_prediction = predict_stat(ML_STAT_MAP[prop_type], ml_features)
-                if ml_prediction > 0:
-                    final_projection = ml_prediction
-                    projection_source = 'ml'
+                try:
+                    from app.services.ml_model import predict_stat
+                    ml_prediction = predict_stat(ML_STAT_MAP[prop_type], ml_features)
+                    if ml_prediction > 0:
+                        final_projection = ml_prediction
+                        projection_source = 'ml'
+                except Exception as exc:
+                    logger.warning(
+                        "ML projection failed for %s (%s); using heuristic fallback: %s",
+                        player_name, prop_type, exc,
+                    )
 
         result = {
             'projection': final_projection,

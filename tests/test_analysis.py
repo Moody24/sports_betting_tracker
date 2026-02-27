@@ -387,12 +387,49 @@ class TestAnalysisRoute(BaseTestCase):
         self.register_and_login()
         with patch('app.routes.bet.ValueDetector') as mock_vd:
             mock_instance = MagicMock()
-            mock_instance.get_top_plays.return_value = []
+            mock_instance.score_all_todays_props.return_value = []
+            mock_instance.filter_plays.return_value = []
             mock_vd.return_value = mock_instance
 
             resp = self.client.get('/nba/analysis')
             self.assertEqual(resp.status_code, 200)
             self.assertIn(b'NBA Prop Analysis', resp.data)
+
+    def test_analysis_counts_from_full_filtered_set(self):
+        self.register_and_login()
+        def _play(i, tier):
+            return {
+                'player': f'Player {i}',
+                'prop_type': 'player_points',
+                'line': 20.5,
+                'projection': 25.2,
+                'edge': 0.2 if tier == 'strong' else 0.09,
+                'recommended_side': 'over',
+                'recommended_odds': -110,
+                'confidence_tier': tier,
+                'confidence': 'high',
+                'context_notes': [],
+                'game_id': f'g{i}',
+                'home_team': 'Lakers',
+                'away_team': 'Celtics',
+                'match_date': '2026-02-27',
+            }
+
+        full_filtered = [_play(1, 'strong'), _play(2, 'strong'), _play(2, 'moderate')]
+        full_filtered.extend(_play(i, 'strong') for i in range(3, 61))
+
+        with patch('app.routes.bet.ValueDetector') as mock_vd:
+            mock_instance = MagicMock()
+            mock_instance.score_all_todays_props.return_value = ['raw']
+            mock_instance.filter_plays.return_value = full_filtered
+            mock_vd.return_value = mock_instance
+
+            resp = self.client.get('/nba/analysis')
+            self.assertEqual(resp.status_code, 200)
+            self.assertIn(b'Value Plays Found', resp.data)
+            self.assertIn(b'>60<', resp.data)
+            self.assertIn(b'>1<', resp.data)
+            self.assertIn(b'top 50 shown', resp.data)
 
 
 class TestFeatureEngine(BaseTestCase):

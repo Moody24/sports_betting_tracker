@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 TIER_STRONG = 0.15
 TIER_MODERATE = 0.08
 TIER_SLIGHT = 0.03
+STRONG_CONFIDENCE_LEVELS = {'medium', 'high'}
 
 
 def implied_prob(american_odds: int) -> float:
@@ -35,6 +36,16 @@ def decimal_odds(american_odds: int) -> float:
     elif american_odds < 0:
         return 1.0 + 100.0 / abs(american_odds)
     return 2.0
+
+
+def devig_probs(over_odds: int, under_odds: int) -> tuple[float, float]:
+    """Convert over/under odds to no-vig probabilities."""
+    over_raw = implied_prob(over_odds) if over_odds else 0.5
+    under_raw = implied_prob(under_odds) if under_odds else 0.5
+    total = over_raw + under_raw
+    if total <= 0:
+        return 0.5, 0.5
+    return over_raw / total, under_raw / total
 
 
 class ValueDetector:
@@ -86,9 +97,8 @@ class ValueDetector:
         model_prob_over = self._model_prob_over(projection, line, std_dev)
         model_prob_under = 1.0 - model_prob_over
 
-        # Book implied probabilities
-        book_prob_over = implied_prob(over_odds) if over_odds else 0.5
-        book_prob_under = implied_prob(under_odds) if under_odds else 0.5
+        # Book no-vig probabilities
+        book_prob_over, book_prob_under = devig_probs(over_odds, under_odds)
 
         # Edge calculation
         edge_over = model_prob_over - book_prob_over
@@ -106,7 +116,8 @@ class ValueDetector:
 
         # Confidence tier
         abs_edge = abs(edge)
-        if abs_edge >= TIER_STRONG:
+        projection_confidence = proj.get('confidence', 'low')
+        if abs_edge >= TIER_STRONG and projection_confidence in STRONG_CONFIDENCE_LEVELS:
             confidence_tier = 'strong'
         elif abs_edge >= TIER_MODERATE:
             confidence_tier = 'moderate'
@@ -134,7 +145,7 @@ class ValueDetector:
             'std_dev': round(std_dev, 2),
             'z_score': proj.get('z_score', 0),
             'games_played': games_played,
-            'confidence': proj.get('confidence', 'low'),
+            'confidence': projection_confidence,
             'projection_source': proj.get('projection_source', 'heuristic'),
             'breakdown': proj.get('breakdown', {}),
             'game_id': game_id,
@@ -171,8 +182,8 @@ class ValueDetector:
             'confidence_tier': 'no_edge',
             'model_prob_over': 0.5,
             'model_prob_under': 0.5,
-            'book_prob_over': implied_prob(over_odds) if over_odds else 0.5,
-            'book_prob_under': implied_prob(under_odds) if under_odds else 0.5,
+            'book_prob_over': devig_probs(over_odds, under_odds)[0],
+            'book_prob_under': devig_probs(over_odds, under_odds)[1],
             'context_notes': [],
             'std_dev': 0,
             'z_score': 0,
@@ -258,13 +269,18 @@ class ValueDetector:
         Filters by minimum edge and excludes no_edge/low confidence plays.
         """
         all_scores = self.score_all_todays_props()
-        top = [
-            s for s in all_scores
+        top = self.filter_plays(all_scores, min_edge=min_edge)
+        return top[:max_plays]
+
+    @staticmethod
+    def filter_plays(scores: list, min_edge: float = TIER_SLIGHT) -> list:
+        """Filter scores down to actionable value plays."""
+        return [
+            s for s in scores
             if abs(s.get('edge', 0)) >= min_edge
             and s.get('confidence_tier') != 'no_edge'
             and s.get('games_played', 0) >= 10
         ]
-        return top[:max_plays]
 
 
 def quarter_kelly(edge: float, american_odds: int, bankroll: float) -> float:

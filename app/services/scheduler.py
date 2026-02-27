@@ -201,6 +201,8 @@ def retrain_models():
         projection_should_train = True
 
         if latest_projection_train:
+            if latest_projection_train.tzinfo is None:
+                latest_projection_train = latest_projection_train.replace(tzinfo=timezone.utc)
             days_since_train = (datetime.now(timezone.utc) - latest_projection_train).days
             if days_since_train < 7:
                 logger.info(
