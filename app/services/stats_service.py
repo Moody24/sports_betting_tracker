@@ -98,7 +98,12 @@ def _parse_minutes(min_str) -> float:
         return 0.0
 
 
-def fetch_player_game_logs(player_id: str, season: str = None, last_n: Optional[int] = 15):
+def fetch_player_game_logs(
+    player_id: str,
+    season: str = None,
+    last_n: Optional[int] = 15,
+    raise_on_error: bool = False,
+):
     """Fetch recent game logs for a player from the NBA API.
 
     Returns a list of dicts with normalised stat keys, or an empty list
@@ -125,6 +130,8 @@ def fetch_player_game_logs(player_id: str, season: str = None, last_n: Optional[
         df = log.get_data_frames()[0]
     except Exception as exc:
         logger.error("NBA API game log fetch failed for player %s: %s", player_id, exc)
+        if raise_on_error:
+            raise
         return []
 
     if df.empty:

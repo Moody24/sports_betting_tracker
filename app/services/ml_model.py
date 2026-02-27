@@ -129,6 +129,7 @@ def train_model(stat_type: str) -> dict:
         logger.error("xgboost or scikit-learn not installed")
         return {'error': 'Missing ML dependencies'}
 
+    player_game_log_rows = PlayerGameLog.query.count()
     features_list, targets = _build_training_data(stat_type)
     if features_list is None:
         return {'error': 'Insufficient training data', 'stat_type': stat_type}
@@ -190,6 +191,7 @@ def train_model(stat_type: str) -> dict:
             'feature_names': feature_names,
             'val_samples': len(X_val),
             'train_samples': len(X_train),
+            'player_game_log_rows': player_game_log_rows,
         }),
     )
     db.session.add(meta)

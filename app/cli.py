@@ -164,7 +164,12 @@ def register_cli(app):
                     try:
                         if backoff:
                             time.sleep(backoff)
-                        logs = fetch_player_game_logs(player_id, season=season, last_n=None)
+                        logs = fetch_player_game_logs(
+                            player_id,
+                            season=season,
+                            last_n=None,
+                            raise_on_error=True,
+                        )
                         break
                     except Exception as exc:
                         last_exc = exc

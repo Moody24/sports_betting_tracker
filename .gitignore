@@ -1,8 +1,10 @@
 # Ignore virtual environment folder
 venv/
+.venv/
 
 # Ignore environment variables file at root (sensitive data)
 .env
+.env.backup
 
 # Ignore SQLite database file (optional, only if you don't want to track it)
 app/database.db
