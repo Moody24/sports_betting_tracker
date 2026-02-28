@@ -467,6 +467,28 @@ class TestContextService(BaseTestCase):
         mock_get.return_value = mock_resp
         self.assertEqual(fetch_espn_injuries(), [])
 
+    @patch('app.services.context_service.requests.get')
+    def test_fetch_espn_injuries_new_payload_shape(self, mock_get):
+        from app.services.context_service import fetch_espn_injuries
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status.return_value = None
+        mock_resp.json.return_value = {
+            'injuries': [{
+                'displayName': 'Los Angeles Lakers',
+                'injuries': [{
+                    'athlete': {'displayName': 'LeBron James'},
+                    'status': 'Day-To-Day',
+                    'shortComment': 'Questionable for tonight.',
+                }],
+            }],
+        }
+        mock_get.return_value = mock_resp
+        injuries = fetch_espn_injuries()
+        self.assertEqual(len(injuries), 1)
+        self.assertEqual(injuries[0]['team'], 'Los Angeles Lakers')
+        self.assertEqual(injuries[0]['player_name'], 'LeBron James')
+        self.assertEqual(injuries[0]['status'], 'day-to-day')
+
     # -- refresh_injuries --
 
     @patch('app.services.context_service.fetch_espn_injuries')

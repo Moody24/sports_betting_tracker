@@ -44,11 +44,17 @@ def _safe_get_json(url: str, *, params: Optional[dict] = None, timeout: int = 10
 
 def _parse_injury_payload(data: dict) -> list:
     injuries = []
-    for team_block in data.get('items', data.get('teams', [])):
+    team_blocks = data.get('items', data.get('teams', []))
+    if not team_blocks and data.get('injuries'):
+        team_blocks = data.get('injuries', [])
+
+    for team_block in team_blocks:
         team_name = ''
         team_obj = team_block.get('team', {})
         if team_obj:
             team_name = team_obj.get('displayName', team_obj.get('name', ''))
+        if not team_name:
+            team_name = team_block.get('displayName', '')
 
         for athlete in team_block.get('injuries', team_block.get('athletes', [])):
             player_info = athlete.get('athlete', athlete)
@@ -61,7 +67,7 @@ def _parse_injury_payload(data: dict) -> list:
                 status_raw = status_raw.get('type', status_raw.get('name', ''))
             status = _normalize_injury_status(str(status_raw))
 
-            detail = athlete.get('details', athlete.get('longComment', ''))
+            detail = athlete.get('details', athlete.get('longComment', athlete.get('shortComment', '')))
             if isinstance(detail, dict):
                 detail = detail.get('detail', str(detail))
 
