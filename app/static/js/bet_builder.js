@@ -573,17 +573,28 @@
 
         // Autofill fields
         setVal('ocr-player',    data.player_name);
-        setVal('ocr-prop-line', data.prop_line);
         setVal('ocr-odds',      data.american_odds);
         setVal('ocr-stake',     data.stake);
         setVal('ocr-team-a',    data.team_a);
         setVal('ocr-team-b',    data.team_b);
 
         const ocrBetType = document.getElementById('ocr-bet-type');
-        if (ocrBetType && data.bet_type) ocrBetType.value = data.bet_type;
+        if (ocrBetType) ocrBetType.value = data.bet_type || 'over';
 
         const ocrPropType = document.getElementById('ocr-prop-type');
-        if (ocrPropType && data.prop_type) ocrPropType.value = data.prop_type;
+        if (ocrPropType) ocrPropType.value = data.prop_type || '';
+        const propLineEl = document.getElementById('ocr-prop-line');
+        const totalLineEl = document.getElementById('ocr-ou-line');
+        if (propLineEl && totalLineEl) {
+          propLineEl.value = '';
+          totalLineEl.value = '';
+          if (data.prop_type) {
+            setVal('ocr-prop-line', data.prop_line);
+          } else if (data.bet_type === 'over' || data.bet_type === 'under') {
+            setVal('ocr-ou-line', data.prop_line);
+          }
+        }
+        setVal('ocr-picked-team', '');
 
         const rawPre = document.getElementById('ocr-raw-pre');
         if (rawPre) rawPre.textContent = data.raw_text || '';

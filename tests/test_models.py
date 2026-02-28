@@ -141,6 +141,39 @@ class TestModels(BaseTestCase):
     def test_bet_prop_display_none_when_not_prop(self):
         self.assertIsNone(make_bet(1).prop_display)
 
+    # Bet.display_label
+    def test_display_label_player_prop(self):
+        b = make_bet(
+            1,
+            bet_type="over",
+            player_name="LeBron James",
+            prop_type="player_points",
+            prop_line=25.5,
+        )
+        self.assertIn("Prop", b.display_label)
+        self.assertIn("LeBron James", b.display_label)
+        self.assertIn("PTS", b.display_label)
+
+    def test_display_label_total(self):
+        b = make_bet(1, bet_type="under", over_under_line=219.5)
+        self.assertEqual(b.display_label, "Total — Under 219.5")
+
+    def test_display_label_moneyline_missing_winner(self):
+        b = make_bet(1, bet_type="moneyline", picked_team=None)
+        self.assertEqual(b.display_label, "Moneyline — (missing winner)")
+
+    def test_display_label_parlay_prefix(self):
+        with self.app.app_context():
+            user = make_user("parlayuser", "parlay@example.com")
+            db.session.add(user)
+            db.session.commit()
+            pid = "pid-123"
+            leg1 = make_bet(user.id, is_parlay=True, parlay_id=pid, bet_type="over", over_under_line=210.5)
+            leg2 = make_bet(user.id, is_parlay=True, parlay_id=pid, bet_type="under", over_under_line=220.5)
+            db.session.add_all([leg1, leg2])
+            db.session.commit()
+            self.assertIn("Parlay — 2 legs", leg1.display_label)
+
     # Bet.is_winning_bet / is_losing_bet
     def test_bet_is_winning_losing(self):
         win = make_bet(1, outcome="win")

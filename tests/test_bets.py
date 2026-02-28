@@ -55,6 +55,70 @@ class TestBetRoutes(BaseTestCase):
         )
         self.assertIn(b"Bet recorded successfully", resp.data)
 
+    def test_new_bet_total_falls_back_to_prop_line_when_over_under_missing(self):
+        user_id = self.register_and_login()
+        self.client.post(
+            "/bets/new",
+            data={
+                "team_a": "Warriors",
+                "team_b": "Nets",
+                "match_date": "2025-03-01",
+                "bet_amount": "25",
+                "bet_type": "over",
+                "prop_line": "218.5",
+                "outcome": "pending",
+            },
+            follow_redirects=True,
+        )
+        with self.app.app_context():
+            bet = Bet.query.filter_by(user_id=user_id).order_by(Bet.id.desc()).first()
+            self.assertIsNotNone(bet)
+            self.assertEqual(bet.over_under_line, 218.5)
+            self.assertIsNone(bet.prop_line)
+
+    def test_new_bet_player_prop_uses_prop_line_not_total_line(self):
+        user_id = self.register_and_login()
+        self.client.post(
+            "/bets/new",
+            data={
+                "team_a": "Warriors",
+                "team_b": "Nets",
+                "match_date": "2025-03-01",
+                "bet_amount": "25",
+                "bet_type": "over",
+                "player_name": "Stephen Curry",
+                "prop_type": "player_points",
+                "prop_line": "29.5",
+                "outcome": "pending",
+            },
+            follow_redirects=True,
+        )
+        with self.app.app_context():
+            bet = Bet.query.filter_by(user_id=user_id).order_by(Bet.id.desc()).first()
+            self.assertIsNotNone(bet)
+            self.assertEqual(bet.prop_line, 29.5)
+            self.assertIsNone(bet.over_under_line)
+
+    def test_new_bet_over_under_without_any_line_is_rejected(self):
+        user_id = self.register_and_login()
+        resp = self.client.post(
+            "/bets/new",
+            data={
+                "team_a": "Warriors",
+                "team_b": "Nets",
+                "match_date": "2025-03-01",
+                "bet_amount": "25",
+                "bet_type": "over",
+                "outcome": "pending",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn(b"line is required for totals", resp.data)
+        with self.app.app_context():
+            count = Bet.query.filter_by(user_id=user_id).count()
+            self.assertEqual(count, 0)
+
     def test_bets_list_shows_own_bets(self):
         user_id = self.register_and_login()
         with self.app.app_context():
@@ -209,7 +273,7 @@ class TestBetRoutes(BaseTestCase):
         self.assertEqual(resp.status_code, 400)
 
     def test_place_bets_single_success(self):
-        self.register_and_login()
+        user_id = self.register_and_login()
         payload = {
             "stake": 25.0,
             "is_parlay": False,
@@ -234,6 +298,10 @@ class TestBetRoutes(BaseTestCase):
         data = json.loads(resp.data)
         self.assertTrue(data["success"])
         self.assertEqual(data["count"], 1)
+        with self.app.app_context():
+            bet = Bet.query.filter_by(user_id=user_id).order_by(Bet.id.desc()).first()
+            self.assertEqual(bet.prop_line, 25.5)
+            self.assertIsNone(bet.over_under_line)
 
     def test_place_bets_parlay_success(self):
         self.register_and_login()

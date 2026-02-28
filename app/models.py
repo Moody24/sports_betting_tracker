@@ -128,11 +128,59 @@ class Bet(db.Model):
         """Human-readable prop description, e.g. 'LeBron James Over 25.5 Points'."""
         if not self.is_player_prop:
             return None
-        label = self.prop_type.replace("player_", "").replace("_", " ").title()
+        label = self._prop_stat_label(self.prop_type)
         direction = self.bet_type.capitalize() if self.bet_type in (
             BetType.OVER.value, BetType.UNDER.value
         ) else ""
         return f"{self.player_name} {direction} {self.prop_line} {label}".strip()
+
+    @staticmethod
+    def _prop_stat_label(prop_type: Optional[str]) -> str:
+        if not prop_type:
+            return "Stat"
+        labels = {
+            "player_points": "PTS",
+            "player_rebounds": "REB",
+            "player_assists": "AST",
+            "player_threes": "3PM",
+            "player_blocks": "BLK",
+            "player_steals": "STL",
+            "player_points_rebounds_assists": "PTS+REB+AST",
+            "player_points_rebounds": "PTS+REB",
+            "player_points_assists": "PTS+AST",
+            "player_rebounds_assists": "REB+AST",
+        }
+        return labels.get(prop_type, prop_type.replace("player_", "").replace("_", " ").upper())
+
+    @property
+    def display_label(self) -> str:
+        bet_type = (self.bet_type or "").lower()
+        direction = "Over" if bet_type == BetType.OVER.value else "Under" if bet_type == BetType.UNDER.value else ""
+        prefix = ""
+        if self.is_parlay and self.parlay_id:
+            num_legs = Bet.query.filter_by(user_id=self.user_id, parlay_id=self.parlay_id).count()
+            prefix = f"Parlay — {num_legs} legs · "
+
+        if self.is_player_prop:
+            line = self.prop_line if self.prop_line is not None else "?"
+            return f"{prefix}Prop — {self.player_name} {direction} {line} {self._prop_stat_label(self.prop_type)}".strip()
+
+        if bet_type in (BetType.OVER.value, BetType.UNDER.value):
+            line = self.over_under_line if self.over_under_line is not None else "?"
+            return f"{prefix}Total — {direction} {line}".strip()
+
+        if bet_type == BetType.MONEYLINE.value:
+            picked = self.picked_team or "(missing winner)"
+            return f"{prefix}Moneyline — {picked}".strip()
+
+        if bet_type == "spread":
+            spread_line = getattr(self, "spread_line", None)
+            team = self.picked_team or "(missing team)"
+            if spread_line is not None:
+                return f"{prefix}Spread — {team} {spread_line}".strip()
+            return f"{prefix}Spread — {team}".strip()
+
+        return f"{prefix}{bet_type.title() if bet_type else 'Bet'}".strip()
 
     @staticmethod
     def generate_parlay_id() -> str:

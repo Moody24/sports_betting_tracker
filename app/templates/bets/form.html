@@ -178,7 +178,6 @@
 
     <form method="POST" novalidate>
       {{ form.hidden_tag() }}
-      <input type="hidden" name="bet_type" value="over">
       <input type="hidden" id="prop-game-id" name="external_game_id" value="">
 
       <div class="mb-3">
@@ -411,8 +410,12 @@
             </select>
           </div>
           <div class="col-md-3">
-            <label class="form-label small">Line</label>
+            <label class="form-label small">Prop Line</label>
             <input type="number" name="prop_line" id="ocr-prop-line" class="form-control" step="0.5" placeholder="25.5">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label small">Total Line</label>
+            <input type="number" name="over_under_line" id="ocr-ou-line" class="form-control" step="0.5" placeholder="218.5">
           </div>
           <div class="col-md-3">
             <label class="form-label small">Bet Type</label>
@@ -421,6 +424,10 @@
               <option value="under">Under</option>
               <option value="moneyline">Moneyline</option>
             </select>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label small">Picked Winner (ML)</label>
+            <input type="text" name="picked_team" id="ocr-picked-team" class="form-control" placeholder="Team name">
           </div>
           <div class="col-md-3">
             <label class="form-label small">Odds</label>

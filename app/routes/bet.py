@@ -160,6 +160,13 @@ def new_bet():
             except (ValueError, TypeError):
                 pass
 
+        over_under_line_val = form.over_under_line.data
+        if over_under_line_val is None and request.form.get('over_under_line'):
+            try:
+                over_under_line_val = float(request.form['over_under_line'])
+            except (ValueError, TypeError):
+                pass
+
         picked_team = form.picked_team.data or None
 
         bonus_mult = 1.0
@@ -170,6 +177,28 @@ def new_bet():
         except (ValueError, TypeError):
             pass
 
+        normalized_prop_line = prop_line_val
+        normalized_over_under_line = over_under_line_val
+
+        is_total_side = form.bet_type.data in (BetType.OVER.value, BetType.UNDER.value)
+        if is_total_side and not prop_type:
+            if normalized_over_under_line is None and normalized_prop_line is not None:
+                normalized_over_under_line = normalized_prop_line
+                normalized_prop_line = None
+            else:
+                normalized_prop_line = None
+
+            if normalized_over_under_line is None:
+                flash('A line is required for totals (Over/Under).', 'danger')
+                return render_template('bets/form.html', form=form, bet=None), 400
+
+        if is_total_side and prop_type:
+            normalized_prop_line = prop_line_val
+            normalized_over_under_line = None
+            if normalized_prop_line is None:
+                flash('A prop line is required for player props.', 'danger')
+                return render_template('bets/form.html', form=form, bet=None), 400
+
         bet_obj = Bet(
             user_id=current_user.id,
             team_a=form.team_a.data,
@@ -178,13 +207,11 @@ def new_bet():
             bet_amount=form.bet_amount.data,
             outcome=form.outcome.data,
             bet_type=form.bet_type.data,
-            over_under_line=form.over_under_line.data if form.bet_type.data in (
-                BetType.OVER.value, BetType.UNDER.value
-            ) else None,
+            over_under_line=normalized_over_under_line if is_total_side else None,
             external_game_id=form.external_game_id.data or None,
             player_name=player_name,
             prop_type=prop_type,
-            prop_line=prop_line_val,
+            prop_line=normalized_prop_line,
             picked_team=picked_team if form.bet_type.data == BetType.MONEYLINE.value else None,
             bonus_multiplier=bonus_mult,
             notes=form.notes.data or None,
@@ -421,6 +448,20 @@ def nba_place_bets():
         except (TypeError, ValueError):
             american_odds_val = None
 
+        player_name_val = str(leg.get("player_name") or "")[:100] or None
+        prop_type_val = str(leg.get("prop_type") or "")[:40] or None
+        is_player_prop = bool(player_name_val and prop_type_val and prop_line_val is not None)
+
+        over_under_line_val = None
+        if not is_player_prop and leg.get("over_under_line") is not None:
+            try:
+                over_under_line_val = float(leg.get("over_under_line"))
+            except (TypeError, ValueError):
+                over_under_line_val = None
+        if not is_player_prop and over_under_line_val is None and prop_line_val is not None:
+            # Backward-compatible fallback for totals if clients still send prop_line.
+            over_under_line_val = prop_line_val
+
         bet_obj = Bet(
             user_id=current_user.id,
             team_a=str(leg["team_a"])[:80],
@@ -429,12 +470,12 @@ def nba_place_bets():
             bet_amount=stake,
             outcome=Outcome.PENDING.value,
             bet_type=leg.get("bet_type", BetType.OVER.value),
-            over_under_line=prop_line_val,
+            over_under_line=None if is_player_prop else over_under_line_val,
             american_odds=american_odds_val,
             external_game_id=leg.get("game_id") or None,
-            player_name=str(leg.get("player_name", ""))[:100],
-            prop_type=str(leg.get("prop_type", ""))[:40],
-            prop_line=prop_line_val,
+            player_name=player_name_val,
+            prop_type=prop_type_val,
+            prop_line=prop_line_val if is_player_prop else None,
             is_parlay=is_parlay,
             parlay_id=parlay_id,
             source=BetSource.NBA_PROPS.value,
