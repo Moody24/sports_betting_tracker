@@ -19,6 +19,10 @@ except ModuleNotFoundError:  # pragma: no cover - handled in environments withou
 logger = logging.getLogger(__name__)
 
 APP_TIMEZONE = "US/Eastern"
+AUTO_PICK_STRONG_COUNT = 3
+AUTO_PICK_EV_COUNT = 4
+AUTO_PICK_COINFLIP_COUNT = 3
+AUTO_PICK_LONGSHOT_PARLAY_LEGS = 3
 
 scheduler = BackgroundScheduler(timezone=APP_TIMEZONE) if BackgroundScheduler else None
 
@@ -204,10 +208,10 @@ def generate_daily_auto_picks():
         detector = ValueDetector(ProjectionEngine())
         scores = detector.score_all_todays_props()
         actionable = [s for s in scores if s.get('games_played', 0) >= 10 and s.get('confidence_tier') != 'no_edge']
-        strong = [s for s in actionable if s.get('confidence_tier') == 'strong'][:3]
-        ev_positive = [s for s in actionable if s.get('edge', 0) >= 0.05][:4]
-        coin_flip = [s for s in scores if s.get('games_played', 0) >= 10 and abs(s.get('edge', 0)) <= 0.02][:3]
-        longshot_pool = [s for s in actionable if int(s.get('recommended_odds') or 0) >= 120][:3]
+        strong = [s for s in actionable if s.get('confidence_tier') == 'strong'][:AUTO_PICK_STRONG_COUNT]
+        ev_positive = [s for s in actionable if s.get('edge', 0) >= 0.05][:AUTO_PICK_EV_COUNT]
+        coin_flip = [s for s in scores if s.get('games_played', 0) >= 10 and abs(s.get('edge', 0)) <= 0.02][:AUTO_PICK_COINFLIP_COUNT]
+        longshot_pool = [s for s in actionable if int(s.get('recommended_odds') or 0) >= 120][:AUTO_PICK_LONGSHOT_PARLAY_LEGS]
 
         selected = []
         seen = set()
@@ -311,7 +315,15 @@ def generate_daily_auto_picks():
                 created_bets.append(leg)
 
         db.session.commit()
-        logger.info("Generated %d auto picks for %s", len(created_bets), today.isoformat())
+        logger.info(
+            "Generated %d auto picks for %s (strong<=%d, ev<=%d, coinflip<=%d, longshot_parlay_legs<=%d)",
+            len(created_bets),
+            today.isoformat(),
+            AUTO_PICK_STRONG_COUNT,
+            AUTO_PICK_EV_COUNT,
+            AUTO_PICK_COINFLIP_COUNT,
+            AUTO_PICK_LONGSHOT_PARLAY_LEGS,
+        )
 
 
 def resolve_and_grade():

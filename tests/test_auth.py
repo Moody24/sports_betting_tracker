@@ -1,5 +1,7 @@
 """Tests for the auth blueprint."""
 
+from unittest.mock import patch
+
 from app import db
 
 from tests.helpers import BaseTestCase, make_user
@@ -83,6 +85,20 @@ class TestAuthRoutes(BaseTestCase):
             follow_redirects=True,
         )
         self.assertIn(b"Login failed", resp.data)
+
+    @patch("app.routes.auth._maybe_trigger_auto_picks_on_login")
+    def test_login_success_triggers_auto_pick_hook(self, mock_hook):
+        with self.app.app_context():
+            db.session.add(make_user())
+            db.session.commit()
+        resp = self.client.post(
+            "/auth/login",
+            data={"username": "testuser", "password": "password123"},
+            follow_redirects=True,
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn(b"Login successful", resp.data)
+        mock_hook.assert_called_once()
 
     def test_already_logged_in_register_redirects(self):
         self.register_and_login()
