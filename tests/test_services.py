@@ -1937,6 +1937,54 @@ class TestScheduler(BaseTestCase):
             self.assertEqual(bad.status, 'failed')
             self.assertIn('x', bad.message)
 
+    def test_close_stale_running_jobs_marks_old_rows_failed(self):
+        from app.services import scheduler as scheduler_module
+
+        with self.app.app_context():
+            stale_row = JobLog(
+                job_name='stale_job',
+                started_at=datetime.now(timezone.utc) - timedelta(hours=5),
+                status='running',
+            )
+            fresh_row = JobLog(
+                job_name='fresh_job',
+                started_at=datetime.now(timezone.utc) - timedelta(minutes=30),
+                status='running',
+            )
+            db.session.add_all([stale_row, fresh_row])
+            db.session.commit()
+
+            scheduler_module._close_stale_running_jobs(db, JobLog)
+
+            stale_row = db.session.get(JobLog, stale_row.id)
+            fresh_row = db.session.get(JobLog, fresh_row.id)
+            self.assertEqual(stale_row.status, 'failed')
+            self.assertIsNotNone(stale_row.finished_at)
+            self.assertIn('Marked stale after', stale_row.message)
+            self.assertEqual(fresh_row.status, 'running')
+            self.assertIsNone(fresh_row.finished_at)
+
+    def test_log_job_closes_stale_before_new_run(self):
+        from app.services import scheduler as scheduler_module
+
+        with self.app.app_context():
+            db.session.add(JobLog(
+                job_name='yesterday_stats_refresh',
+                started_at=datetime.now(timezone.utc) - timedelta(days=1),
+                status='running',
+            ))
+            db.session.commit()
+
+        with patch('app.create_app', return_value=self.app):
+            scheduler_module._log_job('stats_refresh', lambda: None)
+
+        with self.app.app_context():
+            stale = JobLog.query.filter_by(job_name='yesterday_stats_refresh').first()
+            latest = JobLog.query.filter_by(job_name='stats_refresh').order_by(JobLog.id.desc()).first()
+            self.assertEqual(stale.status, 'failed')
+            self.assertIsNotNone(stale.finished_at)
+            self.assertEqual(latest.status, 'success')
+
     def test_refresh_jobs_and_projection_job(self):
         from app.services import scheduler as scheduler_module
         with patch('app.create_app', return_value=self.app):

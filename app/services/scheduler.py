@@ -28,6 +28,7 @@ scheduler = BackgroundScheduler(timezone=APP_TIMEZONE) if BackgroundScheduler el
 
 
 _scheduler_lock_fd = None
+STALE_JOB_MINUTES = 180
 
 
 def _acquire_scheduler_lock(lock_path='/tmp/sports_betting_scheduler.lock'):
@@ -56,6 +57,7 @@ def _log_job(job_name, func):
 
     app = create_app()
     with app.app_context():
+        _close_stale_running_jobs(db, JobLog)
         log_entry = JobLog(
             job_name=job_name,
             started_at=datetime.now(timezone.utc),
@@ -82,6 +84,36 @@ def _log_job(job_name, func):
                 entry.status = 'failed'
                 entry.message = str(exc)[:500]
                 db.session.commit()
+
+
+def _close_stale_running_jobs(db, JobLog):
+    """Mark stale running jobs as failed so the log table stays accurate."""
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(minutes=STALE_JOB_MINUTES)
+    stale = (
+        JobLog.query
+        .filter_by(status='running')
+        .filter(JobLog.started_at.isnot(None))
+        .all()
+    )
+
+    stale_count = 0
+    for row in stale:
+        started = row.started_at
+        if started and started.tzinfo is None:
+            started = started.replace(tzinfo=timezone.utc)
+        if not started or started > cutoff:
+            continue
+        row.status = 'failed'
+        row.finished_at = now
+        row.message = (
+            f"Marked stale after {STALE_JOB_MINUTES} minutes without completion"
+        )
+        stale_count += 1
+
+    if stale_count:
+        db.session.commit()
+        logger.warning("Marked %d stale running job log(s) as failed", stale_count)
 
 
 def refresh_player_stats():
