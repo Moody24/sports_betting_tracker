@@ -746,3 +746,65 @@ class TestNBAService(unittest.TestCase):
         self.assertEqual(total, 218.0)
         called_dates = {c.kwargs.get("date_str") for c in mock_scoreboard.call_args_list}
         self.assertIn("20250301", called_dates)
+
+    @patch("app.services.nba_service.fetch_espn_scoreboard")
+    def test_resolve_pending_bets_without_external_game_id_uses_matchup(self, mock_scoreboard):
+        class FakeBet:
+            external_game_id = None
+            bet_type = "over"
+            over_under_line = 210.5
+            is_player_prop = False
+            picked_team = None
+            player_name = None
+            prop_type = None
+            prop_line = None
+            team_a = "Boston Celtics"
+            team_b = "Los Angeles Lakers"
+            match_date = datetime(2025, 3, 1)
+
+        mock_scoreboard.return_value = [{
+            "espn_id": "espn123",
+            "status": "STATUS_FINAL",
+            "total_score": 218,
+            "home": {"name": "Los Angeles Lakers", "score": 112},
+            "away": {"name": "Boston Celtics", "score": 106},
+            "start_time": "2025-03-01T00:00:00Z",
+        }]
+
+        results = nba_service.resolve_pending_bets([FakeBet()])
+        self.assertEqual(len(results), 1)
+        _, outcome, total = results[0]
+        self.assertEqual(outcome, "win")
+        self.assertEqual(total, 218.0)
+
+    @patch("app.services.nba_service.fetch_espn_boxscore")
+    @patch("app.services.nba_service.fetch_espn_scoreboard")
+    def test_resolve_prop_without_external_game_id_uses_matchup(self, mock_scoreboard, mock_boxscore):
+        class FakeBet:
+            external_game_id = None
+            bet_type = "over"
+            over_under_line = None
+            picked_team = None
+            is_player_prop = True
+            player_name = "LeBron James"
+            prop_type = "player_points"
+            prop_line = 25.5
+            team_a = "Boston Celtics"
+            team_b = "Los Angeles Lakers"
+            match_date = datetime(2025, 3, 1)
+
+        mock_scoreboard.return_value = [{
+            "espn_id": "espn123",
+            "status": "STATUS_FINAL",
+            "total_score": 218,
+            "home": {"name": "Los Angeles Lakers", "score": 112},
+            "away": {"name": "Boston Celtics", "score": 106},
+            "start_time": "2025-03-01T00:00:00Z",
+        }]
+        mock_boxscore.return_value = {"LeBron James": {"player_points": 30.0}}
+
+        results = nba_service.resolve_pending_bets([FakeBet()])
+        self.assertEqual(len(results), 1)
+        _, outcome, stat = results[0]
+        self.assertEqual(outcome, "win")
+        self.assertEqual(stat, 30.0)

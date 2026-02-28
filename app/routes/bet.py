@@ -485,10 +485,10 @@ def nba_today():
 @bet.route('/nba/update-results', methods=['POST'])
 @login_required
 def nba_update_results():
-    # Resolve ALL pending bets that have an external_game_id
+    # Resolve all pending bets; resolver can fallback by matchup/date.
     pending = Bet.query.filter_by(
         user_id=current_user.id, outcome=Outcome.PENDING.value
-    ).filter(Bet.external_game_id.isnot(None)).all()
+    ).all()
 
     resolved = resolve_pending_bets(pending)
     count = 0

@@ -734,9 +734,10 @@ class TestMatchupService(BaseTestCase):
     @patch('app.services.matchup_service.fetch_team_defense_stats')
     def test_refresh_all_team_defense_empty(self, mock_fetch):
         from app.services.matchup_service import refresh_all_team_defense
-        with self.app.app_context():
-            mock_fetch.return_value = []
-            self.assertEqual(refresh_all_team_defense(), 0)
+        with patch('app.services.matchup_service._build_baseline_team_stats', return_value=[]):
+            with self.app.app_context():
+                mock_fetch.return_value = []
+                self.assertEqual(refresh_all_team_defense(), 0)
 
     # -- get_matchup_adjustment --
 

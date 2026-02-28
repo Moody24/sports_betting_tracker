@@ -1,6 +1,6 @@
 import logging
 import os
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date as date_type
 from typing import Optional
 from zoneinfo import ZoneInfo
 
@@ -256,6 +256,53 @@ def _normalize_team_name(name: str) -> str:
         "no pelicans": "new orleans pelicans",
     }
     return aliases.get(norm, norm)
+
+
+def _coerce_match_date(bet) -> Optional[datetime]:
+    """Best-effort conversion of a bet's match_date into a datetime."""
+    match_dt = getattr(bet, "match_date", None)
+    if isinstance(match_dt, datetime):
+        return match_dt
+    if isinstance(match_dt, date_type):
+        return datetime.combine(match_dt, datetime.min.time())
+    return None
+
+
+def _choose_game_for_bet(bet, scoreboards: list[dict], espn_lookup: dict) -> Optional[dict]:
+    """Resolve a scoreboard game for a bet, with fallback when game_id is missing."""
+    if getattr(bet, "external_game_id", None):
+        return espn_lookup.get(bet.external_game_id)
+
+    team_a = getattr(bet, "team_a", "") or ""
+    team_b = getattr(bet, "team_b", "") or ""
+    if not team_a or not team_b:
+        return None
+
+    matchup_key = _matchup_key(team_a, team_b)
+    candidates = []
+    for game in scoreboards:
+        home_name = game.get("home", {}).get("name", "")
+        away_name = game.get("away", {}).get("name", "")
+        if _matchup_key(home_name, away_name) == matchup_key:
+            candidates.append(game)
+
+    if not candidates:
+        return None
+
+    match_dt = _coerce_match_date(bet)
+    if match_dt:
+        # Prefer games closest to the bet's intended date when duplicates exist.
+        def _distance_days(game):
+            start_raw = game.get("start_time", "")
+            try:
+                start_dt = datetime.fromisoformat(str(start_raw).replace("Z", "+00:00"))
+                return abs((start_dt.date() - match_dt.date()).days)
+            except Exception:
+                return 99
+
+        candidates.sort(key=_distance_days)
+
+    return candidates[0]
 
 
 def fetch_odds_events() -> dict:
@@ -524,9 +571,7 @@ def resolve_pending_bets(pending_bets: list) -> list[tuple]:
 
     results = []
     for bet in pending_bets:
-        if not bet.external_game_id:
-            continue
-        game = espn_lookup.get(bet.external_game_id)
+        game = _choose_game_for_bet(bet, scoreboards, espn_lookup)
         if not game:
             continue
         if game["status"] != _STATUS_FINAL:
@@ -568,7 +613,9 @@ def resolve_pending_bets(pending_bets: list) -> list[tuple]:
         elif bet.is_player_prop:
             if not bet.player_name or not bet.prop_type or bet.prop_line is None:
                 continue
-            espn_id = bet.external_game_id
+            espn_id = game.get("espn_id", "")
+            if not espn_id:
+                continue
             if espn_id not in boxscore_cache:
                 boxscore_cache[espn_id] = fetch_espn_boxscore(espn_id)
             boxscore = boxscore_cache[espn_id]

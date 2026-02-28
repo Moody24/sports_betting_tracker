@@ -28,6 +28,33 @@ LEAGUE_AVG = {
 }
 
 
+def _build_baseline_team_stats() -> list:
+    """Fallback baseline when live NBA defensive endpoint is unavailable."""
+    try:
+        from nba_api.stats.static import teams as nba_static_teams
+        teams = nba_static_teams.get_teams()
+    except Exception:
+        teams = []
+
+    baseline = []
+    for team in teams:
+        baseline.append({
+            'team_id': str(team.get('id', '')),
+            'team_name': str(team.get('full_name', '')),
+            'team_abbr': str(team.get('abbreviation', '')),
+            'opp_pts_pg': LEAGUE_AVG['pts'],
+            'opp_reb_pg': LEAGUE_AVG['reb'],
+            'opp_ast_pg': LEAGUE_AVG['ast'],
+            'opp_3pm_pg': LEAGUE_AVG['fg3m'],
+            'opp_stl_pg': LEAGUE_AVG['stl'],
+            'opp_blk_pg': LEAGUE_AVG['blk'],
+            'opp_tov_pg': LEAGUE_AVG['tov'],
+            'pace': LEAGUE_AVG['pace'],
+            'def_rating': 114.0,
+        })
+    return baseline
+
+
 def fetch_team_defense_stats() -> list:
     """Fetch opponent (defensive) stats for all NBA teams from the NBA API.
 
@@ -83,8 +110,11 @@ def refresh_all_team_defense() -> int:
     today = date_type.today()
     team_stats = fetch_team_defense_stats()
     if not team_stats:
-        logger.warning("No team defense data fetched")
-        return 0
+        team_stats = _build_baseline_team_stats()
+        if not team_stats:
+            logger.warning("No team defense data fetched")
+            return 0
+        logger.warning("Using baseline defensive snapshot fallback (%d teams)", len(team_stats))
 
     count = 0
     for ts in team_stats:

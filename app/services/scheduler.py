@@ -338,7 +338,6 @@ def resolve_and_grade():
         pending = (
             Bet.query
             .filter_by(outcome=Outcome.PENDING.value)
-            .filter(Bet.external_game_id.isnot(None))
             .all()
         )
         resolved = resolve_pending_bets(pending)
@@ -350,7 +349,7 @@ def resolve_and_grade():
 
 
 def retrain_models():
-    """Weekly model retrain using accumulated game log data."""
+    """Scheduled model retrain using accumulated game log data."""
     from app import create_app, db
 
     app = create_app()
@@ -491,10 +490,10 @@ def init_scheduler(app):
         replace_existing=True,
     )
 
-    # Weekly model retrain (Sunday 8:00 AM ET)
+    # Daily model retrain (8:00 AM ET)
     scheduler.add_job(
         lambda: _log_job('retrain', retrain_models),
-        CronTrigger(day_of_week='sun', hour=8, minute=0, timezone=APP_TIMEZONE),
+        CronTrigger(hour=8, minute=0, timezone=APP_TIMEZONE),
         id='retrain',
         replace_existing=True,
     )

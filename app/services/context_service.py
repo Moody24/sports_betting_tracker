@@ -7,6 +7,7 @@ engine's situational adjustments.
 import logging
 import re
 from datetime import datetime, timezone, date as date_type, timedelta
+from typing import Optional
 
 import requests
 
@@ -18,24 +19,30 @@ logger = logging.getLogger(__name__)
 ESPN_INJURIES_URL = (
     "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries"
 )
+ESPN_TEAMS_URL = (
+    "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams"
+)
 ESPN_SCOREBOARD_URL = (
     "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard"
 )
 
 
-def fetch_espn_injuries() -> list:
-    """Fetch current NBA injury data from ESPN.
+def _safe_get_json(url: str, *, params: Optional[dict] = None, timeout: int = 10, attempts: int = 2) -> dict:
+    headers = {"User-Agent": "sports-betting-tracker/1.0"}
+    for attempt in range(1, attempts + 1):
+        try:
+            resp = requests.get(url, params=params, timeout=timeout, headers=headers)
+            resp.raise_for_status()
+            return resp.json()
+        except (requests.RequestException, ValueError) as exc:
+            if attempt == attempts:
+                logger.error("Request failed for %s: %s", url, exc)
+            else:
+                logger.warning("Request retry %d/%d for %s", attempt, attempts, url)
+    return {}
 
-    Returns a list of dicts: {player_name, team, status, detail}.
-    """
-    try:
-        resp = requests.get(ESPN_INJURIES_URL, timeout=10)
-        resp.raise_for_status()
-        data = resp.json()
-    except (requests.RequestException, ValueError) as exc:
-        logger.error("ESPN injury fetch failed: %s", exc)
-        return []
 
+def _parse_injury_payload(data: dict) -> list:
     injuries = []
     for team_block in data.get('items', data.get('teams', [])):
         team_name = ''
@@ -64,6 +71,49 @@ def fetch_espn_injuries() -> list:
                 'status': status,
                 'detail': str(detail)[:300] if detail else '',
             })
+    return injuries
+
+
+def _fetch_team_injuries_fallback() -> list:
+    teams_payload = _safe_get_json(ESPN_TEAMS_URL, timeout=10, attempts=2)
+    teams = teams_payload.get('sports', [{}])[0].get('leagues', [{}])[0].get('teams', [])
+    if not teams:
+        return []
+
+    injuries = []
+    seen = set()
+    for team in teams:
+        team_obj = team.get('team', {})
+        team_id = team_obj.get('id')
+        if not team_id:
+            continue
+        team_inj_url = f"{ESPN_TEAMS_URL}/{team_id}/injuries"
+        payload = _safe_get_json(team_inj_url, timeout=8, attempts=2)
+        parsed = _parse_injury_payload(payload)
+        for item in parsed:
+            key = (item['player_name'].lower().strip(), item['status'], item.get('team', '').lower().strip())
+            if key in seen:
+                continue
+            seen.add(key)
+            injuries.append(item)
+    return injuries
+
+
+def fetch_espn_injuries() -> list:
+    """Fetch current NBA injury data from ESPN.
+
+    Returns a list of dicts: {player_name, team, status, detail}.
+    """
+    data = _safe_get_json(ESPN_INJURIES_URL, timeout=10, attempts=2)
+    injuries = _parse_injury_payload(data) if data else []
+    if injuries:
+        return injuries
+
+    # Fallback path: fetch per-team injury feeds if the aggregate endpoint is empty.
+    fallback = _fetch_team_injuries_fallback()
+    if fallback:
+        logger.info("Injury fallback endpoint returned %d rows", len(fallback))
+        return fallback
 
     return injuries
 
@@ -92,6 +142,10 @@ def refresh_injuries() -> int:
     today = date_type.today()
     injuries = fetch_espn_injuries()
     if not injuries:
+        cloned = _clone_latest_injuries_for_today(today)
+        if cloned:
+            logger.info("No fresh injuries fetched; copied %d latest rows forward", cloned)
+            return cloned
         logger.info("No injuries fetched (or empty list)")
         return 0
 
@@ -113,6 +167,29 @@ def refresh_injuries() -> int:
     db.session.commit()
     logger.info("Refreshed %d injury reports", count)
     return count
+
+
+def _clone_latest_injuries_for_today(today: date_type) -> int:
+    """Carry forward the latest available injury snapshot when upstream is empty."""
+    latest_date = db.session.query(db.func.max(InjuryReport.date_reported)).scalar()
+    if not latest_date or latest_date == today:
+        return 0
+
+    latest_rows = InjuryReport.query.filter_by(date_reported=latest_date).all()
+    if not latest_rows:
+        return 0
+
+    InjuryReport.query.filter_by(date_reported=today).delete()
+    for row in latest_rows:
+        db.session.add(InjuryReport(
+            player_name=row.player_name,
+            team=row.team,
+            status=row.status,
+            detail=row.detail,
+            date_reported=today,
+        ))
+    db.session.commit()
+    return len(latest_rows)
 
 
 def get_player_injury_status(player_name: str) -> dict:
