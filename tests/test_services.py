@@ -2457,6 +2457,25 @@ class TestCLI(BaseTestCase):
         self.assertIn('Generating daily auto picks', result.output)
         mock_fn.assert_called_once()
 
+    @patch('app.services.scheduler.bootstrap_pick_quality_examples', return_value={'created': 25})
+    def test_bootstrap_pick_quality(self, mock_fn):
+        runner = self._runner()
+        result = runner.invoke(args=['bootstrap-pick-quality', '--target', '50'])
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn('Bootstrapping hidden pick-quality training examples', result.output)
+        self.assertIn('Bootstrap result', result.output)
+        mock_fn.assert_called_once()
+
+    @patch('app.services.pick_quality_model.train_pick_quality_model', return_value={'ok': 1})
+    @patch('app.services.scheduler.bootstrap_pick_quality_examples', return_value={'created': 100})
+    def test_bootstrap_pick_quality_with_train(self, mock_bootstrap, mock_train):
+        runner = self._runner()
+        result = runner.invoke(args=['bootstrap-pick-quality', '--train-after'])
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn('Training pick-quality model', result.output)
+        mock_bootstrap.assert_called_once()
+        mock_train.assert_called_once()
+
     def test_data_quality_report(self):
         runner = self._runner()
         result = runner.invoke(args=['data_quality_report'])

@@ -84,6 +84,23 @@ def register_cli(app):
         generate_daily_auto_picks()
         click.echo('Done.')
 
+    @app.cli.command('bootstrap-pick-quality')
+    @click.option('--target', type=int, default=220, show_default=True, help='Target resolved examples for Model 2.')
+    @click.option('--max-logs', type=int, default=10000, show_default=True, help='Max PlayerGameLog rows to scan.')
+    @click.option('--train-after', is_flag=True, help='Train pick-quality model after backfill.')
+    def cli_bootstrap_pick_quality(target, max_logs, train_after):
+        from app.services.scheduler import bootstrap_pick_quality_examples
+        from app.services.pick_quality_model import train_pick_quality_model
+
+        click.echo('Bootstrapping hidden pick-quality training examples...')
+        result = bootstrap_pick_quality_examples(target_resolved=target, max_logs=max_logs)
+        click.echo(f'Bootstrap result: {result}')
+        if train_after:
+            click.echo('Training pick-quality model...')
+            model_result = train_pick_quality_model()
+            click.echo(f'Pick-quality train result: {model_result}')
+        click.echo('Done.')
+
     @app.cli.command('backfill_player_logs')
     @click.option('--seasons', multiple=True, required=True, help='Season values like 2024-25')
     @click.option('--players', 'players_scope', type=click.Choice(['active', 'all']), default='active')

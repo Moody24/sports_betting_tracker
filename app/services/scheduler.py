@@ -8,6 +8,7 @@ import fcntl
 import json
 import logging
 import os
+import random
 from datetime import datetime, timezone, timedelta, time as dt_time
 
 try:
@@ -217,6 +218,16 @@ def _build_auto_pick_context(bet_obj, score: dict) -> dict:
     )
 
 
+def _ensure_autopicks_user(db, User):
+    system_user = User.query.filter_by(username='__autopicks__').first()
+    if system_user is None:
+        system_user = User(username='__autopicks__', email='autopicks@local.invalid')
+        system_user.set_password('auto-picks-system-user')
+        db.session.add(system_user)
+        db.session.flush()
+    return system_user
+
+
 def generate_daily_auto_picks():
     """Generate a separated daily basket of auto picks for faster model learning."""
     from app import create_app, db
@@ -231,12 +242,7 @@ def generate_daily_auto_picks():
         day_start = datetime.combine(today, dt_time.min)
         day_end = day_start + timedelta(days=1)
 
-        system_user = User.query.filter_by(username='__autopicks__').first()
-        if system_user is None:
-            system_user = User(username='__autopicks__', email='autopicks@local.invalid')
-            system_user.set_password('auto-picks-system-user')
-            db.session.add(system_user)
-            db.session.flush()
+        system_user = _ensure_autopicks_user(db, User)
 
         existing_today = (
             Bet.query
@@ -369,6 +375,154 @@ def generate_daily_auto_picks():
             AUTO_PICK_COINFLIP_COUNT,
             AUTO_PICK_LONGSHOT_PARLAY_LEGS,
         )
+
+
+def bootstrap_pick_quality_examples(target_resolved: int = 220, max_logs: int = 10000) -> dict:
+    """Backfill hidden resolved auto picks + PickContext for Model 2 bootstrap."""
+    from app import create_app, db
+    from app.enums import BetSource, Outcome
+    from app.models import Bet, PickContext, PlayerGameLog, User
+    from app.services.feature_engine import build_pick_context_features
+    from app.services.stats_service import get_player_stats_summary
+
+    app = create_app()
+    with app.app_context():
+        system_user = _ensure_autopicks_user(db, User)
+
+        existing_resolved = (
+            db.session.query(Bet)
+            .join(PickContext, PickContext.bet_id == Bet.id)
+            .filter(Bet.user_id == system_user.id)
+            .filter(Bet.source == BetSource.AUTO_GENERATED.value)
+            .filter(Bet.notes.like('AUTO_BOOTSTRAP_HIDDEN%'))
+            .filter(Bet.outcome.in_([Outcome.WIN.value, Outcome.LOSE.value]))
+            .count()
+        )
+        if existing_resolved >= target_resolved:
+            return {
+                'created': 0,
+                'existing_resolved': existing_resolved,
+                'target_resolved': target_resolved,
+                'message': 'already at target',
+            }
+
+        needed = target_resolved - existing_resolved
+        rng = random.Random(42)
+        created = 0
+        created_ctx = 0
+        scan_count = 0
+
+        stat_map = [
+            ('player_points', 'pts', 4.5),
+            ('player_rebounds', 'reb', 2.5),
+            ('player_assists', 'ast', 2.5),
+            ('player_threes', 'fg3m', 1.5),
+        ]
+
+        logs = (
+            PlayerGameLog.query
+            .filter(PlayerGameLog.game_date.isnot(None))
+            .order_by(PlayerGameLog.game_date.desc(), PlayerGameLog.id.desc())
+            .limit(max_logs)
+            .all()
+        )
+
+        for log in logs:
+            if created >= needed:
+                break
+            scan_count += 1
+
+            # Keep bootstrap samples in the past only.
+            if not log.game_date or log.game_date >= datetime.now(timezone.utc).date():
+                continue
+
+            prop_type, stat_key, spread = rng.choice(stat_map)
+            actual = float(getattr(log, stat_key, 0) or 0)
+            if actual < 0:
+                continue
+
+            # Use half-lines to avoid push labels.
+            base_line = actual + rng.uniform(-spread, spread)
+            line = round(base_line) + 0.5
+            if line < 0.5:
+                line = 0.5
+
+            bet_type = 'over' if rng.random() >= 0.5 else 'under'
+            is_win = actual > line if bet_type == 'over' else actual < line
+            outcome = Outcome.WIN.value if is_win else Outcome.LOSE.value
+            odds = -110 if rng.random() >= 0.3 else int(rng.choice([100, 105, 110, 115, 120]))
+
+            summary = get_player_stats_summary(str(log.player_id), logs=None)
+            season_avg = float(summary.get('season', {}).get(stat_key, actual) or actual)
+            projected_stat = season_avg + rng.uniform(-1.5, 1.5)
+            projected_edge = (projected_stat - line) / max(line, 1.0)
+            if bet_type == 'under':
+                projected_edge = (line - projected_stat) / max(line, 1.0)
+            edge_abs = abs(projected_edge)
+            if edge_abs >= 0.15:
+                tier = 'strong'
+            elif edge_abs >= 0.08:
+                tier = 'moderate'
+            else:
+                tier = 'slight'
+
+            context = build_pick_context_features(
+                player_name=log.player_name,
+                player_id=str(log.player_id),
+                prop_type=prop_type,
+                prop_line=float(line),
+                american_odds=int(odds),
+                projected_stat=float(round(projected_stat, 2)),
+                projected_edge=float(round(projected_edge, 4)),
+                confidence_tier=tier,
+                opponent_name='',
+                team_name='',
+                is_home=(log.home_away or '').lower() == 'home',
+            )
+
+            bet_obj = Bet(
+                user_id=system_user.id,
+                team_a=str(log.team_abbr or 'TEAM'),
+                team_b='OPP',
+                match_date=datetime.combine(log.game_date, dt_time.min),
+                bet_amount=10.0,
+                outcome=outcome,
+                american_odds=int(odds),
+                is_parlay=False,
+                source=BetSource.AUTO_GENERATED.value,
+                bet_type=bet_type,
+                over_under_line=None,
+                external_game_id=None,
+                player_name=log.player_name,
+                prop_type=prop_type,
+                prop_line=float(line),
+                actual_total=float(actual),
+                notes='AUTO_BOOTSTRAP_HIDDEN:model2',
+            )
+            db.session.add(bet_obj)
+            db.session.flush()
+
+            db.session.add(PickContext(
+                bet_id=bet_obj.id,
+                context_json=json.dumps(context),
+                projected_stat=float(round(projected_stat, 2)),
+                projected_edge=float(round(projected_edge, 4)),
+                confidence_tier=tier,
+            ))
+            created += 1
+            created_ctx += 1
+
+            if created % 100 == 0:
+                db.session.commit()
+
+        db.session.commit()
+        return {
+            'created': created,
+            'created_context': created_ctx,
+            'existing_resolved': existing_resolved,
+            'target_resolved': target_resolved,
+            'logs_scanned': scan_count,
+        }
 
 
 def resolve_and_grade():
