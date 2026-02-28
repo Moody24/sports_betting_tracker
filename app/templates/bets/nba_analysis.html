@@ -186,19 +186,34 @@
             </div>
           </td>
           <td class="text-center">
-            <button class="btn btn-sm btn-outline-primary quick-add-btn"
-                    data-player="{{ play.player }}"
-                    data-prop-type="{{ play.prop_type }}"
-                    data-line="{{ play.line }}"
-                    data-side="{{ play.recommended_side }}"
-                    data-odds="{{ play.recommended_odds or '' }}"
-                    data-game-id="{{ play.game_id }}"
-                    data-home="{{ play.home_team }}"
-                    data-away="{{ play.away_team }}"
-                    data-date="{{ play.match_date }}"
-                    title="Add to bet slip">
-              <i class="bi bi-plus-lg"></i>
-            </button>
+            <div class="btn-group btn-group-sm" role="group">
+              <button class="btn btn-outline-primary quick-add-prop-btn"
+                      data-player="{{ play.player }}"
+                      data-prop-type="{{ play.prop_type }}"
+                      data-line="{{ play.line }}"
+                      data-side="{{ play.recommended_side }}"
+                      data-odds="{{ play.recommended_odds or '' }}"
+                      data-game-id="{{ play.game_id }}"
+                      data-home="{{ play.home_team }}"
+                      data-away="{{ play.away_team }}"
+                      data-date="{{ play.match_date }}"
+                      title="Add as single prop bet">
+                Bet
+              </button>
+              <button class="btn btn-outline-info quick-add-parlay-btn"
+                      data-player="{{ play.player }}"
+                      data-prop-type="{{ play.prop_type }}"
+                      data-line="{{ play.line }}"
+                      data-side="{{ play.recommended_side }}"
+                      data-odds="{{ play.recommended_odds or '' }}"
+                      data-game-id="{{ play.game_id }}"
+                      data-home="{{ play.home_team }}"
+                      data-away="{{ play.away_team }}"
+                      data-date="{{ play.match_date }}"
+                      title="Add to parlay builder">
+                Parlay
+              </button>
+            </div>
           </td>
         </tr>
         {% endfor %}
@@ -353,8 +368,8 @@ document.addEventListener('DOMContentLoaded', function() {
     });
   });
 
-  // Quick-add to bet
-  document.querySelectorAll('.quick-add-btn').forEach(btn => {
+  // Quick-add to single prop bet form
+  document.querySelectorAll('.quick-add-prop-btn').forEach(btn => {
     btn.addEventListener('click', function() {
       const params = new URLSearchParams({
         team_a: this.dataset.away,
@@ -367,6 +382,24 @@ document.addEventListener('DOMContentLoaded', function() {
         game_id: this.dataset.gameId,
       });
       window.location.href = '/bets/new?' + params.toString() + '#prop';
+    });
+  });
+
+  // Quick-add to parlay builder with first leg prefilled
+  document.querySelectorAll('.quick-add-parlay-btn').forEach(btn => {
+    btn.addEventListener('click', function() {
+      const params = new URLSearchParams({
+        add_to_parlay: '1',
+        team_a: this.dataset.away,
+        team_b: this.dataset.home,
+        match_date: this.dataset.date,
+        bet_type: this.dataset.side,
+        player_name: this.dataset.player,
+        prop_type: this.dataset.propType,
+        prop_line: this.dataset.line,
+        game_id: this.dataset.gameId,
+      });
+      window.location.href = '/bets/new?' + params.toString() + '#parlay';
     });
   });
 });

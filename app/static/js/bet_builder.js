@@ -19,16 +19,20 @@
   const tabs   = document.querySelectorAll('[data-bb-tab]');
   const panels = document.querySelectorAll('[data-bb-panel]');
 
-  function showTab(name) {
+  function showTab(name, pushHash) {
     const validTabs = ['single', 'prop', 'parlay', 'screenshot'];
+    if (!validTabs.includes(name)) return;
     tabs.forEach(t => t.classList.toggle('active', t.dataset.bbTab === name));
     panels.forEach(p => p.classList.toggle('d-none', p.dataset.bbPanel !== name));
+    if (pushHash) {
+      history.replaceState(null, '', '#' + name);
+    }
   }
 
-  tabs.forEach(t => t.addEventListener('click', () => showTab(t.dataset.bbTab)));
+  tabs.forEach(t => t.addEventListener('click', () => showTab(t.dataset.bbTab, true)));
 
   const hash = location.hash.replace('#', '') || 'single';
-  showTab(['single', 'prop', 'parlay', 'screenshot'].includes(hash) ? hash : 'single');
+  showTab(['single', 'prop', 'parlay', 'screenshot'].includes(hash) ? hash : 'single', false);
 
   // ── Game picker (shared datalist) ─────────────────────────────────
   var upcomingGames = [];
@@ -340,6 +344,7 @@
     legsContainer.insertAdjacentHTML('beforeend', makeLegHTML(legCount++));
     bindLegEvents(legsContainer.lastElementChild);
   }
+  maybePrefillParlayFromQuery();
 
   // ── Parlay submit ─────────────────────────────────────────────────
   const parlayForm     = document.getElementById('parlay-form');
@@ -689,6 +694,71 @@
 
     newLeg.scrollIntoView({ behavior: 'smooth', block: 'center' });
     if (playerEl) playerEl.focus();
+  }
+
+  function fillParlayLegFromPrefill(legEl, prefill) {
+    if (!legEl || !prefill) return;
+
+    const teamAEl = legEl.querySelector('.leg-team-a');
+    const teamBEl = legEl.querySelector('.leg-team-b');
+    const dateEl = legEl.querySelector('.leg-date');
+    const gameIdEl = legEl.querySelector('.leg-game-id');
+    const betTypeEl = legEl.querySelector('.leg-bet-type');
+    const playerEl = legEl.querySelector('.leg-player');
+    const propTypeEl = legEl.querySelector('.leg-prop-type');
+    const propLineEl = legEl.querySelector('.leg-prop-line');
+
+    if (teamAEl) teamAEl.value = prefill.teamA || '';
+    if (teamBEl) teamBEl.value = prefill.teamB || '';
+    if (dateEl) dateEl.value = prefill.matchDate || '';
+    if (gameIdEl) gameIdEl.value = prefill.gameId || '';
+    if (playerEl) playerEl.value = prefill.playerName || '';
+    if (propTypeEl) propTypeEl.value = prefill.propType || 'player_points';
+    if (propLineEl) propLineEl.value = prefill.propLine || '';
+
+    if (betTypeEl) {
+      for (let i = 0; i < betTypeEl.options.length; i += 1) {
+        const opt = betTypeEl.options[i];
+        if (opt.value === prefill.betType && opt.dataset.prop === '1') {
+          betTypeEl.selectedIndex = i;
+          break;
+        }
+      }
+      betTypeEl.dispatchEvent(new Event('change'));
+    }
+  }
+
+  function maybePrefillParlayFromQuery() {
+    const qp = new URLSearchParams(window.location.search || '');
+    if (qp.get('add_to_parlay') !== '1' || !legsContainer) return;
+
+    const prefill = {
+      teamA: qp.get('team_a') || '',
+      teamB: qp.get('team_b') || '',
+      matchDate: qp.get('match_date') || '',
+      playerName: qp.get('player_name') || '',
+      propType: qp.get('prop_type') || 'player_points',
+      propLine: qp.get('prop_line') || '',
+      betType: (qp.get('bet_type') || 'over').toLowerCase() === 'under' ? 'under' : 'over',
+      gameId: qp.get('game_id') || '',
+    };
+
+    const firstLeg = legsContainer.querySelector('.parlay-leg');
+    if (firstLeg) {
+      fillParlayLegFromPrefill(firstLeg, prefill);
+    } else {
+      legsContainer.insertAdjacentHTML('beforeend', makeLegHTML(legCount++));
+      const newLeg = legsContainer.lastElementChild;
+      bindLegEvents(newLeg);
+      fillParlayLegFromPrefill(newLeg, prefill);
+    }
+
+    showTab('parlay', true);
+    const stakeEl = document.getElementById('parlay-stake');
+    if (stakeEl) {
+      stakeEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      stakeEl.focus();
+    }
   }
 
   function renderParlayPropsBrowser(props) {

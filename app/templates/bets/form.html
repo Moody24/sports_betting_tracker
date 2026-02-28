@@ -8,29 +8,26 @@
 {# Shared game datalist — populated by bet_builder.js #}
 <datalist id="game-datalist"></datalist>
 
-{# ── Tab pills ── #}
-<ul class="nav nav-pills mb-4 gap-2 flex-wrap">
-  <li class="nav-item">
-    <button class="nav-link" data-bb-tab="single">
-      <i class="bi bi-bar-chart me-1"></i>Single Game
-    </button>
-  </li>
-  <li class="nav-item">
-    <button class="nav-link" data-bb-tab="prop">
-      <i class="bi bi-person-fill me-1"></i>Player Prop
-    </button>
-  </li>
-  <li class="nav-item">
-    <button class="nav-link" data-bb-tab="parlay">
-      <i class="bi bi-list-check me-1"></i>Parlay Builder
-    </button>
-  </li>
-  <li class="nav-item">
-    <button class="nav-link" data-bb-tab="screenshot">
-      <i class="bi bi-camera me-1"></i>Import Screenshot
-    </button>
-  </li>
-</ul>
+<div class="card-soft p-3 mb-4">
+  <div class="d-flex flex-wrap align-items-center gap-2">
+    <span class="small text-secondary fw-semibold me-2">Bet Mode</span>
+    <div class="btn-group btn-group-sm flex-wrap" role="group" aria-label="Bet builder modes">
+      <button class="btn btn-outline-light" data-bb-tab="single" type="button">
+        <i class="bi bi-bar-chart me-1"></i>Game Line
+      </button>
+      <button class="btn btn-outline-light" data-bb-tab="prop" type="button">
+        <i class="bi bi-person-fill me-1"></i>Player Prop
+      </button>
+      <button class="btn btn-outline-light" data-bb-tab="parlay" type="button">
+        <i class="bi bi-list-check me-1"></i>Parlay
+      </button>
+      <button class="btn btn-outline-light" data-bb-tab="screenshot" type="button">
+        <i class="bi bi-camera me-1"></i>Screenshot
+      </button>
+    </div>
+    <span class="small text-secondary ms-auto">Switch modes in one tap without leaving this page.</span>
+  </div>
+</div>
 
 {# ══════════════════════════════════════════════════════════════════
    TAB 1 — Single Game (Moneyline or Over/Under)

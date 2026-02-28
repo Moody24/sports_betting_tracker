@@ -14,6 +14,7 @@ from datetime import datetime, timezone, date as date_type
 
 from app import db
 from app.models import Bet, PickContext, ModelMetadata
+from app.services.model_storage import materialize_model_artifact, persist_model_artifact
 
 logger = logging.getLogger(__name__)
 
@@ -181,6 +182,7 @@ def train_pick_quality_model(user_id: int | None = None) -> dict:
     filename = f"pick_quality_{file_tag}_{today}.json"
     filepath = os.path.join(MODEL_DIR, filename)
     model.save_model(filepath)
+    artifact_path = persist_model_artifact(filepath, filename)
 
     # Store metadata
     ModelMetadata.query.filter_by(
@@ -191,7 +193,7 @@ def train_pick_quality_model(user_id: int | None = None) -> dict:
         model_name=model_name,
         model_type='xgboost_classifier',
         version=f"{model_name}_{today}",
-        file_path=filepath,
+        file_path=artifact_path,
         training_date=datetime.now(timezone.utc),
         training_samples=len(X_train),
         val_accuracy=round(accuracy, 4),
@@ -217,7 +219,7 @@ def train_pick_quality_model(user_id: int | None = None) -> dict:
         'train_samples': len(X_train),
         'val_samples': len(X_val),
         'top_features': top_features,
-        'model_path': filepath,
+        'model_path': artifact_path,
         'user_id': user_id,
     }
 
@@ -249,7 +251,10 @@ def predict_pick_quality(context: dict, user_id: int | None = None) -> dict:
             model_name=_model_name(None), is_active=True,
         ).first()
 
-    if not meta or not os.path.exists(meta.file_path):
+    if not meta:
+        return _no_model_result()
+    local_model_path = materialize_model_artifact(meta.file_path)
+    if not local_model_path:
         return _no_model_result()
 
     try:
@@ -262,7 +267,7 @@ def predict_pick_quality(context: dict, user_id: int | None = None) -> dict:
         return _no_model_result()
 
     model = XGBClassifier()
-    model.load_model(meta.file_path)
+    model.load_model(local_model_path)
 
     # Build feature vector from context
     features = {}

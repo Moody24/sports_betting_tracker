@@ -15,6 +15,7 @@ from datetime import datetime, timezone, date as date_type
 
 from app import db
 from app.models import ModelMetadata, PlayerGameLog
+from app.services.model_storage import materialize_model_artifact, persist_model_artifact
 
 logger = logging.getLogger(__name__)
 
@@ -271,6 +272,7 @@ def train_model(stat_type: str) -> dict:
     filename = f"projection_{stat_type}_{today}.json"
     filepath = os.path.join(MODEL_DIR, filename)
     model.save_model(filepath)
+    artifact_path = persist_model_artifact(filepath, filename)
 
     # Store metadata
     version = f"{stat_type}_{today}"
@@ -283,7 +285,7 @@ def train_model(stat_type: str) -> dict:
         model_name=f"projection_{stat_type}",
         model_type='xgboost_regressor',
         version=version,
-        file_path=filepath,
+        file_path=artifact_path,
         training_date=datetime.now(timezone.utc),
         training_samples=len(X_train),
         val_mae=round(mae, 3),
@@ -308,7 +310,7 @@ def train_model(stat_type: str) -> dict:
         'mae': round(mae, 3),
         'train_samples': len(X_train),
         'val_samples': len(X_val),
-        'model_path': filepath,
+        'model_path': artifact_path,
     }
 
 
@@ -327,11 +329,14 @@ def load_active_model(stat_type: str):
         is_active=True,
     ).first()
 
-    if not meta or not os.path.exists(meta.file_path):
+    if not meta:
+        return None, None
+    local_model_path = materialize_model_artifact(meta.file_path)
+    if not local_model_path:
         return None, None
 
     model = XGBRegressor()
-    model.load_model(meta.file_path)
+    model.load_model(local_model_path)
 
     feature_names = None
     if meta.metadata_json:

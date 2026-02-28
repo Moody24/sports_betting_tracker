@@ -1909,6 +1909,66 @@ class TestMLModel(BaseTestCase):
             self.assertTrue(any(m['name'] == 'projection_player_points' for m in perf))
 
 
+class TestModelStorage(BaseTestCase):
+    """Coverage for model artifact storage helpers."""
+
+    def test_persist_local_mode_returns_local_path(self):
+        from app.services import model_storage
+
+        local_path = '/tmp/local_model.json'
+        with open(local_path, 'w', encoding='utf-8') as f:
+            f.write('{}')
+
+        with patch.dict(os.environ, {'MODEL_STORAGE': 'local'}, clear=False):
+            out = model_storage.persist_model_artifact(local_path, 'local_model.json')
+        self.assertEqual(out, local_path)
+
+    def test_persist_s3_mode_uploads_and_returns_s3_uri(self):
+        from app.services import model_storage
+
+        local_path = '/tmp/s3_model_upload.json'
+        with open(local_path, 'w', encoding='utf-8') as f:
+            f.write('{}')
+
+        fake_client = MagicMock()
+        with patch.dict(
+            os.environ,
+            {
+                'MODEL_STORAGE': 's3',
+                'S3_MODEL_BUCKET': 'test-bucket',
+                'S3_MODEL_PREFIX': 'models/',
+            },
+            clear=False,
+        ):
+            with patch.object(model_storage, '_get_s3_client', return_value=fake_client):
+                out = model_storage.persist_model_artifact(local_path, 'projection_player_points_x.json')
+
+        self.assertEqual(out, 's3://test-bucket/models/projection_player_points_x.json')
+        fake_client.upload_file.assert_called_once_with(
+            local_path, 'test-bucket', 'models/projection_player_points_x.json'
+        )
+
+    def test_materialize_s3_downloads_to_cache(self):
+        from app.services import model_storage
+        from uuid import uuid4
+
+        uri = f's3://test-bucket/models/model_{uuid4().hex}.json'
+        fake_client = MagicMock()
+
+        def _fake_download(_bucket, _key, dest):
+            with open(dest, 'w', encoding='utf-8') as f:
+                f.write('{}')
+
+        fake_client.download_file.side_effect = _fake_download
+
+        with patch.object(model_storage, '_get_s3_client', return_value=fake_client):
+            local_path = model_storage.materialize_model_artifact(uri)
+
+        self.assertIsNotNone(local_path)
+        self.assertTrue(os.path.exists(local_path))
+        fake_client.download_file.assert_called_once()
+
+
 class TestScheduler(BaseTestCase):
     """Targeted coverage for app.services.scheduler."""
 
