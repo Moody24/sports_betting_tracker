@@ -10,6 +10,7 @@ Requires 200+ resolved picks before training has enough signal.
 import json
 import logging
 import os
+import math
 from datetime import datetime, timezone, date as date_type
 
 from app import db
@@ -341,4 +342,123 @@ def _no_model_result() -> dict:
         'recommendation': 'no_model',
         'red_flags': [],
         'model_version': None,
+    }
+
+
+def get_calibration_report(
+    limit: int = 500,
+    bins: int = 5,
+    user_id: int | None = None,
+) -> dict:
+    """Evaluate active pick-quality model calibration on resolved picks.
+
+    Returns aggregate quality metrics and probability-bin calibration stats.
+    """
+    try:
+        limit = max(int(limit), 1)
+    except (TypeError, ValueError):
+        limit = 500
+    try:
+        bins = max(min(int(bins), 10), 2)
+    except (TypeError, ValueError):
+        bins = 5
+
+    query = (
+        db.session.query(Bet, PickContext)
+        .join(PickContext, Bet.id == PickContext.bet_id)
+        .filter(Bet.outcome.in_(['win', 'lose']))
+        .order_by(Bet.match_date.desc(), Bet.id.desc())
+    )
+    if user_id is not None:
+        query = query.filter(Bet.user_id == int(user_id))
+
+    rows = query.limit(limit).all()
+    if not rows:
+        return {'error': 'No resolved picks with context found.'}
+
+    evaluated = []
+    no_model_count = 0
+    recommendation_counts = {'take_it': 0, 'caution': 0, 'skip': 0, 'no_model': 0}
+    model_version = None
+
+    for bet_obj, pick_ctx in rows:
+        try:
+            context = json.loads(pick_ctx.context_json) if pick_ctx.context_json else {}
+        except (TypeError, ValueError):
+            continue
+
+        prediction = predict_pick_quality(context, user_id=user_id)
+        recommendation = prediction.get('recommendation', 'no_model')
+        recommendation_counts[recommendation] = recommendation_counts.get(recommendation, 0) + 1
+
+        if recommendation == 'no_model' or prediction.get('model_version') is None:
+            no_model_count += 1
+            continue
+
+        p_raw = prediction.get('win_probability', 0.5)
+        try:
+            p = float(p_raw)
+        except (TypeError, ValueError):
+            p = 0.5
+        p = min(max(p, 0.001), 0.999)
+        y = 1 if bet_obj.outcome == 'win' else 0
+        evaluated.append((p, y))
+        model_version = model_version or prediction.get('model_version')
+
+    if not evaluated:
+        return {
+            'error': 'No evaluable predictions (active model unavailable).',
+            'total_rows': len(rows),
+            'no_model_count': no_model_count,
+        }
+
+    n = len(evaluated)
+    wins = sum(y for _, y in evaluated)
+    losses = n - wins
+    avg_pred = sum(p for p, _ in evaluated) / n
+    win_rate = wins / n
+
+    brier = sum((p - y) ** 2 for p, y in evaluated) / n
+    logloss = -sum(y * math.log(p) + (1 - y) * math.log(1 - p) for p, y in evaluated) / n
+
+    bin_rows = []
+    for idx in range(bins):
+        start = idx / bins
+        end = (idx + 1) / bins
+        values = [(p, y) for p, y in evaluated if (start <= p < end) or (idx == bins - 1 and p == 1.0)]
+        if not values:
+            bin_rows.append({
+                'range': f'{start:.2f}-{end:.2f}',
+                'count': 0,
+                'avg_pred': None,
+                'win_rate': None,
+                'gap': None,
+            })
+            continue
+
+        b_count = len(values)
+        b_avg = sum(p for p, _ in values) / b_count
+        b_win = sum(y for _, y in values) / b_count
+        bin_rows.append({
+            'range': f'{start:.2f}-{end:.2f}',
+            'count': b_count,
+            'avg_pred': round(b_avg, 3),
+            'win_rate': round(b_win, 3),
+            'gap': round(b_avg - b_win, 3),
+        })
+
+    return {
+        'model_version': model_version,
+        'total_rows': len(rows),
+        'evaluated': n,
+        'no_model_count': no_model_count,
+        'wins': wins,
+        'losses': losses,
+        'win_rate': round(win_rate, 3),
+        'avg_pred': round(avg_pred, 3),
+        'overconfidence_gap': round(avg_pred - win_rate, 3),
+        'brier': round(brier, 4),
+        'logloss': round(logloss, 4),
+        'recommendation_counts': recommendation_counts,
+        'bins': bin_rows,
     }

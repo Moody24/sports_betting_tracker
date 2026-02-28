@@ -438,3 +438,86 @@ def register_cli(app):
                 click.echo(f'- {issue}')
         else:
             click.echo('PASS')
+
+    @app.cli.command('model_calibration_report')
+    @click.option(
+        '--limit',
+        type=int,
+        default=500,
+        show_default=True,
+        help='Max most-recent resolved picks with context to evaluate.',
+    )
+    @click.option(
+        '--bins',
+        type=int,
+        default=5,
+        show_default=True,
+        help='Number of probability bins for calibration table (2-10).',
+    )
+    @click.option(
+        '--user-id',
+        type=int,
+        default=None,
+        help='Optional user ID for per-user model calibration.',
+    )
+    def cli_model_calibration_report(limit, bins, user_id):
+        """Print pick-quality model calibration and confidence diagnostics."""
+        from app.services.pick_quality_model import get_calibration_report
+
+        report = get_calibration_report(limit=limit, bins=bins, user_id=user_id)
+
+        click.echo('=== Model Calibration Report (Model 2) ===')
+        if user_id is not None:
+            click.echo(f'User ID: {user_id}')
+
+        if report.get('error'):
+            click.echo(f"Error: {report['error']}")
+            if 'total_rows' in report:
+                click.echo(f"Resolved rows scanned: {report.get('total_rows', 0)}")
+                click.echo(f"No-model rows: {report.get('no_model_count', 0)}")
+            return
+
+        click.echo(f"Model version: {report.get('model_version') or 'unknown'}")
+        click.echo(
+            "Rows scanned/evaluated/no-model: "
+            f"{report.get('total_rows', 0)}/{report.get('evaluated', 0)}/{report.get('no_model_count', 0)}"
+        )
+        click.echo(f"Wins/Losses: {report.get('wins', 0)}/{report.get('losses', 0)}")
+        click.echo(
+            "Avg predicted vs actual win rate: "
+            f"{report.get('avg_pred', 0):.3f} vs {report.get('win_rate', 0):.3f}"
+        )
+        click.echo(
+            f"Overconfidence gap (pred - actual): {report.get('overconfidence_gap', 0):.3f}"
+        )
+        click.echo(f"Brier score (lower is better): {report.get('brier', 0):.4f}")
+        click.echo(f"Log loss (lower is better): {report.get('logloss', 0):.4f}")
+
+        rec = report.get('recommendation_counts', {})
+        click.echo(
+            "Recommendation mix: "
+            f"take_it={rec.get('take_it', 0)}, "
+            f"caution={rec.get('caution', 0)}, "
+            f"skip={rec.get('skip', 0)}, "
+            f"no_model={rec.get('no_model', 0)}"
+        )
+
+        click.echo('\n=== Calibration Bins ===')
+        for row in report.get('bins', []):
+            if row.get('count', 0) == 0:
+                click.echo(f"- {row.get('range')}: count=0")
+                continue
+            click.echo(
+                f"- {row.get('range')}: count={row.get('count')}, "
+                f"pred={row.get('avg_pred'):.3f}, actual={row.get('win_rate'):.3f}, "
+                f"gap={row.get('gap'):.3f}"
+            )
+
+        click.echo('\n=== Verdict ===')
+        gap = abs(float(report.get('overconfidence_gap', 0) or 0))
+        if gap <= 0.03:
+            click.echo('GOOD: model appears reasonably calibrated on this sample.')
+        elif gap <= 0.07:
+            click.echo('WATCH: mild confidence skew detected; monitor next retrains.')
+        else:
+            click.echo('WARN: significant over/under-confidence; recalibration advised.')

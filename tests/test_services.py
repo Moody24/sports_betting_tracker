@@ -2684,6 +2684,39 @@ class TestCLI(BaseTestCase):
         self.assertIn('=== Scheduler/Jobs ===', result.output)
         self.assertIn('=== Verdict ===', result.output)
 
+    @patch('app.services.pick_quality_model.get_calibration_report')
+    def test_model_calibration_report(self, mock_report):
+        mock_report.return_value = {
+            'model_version': 'pick_quality_nba_2026-02-28',
+            'total_rows': 120,
+            'evaluated': 100,
+            'no_model_count': 20,
+            'wins': 54,
+            'losses': 46,
+            'win_rate': 0.54,
+            'avg_pred': 0.56,
+            'overconfidence_gap': 0.02,
+            'brier': 0.2421,
+            'logloss': 0.6812,
+            'recommendation_counts': {
+                'take_it': 70,
+                'caution': 10,
+                'skip': 20,
+                'no_model': 20,
+            },
+            'bins': [
+                {'range': '0.40-0.60', 'count': 60, 'avg_pred': 0.55, 'win_rate': 0.53, 'gap': 0.02},
+                {'range': '0.60-0.80', 'count': 40, 'avg_pred': 0.67, 'win_rate': 0.65, 'gap': 0.02},
+            ],
+        }
+        runner = self._runner()
+        result = runner.invoke(args=['model_calibration_report', '--limit', '100', '--bins', '5'])
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn('=== Model Calibration Report (Model 2) ===', result.output)
+        self.assertIn('Overconfidence gap (pred - actual)', result.output)
+        self.assertIn('=== Calibration Bins ===', result.output)
+        self.assertIn('=== Verdict ===', result.output)
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # health/readiness endpoint tests
