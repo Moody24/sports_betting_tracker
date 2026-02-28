@@ -1,11 +1,11 @@
 """Tests for the bet blueprint."""
 
 import json
-from datetime import datetime
+from datetime import datetime, date
 from unittest.mock import patch
 
 from app import db
-from app.models import Bet, User, PickContext
+from app.models import Bet, User, PickContext, GameSnapshot
 
 from tests.helpers import BaseTestCase, make_bet, make_user
 
@@ -313,6 +313,69 @@ class TestBetRoutes(BaseTestCase):
         resp = self.client.get("/nba/props/espn123")
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.content_type, "application/json")
+
+    @patch("app.routes.bet.get_player_props", return_value={})
+    def test_nba_props_returns_cached_snapshot_when_live_empty(self, _mock):
+        self.register_and_login()
+        with self.app.app_context():
+            db.session.add(GameSnapshot(
+                espn_id="espn123",
+                game_date=date.today(),
+                home_team="Miami Heat",
+                away_team="Houston Rockets",
+                home_logo="",
+                away_logo="",
+                home_score=0,
+                away_score=0,
+                status="STATUS_SCHEDULED",
+                props_json=json.dumps({
+                    "player_points": [{
+                        "player": "Jimmy Butler",
+                        "line": 22.5,
+                        "over_odds": -110,
+                        "under_odds": -110,
+                    }]
+                }),
+            ))
+            db.session.commit()
+
+        resp = self.client.get("/nba/props/espn123")
+        self.assertEqual(resp.status_code, 200)
+        data = json.loads(resp.data)
+        self.assertIn("player_points", data)
+        self.assertEqual(data["player_points"][0]["player"], "Jimmy Butler")
+
+    @patch("app.routes.bet.fetch_upcoming_games", return_value=[])
+    @patch("app.routes.bet.fetch_player_props_for_event")
+    @patch("app.routes.bet.get_todays_games")
+    def test_nba_today_prefetches_props_snapshot(self, mock_games, mock_fetch_props, _mock_upcoming):
+        self.register_and_login()
+        mock_games.return_value = [{
+            "espn_id": "espnA",
+            "home": {"name": "Charlotte Hornets", "score": 0, "logo": "", "abbr": "CHA"},
+            "away": {"name": "Portland Trail Blazers", "score": 0, "logo": "", "abbr": "POR"},
+            "status": "STATUS_SCHEDULED",
+            "start_time": "2026-02-28T19:00:00Z",
+            "over_under_line": 221.5,
+            "moneyline_home": -120,
+            "moneyline_away": 102,
+            "odds_event_id": "evt123",
+        }]
+        mock_fetch_props.return_value = {
+            "player_points": [{
+                "player": "LaMelo Ball",
+                "line": 24.5,
+                "over_odds": -110,
+                "under_odds": -110,
+            }]
+        }
+
+        resp = self.client.get("/nba/today")
+        self.assertEqual(resp.status_code, 200)
+        with self.app.app_context():
+            snap = GameSnapshot.query.filter_by(espn_id="espnA", game_date=date.today()).first()
+            self.assertIsNotNone(snap)
+            self.assertIsNotNone(snap.props_json)
 
     def test_nba_prop_progress_requires_query_params(self):
         self.register_and_login()

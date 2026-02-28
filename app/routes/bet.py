@@ -456,6 +456,14 @@ def nba_today():
             if not snap.away_logo:
                 snap.away_logo = game['away'].get('logo', '')
 
+        # Opportunistically lock player props while an Odds event mapping exists.
+        if snap.props_json is None:
+            event_id = (game.get('odds_event_id') or '').strip()
+            if event_id:
+                props = fetch_player_props_for_event(event_id)
+                if props:
+                    snap.props_json = json.dumps(props)
+
     db.session.commit()
 
     # Separate active (non-final) vs completed today
@@ -546,11 +554,19 @@ def nba_upcoming_games():
 @login_required
 def nba_props(espn_id):
     """Return player props for a game as JSON and persist them to snapshot."""
-    props = get_player_props(espn_id)
-
-    # Save props to today's snapshot if not already stored
+    # Prefer stored snapshot props first so historical games still resolve even
+    # when live Odds event mappings disappear after tip/final.
     today = date_type.today()
     snap = GameSnapshot.query.filter_by(espn_id=espn_id, game_date=today).first()
+    if snap and snap.props_json:
+        try:
+            return jsonify(json.loads(snap.props_json))
+        except (TypeError, ValueError):
+            pass
+
+    props = get_player_props(espn_id)
+
+    # Save props to today's snapshot if not already stored.
     if snap and snap.props_json is None and props:
         snap.props_json = json.dumps(props)
         db.session.commit()
