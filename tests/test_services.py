@@ -2210,6 +2210,14 @@ class TestCLI(BaseTestCase):
         self.assertIn('Retraining models', result.output)
         mock_fn.assert_called_once()
 
+    @patch('app.services.scheduler.generate_daily_auto_picks')
+    def test_generate_auto_picks(self, mock_fn):
+        runner = self._runner()
+        result = runner.invoke(args=['generate-auto-picks'])
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn('Generating daily auto picks', result.output)
+        mock_fn.assert_called_once()
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # health/readiness endpoint tests

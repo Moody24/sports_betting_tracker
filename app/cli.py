@@ -70,6 +70,13 @@ def register_cli(app):
         retrain_models()
         click.echo('Done.')
 
+    @app.cli.command('generate-auto-picks')
+    def cli_generate_auto_picks():
+        from app.services.scheduler import generate_daily_auto_picks
+        click.echo('Generating daily auto picks...')
+        generate_daily_auto_picks()
+        click.echo('Done.')
+
     @app.cli.command('backfill_player_logs')
     @click.option('--seasons', multiple=True, required=True, help='Season values like 2024-25')
     @click.option('--players', 'players_scope', type=click.Choice(['active', 'all']), default='active')
