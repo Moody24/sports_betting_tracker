@@ -21,7 +21,6 @@ from app.services.nba_service import (
     fetch_player_props_for_event,
     resolve_pending_bets,
     get_player_props,
-    fetch_espn_boxscore,
     ESPN_SUMMARY_URL,
 )
 from app.services.projection_engine import ProjectionEngine
@@ -33,6 +32,7 @@ logger = logging.getLogger(__name__)
 bet = Blueprint('bet', __name__)
 _PROP_PROGRESS_CACHE: dict[tuple, dict] = {}
 _PROP_PROGRESS_TTL_SECONDS = 30
+_PROP_PROGRESS_CACHE_MAX = 2000
 
 
 def _escape_like(value: str) -> str:
@@ -42,6 +42,58 @@ def _escape_like(value: str) -> str:
 
 def _normalize_name(value: str) -> str:
     return re.sub(r'[^a-z0-9]+', ' ', (value or '').lower()).strip()
+
+
+def _extract_prop_boxscore(summary_data: dict) -> dict:
+    """Extract prop-relevant player stats from ESPN summary payload."""
+    stat_column_map = {
+        "player_points": "PTS",
+        "player_rebounds": "REB",
+        "player_assists": "AST",
+        "player_threes": "3PT",
+    }
+    player_stats: dict = {}
+    for team_block in summary_data.get("boxscore", {}).get("players", []):
+        for stat_block in team_block.get("statistics", []):
+            column_names: list[str] = stat_block.get("names", [])
+            for athlete in stat_block.get("athletes", []):
+                name = athlete.get("athlete", {}).get("displayName", "")
+                if not name:
+                    continue
+                raw_stats: list[str] = athlete.get("stats", [])
+                entry: dict = {}
+                for prop_type, col_header in stat_column_map.items():
+                    if col_header not in column_names:
+                        continue
+                    idx = column_names.index(col_header)
+                    if idx >= len(raw_stats):
+                        continue
+                    raw = raw_stats[idx]
+                    if "-" in str(raw):
+                        raw = str(raw).split("-")[0]
+                    try:
+                        entry[prop_type] = float(raw)
+                    except (ValueError, TypeError):
+                        continue
+                if entry:
+                    player_stats[name] = entry
+    return player_stats
+
+
+def _prune_prop_progress_cache(now_monotonic: float) -> None:
+    # Remove expired entries every request; keep bounded memory in long-lived workers.
+    expired_keys = [k for k, v in _PROP_PROGRESS_CACHE.items() if v.get("expires_at", 0) <= now_monotonic]
+    for key in expired_keys:
+        _PROP_PROGRESS_CACHE.pop(key, None)
+
+    if len(_PROP_PROGRESS_CACHE) <= _PROP_PROGRESS_CACHE_MAX:
+        return
+
+    # If still oversized, remove oldest entries by creation time.
+    survivors = sorted(_PROP_PROGRESS_CACHE.items(), key=lambda kv: kv[1].get("created_at", 0), reverse=True)
+    keep = survivors[: _PROP_PROGRESS_CACHE_MAX // 2]
+    _PROP_PROGRESS_CACHE.clear()
+    _PROP_PROGRESS_CACHE.update(dict(keep))
 
 
 def _filtered_bets_query(user_id: int, args) -> "db.Query":
@@ -101,6 +153,9 @@ def place_bet():
     parlay_status: dict = {}
     for pid, legs in parlay_groups.items():
         outcomes = [l.outcome for l in legs]
+        leg_count = len(legs)
+        for leg in legs:
+            setattr(leg, "_parlay_legs_count", leg_count)
         if any(o == Outcome.LOSE.value for o in outcomes):
             parlay_status[pid] = 'lose'
         elif all(o == Outcome.WIN.value for o in outcomes):
@@ -403,18 +458,33 @@ def nba_prop_progress(espn_id):
         return jsonify({'ok': False, 'error': 'player and prop_type are required'}), 400
 
     cache_key = (espn_id, _normalize_name(player_name), prop_type)
-    cached = _PROP_PROGRESS_CACHE.get(cache_key)
     now_monotonic = time.monotonic()
+    _prune_prop_progress_cache(now_monotonic)
+
+    cached = _PROP_PROGRESS_CACHE.get(cache_key)
     if cached and cached.get('expires_at', 0) > now_monotonic:
         return jsonify(cached['payload'])
 
-    boxscore = fetch_espn_boxscore(espn_id)
-    if not boxscore:
-        payload = {'ok': False, 'error': 'No boxscore data available yet'}
+    def _cache_payload(payload: dict) -> None:
         _PROP_PROGRESS_CACHE[cache_key] = {
             'expires_at': now_monotonic + _PROP_PROGRESS_TTL_SECONDS,
+            'created_at': now_monotonic,
             'payload': payload,
         }
+
+    try:
+        resp = requests.get(ESPN_SUMMARY_URL, params={'event': espn_id}, timeout=8)
+        resp.raise_for_status()
+        summary_data = resp.json()
+    except Exception:
+        payload = {'ok': False, 'error': 'No boxscore data available yet'}
+        _cache_payload(payload)
+        return jsonify(payload), 404
+
+    boxscore = _extract_prop_boxscore(summary_data)
+    if not boxscore:
+        payload = {'ok': False, 'error': 'No boxscore data available yet'}
+        _cache_payload(payload)
         return jsonify(payload), 404
 
     target = _normalize_name(player_name)
@@ -437,10 +507,7 @@ def nba_prop_progress(espn_id):
 
     if best_name is None or best_score < 0.72:
         payload = {'ok': False, 'error': f'Player not found in boxscore for {player_name}'}
-        _PROP_PROGRESS_CACHE[cache_key] = {
-            'expires_at': now_monotonic + _PROP_PROGRESS_TTL_SECONDS,
-            'payload': payload,
-        }
+        _cache_payload(payload)
         return jsonify(payload), 404
 
     stat_val = None if not best_stats else best_stats.get(prop_type)
@@ -450,17 +517,11 @@ def nba_prop_progress(espn_id):
             'error': f'Stat {prop_type} unavailable for {best_name}',
             'player': best_name,
         }
-        _PROP_PROGRESS_CACHE[cache_key] = {
-            'expires_at': now_monotonic + _PROP_PROGRESS_TTL_SECONDS,
-            'payload': payload,
-        }
+        _cache_payload(payload)
         return jsonify(payload), 404
 
     status_text = 'Status unavailable'
     try:
-        resp = requests.get(ESPN_SUMMARY_URL, params={'event': espn_id}, timeout=8)
-        resp.raise_for_status()
-        summary_data = resp.json()
         status_type = (
             summary_data.get('header', {})
             .get('competitions', [{}])[0]
@@ -481,10 +542,7 @@ def nba_prop_progress(espn_id):
         'status': status_text,
         'match_score': round(best_score, 3),
     }
-    _PROP_PROGRESS_CACHE[cache_key] = {
-        'expires_at': now_monotonic + _PROP_PROGRESS_TTL_SECONDS,
-        'payload': payload,
-    }
+    _cache_payload(payload)
     return jsonify(payload)
 
 

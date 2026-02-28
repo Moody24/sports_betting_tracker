@@ -302,15 +302,22 @@ class TestBetRoutes(BaseTestCase):
         self.assertFalse(data["ok"])
 
     @patch("app.routes.bet.requests.get")
-    @patch("app.routes.bet.fetch_espn_boxscore")
-    def test_nba_prop_progress_success(self, mock_boxscore, mock_get):
+    def test_nba_prop_progress_success(self, mock_get):
         self.register_and_login()
-        mock_boxscore.return_value = {
-            "LeBron James": {"player_points": 22.0, "player_assists": 7.0},
-        }
         mock_resp = mock_get.return_value
         mock_resp.raise_for_status.return_value = None
         mock_resp.json.return_value = {
+            "boxscore": {
+                "players": [{
+                    "statistics": [{
+                        "names": ["PTS", "AST", "REB", "3PT"],
+                        "athletes": [{
+                            "athlete": {"displayName": "LeBron James"},
+                            "stats": ["22", "7", "8", "2-6"],
+                        }],
+                    }]
+                }]
+            },
             "header": {
                 "competitions": [{
                     "status": {"type": {"name": "STATUS_IN_PROGRESS", "detail": "Q3 05:12"}}
@@ -326,6 +333,7 @@ class TestBetRoutes(BaseTestCase):
         self.assertEqual(data["player"], "LeBron James")
         self.assertEqual(data["stat"], 22.0)
         self.assertIn("STATUS_IN_PROGRESS", data["status"])
+        self.assertEqual(mock_get.call_count, 1)
 
     def test_bets_list_shows_prop_progress_button_for_pending_props(self):
         user_id = self.register_and_login()

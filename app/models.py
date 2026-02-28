@@ -160,7 +160,9 @@ class Bet(db.Model):
         direction = "Over" if bet_type == BetType.OVER.value else "Under" if bet_type == BetType.UNDER.value else ""
         prefix = ""
         if self.is_parlay and self.parlay_id:
-            num_legs = Bet.query.filter_by(user_id=self.user_id, parlay_id=self.parlay_id).count()
+            num_legs = getattr(self, "_parlay_legs_count", None)
+            if num_legs is None:
+                num_legs = Bet.query.filter_by(user_id=self.user_id, parlay_id=self.parlay_id).count()
             prefix = f"Parlay — {num_legs} legs · "
 
         if self.is_player_prop:
