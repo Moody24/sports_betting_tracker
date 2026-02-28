@@ -490,10 +490,10 @@ def init_scheduler(app):
         replace_existing=True,
     )
 
-    # Daily model retrain (8:00 AM ET)
+    # Daily model retrain after morning stats refresh (10:30 AM ET)
     scheduler.add_job(
         lambda: _log_job('retrain', retrain_models),
-        CronTrigger(hour=8, minute=0, timezone=APP_TIMEZONE),
+        CronTrigger(hour=10, minute=30, timezone=APP_TIMEZONE),
         id='retrain',
         replace_existing=True,
     )
