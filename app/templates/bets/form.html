@@ -89,6 +89,16 @@
           </div>
           {% for e in form.bet_amount.errors %}<div class="invalid-feedback d-block">{{ e }}</div>{% endfor %}
         </div>
+        {% if current_user.unit_size %}
+        <div class="col-md-4">
+          <label class="form-label">Units</label>
+          <div class="input-group">
+            <span class="input-group-text bg-dark border-secondary-subtle">u</span>
+            <input type="number" name="units" id="single-units" class="form-control" min="0.1" step="0.1" placeholder="1.0">
+          </div>
+          <div class="form-text text-secondary">1u = ${{ '%.2f'|format(current_user.unit_size) }}</div>
+        </div>
+        {% endif %}
 
         {# O/U line — shown only for over/under #}
         <div class="col-md-4" id="single-ou-group">
@@ -250,6 +260,16 @@
             <input type="number" id="prop-stake" name="bet_amount" class="form-control" placeholder="25.00" min="1" step="0.01" required>
           </div>
         </div>
+        {% if current_user.unit_size %}
+        <div class="col-md-3">
+          <label class="form-label">Units</label>
+          <div class="input-group">
+            <span class="input-group-text bg-dark border-secondary-subtle">u</span>
+            <input type="number" id="prop-units" name="units" class="form-control" min="0.1" step="0.1" placeholder="1.0">
+          </div>
+          <div class="form-text text-secondary">1u = ${{ '%.2f'|format(current_user.unit_size) }}</div>
+        </div>
+        {% endif %}
         <div class="col-md-3">
           <label class="form-label">Status</label>
           <select name="outcome" class="form-select">
@@ -317,6 +337,13 @@
             <input type="number" id="parlay-stake" class="form-control"
               placeholder="25.00" min="1" step="0.01" required>
           </div>
+          {% if current_user.unit_size %}
+          <div class="input-group mt-2">
+            <span class="input-group-text bg-dark border-secondary-subtle">u</span>
+            <input type="number" id="parlay-units" class="form-control" min="0.1" step="0.1" placeholder="Units">
+          </div>
+          <div class="form-text text-secondary">1u = ${{ '%.2f'|format(current_user.unit_size) }}</div>
+          {% endif %}
         </div>
         <div class="col-md-4">
           <label class="form-label">Status</label>
@@ -503,6 +530,7 @@
   var PARLAY_URL         = '{{ url_for("bet.manual_parlay") }}';
   var ALL_PROPS_URL      = '{{ url_for("bet.nba_all_props") }}';
   var OCR_URL            = '{{ url_for("bet.ocr_screenshot") }}';
+  var USER_UNIT_SIZE     = {{ current_user.unit_size|tojson }};
 </script>
 <script src="{{ url_for('static', filename='js/bet_builder.js') }}"></script>
 {% endblock %}

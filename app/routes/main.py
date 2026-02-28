@@ -1,7 +1,7 @@
 import logging
 from collections import defaultdict
 
-from flask import Blueprint, jsonify, render_template
+from flask import Blueprint, jsonify, render_template, request, redirect, url_for, flash
 from flask_login import current_user, login_required
 from sqlalchemy import func, case, text
 
@@ -140,3 +140,29 @@ def dashboard():
         cumul_values=cumul_values,
         top_plays=top_plays,
     )
+
+
+@main.route('/dashboard/settings', methods=['POST'])
+@login_required
+def dashboard_settings():
+    raw_unit_size = (request.form.get('unit_size') or '').strip()
+    if raw_unit_size == '':
+        current_user.unit_size = None
+        db.session.commit()
+        flash('Unit size cleared.', 'success')
+        return redirect(url_for('main.dashboard'))
+
+    try:
+        unit_size = float(raw_unit_size)
+    except ValueError:
+        flash('Unit size must be a number.', 'danger')
+        return redirect(url_for('main.dashboard'))
+
+    if unit_size <= 0:
+        flash('Unit size must be greater than zero.', 'danger')
+        return redirect(url_for('main.dashboard'))
+
+    current_user.unit_size = unit_size
+    db.session.commit()
+    flash('Unit size saved.', 'success')
+    return redirect(url_for('main.dashboard'))

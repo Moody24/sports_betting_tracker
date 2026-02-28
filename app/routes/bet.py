@@ -177,6 +177,15 @@ def new_bet():
         except (ValueError, TypeError):
             pass
 
+        units_val = None
+        if request.form.get('units'):
+            try:
+                parsed_units = float(request.form.get('units'))
+                if parsed_units > 0:
+                    units_val = parsed_units
+            except (ValueError, TypeError):
+                units_val = None
+
         normalized_prop_line = prop_line_val
         normalized_over_under_line = over_under_line_val
 
@@ -205,6 +214,7 @@ def new_bet():
             team_b=form.team_b.data,
             match_date=form.match_date.data,
             bet_amount=form.bet_amount.data,
+            units=units_val,
             outcome=form.outcome.data,
             bet_type=form.bet_type.data,
             over_under_line=normalized_over_under_line if is_total_side else None,
@@ -414,6 +424,16 @@ def nba_place_bets():
     if stake <= 0:
         return jsonify({"error": "Stake must be greater than zero"}), 400
 
+    units_payload = data.get("units")
+    units_val = None
+    if units_payload is not None:
+        try:
+            parsed_units = float(units_payload)
+            if parsed_units > 0:
+                units_val = parsed_units
+        except (TypeError, ValueError):
+            units_val = None
+
     try:
         bonus_mult = float(data.get("bonus_multiplier") or 1.0)
         if bonus_mult < 1.0:
@@ -468,6 +488,7 @@ def nba_place_bets():
             team_b=str(leg["team_b"])[:80],
             match_date=match_date,
             bet_amount=stake,
+            units=units_val,
             outcome=Outcome.PENDING.value,
             bet_type=leg.get("bet_type", BetType.OVER.value),
             over_under_line=None if is_player_prop else over_under_line_val,
@@ -539,6 +560,15 @@ def manual_parlay():
         return jsonify({"error": "Stake must be a number"}), 400
     if stake <= 0:
         return jsonify({"error": "Stake must be greater than zero"}), 400
+
+    units_val = None
+    if data.get("units") is not None:
+        try:
+            parsed_units = float(data.get("units"))
+            if parsed_units > 0:
+                units_val = parsed_units
+        except (TypeError, ValueError):
+            units_val = None
     parlay_id = Bet.generate_parlay_id()
 
     errors = []
@@ -578,6 +608,7 @@ def manual_parlay():
             team_b=str(leg["team_b"])[:80],
             match_date=match_date,
             bet_amount=stake,
+            units=units_val,
             outcome=outcome,
             bet_type=bet_type,
             over_under_line=ou_line,

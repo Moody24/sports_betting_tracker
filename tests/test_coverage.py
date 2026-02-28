@@ -4,6 +4,7 @@ import json
 from unittest.mock import patch
 
 from app import db
+from app.models import Bet
 
 from tests.helpers import BaseTestCase, make_bet
 
@@ -77,11 +78,12 @@ class TestCoverageGap(BaseTestCase):
         self.assertEqual(resp.status_code, 400)
 
     def test_manual_parlay_success(self):
-        self.register_and_login()
+        user_id = self.register_and_login()
         resp = self.client.post(
             "/bets/parlay",
             json={
                 "stake": 25.0,
+                "units": 1.5,
                 "legs": [{
                     "team_a": "Lakers",
                     "team_b": "Celtics",
@@ -98,6 +100,9 @@ class TestCoverageGap(BaseTestCase):
         )
         self.assertEqual(resp.status_code, 200)
         self.assertTrue(json.loads(resp.data)["success"])
+        with self.app.app_context():
+            bet = Bet.query.filter_by(user_id=user_id).order_by(Bet.id.desc()).first()
+            self.assertEqual(bet.units, 1.5)
 
     def test_manual_parlay_invalid_date_uses_fallback(self):
         self.register_and_login()

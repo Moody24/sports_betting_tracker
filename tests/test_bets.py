@@ -5,7 +5,7 @@ from datetime import datetime
 from unittest.mock import patch
 
 from app import db
-from app.models import Bet
+from app.models import Bet, User
 
 from tests.helpers import BaseTestCase, make_bet, make_user
 
@@ -27,6 +27,18 @@ class TestBetRoutes(BaseTestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertIn(b'id="single-picked-team"', resp.data)
         self.assertIn(b'Select winner', resp.data)
+
+    def test_new_bet_form_shows_units_inputs_when_unit_size_set(self):
+        user_id = self.register_and_login()
+        with self.app.app_context():
+            user = db.session.get(User, user_id)
+            user.unit_size = 25.0
+            db.session.commit()
+        resp = self.client.get("/bets/new")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn(b'id="single-units"', resp.data)
+        self.assertIn(b'id="prop-units"', resp.data)
+        self.assertIn(b'id="parlay-units"', resp.data)
 
     def test_create_moneyline_bet(self):
         user_id = self.register_and_login()
@@ -86,6 +98,26 @@ class TestBetRoutes(BaseTestCase):
             self.assertIsNotNone(bet)
             self.assertEqual(bet.over_under_line, 218.5)
             self.assertIsNone(bet.prop_line)
+
+    def test_new_bet_saves_units_when_provided(self):
+        user_id = self.register_and_login()
+        self.client.post(
+            "/bets/new",
+            data={
+                "team_a": "Warriors",
+                "team_b": "Nets",
+                "match_date": "2025-03-01",
+                "bet_amount": "25",
+                "units": "1.0",
+                "bet_type": "over",
+                "over_under_line": "215.5",
+                "outcome": "pending",
+            },
+            follow_redirects=True,
+        )
+        with self.app.app_context():
+            bet = Bet.query.filter_by(user_id=user_id).order_by(Bet.id.desc()).first()
+            self.assertEqual(bet.units, 1.0)
 
     def test_new_bet_player_prop_uses_prop_line_not_total_line(self):
         user_id = self.register_and_login()

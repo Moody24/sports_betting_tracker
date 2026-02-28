@@ -131,6 +131,36 @@
   if (singleTeamB) singleTeamB.addEventListener('input', refreshSinglePickedWinnerOptions);
   refreshSinglePickedWinnerOptions();
 
+  function wireUnitsAutoCalc(unitsInputId, stakeInputId) {
+    if (USER_UNIT_SIZE === null || USER_UNIT_SIZE === undefined) return;
+    const unitSize = parseFloat(USER_UNIT_SIZE);
+    if (!unitSize || unitSize <= 0) return;
+
+    const unitsEl = document.getElementById(unitsInputId);
+    const stakeEl = document.getElementById(stakeInputId);
+    if (!unitsEl || !stakeEl) return;
+
+    let manualStakeOverride = false;
+
+    stakeEl.addEventListener('input', function () {
+      manualStakeOverride = true;
+    });
+
+    unitsEl.addEventListener('input', function () {
+      if (manualStakeOverride) return;
+      const units = parseFloat(unitsEl.value);
+      if (!units || units <= 0) {
+        stakeEl.value = '';
+        return;
+      }
+      stakeEl.value = (units * unitSize).toFixed(2);
+    });
+  }
+
+  wireUnitsAutoCalc('single-units', 'bet_amount');
+  wireUnitsAutoCalc('prop-units', 'prop-stake');
+  wireUnitsAutoCalc('parlay-units', 'parlay-stake');
+
   // ── Bonus multiplier previews ─────────────────────────────────────
   function calcProfit(stake, odds) {
     if (!stake || !odds) return null;
@@ -321,6 +351,8 @@
       const stake   = parseFloat(document.getElementById('parlay-stake').value);
       const outcome = document.getElementById('parlay-outcome').value;
       const bonusMult = parseFloat(document.getElementById('parlay-bonus-mult').value) || 1.0;
+      const parlayUnitsEl = document.getElementById('parlay-units');
+      const parlayUnits = parlayUnitsEl ? (parseFloat(parlayUnitsEl.value) || null) : null;
 
       if (!stake || stake <= 0) {
         showFeedback('Enter a stake amount.', 'danger');
@@ -379,7 +411,7 @@
       fetch(PARLAY_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF_TOKEN },
-        body: JSON.stringify({ stake, outcome, legs, bonus_multiplier: bonusMult }),
+        body: JSON.stringify({ stake, units: parlayUnits, outcome, legs, bonus_multiplier: bonusMult }),
       })
         .then(r => r.json())
         .then(data => {

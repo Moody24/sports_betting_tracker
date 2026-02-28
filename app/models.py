@@ -17,6 +17,7 @@ class User(UserMixin, db.Model):
     email = db.Column(db.String(120), unique=True, nullable=False)
     password_hash = db.Column(db.String(512), nullable=False)
     starting_bankroll = db.Column(db.Float, nullable=True)
+    unit_size = db.Column(db.Float, nullable=True)
     bets = db.relationship("Bet", backref="user", lazy=True)
 
     def __repr__(self) -> str:
@@ -54,6 +55,7 @@ class Bet(db.Model):
     team_b = db.Column(db.String(80), nullable=False)
     match_date = db.Column(db.DateTime, nullable=False)
     bet_amount = db.Column(db.Float, nullable=False)
+    units = db.Column(db.Float, nullable=True)
     outcome = db.Column(db.String(10), nullable=True, default=Outcome.PENDING.value)
     american_odds = db.Column(db.Integer, nullable=True)
     is_parlay = db.Column(db.Boolean, nullable=False, default=False)
