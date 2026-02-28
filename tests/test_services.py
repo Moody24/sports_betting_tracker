@@ -5,6 +5,7 @@ Covers: feature_engine, projection_engine, context_service,
 All external API calls are mocked.
 """
 
+import os
 import sys
 import unittest
 from datetime import date, datetime, timedelta, timezone
@@ -15,10 +16,14 @@ import requests as _requests
 from app import db
 from app.models import (
     InjuryReport,
+    JobLog,
+    ModelMetadata,
     PlayerGameLog,
     TeamDefenseSnapshot,
+    Bet,
 )
-from tests.helpers import BaseTestCase
+from app.enums import Outcome
+from tests.helpers import BaseTestCase, make_bet, make_user
 
 
 # ---------------------------------------------------------------------------
@@ -1610,6 +1615,292 @@ class TestValueDetector(BaseTestCase):
         self.assertEqual(result['projection'], 0)
         self.assertEqual(result['game_id'], 'g1')
         self.assertEqual(result['confidence_tier'], 'no_edge')
+
+
+class TestMLModel(BaseTestCase):
+    """Targeted coverage for app.services.ml_model."""
+
+    def test_build_training_data_insufficient(self):
+        from app.services import ml_model
+        with self.app.app_context():
+            feats, targets = ml_model._build_training_data('player_points')
+        self.assertIsNone(feats)
+        self.assertIsNone(targets)
+
+    def test_build_training_data_has_new_feature_keys(self):
+        from app.services import ml_model
+        with self.app.app_context():
+            _seed_player_logs(count=12, player_id='501', player_name='Feature Player')
+            with patch.object(ml_model, 'MIN_TRAIN_SAMPLES', 1):
+                feats, targets = ml_model._build_training_data('player_points')
+        self.assertIsNotNone(feats)
+        self.assertIsNotNone(targets)
+        self.assertGreater(len(feats), 0)
+        sample = feats[0]
+        for key in (
+            'home_split_stat_avg',
+            'away_split_stat_avg',
+            'context_split_stat_avg',
+            'fg_pct_last_10',
+            'ts_pct_last_10',
+            'fga_last_5_avg',
+            'fg3a_last_5_avg',
+            'fg3m_last_5_avg',
+            'fta_last_5_avg',
+        ):
+            self.assertIn(key, sample)
+
+    def test_train_model_success_persists_metadata(self):
+        from app.services import ml_model
+        with self.app.app_context():
+            db.session.add(ModelMetadata(
+                model_name='projection_player_points',
+                model_type='xgboost_regressor',
+                version='old',
+                file_path='/tmp/old.json',
+                training_date=datetime.now(timezone.utc),
+                training_samples=100,
+                val_mae=9.9,
+                is_active=True,
+            ))
+            db.session.commit()
+
+            mock_features = [
+                {'avg_stat_last_5': 10.0, 'games_played': 12},
+                {'avg_stat_last_5': 11.0, 'games_played': 13},
+                {'avg_stat_last_5': 12.0, 'games_played': 14},
+                {'avg_stat_last_5': 13.0, 'games_played': 15},
+                {'avg_stat_last_5': 14.0, 'games_played': 16},
+            ]
+            mock_targets = [10, 12, 14, 16, 18]
+
+            fake_model = MagicMock()
+            fake_model.predict.return_value = [11.0]
+            with patch.object(ml_model, '_build_training_data', return_value=(mock_features, mock_targets)):
+                with patch.object(ml_model, '_ensure_model_dir'):
+                    with patch('xgboost.XGBRegressor', return_value=fake_model):
+                        with patch('sklearn.metrics.mean_absolute_error', return_value=1.234):
+                            result = ml_model.train_model('player_points')
+
+            self.assertEqual(result['stat_type'], 'player_points')
+            active = ModelMetadata.query.filter_by(model_name='projection_player_points', is_active=True).all()
+            self.assertEqual(len(active), 1)
+            inactive = ModelMetadata.query.filter_by(model_name='projection_player_points', is_active=False).all()
+            self.assertGreaterEqual(len(inactive), 1)
+
+    def test_load_and_predict_paths(self):
+        from app.services import ml_model
+        with self.app.app_context():
+            # No active model
+            model, names = ml_model.load_active_model('player_points')
+            self.assertIsNone(model)
+            self.assertIsNone(names)
+            self.assertEqual(ml_model.predict_stat('player_points', {'x': 1}), 0.0)
+
+            # Active model with parseable metadata
+            model_path = '/tmp/test_model.json'
+            with open(model_path, 'w', encoding='utf-8') as f:
+                f.write('{}')
+            db.session.add(ModelMetadata(
+                model_name='projection_player_points',
+                model_type='xgboost_regressor',
+                version='v1',
+                file_path=model_path,
+                training_date=datetime.now(timezone.utc),
+                training_samples=10,
+                val_mae=1.0,
+                is_active=True,
+                metadata_json='{"feature_names":["f1","f2"]}',
+            ))
+            db.session.commit()
+
+            fake_loaded_model = MagicMock()
+            fake_loaded_model.predict.return_value = [22.26]
+            with patch('xgboost.XGBRegressor', return_value=fake_loaded_model):
+                pred = ml_model.predict_stat('player_points', {'f1': 1.0, 'f2': 2.0})
+            self.assertEqual(pred, 22.3)
+
+            with patch('xgboost.XGBRegressor', return_value=fake_loaded_model):
+                with patch.object(ml_model, 'load_active_model', return_value=(fake_loaded_model, ['f1'])):
+                    fake_loaded_model.predict.side_effect = RuntimeError('boom')
+                    self.assertEqual(ml_model.predict_stat('player_points', {'f1': 1.0}), 0.0)
+
+    def test_retrain_all_models_and_performance(self):
+        from app.services import ml_model
+        with self.app.app_context():
+            with patch.object(ml_model, 'train_model', side_effect=[
+                {'error': 'Insufficient training data', 'stat_type': 'player_points'},
+                {'stat_type': 'player_rebounds', 'mae': 2.0, 'train_samples': 10, 'val_samples': 2, 'model_path': '/tmp/a'},
+                {'stat_type': 'player_assists', 'mae': 1.0, 'train_samples': 10, 'val_samples': 2, 'model_path': '/tmp/b'},
+                {'stat_type': 'player_threes', 'mae': 0.8, 'train_samples': 10, 'val_samples': 2, 'model_path': '/tmp/c'},
+            ]):
+                out = ml_model.retrain_all_models()
+            self.assertIn('player_points', out)
+            self.assertIn('player_threes', out)
+
+            db.session.add(ModelMetadata(
+                model_name='projection_player_points',
+                model_type='xgboost_regressor',
+                version='perf',
+                file_path='/tmp/perf.json',
+                training_date=datetime.now(timezone.utc),
+                training_samples=123,
+                val_mae=4.2,
+                val_accuracy=None,
+                is_active=True,
+            ))
+            db.session.commit()
+            perf = ml_model.get_model_performance()
+            self.assertTrue(any(m['name'] == 'projection_player_points' for m in perf))
+
+
+class TestScheduler(BaseTestCase):
+    """Targeted coverage for app.services.scheduler."""
+
+    def setUp(self):
+        super().setUp()
+        from app.services import scheduler as scheduler_module
+        scheduler_module._scheduler_lock_fd = None
+
+    def test_acquire_scheduler_lock_paths(self):
+        from app.services import scheduler as scheduler_module
+        self.assertTrue(scheduler_module._acquire_scheduler_lock('/tmp/test_scheduler.lock'))
+        self.assertTrue(scheduler_module._acquire_scheduler_lock('/tmp/test_scheduler.lock'))
+        scheduler_module._scheduler_lock_fd = None
+        with patch('app.services.scheduler.fcntl.flock', side_effect=BlockingIOError):
+            self.assertFalse(scheduler_module._acquire_scheduler_lock('/tmp/test_scheduler2.lock'))
+
+    def test_log_job_success_and_failure(self):
+        from app.services import scheduler as scheduler_module
+        with patch('app.create_app', return_value=self.app):
+            scheduler_module._log_job('ok_job', lambda: None)
+            scheduler_module._log_job('bad_job', lambda: (_ for _ in ()).throw(RuntimeError('x')))
+        with self.app.app_context():
+            ok = JobLog.query.filter_by(job_name='ok_job').first()
+            bad = JobLog.query.filter_by(job_name='bad_job').first()
+            self.assertEqual(ok.status, 'success')
+            self.assertEqual(bad.status, 'failed')
+            self.assertIn('x', bad.message)
+
+    def test_refresh_jobs_and_projection_job(self):
+        from app.services import scheduler as scheduler_module
+        with patch('app.create_app', return_value=self.app):
+            with patch('app.services.nba_service.get_todays_games', return_value=[{'id': 'g1'}]):
+                with patch('app.services.stats_service.update_player_logs_for_games', return_value=2):
+                    scheduler_module.refresh_player_stats()
+            with patch('app.services.matchup_service.refresh_all_team_defense', return_value=30):
+                scheduler_module.refresh_defense_data()
+            with patch('app.services.context_service.refresh_injuries', return_value=12):
+                scheduler_module.refresh_injury_reports()
+            fake_detector = MagicMock()
+            fake_detector.score_all_todays_props.return_value = [{'edge': 0.16}, {'edge': 0.04}]
+            with patch('app.services.value_detector.ValueDetector', return_value=fake_detector):
+                with patch('app.services.projection_engine.ProjectionEngine', return_value=MagicMock()):
+                    scheduler_module.run_projections()
+
+    def test_resolve_and_grade(self):
+        from app.services import scheduler as scheduler_module
+        with self.app.app_context():
+            user = make_user('scheduser', 'sched@example.com')
+            db.session.add(user)
+            db.session.commit()
+            bet = make_bet(
+                user.id,
+                external_game_id='game123',
+                outcome=Outcome.PENDING.value,
+                bet_type='over',
+                over_under_line=210.5,
+            )
+            db.session.add(bet)
+            db.session.commit()
+            bet_id = bet.id
+
+        with patch('app.create_app', return_value=self.app):
+            with patch(
+                'app.services.nba_service.resolve_pending_bets',
+                side_effect=lambda pending: [(pending[0], Outcome.WIN.value, 225.0)],
+            ):
+                scheduler_module.resolve_and_grade()
+            with self.app.app_context():
+                updated = db.session.get(Bet, bet_id)
+                self.assertEqual(updated.outcome, Outcome.WIN.value)
+                self.assertEqual(updated.actual_total, 225.0)
+
+    def test_retrain_models_guardrails_and_train_path(self):
+        from app.services import scheduler as scheduler_module
+        now = datetime.now(timezone.utc)
+        with self.app.app_context():
+            db.session.add(PlayerGameLog(
+                player_id='p1', player_name='P1', game_date=date(2026, 1, 1), pts=10, minutes=30
+            ))
+            db.session.commit()
+
+        with patch('app.create_app', return_value=self.app):
+            # Skip path: recent model + no new rows
+            with self.app.app_context():
+                db.session.add(ModelMetadata(
+                    model_name='projection_player_points',
+                    model_type='xgboost_regressor',
+                    version='recent',
+                    file_path='/tmp/recent.json',
+                    training_date=now,
+                    training_samples=10,
+                    val_mae=1.0,
+                    is_active=True,
+                    metadata_json='{"player_game_log_rows": 1}',
+                ))
+                db.session.commit()
+            with patch('app.services.ml_model.retrain_all_models') as retrain_mock:
+                with patch('app.services.pick_quality_model.train_pick_quality_model', return_value={'ok': 1}) as pq_mock:
+                    scheduler_module.retrain_models()
+            retrain_mock.assert_not_called()
+            pq_mock.assert_called_once()
+
+            # Train path: old model + stale row count
+            with self.app.app_context():
+                ModelMetadata.query.delete()
+                db.session.add(ModelMetadata(
+                    model_name='projection_player_points',
+                    model_type='xgboost_regressor',
+                    version='old',
+                    file_path='/tmp/old_sched.json',
+                    training_date=now - timedelta(days=10),
+                    training_samples=10,
+                    val_mae=1.0,
+                    is_active=True,
+                    metadata_json='{"player_game_log_rows": 0}',
+                ))
+                db.session.commit()
+            with patch('app.services.ml_model.retrain_all_models', return_value={'ok': 1}) as retrain_mock:
+                with patch('app.services.pick_quality_model.train_pick_quality_model', return_value={'ok': 1}):
+                    scheduler_module.retrain_models()
+            retrain_mock.assert_called_once()
+
+    def test_init_scheduler_adds_jobs(self):
+        from app.services import scheduler as scheduler_module
+
+        class FakeScheduler:
+            def __init__(self):
+                self.running = False
+                self.jobs = []
+                self.started = False
+
+            def add_job(self, func, trigger, id=None, replace_existing=None):
+                self.jobs.append((id, trigger))
+
+            def start(self):
+                self.started = True
+
+            def get_jobs(self):
+                return self.jobs
+
+        fake = FakeScheduler()
+        with patch.object(scheduler_module, 'scheduler', fake):
+            with patch.object(scheduler_module, 'CronTrigger', side_effect=lambda **kw: kw):
+                with patch.object(scheduler_module, '_acquire_scheduler_lock', return_value=True):
+                    scheduler_module.init_scheduler(self.app)
+        self.assertTrue(fake.started)
+        self.assertEqual(len(fake.jobs), 7)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
