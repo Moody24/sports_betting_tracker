@@ -67,6 +67,71 @@ def _build_training_data(stat_type: str):
     for log in all_logs:
         player_logs.setdefault(log.player_id, []).append(log)
 
+    # Precompute team-game totals for share/usage features.
+    team_game_totals = {}
+    for log in all_logs:
+        team = (log.team_abbr or '').strip().upper()
+        if not team or not log.game_date:
+            continue
+        key = (team, log.game_date)
+        agg = team_game_totals.setdefault(key, {'pts': 0.0, 'fga': 0.0, 'fta': 0.0, 'tov': 0.0})
+        agg['pts'] += float(log.pts or 0.0)
+        agg['fga'] += float(log.fga or 0.0)
+        agg['fta'] += float(log.fta or 0.0)
+        agg['tov'] += float(log.tov or 0.0)
+
+    def _share_avg(game_list, num_key: str, den_key: str) -> float:
+        shares = []
+        for g in game_list:
+            team = (g.team_abbr or '').strip().upper()
+            if not team or not g.game_date:
+                continue
+            totals = team_game_totals.get((team, g.game_date))
+            if not totals:
+                continue
+            den = float(totals.get(den_key, 0.0) or 0.0)
+            if den <= 0:
+                continue
+            shares.append(float(getattr(g, num_key, 0.0) or 0.0) / den)
+        return (sum(shares) / len(shares)) if shares else 0.0
+
+    def _usage_share_avg(game_list) -> float:
+        shares = []
+        for g in game_list:
+            team = (g.team_abbr or '').strip().upper()
+            if not team or not g.game_date:
+                continue
+            totals = team_game_totals.get((team, g.game_date))
+            if not totals:
+                continue
+            team_usage = float(totals.get('fga', 0.0) or 0.0) + 0.44 * float(totals.get('fta', 0.0) or 0.0) + float(totals.get('tov', 0.0) or 0.0)
+            if team_usage <= 0:
+                continue
+            player_usage = float(g.fga or 0.0) + 0.44 * float(g.fta or 0.0) + float(g.tov or 0.0)
+            shares.append(player_usage / team_usage)
+        return (sum(shares) / len(shares)) if shares else 0.0
+
+    def _lead_rate(game_list, threshold: float = 0.22) -> float:
+        if not game_list:
+            return 0.0
+        qualifies = 0
+        valid = 0
+        for g in game_list:
+            team = (g.team_abbr or '').strip().upper()
+            if not team or not g.game_date:
+                continue
+            totals = team_game_totals.get((team, g.game_date))
+            if not totals:
+                continue
+            team_fga = float(totals.get('fga', 0.0) or 0.0)
+            if team_fga <= 0:
+                continue
+            valid += 1
+            share = float(g.fga or 0.0) / team_fga
+            if share >= threshold:
+                qualifies += 1
+        return (qualifies / valid) if valid else 0.0
+
     features_list = []
     targets = []
 
@@ -137,6 +202,10 @@ def _build_training_data(stat_type: str):
                 'fg3a_last_5_avg': _avg(last_5, 'fg3a'),
                 'fg3m_last_5_avg': _avg(last_5, 'fg3m'),
                 'fta_last_5_avg': _avg(last_5, 'fta'),
+                'fga_share_last_5': _share_avg(last_5, 'fga', 'fga'),
+                'pts_share_last_5': _share_avg(last_5, 'pts', 'pts'),
+                'usage_share_last_5': _usage_share_avg(last_5),
+                'lead_usage_rate_last_10': _lead_rate(last_10),
             }
 
             features_list.append(features)

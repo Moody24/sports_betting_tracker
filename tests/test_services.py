@@ -1316,11 +1316,17 @@ class TestProjectionEngine(BaseTestCase):
                 'fg3a_last_5_avg',
                 'fg3m_last_5_avg',
                 'fta_last_5_avg',
+                'fga_share_last_5',
+                'pts_share_last_5',
+                'usage_share_last_5',
+                'lead_usage_rate_last_10',
             ):
                 self.assertIn(key, features)
             self.assertGreaterEqual(features['fg_pct_last_10'], 0.0)
             self.assertLessEqual(features['fg_pct_last_10'], 1.0)
             self.assertGreaterEqual(features['ts_pct_last_10'], 0.0)
+            self.assertGreaterEqual(features['fga_share_last_5'], 0.0)
+            self.assertLessEqual(features['fga_share_last_5'], 1.0)
 
     # -- _compute_confidence --
 
@@ -1780,6 +1786,10 @@ class TestMLModel(BaseTestCase):
             'fg3a_last_5_avg',
             'fg3m_last_5_avg',
             'fta_last_5_avg',
+            'fga_share_last_5',
+            'pts_share_last_5',
+            'usage_share_last_5',
+            'lead_usage_rate_last_10',
         ):
             self.assertIn(key, sample)
 
