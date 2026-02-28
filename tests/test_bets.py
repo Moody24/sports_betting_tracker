@@ -5,7 +5,7 @@ from datetime import datetime
 from unittest.mock import patch
 
 from app import db
-from app.models import Bet, User
+from app.models import Bet, User, PickContext
 
 from tests.helpers import BaseTestCase, make_bet, make_user
 
@@ -148,6 +148,7 @@ class TestBetRoutes(BaseTestCase):
             self.assertIsNotNone(bet)
             self.assertEqual(bet.prop_line, 29.5)
             self.assertIsNone(bet.over_under_line)
+            self.assertIsNotNone(PickContext.query.filter_by(bet_id=bet.id).first())
 
     def test_new_bet_over_under_without_any_line_is_rejected(self):
         user_id = self.register_and_login()
@@ -412,6 +413,7 @@ class TestBetRoutes(BaseTestCase):
             bet = Bet.query.filter_by(user_id=user_id).order_by(Bet.id.desc()).first()
             self.assertEqual(bet.prop_line, 25.5)
             self.assertIsNone(bet.over_under_line)
+            self.assertIsNotNone(PickContext.query.filter_by(bet_id=bet.id).first())
 
     def test_place_bets_parlay_success(self):
         self.register_and_login()

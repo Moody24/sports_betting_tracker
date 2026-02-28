@@ -8,8 +8,10 @@ import logging
 import math
 from typing import Optional
 
+from app.models import PlayerGameLog
 from app.services.projection_engine import ProjectionEngine
 from app.services.context_service import is_player_available
+from app.services.stats_service import find_player_id, get_cached_logs
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +55,53 @@ class ValueDetector:
 
     def __init__(self, engine: ProjectionEngine = None):
         self.engine = engine or ProjectionEngine()
+
+    @staticmethod
+    def _build_player_team_map(player_names: set[str]) -> dict[str, str]:
+        if not player_names:
+            return {}
+
+        resolved: dict[str, str] = {}
+        rows = (
+            PlayerGameLog.query
+            .filter(PlayerGameLog.player_name.in_(list(player_names)))
+            .order_by(PlayerGameLog.player_name, PlayerGameLog.game_date.desc())
+            .all()
+        )
+        for row in rows:
+            if row.player_name not in resolved and row.team_abbr:
+                resolved[row.player_name] = (row.team_abbr or '').upper()
+
+        for player_name in player_names:
+            if player_name in resolved:
+                continue
+            try:
+                player_id = find_player_id(player_name)
+                if not player_id:
+                    continue
+                logs = get_cached_logs(player_id, last_n=1)
+                if logs and logs[0].team_abbr:
+                    resolved[player_name] = (logs[0].team_abbr or '').upper()
+            except Exception:
+                continue
+        return resolved
+
+    @staticmethod
+    def _resolve_game_context_for_player(
+        player_name: str,
+        home_team: str,
+        away_team: str,
+        home_abbr: str,
+        away_abbr: str,
+        player_team_map: dict[str, str],
+    ) -> tuple[str, str, bool]:
+        player_team_abbr = player_team_map.get(player_name, '')
+        if player_team_abbr and player_team_abbr == home_abbr:
+            return home_team, away_team, True
+        if player_team_abbr and player_team_abbr == away_abbr:
+            return away_team, home_team, False
+        # Fallback if unknown team: preserve previous behavior.
+        return home_team, away_team, True
 
     def score_prop(
         self,
@@ -207,20 +256,32 @@ class ValueDetector:
 
         all_scores = []
 
+        # Prefetch props and player team mapping once to reduce per-prop DB/API lookups.
+        game_props_payloads = []
+        all_player_names: set[str] = set()
         for game in games:
             event_id = game.get('odds_event_id', '')
             if not event_id:
                 continue
-
-            espn_id = game.get('espn_id', '')
-            home_team = game.get('home', {}).get('name', '')
-            away_team = game.get('away', {}).get('name', '')
-
             try:
                 props = fetch_player_props_for_event(event_id)
             except Exception as exc:
                 logger.error("Failed to fetch props for event %s: %s", event_id, exc)
                 continue
+            game_props_payloads.append((game, props))
+            for market_props in props.values():
+                for prop in market_props:
+                    player = prop.get('player', '')
+                    if player:
+                        all_player_names.add(player)
+
+        player_team_map = self._build_player_team_map(all_player_names)
+        for game, props in game_props_payloads:
+            espn_id = game.get('espn_id', '')
+            home_team = game.get('home', {}).get('name', '')
+            away_team = game.get('away', {}).get('name', '')
+            home_abbr = (game.get('home', {}).get('abbr') or '').upper()
+            away_abbr = (game.get('away', {}).get('abbr') or '').upper()
 
             for market_key, market_props in props.items():
                 for prop in market_props:
@@ -236,18 +297,24 @@ class ValueDetector:
                     over_odds = prop.get('over_odds', -110)
                     under_odds = prop.get('under_odds', -110)
 
-                    # Determine team/opponent from game context
-                    # Heuristic: we don't know the player's team without extra lookup,
-                    # so pass both teams and let the engine handle it
+                    team_name, opponent_name, is_home = self._resolve_game_context_for_player(
+                        player_name=player,
+                        home_team=home_team,
+                        away_team=away_team,
+                        home_abbr=home_abbr,
+                        away_abbr=away_abbr,
+                        player_team_map=player_team_map,
+                    )
+
                     score = self.score_prop(
                         player_name=player,
                         prop_type=market_key,
                         line=line,
                         over_odds=over_odds,
                         under_odds=under_odds,
-                        opponent_name=away_team,
-                        team_name=home_team,
-                        is_home=True,
+                        opponent_name=opponent_name,
+                        team_name=team_name,
+                        is_home=is_home,
                         game_id=espn_id,
                     )
 

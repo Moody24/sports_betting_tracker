@@ -1537,6 +1537,46 @@ class TestValueDetector(BaseTestCase):
             scores = detector.score_all_todays_props(games=mock_games)
             self.assertEqual(scores, [])
 
+    def test_score_all_todays_props_resolves_player_side_from_team_abbr(self):
+        from app.services.value_detector import ValueDetector
+        with self.app.app_context():
+            db.session.add(PlayerGameLog(
+                player_id='777',
+                player_name='Away Player',
+                team_abbr='BOS',
+                game_date=date(2026, 2, 25),
+                pts=20,
+            ))
+            db.session.commit()
+
+            mock_games = [{
+                'odds_event_id': 'evt1',
+                'espn_id': 'espn1',
+                'start_time': '2026-02-25T19:00:00Z',
+                'home': {'name': 'Los Angeles Lakers', 'abbr': 'LAL'},
+                'away': {'name': 'Boston Celtics', 'abbr': 'BOS'},
+            }]
+            mock_props = {
+                'player_points': [{
+                    'player': 'Away Player',
+                    'line': 15.5,
+                    'over_odds': -110,
+                    'under_odds': -110,
+                }],
+            }
+            detector = ValueDetector()
+            with patch('app.services.nba_service.fetch_player_props_for_event', return_value=mock_props):
+                with patch.object(detector, 'score_prop', return_value={
+                    'edge': 0.1, 'confidence_tier': 'moderate', 'games_played': 20,
+                }) as score_mock:
+                    detector.score_all_todays_props(games=mock_games)
+
+            self.assertTrue(score_mock.called)
+            kwargs = score_mock.call_args.kwargs
+            self.assertEqual(kwargs['team_name'], 'Boston Celtics')
+            self.assertEqual(kwargs['opponent_name'], 'Los Angeles Lakers')
+            self.assertFalse(kwargs['is_home'])
+
     # -- get_top_plays --
 
     def test_get_top_plays(self):

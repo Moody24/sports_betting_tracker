@@ -14,7 +14,7 @@ import requests
 from app import db
 from app.enums import BetSource, BetType, Outcome
 from app.forms import BetForm
-from app.models import Bet, GameSnapshot
+from app.models import Bet, GameSnapshot, PickContext, PlayerGameLog
 from app.services.nba_service import (
     get_todays_games,
     fetch_upcoming_games,
@@ -25,6 +25,7 @@ from app.services.nba_service import (
 )
 from app.services.projection_engine import ProjectionEngine
 from app.services.value_detector import ValueDetector, quarter_kelly
+from app.services.feature_engine import build_pick_context_features
 from app.services.stats_service import find_player_id, get_cached_logs, get_player_stats_summary
 
 logger = logging.getLogger(__name__)
@@ -42,6 +43,98 @@ def _escape_like(value: str) -> str:
 
 def _normalize_name(value: str) -> str:
     return re.sub(r'[^a-z0-9]+', ' ', (value or '').lower()).strip()
+
+
+def _resolve_player_team_abbrs(player_names: set[str]) -> dict[str, str]:
+    """Resolve latest team abbreviation for each player from cache (with fallback lookup)."""
+    if not player_names:
+        return {}
+
+    resolved: dict[str, str] = {}
+    rows = (
+        PlayerGameLog.query
+        .filter(PlayerGameLog.player_name.in_(list(player_names)))
+        .order_by(PlayerGameLog.player_name, PlayerGameLog.game_date.desc())
+        .all()
+    )
+    for row in rows:
+        if row.player_name not in resolved and row.team_abbr:
+            resolved[row.player_name] = (row.team_abbr or "").upper()
+
+    # Fallback only for unresolved players.
+    for player_name in player_names:
+        if player_name in resolved:
+            continue
+        try:
+            player_id = find_player_id(player_name)
+            if not player_id:
+                continue
+            logs = get_cached_logs(player_id, last_n=1)
+            if logs and logs[0].team_abbr:
+                resolved[player_name] = (logs[0].team_abbr or "").upper()
+        except Exception:
+            continue
+
+    return resolved
+
+
+def _create_pick_context_for_bet(
+    bet_obj: Bet,
+    detector: ValueDetector,
+    selected_odds: int | None = None,
+    team_name: str = '',
+    opponent_name: str = '',
+    is_home: bool = True,
+) -> None:
+    """Persist PickContext for player props so Model 2 has training examples."""
+    if not bet_obj.is_player_prop or bet_obj.prop_line is None:
+        return
+
+    player_id = find_player_id(bet_obj.player_name or '')
+    if not player_id:
+        return
+
+    # If we only have one side's odds, use it for both sides as a neutral fallback.
+    market_odds = int(selected_odds) if selected_odds is not None else -110
+    score = detector.score_prop(
+        player_name=bet_obj.player_name or '',
+        prop_type=bet_obj.prop_type or '',
+        line=float(bet_obj.prop_line),
+        over_odds=market_odds,
+        under_odds=market_odds,
+        opponent_name=opponent_name,
+        team_name=team_name,
+        is_home=is_home,
+        game_id=bet_obj.external_game_id or '',
+    )
+
+    projected_edge = score.get('edge', 0.0)
+    if bet_obj.bet_type == BetType.OVER.value:
+        projected_edge = score.get('edge_over', projected_edge)
+    elif bet_obj.bet_type == BetType.UNDER.value:
+        projected_edge = score.get('edge_under', projected_edge)
+
+    context = build_pick_context_features(
+        player_name=bet_obj.player_name or '',
+        player_id=str(player_id),
+        prop_type=bet_obj.prop_type or '',
+        prop_line=float(bet_obj.prop_line),
+        american_odds=market_odds,
+        projected_stat=float(score.get('projection', 0.0) or 0.0),
+        projected_edge=float(projected_edge or 0.0),
+        confidence_tier=score.get('confidence_tier', 'no_edge'),
+        opponent_name=opponent_name,
+        team_name=team_name,
+        is_home=is_home,
+    )
+
+    db.session.add(PickContext(
+        bet_id=bet_obj.id,
+        context_json=json.dumps(context),
+        projected_stat=score.get('projection'),
+        projected_edge=projected_edge,
+        confidence_tier=score.get('confidence_tier'),
+    ))
 
 
 def _extract_prop_boxscore(summary_data: dict) -> dict:
@@ -243,6 +336,13 @@ def new_bet():
         except (ValueError, TypeError):
             pass
 
+        american_odds_val = None
+        if request.form.get('american_odds'):
+            try:
+                american_odds_val = int(request.form.get('american_odds'))
+            except (ValueError, TypeError):
+                american_odds_val = None
+
         units_val = None
         if request.form.get('units'):
             try:
@@ -282,6 +382,7 @@ def new_bet():
             bet_amount=form.bet_amount.data,
             units=units_val,
             outcome=form.outcome.data,
+            american_odds=american_odds_val,
             bet_type=form.bet_type.data,
             over_under_line=normalized_over_under_line if is_total_side else None,
             external_game_id=form.external_game_id.data or None,
@@ -293,6 +394,12 @@ def new_bet():
             notes=form.notes.data or None,
         )
         db.session.add(bet_obj)
+        db.session.flush()
+        _create_pick_context_for_bet(
+            bet_obj=bet_obj,
+            detector=ValueDetector(ProjectionEngine()),
+            selected_odds=american_odds_val,
+        )
         db.session.commit()
         flash('Bet recorded successfully!', 'success')
         return redirect(url_for('bet.place_bet'))
@@ -672,6 +779,15 @@ def nba_place_bets():
         db.session.rollback()
         return jsonify({"error": "; ".join(errors)}), 400
 
+    db.session.flush()
+    detector = ValueDetector(ProjectionEngine())
+    for bet_obj in created:
+        _create_pick_context_for_bet(
+            bet_obj=bet_obj,
+            detector=detector,
+            selected_odds=bet_obj.american_odds,
+        )
+
     db.session.commit()
 
     if is_parlay:
@@ -735,6 +851,7 @@ def manual_parlay():
     parlay_id = Bet.generate_parlay_id()
 
     errors = []
+    created_bets: list[Bet] = []
     for i, leg in enumerate(legs):
         if not isinstance(leg, dict):
             errors.append(f"Leg {i + 1}: must be an object")
@@ -785,10 +902,20 @@ def manual_parlay():
             source=BetSource.MANUAL.value,
         )
         db.session.add(bet_obj)
+        created_bets.append(bet_obj)
 
     if errors:
         db.session.rollback()
         return jsonify({"error": "; ".join(errors)}), 400
+
+    db.session.flush()
+    detector = ValueDetector(ProjectionEngine())
+    for bet_obj in created_bets:
+        _create_pick_context_for_bet(
+            bet_obj=bet_obj,
+            detector=detector,
+            selected_odds=bet_obj.american_odds,
+        )
 
     db.session.commit()
     return jsonify({
@@ -803,24 +930,8 @@ def manual_parlay():
 def nba_all_props():
     """Return a flat list of all player props across today's games for the prop browser."""
     games = get_todays_games()
-    all_props = []
-    player_team_cache: dict[str, str] = {}
-
-    def _infer_player_team_abbr(player_name: str) -> str:
-        cached = player_team_cache.get(player_name)
-        if cached is not None:
-            return cached
-        team_abbr = ""
-        try:
-            player_id = find_player_id(player_name)
-            if player_id:
-                logs = get_cached_logs(player_id, last_n=1)
-                if logs:
-                    team_abbr = (logs[0].team_abbr or "").upper()
-        except Exception:
-            team_abbr = ""
-        player_team_cache[player_name] = team_abbr
-        return team_abbr
+    raw_props = []
+    player_names: set[str] = set()
 
     for game in games:
         event_id = game.get('odds_event_id', '')
@@ -832,14 +943,8 @@ def nba_all_props():
         for market_key, market_props in props.items():
             for prop in market_props:
                 player_name = prop['player']
-                player_team_abbr = _infer_player_team_abbr(player_name)
-                if player_team_abbr and player_team_abbr == team_a_abbr:
-                    player_team_name = game['away']['name']
-                elif player_team_abbr and player_team_abbr == team_b_abbr:
-                    player_team_name = game['home']['name']
-                else:
-                    player_team_name = ''
-                all_props.append({
+                player_names.add(player_name)
+                raw_props.append({
                     'player': player_name,
                     'market': market_key,
                     'line': prop['line'],
@@ -850,10 +955,25 @@ def nba_all_props():
                     'team_b': game['home']['name'],
                     'team_a_abbr': team_a_abbr,
                     'team_b_abbr': team_b_abbr,
-                    'player_team_abbr': player_team_abbr,
-                    'player_team': player_team_name,
                     'match_date': game['start_time'][:10] if game.get('start_time') else '',
                 })
+
+    player_team_map = _resolve_player_team_abbrs(player_names)
+    all_props = []
+    for prop in raw_props:
+        player_team_abbr = player_team_map.get(prop['player'], '')
+        if player_team_abbr and player_team_abbr == prop.get('team_a_abbr', ''):
+            player_team_name = prop.get('team_a', '')
+        elif player_team_abbr and player_team_abbr == prop.get('team_b_abbr', ''):
+            player_team_name = prop.get('team_b', '')
+        else:
+            player_team_name = ''
+
+        enriched = dict(prop)
+        enriched['player_team_abbr'] = player_team_abbr
+        enriched['player_team'] = player_team_name
+        all_props.append(enriched)
+
     return jsonify(all_props)
 
 

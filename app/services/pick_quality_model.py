@@ -1,9 +1,8 @@
 """Pick quality classifier (Model 2).
 
 Learns from resolved bet history to predict which picks are likely to
-win.  Unlike Model 1 (stat projection), this model learns *your*
-betting patterns -- which combinations of factors produce winning picks
-and which are traps.
+win. Supports both a global model and user-specific models when enough
+per-user data exists.
 
 Requires 200+ resolved picks before training has enough signal.
 """
@@ -46,18 +45,26 @@ MINUTES_MAP = {'increasing': 1, 'stable': 0, 'decreasing': -1}
 TIER_MAP = {'strong': 3, 'moderate': 2, 'slight': 1, 'no_edge': 0}
 
 
-def _build_training_data():
+def _model_name(user_id: int | None) -> str:
+    if user_id is None:
+        return 'pick_quality_nba'
+    return f'pick_quality_nba_user_{int(user_id)}'
+
+
+def _build_training_data(user_id: int | None = None):
     """Build training data from resolved bets that have PickContext.
 
     Returns (features_list, targets) or (None, None) if insufficient data.
     """
     # Get all resolved bets with pick context
-    resolved = (
+    query = (
         db.session.query(Bet, PickContext)
         .join(PickContext, Bet.id == PickContext.bet_id)
         .filter(Bet.outcome.in_(['win', 'lose']))
-        .all()
     )
+    if user_id is not None:
+        query = query.filter(Bet.user_id == int(user_id))
+    resolved = query.all()
 
     if len(resolved) < MIN_RESOLVED_PICKS:
         logger.info(
@@ -101,7 +108,7 @@ def _build_training_data():
     return features_list, targets
 
 
-def train_pick_quality_model() -> dict:
+def train_pick_quality_model(user_id: int | None = None) -> dict:
     """Train the pick quality XGBoost classifier.
 
     Returns a dict with training results metadata.
@@ -114,9 +121,13 @@ def train_pick_quality_model() -> dict:
         logger.error("xgboost or scikit-learn not installed")
         return {'error': 'Missing ML dependencies'}
 
-    features_list, targets = _build_training_data()
+    features_list, targets = _build_training_data(user_id=user_id)
     if features_list is None:
-        return {'error': 'Insufficient training data', 'resolved_picks': 0}
+        return {
+            'error': 'Insufficient training data',
+            'resolved_picks': 0,
+            'user_id': user_id,
+        }
 
     feature_names = list(features_list[0].keys())
     X = np.array([[f[k] for k in feature_names] for f in features_list])
@@ -165,19 +176,21 @@ def train_pick_quality_model() -> dict:
     # Save model
     os.makedirs(MODEL_DIR, exist_ok=True)
     today = date_type.today().isoformat()
-    filename = f"pick_quality_nba_{today}.json"
+    model_name = _model_name(user_id)
+    file_tag = model_name.replace('pick_quality_', '')
+    filename = f"pick_quality_{file_tag}_{today}.json"
     filepath = os.path.join(MODEL_DIR, filename)
     model.save_model(filepath)
 
     # Store metadata
     ModelMetadata.query.filter_by(
-        model_name='pick_quality_nba', is_active=True,
+        model_name=model_name, is_active=True,
     ).update({'is_active': False})
 
     meta = ModelMetadata(
-        model_name='pick_quality_nba',
+        model_name=model_name,
         model_type='xgboost_classifier',
-        version=f"pick_quality_{today}",
+        version=f"{model_name}_{today}",
         file_path=filepath,
         training_date=datetime.now(timezone.utc),
         training_samples=len(X_train),
@@ -205,10 +218,11 @@ def train_pick_quality_model() -> dict:
         'val_samples': len(X_val),
         'top_features': top_features,
         'model_path': filepath,
+        'user_id': user_id,
     }
 
 
-def predict_pick_quality(context: dict) -> dict:
+def predict_pick_quality(context: dict, user_id: int | None = None) -> dict:
     """Predict whether a pick is likely to win.
 
     *context* is the same dict format as ``PickContext.context_json``.
@@ -225,9 +239,15 @@ def predict_pick_quality(context: dict) -> dict:
     except ImportError:
         return _no_model_result()
 
-    meta = ModelMetadata.query.filter_by(
-        model_name='pick_quality_nba', is_active=True,
-    ).first()
+    meta = None
+    if user_id is not None:
+        meta = ModelMetadata.query.filter_by(
+            model_name=_model_name(user_id), is_active=True,
+        ).first()
+    if meta is None:
+        meta = ModelMetadata.query.filter_by(
+            model_name=_model_name(None), is_active=True,
+        ).first()
 
     if not meta or not os.path.exists(meta.file_path):
         return _no_model_result()
@@ -297,7 +317,7 @@ def predict_pick_quality(context: dict) -> dict:
 def get_feature_importance() -> list:
     """Return feature importance rankings from the active model."""
     meta = ModelMetadata.query.filter_by(
-        model_name='pick_quality_nba', is_active=True,
+        model_name=_model_name(None), is_active=True,
     ).first()
 
     if not meta or not meta.metadata_json:
