@@ -1593,6 +1593,43 @@ class TestValueDetector(BaseTestCase):
                 top = detector.get_top_plays(min_edge=0.03)
             self.assertEqual(len(top), 1)
 
+    def test_recommend_best_parlay_returns_target_range(self):
+        from app.services.value_detector import ValueDetector
+        with self.app.app_context():
+            detector = ValueDetector()
+            mock_scores = [
+                {
+                    'player': 'A', 'prop_type': 'player_points', 'line': 20.5,
+                    'recommended_side': 'over', 'recommended_odds': -150,
+                    'edge': 0.12, 'confidence_tier': 'strong', 'games_played': 20,
+                    'game_id': 'g1',
+                },
+                {
+                    'player': 'B', 'prop_type': 'player_points', 'line': 18.5,
+                    'recommended_side': 'under', 'recommended_odds': -150,
+                    'edge': 0.11, 'confidence_tier': 'strong', 'games_played': 20,
+                    'game_id': 'g2',
+                },
+                {
+                    'player': 'C', 'prop_type': 'player_points', 'line': 16.5,
+                    'recommended_side': 'over', 'recommended_odds': 130,
+                    'edge': 0.2, 'confidence_tier': 'strong', 'games_played': 20,
+                    'game_id': 'g3',
+                },
+            ]
+            parlay = detector.recommend_best_parlay(
+                scores=mock_scores,
+                min_edge=0.08,
+                min_odds=100,
+                max_odds=200,
+                min_legs=2,
+                max_legs=3,
+            )
+            self.assertIsNotNone(parlay)
+            self.assertGreaterEqual(parlay['combined_odds'], 100)
+            self.assertLessEqual(parlay['combined_odds'], 200)
+            self.assertIn(len(parlay['legs']), (2, 3))
+
     def test_score_prop_strong_requires_projection_confidence(self):
         from app.services.value_detector import ValueDetector
         detector = ValueDetector()
@@ -1917,6 +1954,74 @@ class TestScheduler(BaseTestCase):
                     scheduler_module.retrain_models()
             retrain_mock.assert_called_once()
 
+    def test_generate_daily_auto_picks_creates_separated_bets(self):
+        from app.services import scheduler as scheduler_module
+        with patch('app.create_app', return_value=self.app):
+            fake_detector = MagicMock()
+            fake_detector.score_all_todays_props.return_value = [
+                {
+                    'player': 'LeBron James',
+                    'prop_type': 'player_points',
+                    'line': 27.5,
+                    'recommended_side': 'over',
+                    'recommended_odds': -110,
+                    'edge': 0.16,
+                    'edge_over': 0.16,
+                    'edge_under': -0.16,
+                    'confidence_tier': 'strong',
+                    'projection': 30.0,
+                    'games_played': 20,
+                    'game_id': 'espn1',
+                    'home_team': 'Boston Celtics',
+                    'away_team': 'Los Angeles Lakers',
+                    'match_date': '2026-03-01',
+                },
+                {
+                    'player': 'Jayson Tatum',
+                    'prop_type': 'player_points',
+                    'line': 28.5,
+                    'recommended_side': 'under',
+                    'recommended_odds': 130,
+                    'edge': 0.09,
+                    'edge_over': -0.09,
+                    'edge_under': 0.09,
+                    'confidence_tier': 'moderate',
+                    'projection': 26.0,
+                    'games_played': 20,
+                    'game_id': 'espn1',
+                    'home_team': 'Boston Celtics',
+                    'away_team': 'Los Angeles Lakers',
+                    'match_date': '2026-03-01',
+                },
+                {
+                    'player': 'Jaylen Brown',
+                    'prop_type': 'player_points',
+                    'line': 23.5,
+                    'recommended_side': 'over',
+                    'recommended_odds': 125,
+                    'edge': 0.08,
+                    'edge_over': 0.08,
+                    'edge_under': -0.08,
+                    'confidence_tier': 'moderate',
+                    'projection': 25.0,
+                    'games_played': 20,
+                    'game_id': 'espn1',
+                    'home_team': 'Boston Celtics',
+                    'away_team': 'Los Angeles Lakers',
+                    'match_date': '2026-03-01',
+                },
+            ]
+            with patch('app.services.value_detector.ValueDetector', return_value=fake_detector):
+                with patch('app.services.projection_engine.ProjectionEngine', return_value=MagicMock()):
+                    with patch('app.services.stats_service.find_player_id', return_value='123'):
+                        scheduler_module.generate_daily_auto_picks()
+
+        with self.app.app_context():
+            auto_bets = Bet.query.filter_by(source='auto_generated').all()
+            self.assertGreaterEqual(len(auto_bets), 2)
+            self.assertTrue(all(b.user.username == '__autopicks__' for b in auto_bets))
+            self.assertGreaterEqual(PickContext.query.count(), 1)
+
     def test_init_scheduler_adds_jobs(self):
         from app.services import scheduler as scheduler_module
 
@@ -1941,7 +2046,7 @@ class TestScheduler(BaseTestCase):
                 with patch.object(scheduler_module, '_acquire_scheduler_lock', return_value=True):
                     scheduler_module.init_scheduler(self.app)
         self.assertTrue(fake.started)
-        self.assertEqual(len(fake.jobs), 7)
+        self.assertEqual(len(fake.jobs), 8)
 
 
 # ═══════════════════════════════════════════════════════════════════════════

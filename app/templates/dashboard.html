@@ -156,6 +156,53 @@
 </div>
 {% endif %}
 
+{% if best_parlay %}
+<div class="card-soft p-3 mb-4">
+  <div class="d-flex justify-content-between align-items-center mb-2">
+    <h3 class="h6 mb-0"><i class="bi bi-stars me-2 text-warning"></i>Best Play Of The Day</h3>
+    <span class="badge text-bg-warning text-dark">High Confidence</span>
+  </div>
+  <p class="small text-secondary mb-2">
+    Recommended {{ best_parlay.legs|length }}-leg parlay
+    <strong class="text-light">{{ '%+d'|format(best_parlay.combined_odds) }}</strong>
+    (target range +100 to +200).
+  </p>
+  <div class="table-wrap">
+    <table class="table table-dark table-sm align-middle mb-0">
+      <thead>
+        <tr>
+          <th>Player</th>
+          <th>Prop</th>
+          <th class="text-center">Line</th>
+          <th class="text-center">Side</th>
+          <th class="text-center">Odds</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for leg in best_parlay.legs %}
+        <tr>
+          <td class="fw-semibold">{{ leg.player }}</td>
+          <td>
+            {% set prop_label = {'player_points': 'PTS', 'player_rebounds': 'REB', 'player_assists': 'AST', 'player_threes': '3PM', 'player_blocks': 'BLK', 'player_steals': 'STL'}.get(leg.prop_type, leg.prop_type) %}
+            <span class="badge text-bg-dark">{{ prop_label }}</span>
+          </td>
+          <td class="text-center tabular-num">{{ leg.line }}</td>
+          <td class="text-center">
+            {% if leg.side == 'over' %}
+              <span class="text-success"><i class="bi bi-arrow-up"></i> Over</span>
+            {% else %}
+              <span class="text-danger"><i class="bi bi-arrow-down"></i> Under</span>
+            {% endif %}
+          </td>
+          <td class="text-center tabular-num">{{ '%+d'|format(leg.odds) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
 <div class="card-soft p-3">
   <div class="d-flex justify-content-between align-items-center mb-2">
     <h3 class="h6 mb-0">Recent Bets</h3>

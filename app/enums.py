@@ -32,3 +32,4 @@ class BetType(_StrEnum):
 class BetSource(_StrEnum):
     MANUAL = "manual"
     NBA_PROPS = "nba_props"
+    AUTO_GENERATED = "auto_generated"

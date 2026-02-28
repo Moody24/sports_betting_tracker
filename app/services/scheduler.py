@@ -7,7 +7,7 @@ creates its own app context since they execute on background threads.
 import fcntl
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta, time as dt_time
 
 try:
     from apscheduler.schedulers.background import BackgroundScheduler
@@ -135,6 +135,183 @@ def run_projections():
             "Projections complete: %d total props, %d strong value plays",
             len(plays), len(strong),
         )
+
+
+def _build_auto_pick_context(bet_obj, score: dict) -> dict:
+    """Build context payload for auto-generated player prop bets."""
+    from app.services.stats_service import find_player_id
+    from app.services.feature_engine import build_pick_context_features
+
+    player_id = find_player_id(bet_obj.player_name or '')
+    if not player_id:
+        return {}
+
+    selected_odds = int(score.get('recommended_odds') or -110)
+    projected_edge = score.get('edge', 0.0)
+    if bet_obj.bet_type == 'over':
+        projected_edge = score.get('edge_over', projected_edge)
+    elif bet_obj.bet_type == 'under':
+        projected_edge = score.get('edge_under', projected_edge)
+
+    return build_pick_context_features(
+        player_name=bet_obj.player_name or '',
+        player_id=str(player_id),
+        prop_type=bet_obj.prop_type or '',
+        prop_line=float(bet_obj.prop_line or 0.0),
+        american_odds=selected_odds,
+        projected_stat=float(score.get('projection', 0.0) or 0.0),
+        projected_edge=float(projected_edge or 0.0),
+        confidence_tier=score.get('confidence_tier', 'no_edge'),
+        opponent_name='',
+        team_name='',
+        is_home=True,
+    )
+
+
+def generate_daily_auto_picks():
+    """Generate a separated daily basket of auto picks for faster model learning."""
+    from app import create_app, db
+    from app.enums import BetSource, Outcome
+    from app.models import Bet, PickContext, User
+    from app.services.projection_engine import ProjectionEngine
+    from app.services.value_detector import ValueDetector
+
+    app = create_app()
+    with app.app_context():
+        today = datetime.now().date()
+        day_start = datetime.combine(today, dt_time.min)
+        day_end = day_start + timedelta(days=1)
+
+        system_user = User.query.filter_by(username='__autopicks__').first()
+        if system_user is None:
+            system_user = User(username='__autopicks__', email='autopicks@local.invalid')
+            system_user.set_password('auto-picks-system-user')
+            db.session.add(system_user)
+            db.session.flush()
+
+        existing_today = (
+            Bet.query
+            .filter(Bet.user_id == system_user.id)
+            .filter(Bet.source == BetSource.AUTO_GENERATED.value)
+            .filter(Bet.match_date >= day_start, Bet.match_date < day_end)
+            .count()
+        )
+        if existing_today > 0:
+            logger.info("Auto picks already generated for %s (%d bets).", today.isoformat(), existing_today)
+            db.session.commit()
+            return
+
+        detector = ValueDetector(ProjectionEngine())
+        scores = detector.score_all_todays_props()
+        actionable = [s for s in scores if s.get('games_played', 0) >= 10 and s.get('confidence_tier') != 'no_edge']
+        strong = [s for s in actionable if s.get('confidence_tier') == 'strong'][:3]
+        ev_positive = [s for s in actionable if s.get('edge', 0) >= 0.05][:4]
+        coin_flip = [s for s in scores if s.get('games_played', 0) >= 10 and abs(s.get('edge', 0)) <= 0.02][:3]
+        longshot_pool = [s for s in actionable if int(s.get('recommended_odds') or 0) >= 120][:3]
+
+        selected = []
+        seen = set()
+
+        def _add_bucket(bucket_name: str, bucket_scores: list):
+            for play in bucket_scores:
+                key = (play.get('player'), play.get('prop_type'), play.get('line'), play.get('recommended_side'), play.get('game_id'))
+                if key in seen:
+                    continue
+                seen.add(key)
+                selected.append((bucket_name, play))
+
+        _add_bucket('strong', strong)
+        _add_bucket('ev_positive', ev_positive)
+        _add_bucket('coin_flip', coin_flip)
+
+        if not selected:
+            logger.info("Auto pick generation skipped: no playable scores.")
+            db.session.commit()
+            return
+
+        created_bets = []
+        for bucket, play in selected:
+            match_date = play.get('match_date') or today.isoformat()
+            try:
+                match_dt = datetime.strptime(match_date, '%Y-%m-%d')
+            except ValueError:
+                match_dt = day_start
+
+            bet_obj = Bet(
+                user_id=system_user.id,
+                team_a=str(play.get('away_team') or '')[:80] or 'Away',
+                team_b=str(play.get('home_team') or '')[:80] or 'Home',
+                match_date=match_dt,
+                bet_amount=10.0,
+                outcome=Outcome.PENDING.value,
+                american_odds=int(play.get('recommended_odds') or -110),
+                is_parlay=False,
+                source=BetSource.AUTO_GENERATED.value,
+                bet_type=str(play.get('recommended_side') or 'over'),
+                over_under_line=None,
+                external_game_id=play.get('game_id') or None,
+                player_name=str(play.get('player') or '')[:100] or None,
+                prop_type=str(play.get('prop_type') or '')[:40] or None,
+                prop_line=float(play.get('line') or 0.0),
+                notes=f"AUTO_PICK_BUCKET:{bucket}",
+            )
+            db.session.add(bet_obj)
+            db.session.flush()
+
+            context = _build_auto_pick_context(bet_obj, play)
+            if context:
+                db.session.add(PickContext(
+                    bet_id=bet_obj.id,
+                    context_json=json.dumps(context),
+                    projected_stat=play.get('projection'),
+                    projected_edge=play.get('edge'),
+                    confidence_tier=play.get('confidence_tier'),
+                ))
+            created_bets.append(bet_obj)
+
+        # Create one long-shot parlay (2-3 legs) when possible.
+        if len(longshot_pool) >= 2:
+            parlay_legs = longshot_pool[:3]
+            parlay_id = Bet.generate_parlay_id()
+            for play in parlay_legs:
+                match_date = play.get('match_date') or today.isoformat()
+                try:
+                    match_dt = datetime.strptime(match_date, '%Y-%m-%d')
+                except ValueError:
+                    match_dt = day_start
+                leg = Bet(
+                    user_id=system_user.id,
+                    team_a=str(play.get('away_team') or '')[:80] or 'Away',
+                    team_b=str(play.get('home_team') or '')[:80] or 'Home',
+                    match_date=match_dt,
+                    bet_amount=10.0,
+                    outcome=Outcome.PENDING.value,
+                    american_odds=int(play.get('recommended_odds') or -110),
+                    is_parlay=True,
+                    parlay_id=parlay_id,
+                    source=BetSource.AUTO_GENERATED.value,
+                    bet_type=str(play.get('recommended_side') or 'over'),
+                    external_game_id=play.get('game_id') or None,
+                    player_name=str(play.get('player') or '')[:100] or None,
+                    prop_type=str(play.get('prop_type') or '')[:40] or None,
+                    prop_line=float(play.get('line') or 0.0),
+                    notes="AUTO_PICK_BUCKET:longshot_parlay",
+                )
+                db.session.add(leg)
+                db.session.flush()
+                context = _build_auto_pick_context(leg, play)
+                if context:
+                    db.session.add(PickContext(
+                        bet_id=leg.id,
+                        context_json=json.dumps(context),
+                        projected_stat=play.get('projection'),
+                        projected_edge=play.get('edge'),
+                        confidence_tier=play.get('confidence_tier'),
+                    ))
+                created_bets.append(leg)
+
+        db.session.commit()
+        logger.info("Generated %d auto picks for %s", len(created_bets), today.isoformat())
 
 
 def resolve_and_grade():
@@ -283,6 +460,14 @@ def init_scheduler(app):
         lambda: _log_job('projections', run_projections),
         CronTrigger(hour=17, minute=30, timezone=APP_TIMEZONE),
         id='projections',
+        replace_existing=True,
+    )
+
+    # Daily auto-generated picks for model-2 training (11:45 AM ET)
+    scheduler.add_job(
+        lambda: _log_job('auto_picks', generate_daily_auto_picks),
+        CronTrigger(hour=11, minute=45, timezone=APP_TIMEZONE),
+        id='auto_picks',
         replace_existing=True,
     )
 

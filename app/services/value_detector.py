@@ -6,6 +6,7 @@ identify mispriced props and quantify the edge.
 
 import logging
 import math
+from itertools import combinations
 from typing import Optional
 
 from app.models import PlayerGameLog
@@ -38,6 +39,15 @@ def decimal_odds(american_odds: int) -> float:
     elif american_odds < 0:
         return 1.0 + 100.0 / abs(american_odds)
     return 2.0
+
+
+def american_from_decimal(decimal_value: float) -> int:
+    """Convert decimal odds to American odds."""
+    if decimal_value <= 1.0:
+        return 0
+    if decimal_value >= 2.0:
+        return int(round((decimal_value - 1.0) * 100))
+    return int(round(-100.0 / (decimal_value - 1.0)))
 
 
 def devig_probs(over_odds: int, under_odds: int) -> tuple[float, float]:
@@ -338,6 +348,77 @@ class ValueDetector:
         all_scores = self.score_all_todays_props()
         top = self.filter_plays(all_scores, min_edge=min_edge)
         return top[:max_plays]
+
+    def recommend_best_parlay(
+        self,
+        scores: Optional[list] = None,
+        min_edge: float = TIER_MODERATE,
+        min_odds: int = 100,
+        max_odds: int = 200,
+        min_legs: int = 2,
+        max_legs: int = 3,
+    ) -> Optional[dict]:
+        """Return best 2-3 leg high-confidence parlay within target odds range."""
+        if scores is None:
+            scores = self.score_all_todays_props()
+
+        candidates = []
+        for play in self.filter_plays(scores, min_edge=min_edge):
+            if play.get('confidence_tier') != 'strong':
+                continue
+            odds = play.get('recommended_odds')
+            if odds is None:
+                continue
+            candidates.append(play)
+
+        # Keep search space small and deterministic.
+        candidates = sorted(
+            candidates,
+            key=lambda p: (p.get('edge', 0), p.get('games_played', 0)),
+            reverse=True,
+        )[:12]
+        if len(candidates) < min_legs:
+            return None
+
+        best_combo = None
+        best_score = None
+        for legs_count in range(min_legs, max_legs + 1):
+            for combo in combinations(candidates, legs_count):
+                unique_keys = {(c.get('player'), c.get('prop_type'), c.get('game_id')) for c in combo}
+                if len(unique_keys) != len(combo):
+                    continue
+
+                dec_prod = 1.0
+                for leg in combo:
+                    dec_prod *= decimal_odds(int(leg.get('recommended_odds')))
+                parlay_american = american_from_decimal(dec_prod)
+                if parlay_american < min_odds or parlay_american > max_odds:
+                    continue
+
+                combo_edge = sum(float(c.get('edge', 0) or 0) for c in combo)
+                ranking_score = combo_edge + 0.001 * sum(int(c.get('games_played', 0) or 0) for c in combo)
+
+                if best_score is None or ranking_score > best_score:
+                    best_score = ranking_score
+                    best_combo = {
+                        'combined_odds': parlay_american,
+                        'legs': [{
+                            'player': c.get('player'),
+                            'prop_type': c.get('prop_type'),
+                            'line': c.get('line'),
+                            'side': c.get('recommended_side'),
+                            'odds': c.get('recommended_odds'),
+                            'edge': c.get('edge'),
+                            'game_id': c.get('game_id'),
+                            'home_team': c.get('home_team'),
+                            'away_team': c.get('away_team'),
+                            'match_date': c.get('match_date'),
+                        } for c in combo],
+                        'total_edge': round(combo_edge, 4),
+                        'confidence': 'high',
+                    }
+
+        return best_combo
 
     @staticmethod
     def filter_plays(scores: list, min_edge: float = TIER_SLIGHT) -> list:

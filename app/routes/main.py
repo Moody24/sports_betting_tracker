@@ -121,12 +121,22 @@ def dashboard():
 
     # ── Today's top plays from the analysis engine ──────────────────
     top_plays = []
+    best_parlay = None
     try:
         from app.services.projection_engine import ProjectionEngine
         from app.services.value_detector import ValueDetector
         engine = ProjectionEngine()
         detector = ValueDetector(engine)
-        top_plays = detector.get_top_plays(min_edge=0.08, max_plays=5)
+        all_scores = detector.score_all_todays_props()
+        top_plays = detector.filter_plays(all_scores, min_edge=0.08)[:5]
+        best_parlay = detector.recommend_best_parlay(
+            scores=all_scores,
+            min_edge=0.08,
+            min_odds=100,
+            max_odds=200,
+            min_legs=2,
+            max_legs=3,
+        )
     except Exception as exc:
         logger.debug("Top plays unavailable: %s", exc)
 
@@ -139,6 +149,7 @@ def dashboard():
         cumul_labels=cumul_labels,
         cumul_values=cumul_values,
         top_plays=top_plays,
+        best_parlay=best_parlay,
     )
 
 
