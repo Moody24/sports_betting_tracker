@@ -6,18 +6,24 @@ that holds only active-slate player data.
 """
 
 import logging
+import os
 import time
 from datetime import datetime, timezone, timedelta, date as date_type
 from difflib import SequenceMatcher
 from typing import Optional
+from zoneinfo import ZoneInfo
+
+import requests
 
 from app import db
 from app.models import PlayerGameLog
+from app.services.nba_service import ESPN_SUMMARY_URL, fetch_espn_scoreboard
 
 logger = logging.getLogger(__name__)
 
 # Rate-limit delay between NBA API calls (seconds)
 _NBA_API_DELAY = 0.6
+APP_TIMEZONE = ZoneInfo("America/New_York")
 
 
 class PlayerNameResolver:
@@ -370,6 +376,186 @@ def update_player_logs_for_games(games: list) -> int:
             count += 1
 
     return count
+
+
+def _safe_float(value, default=0.0) -> float:
+    try:
+        return float(str(value).replace("+", "").strip())
+    except (ValueError, TypeError):
+        return default
+
+
+def _parse_made_attempt(raw_val) -> tuple[float, float]:
+    if raw_val is None:
+        return 0.0, 0.0
+    text = str(raw_val).strip()
+    if '-' not in text:
+        val = _safe_float(text, 0.0)
+        return val, 0.0
+    made, attempted = text.split('-', 1)
+    return _safe_float(made, 0.0), _safe_float(attempted, 0.0)
+
+
+def _extract_stat_value(columns: list[str], stats: list[str], key: str):
+    if key not in columns:
+        return None
+    idx = columns.index(key)
+    if idx >= len(stats):
+        return None
+    return stats[idx]
+
+
+def _extract_logs_from_espn_summary(summary_data: dict, game: dict, game_date: date_type) -> list[dict]:
+    """Parse ESPN summary payload into PlayerGameLog-compatible rows."""
+    home = game.get('home', {}) or {}
+    away = game.get('away', {}) or {}
+    home_name = home.get('name', '')
+    away_name = away.get('name', '')
+    home_abbr = home.get('abbr', '')
+    away_abbr = away.get('abbr', '')
+    home_score = int(home.get('score', 0) or 0)
+    away_score = int(away.get('score', 0) or 0)
+
+    logs: list[dict] = []
+    for team_block in summary_data.get('boxscore', {}).get('players', []):
+        team_info = team_block.get('team', {}) or {}
+        team_name = team_info.get('displayName', '') or team_info.get('shortDisplayName', '')
+        team_abbr = team_info.get('abbreviation', '') or ''
+
+        is_home_team = (team_name and team_name == home_name) or (team_abbr and team_abbr == home_abbr)
+        opp_abbr = away_abbr if is_home_team else home_abbr
+        home_away = 'home' if is_home_team else 'away'
+        matchup = f"{team_abbr} vs. {opp_abbr}" if is_home_team else f"{team_abbr} @ {opp_abbr}"
+        win_loss = None
+        if home_score != away_score:
+            team_won = (home_score > away_score) if is_home_team else (away_score > home_score)
+            win_loss = 'W' if team_won else 'L'
+
+        for stat_block in team_block.get('statistics', []):
+            columns: list[str] = stat_block.get('names', []) or []
+            for athlete in stat_block.get('athletes', []):
+                athlete_info = athlete.get('athlete', {}) or {}
+                player_name = athlete_info.get('displayName', '') or ''
+                if not player_name:
+                    continue
+
+                stats: list[str] = athlete.get('stats', []) or []
+                min_raw = _extract_stat_value(columns, stats, 'MIN')
+                fg_raw = _extract_stat_value(columns, stats, 'FG')
+                fg3_raw = _extract_stat_value(columns, stats, '3PT')
+                ft_raw = _extract_stat_value(columns, stats, 'FT')
+                reb_raw = _extract_stat_value(columns, stats, 'REB')
+                ast_raw = _extract_stat_value(columns, stats, 'AST')
+                stl_raw = _extract_stat_value(columns, stats, 'STL')
+                blk_raw = _extract_stat_value(columns, stats, 'BLK')
+                tov_raw = _extract_stat_value(columns, stats, 'TO')
+                pm_raw = _extract_stat_value(columns, stats, '+/-')
+                pts_raw = _extract_stat_value(columns, stats, 'PTS')
+                oreb_raw = _extract_stat_value(columns, stats, 'OREB')
+                dreb_raw = _extract_stat_value(columns, stats, 'DREB')
+
+                fgm, fga = _parse_made_attempt(fg_raw)
+                fg3m, fg3a = _parse_made_attempt(fg3_raw)
+                ftm, fta = _parse_made_attempt(ft_raw)
+
+                reb_val = _safe_float(reb_raw, 0.0)
+                if reb_val == 0.0 and (oreb_raw is not None or dreb_raw is not None):
+                    reb_val = _safe_float(oreb_raw, 0.0) + _safe_float(dreb_raw, 0.0)
+
+                resolved_player_id = find_player_id(player_name)
+                if not resolved_player_id:
+                    espn_id = athlete_info.get('id') or player_name.lower().replace(' ', '_')
+                    resolved_player_id = f"espn_{espn_id}"
+
+                logs.append({
+                    'player_id': str(resolved_player_id),
+                    'player_name': player_name,
+                    'team_abbr': team_abbr,
+                    'game_date': game_date,
+                    'matchup': matchup,
+                    'minutes': _parse_minutes(min_raw),
+                    'pts': _safe_float(pts_raw, 0.0),
+                    'reb': reb_val,
+                    'ast': _safe_float(ast_raw, 0.0),
+                    'stl': _safe_float(stl_raw, 0.0),
+                    'blk': _safe_float(blk_raw, 0.0),
+                    'tov': _safe_float(tov_raw, 0.0),
+                    'fgm': fgm,
+                    'fga': fga,
+                    'ftm': ftm,
+                    'fta': fta,
+                    'fg3m': fg3m,
+                    'fg3a': fg3a,
+                    'plus_minus': _safe_float(pm_raw, 0.0),
+                    'home_away': home_away,
+                    'win_loss': win_loss,
+                })
+    return logs
+
+
+def refresh_completed_game_logs(days_back: int = 2) -> dict:
+    """Reliably ingest completed NBA game logs from ESPN summaries.
+
+    Fetches final games for the last ``days_back`` days plus today and
+    upserts player rows into PlayerGameLog.
+    """
+    today_et = datetime.now(APP_TIMEZONE).date()
+    inserted = 0
+    updated = 0
+    players_upserted = 0
+    games_seen = 0
+    finals_seen = 0
+
+    for offset in range(max(days_back, 0) + 1):
+        target_date = today_et - timedelta(days=offset)
+        date_str = target_date.strftime('%Y%m%d')
+        games = fetch_espn_scoreboard(date_str)
+        games_seen += len(games)
+
+        for game in games:
+            status = str(game.get('status', '') or '')
+            status_detail = str(game.get('status_detail', '') or '').lower()
+            if status != 'STATUS_FINAL' and 'final' not in status_detail:
+                continue
+            finals_seen += 1
+
+            espn_id = game.get('espn_id')
+            if not espn_id:
+                continue
+
+            try:
+                resp = requests.get(ESPN_SUMMARY_URL, params={'event': espn_id}, timeout=10)
+                resp.raise_for_status()
+                summary = resp.json()
+            except (requests.RequestException, ValueError) as exc:
+                logger.error("ESPN summary fetch failed for completed game %s: %s", espn_id, exc)
+                continue
+
+            rows = _extract_logs_from_espn_summary(summary, game, target_date)
+            if not rows:
+                continue
+
+            grouped: dict[str, list] = {}
+            for row in rows:
+                grouped.setdefault(str(row['player_id']), []).append(row)
+
+            for pid, player_rows in grouped.items():
+                result = cache_player_logs(pid, player_rows, ttl_days=3650, commit=False)
+                inserted += result['inserted']
+                updated += result['updated']
+                if result['total'] > 0:
+                    players_upserted += 1
+
+    db.session.commit()
+    summary = {
+        'games_seen': games_seen,
+        'final_games_seen': finals_seen,
+        'players_upserted': players_upserted,
+        'rows_inserted': inserted,
+        'rows_updated': updated,
+    }
+    logger.info("Completed-game log refresh summary: %s", summary)
+    return summary
 
 
 def prune_expired_cache():

@@ -7,6 +7,7 @@ creates its own app context since they execute on background threads.
 import fcntl
 import json
 import logging
+import os
 from datetime import datetime, timezone, timedelta, time as dt_time
 
 try:
@@ -117,17 +118,29 @@ def _close_stale_running_jobs(db, JobLog):
 
 
 def refresh_player_stats():
-    """Fetch game logs for all players on today's NBA slate."""
-    from app import create_app, db
+    """Refresh player logs from completed games, with optional NBA API supplement."""
+    from app import create_app
 
     app = create_app()
     with app.app_context():
         from app.services.nba_service import get_todays_games
-        from app.services.stats_service import update_player_logs_for_games
+        from app.services.stats_service import refresh_completed_game_logs, update_player_logs_for_games
+
+        completed_summary = refresh_completed_game_logs(days_back=2)
+        logger.info(
+            "Completed-game refresh: final_games=%d players=%d inserted=%d updated=%d",
+            completed_summary.get('final_games_seen', 0),
+            completed_summary.get('players_upserted', 0),
+            completed_summary.get('rows_inserted', 0),
+            completed_summary.get('rows_updated', 0),
+        )
+
+        if os.getenv('ENABLE_NBA_API_PLAYER_REFRESH', 'false').lower() != 'true':
+            return
 
         games = get_todays_games()
         count = update_player_logs_for_games(games)
-        logger.info("Refreshed stats for %d players", count)
+        logger.info("Supplemental NBA API slate refresh for %d players", count)
 
 
 def refresh_defense_data():

@@ -375,6 +375,56 @@ class TestStatsService(BaseTestCase):
                 count = update_player_logs_for_games([{'odds_event_id': 'evt1'}])
                 self.assertEqual(count, 0)
 
+    @patch('app.services.stats_service.find_player_id', return_value='101')
+    @patch('app.services.stats_service.requests.get')
+    @patch('app.services.stats_service.fetch_espn_scoreboard')
+    def test_refresh_completed_game_logs_ingests_finals(self, mock_scoreboard, mock_get, _mock_pid):
+        from app.services.stats_service import refresh_completed_game_logs
+        with self.app.app_context():
+            mock_scoreboard.return_value = [{
+                'espn_id': 'game1',
+                'status': 'STATUS_FINAL',
+                'status_detail': 'Final',
+                'home': {'name': 'Boston Celtics', 'abbr': 'BOS', 'score': 120},
+                'away': {'name': 'Los Angeles Lakers', 'abbr': 'LAL', 'score': 110},
+            }]
+            mock_resp = MagicMock()
+            mock_resp.raise_for_status.return_value = None
+            mock_resp.json.return_value = {
+                'boxscore': {
+                    'players': [{
+                        'team': {'displayName': 'Boston Celtics', 'abbreviation': 'BOS'},
+                        'statistics': [{
+                            'names': ['MIN', 'FG', '3PT', 'FT', 'REB', 'AST', 'STL', 'BLK', 'TO', '+/-', 'PTS'],
+                            'athletes': [{
+                                'athlete': {'displayName': 'Jayson Tatum', 'id': '300'},
+                                'stats': ['36:00', '10-20', '3-8', '5-6', '8', '6', '1', '0', '2', '+7', '28'],
+                            }],
+                        }],
+                    }],
+                },
+            }
+            mock_get.return_value = mock_resp
+
+            summary = refresh_completed_game_logs(days_back=0)
+            self.assertEqual(summary['final_games_seen'], 1)
+            self.assertGreaterEqual(summary['rows_inserted'], 1)
+            self.assertEqual(PlayerGameLog.query.filter_by(player_name='Jayson Tatum').count(), 1)
+
+    @patch('app.services.stats_service.fetch_espn_scoreboard')
+    def test_refresh_completed_game_logs_skips_non_final(self, mock_scoreboard):
+        from app.services.stats_service import refresh_completed_game_logs
+        with self.app.app_context():
+            mock_scoreboard.return_value = [{
+                'espn_id': 'game2',
+                'status': 'STATUS_SCHEDULED',
+                'status_detail': 'Scheduled',
+                'home': {'name': 'A', 'abbr': 'A', 'score': 0},
+                'away': {'name': 'B', 'abbr': 'B', 'score': 0},
+            }]
+            summary = refresh_completed_game_logs(days_back=0)
+            self.assertEqual(summary['final_games_seen'], 0)
+
     # -- PlayerNameResolver cache --
 
     def test_name_resolver_cache_hit(self):
@@ -2048,9 +2098,13 @@ class TestScheduler(BaseTestCase):
     def test_refresh_jobs_and_projection_job(self):
         from app.services import scheduler as scheduler_module
         with patch('app.create_app', return_value=self.app):
-            with patch('app.services.nba_service.get_todays_games', return_value=[{'id': 'g1'}]):
-                with patch('app.services.stats_service.update_player_logs_for_games', return_value=2):
-                    scheduler_module.refresh_player_stats()
+            with patch('app.services.stats_service.refresh_completed_game_logs', return_value={
+                'final_games_seen': 2,
+                'players_upserted': 20,
+                'rows_inserted': 40,
+                'rows_updated': 15,
+            }):
+                scheduler_module.refresh_player_stats()
             with patch('app.services.matchup_service.refresh_all_team_defense', return_value=30):
                 scheduler_module.refresh_defense_data()
             with patch('app.services.context_service.refresh_injuries', return_value=12):
