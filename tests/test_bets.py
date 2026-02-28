@@ -28,6 +28,13 @@ class TestBetRoutes(BaseTestCase):
         self.assertIn(b'id="single-picked-team"', resp.data)
         self.assertIn(b'Select winner', resp.data)
 
+    def test_new_bet_form_has_ocr_moneyline_winner_dropdown(self):
+        self.register_and_login()
+        resp = self.client.get("/bets/new")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn(b'id="ocr-picked-team"', resp.data)
+        self.assertIn(b'Select winner', resp.data)
+
     def test_new_bet_form_has_parlay_grouped_props_browser_controls(self):
         self.register_and_login()
         resp = self.client.get("/bets/new")
@@ -255,6 +262,18 @@ class TestBetRoutes(BaseTestCase):
         )
         self.assertEqual(resp.status_code, 200)
         self.assertIn(b"Lakers", resp.data)
+
+    def test_new_bet_form_prepopulated_prop_from_query_params(self):
+        self.register_and_login()
+        resp = self.client.get(
+            "/bets/new?team_a=Lakers&team_b=Nets&match_date=2025-03-01"
+            "&bet_type=under&player_name=LeBron+James"
+            "&prop_type=player_points&prop_line=27.5&game_id=abc123"
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn(b'id="prop-player-name"', resp.data)
+        self.assertIn(b'value="LeBron James"', resp.data)
+        self.assertIn(b'value="27.5"', resp.data)
 
     def test_nba_today_requires_auth(self):
         resp = self.client.get("/nba/today", follow_redirects=True)

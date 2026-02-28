@@ -50,8 +50,8 @@
       <label class="form-label small mb-1 text-secondary">Min Edge</label>
       <select class="form-select form-select-sm" id="filter-edge" style="width:auto">
         <option value="0">All</option>
-        <option value="0.03">3%+</option>
-        <option value="0.08" selected>8%+</option>
+        <option value="0.03" selected>3%+</option>
+        <option value="0.08">8%+</option>
         <option value="0.15">15%+</option>
       </select>
     </div>
@@ -216,6 +216,15 @@
 <script>
 // Client-side filtering
 document.addEventListener('DOMContentLoaded', function() {
+  function esc(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
   const filterStat = document.getElementById('filter-stat');
   const filterEdge = document.getElementById('filter-edge');
   const filterConf = document.getElementById('filter-confidence');
@@ -264,7 +273,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
       modal.show();
 
-      fetch(`/nba/player-analysis/${encodeURIComponent(player)}?prop_type=${propType}&game_id=${gameId}`)
+      fetch(`/nba/player-analysis/${encodeURIComponent(player)}?prop_type=${encodeURIComponent(propType)}&game_id=${encodeURIComponent(gameId)}`)
         .then(r => r.json())
         .then(data => {
           let html = '';
@@ -273,9 +282,9 @@ document.addEventListener('DOMContentLoaded', function() {
           if (data.breakdown) {
             html += '<h6 class="text-info">Projection Breakdown</h6>';
             html += '<div class="row g-2 mb-3">';
-            html += `<div class="col-4"><div class="card-soft p-2 text-center"><div class="small text-secondary">Last 5</div><div class="fw-semibold">${data.breakdown.last_5_avg || '—'}</div></div></div>`;
-            html += `<div class="col-4"><div class="card-soft p-2 text-center"><div class="small text-secondary">Last 10</div><div class="fw-semibold">${data.breakdown.last_10_avg || '—'}</div></div></div>`;
-            html += `<div class="col-4"><div class="card-soft p-2 text-center"><div class="small text-secondary">Season</div><div class="fw-semibold">${data.breakdown.season_avg || '—'}</div></div></div>`;
+            html += `<div class="col-4"><div class="card-soft p-2 text-center"><div class="small text-secondary">Last 5</div><div class="fw-semibold">${esc(data.breakdown.last_5_avg || '—')}</div></div></div>`;
+            html += `<div class="col-4"><div class="card-soft p-2 text-center"><div class="small text-secondary">Last 10</div><div class="fw-semibold">${esc(data.breakdown.last_10_avg || '—')}</div></div></div>`;
+            html += `<div class="col-4"><div class="card-soft p-2 text-center"><div class="small text-secondary">Season</div><div class="fw-semibold">${esc(data.breakdown.season_avg || '—')}</div></div></div>`;
             html += '</div>';
           }
 
@@ -284,7 +293,7 @@ document.addEventListener('DOMContentLoaded', function() {
             html += '<h6 class="text-info">Context</h6>';
             html += '<div class="d-flex flex-wrap gap-1 mb-3">';
             data.context_notes.forEach(n => {
-              html += `<span class="badge text-bg-dark">${n}</span>`;
+              html += `<span class="badge text-bg-dark">${esc(n)}</span>`;
             });
             html += '</div>';
           }
@@ -296,8 +305,8 @@ document.addEventListener('DOMContentLoaded', function() {
             html += '<th>Date</th><th>Opp</th><th>MIN</th><th>PTS</th><th>REB</th><th>AST</th><th>3PM</th>';
             html += '</tr></thead><tbody>';
             data.game_log.forEach(g => {
-              html += `<tr><td>${g.date}</td><td>${g.matchup}</td><td>${g.minutes}</td>`;
-              html += `<td>${g.pts}</td><td>${g.reb}</td><td>${g.ast}</td><td>${g.fg3m}</td></tr>`;
+              html += `<tr><td>${esc(g.date)}</td><td>${esc(g.matchup)}</td><td>${esc(g.minutes)}</td>`;
+              html += `<td>${esc(g.pts)}</td><td>${esc(g.reb)}</td><td>${esc(g.ast)}</td><td>${esc(g.fg3m)}</td></tr>`;
             });
             html += '</tbody></table></div>';
           }
@@ -320,10 +329,12 @@ document.addEventListener('DOMContentLoaded', function() {
         team_b: this.dataset.home,
         match_date: this.dataset.date,
         bet_type: this.dataset.side,
-        over_under_line: this.dataset.line,
+        player_name: this.dataset.player,
+        prop_type: this.dataset.propType,
+        prop_line: this.dataset.line,
         game_id: this.dataset.gameId,
       });
-      window.location.href = '/bets/new?' + params.toString() + '#single';
+      window.location.href = '/bets/new?' + params.toString() + '#prop';
     });
   });
 });

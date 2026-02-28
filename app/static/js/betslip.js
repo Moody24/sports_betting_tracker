@@ -26,6 +26,15 @@
     player_rebounds_assists: 'REB+AST'
   };
 
+  function escapeHtml(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
   // ── DOM refs ───────────────────────────────────────────────────
   var slipEl          = document.getElementById('bet-slip');
   var slipLegsEl      = document.getElementById('slip-legs');
@@ -104,44 +113,44 @@
     markets.forEach(function (market) {
       var label = MARKET_LABELS[market] || market.replace('player_', '').replace(/_/g, ' ');
       html += '<div class="prop-market-group">';
-      html += '<div class="prop-market-label">' + label + '</div>';
+      html += '<div class="prop-market-label">' + escapeHtml(label) + '</div>';
 
       data[market].forEach(function (prop) {
         var legId = espnId + '_' + market + '_' + prop.player.replace(/\s/g, '_');
         var inSlip = slip.some(function (l) { return l.id === legId; });
 
         html += '<div class="prop-row">';
-        html += '  <div class="prop-player">' + prop.player + '</div>';
-        html += '  <div class="prop-line">' + prop.line + '</div>';
+        html += '  <div class="prop-player">' + escapeHtml(prop.player) + '</div>';
+        html += '  <div class="prop-line">' + escapeHtml(prop.line) + '</div>';
         html += '  <div class="prop-actions">';
 
         var overActive = inSlip && slip.some(function (l) { return l.id === legId && l.bet_type === 'over'; });
         html += '    <button class="btn btn-xs prop-btn ' + (overActive ? 'prop-btn-active' : 'btn-outline-success') + '"'
-          + ' data-leg-id="' + legId + '"'
+          + ' data-leg-id="' + escapeHtml(legId) + '"'
           + ' data-side="over"'
-          + ' data-player="' + prop.player + '"'
-          + ' data-market="' + market + '"'
-          + ' data-line="' + prop.line + '"'
-          + ' data-odds="' + prop.over_odds + '"'
-          + ' data-espn="' + espnId + '"'
-          + ' data-away="' + away + '"'
-          + ' data-home="' + home + '"'
-          + ' data-date="' + matchDate + '"'
-          + '>O ' + formatOdds(prop.over_odds) + '</button>';
+          + ' data-player="' + escapeHtml(prop.player) + '"'
+          + ' data-market="' + escapeHtml(market) + '"'
+          + ' data-line="' + escapeHtml(prop.line) + '"'
+          + ' data-odds="' + escapeHtml(prop.over_odds) + '"'
+          + ' data-espn="' + escapeHtml(espnId) + '"'
+          + ' data-away="' + escapeHtml(away) + '"'
+          + ' data-home="' + escapeHtml(home) + '"'
+          + ' data-date="' + escapeHtml(matchDate) + '"'
+          + '>O ' + escapeHtml(formatOdds(prop.over_odds)) + '</button>';
 
         var underActive = inSlip && slip.some(function (l) { return l.id === legId && l.bet_type === 'under'; });
         html += '    <button class="btn btn-xs prop-btn ' + (underActive ? 'prop-btn-active' : 'btn-outline-danger') + '"'
-          + ' data-leg-id="' + legId + '"'
+          + ' data-leg-id="' + escapeHtml(legId) + '"'
           + ' data-side="under"'
-          + ' data-player="' + prop.player + '"'
-          + ' data-market="' + market + '"'
-          + ' data-line="' + prop.line + '"'
-          + ' data-odds="' + prop.under_odds + '"'
-          + ' data-espn="' + espnId + '"'
-          + ' data-away="' + away + '"'
-          + ' data-home="' + home + '"'
-          + ' data-date="' + matchDate + '"'
-          + '>U ' + formatOdds(prop.under_odds) + '</button>';
+          + ' data-player="' + escapeHtml(prop.player) + '"'
+          + ' data-market="' + escapeHtml(market) + '"'
+          + ' data-line="' + escapeHtml(prop.line) + '"'
+          + ' data-odds="' + escapeHtml(prop.under_odds) + '"'
+          + ' data-espn="' + escapeHtml(espnId) + '"'
+          + ' data-away="' + escapeHtml(away) + '"'
+          + ' data-home="' + escapeHtml(home) + '"'
+          + ' data-date="' + escapeHtml(matchDate) + '"'
+          + '>U ' + escapeHtml(formatOdds(prop.under_odds)) + '</button>';
 
         html += '  </div>';
         html += '</div>';
@@ -230,12 +239,12 @@
       html += '<div class="slip-leg">';
       html += '  <div class="d-flex justify-content-between align-items-start">';
       html += '    <div>';
-      html += '      <div class="slip-leg-player">' + leg.player_name + '</div>';
+      html += '      <div class="slip-leg-player">' + escapeHtml(leg.player_name) + '</div>';
       html += '      <div class="slip-leg-detail">'
-        + leg.bet_type.charAt(0).toUpperCase() + leg.bet_type.slice(1) + ' '
-        + leg.prop_line + ' ' + label
-        + ' <span class="slip-leg-odds">' + formatOdds(leg.american_odds) + '</span></div>';
-      html += '      <div class="slip-leg-game">' + leg.team_a + ' @ ' + leg.team_b + '</div>';
+        + escapeHtml(leg.bet_type.charAt(0).toUpperCase() + leg.bet_type.slice(1)) + ' '
+        + escapeHtml(leg.prop_line) + ' ' + escapeHtml(label)
+        + ' <span class="slip-leg-odds">' + escapeHtml(formatOdds(leg.american_odds)) + '</span></div>';
+      html += '      <div class="slip-leg-game">' + escapeHtml(leg.team_a) + ' @ ' + escapeHtml(leg.team_b) + '</div>';
       html += '    </div>';
       html += '    <button class="btn btn-sm border-0 text-secondary slip-remove" data-index="' + i + '">';
       html += '      <i class="bi bi-x-lg"></i>';

@@ -456,6 +456,34 @@
       .replace(/'/g, '&#39;');
   }
 
+  function refreshOcrPickedWinnerOptions() {
+    const pickedTeamEl = document.getElementById('ocr-picked-team');
+    const teamAEl = document.getElementById('ocr-team-a');
+    const teamBEl = document.getElementById('ocr-team-b');
+    if (!pickedTeamEl || !teamAEl || !teamBEl) return;
+
+    const teamA = (teamAEl.value || '').trim();
+    const teamB = (teamBEl.value || '').trim();
+    const prev = pickedTeamEl.value;
+
+    pickedTeamEl.innerHTML = '';
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = 'Select winner';
+    pickedTeamEl.appendChild(placeholder);
+
+    [teamA, teamB].filter(Boolean).forEach(function (team) {
+      const option = document.createElement('option');
+      option.value = team;
+      option.textContent = team;
+      pickedTeamEl.appendChild(option);
+    });
+
+    if ([teamA, teamB].includes(prev)) {
+      pickedTeamEl.value = prev;
+    }
+  }
+
   function ensureAllPropsLoaded(onSuccess, onFail) {
     if (allPropsLoaded && Array.isArray(allPropsData)) {
       onSuccess(allPropsData);
@@ -566,24 +594,24 @@
       var overOdds  = p.over_odds  > 0 ? '+' + p.over_odds  : p.over_odds;
       var underOdds = p.under_odds > 0 ? '+' + p.under_odds : p.under_odds;
       html += '<tr>'
-        + '<td>' + p.player + '</td>'
-        + '<td class="text-secondary">' + marketLabel + '</td>'
-        + '<td>' + p.line + '</td>'
-        + '<td class="text-success">' + overOdds + '</td>'
-        + '<td class="text-danger">' + underOdds + '</td>'
+        + '<td>' + escapeHtml(p.player) + '</td>'
+        + '<td class="text-secondary">' + escapeHtml(marketLabel) + '</td>'
+        + '<td>' + escapeHtml(p.line) + '</td>'
+        + '<td class="text-success">' + escapeHtml(overOdds) + '</td>'
+        + '<td class="text-danger">' + escapeHtml(underOdds) + '</td>'
         + '<td>'
         + '<button class="btn btn-xs btn-outline-success me-1 prop-browse-btn"'
-        + ' data-player="' + p.player + '" data-market="' + p.market + '"'
-        + ' data-line="' + p.line + '" data-odds="' + p.over_odds + '"'
+        + ' data-player="' + escapeHtml(p.player) + '" data-market="' + escapeHtml(p.market) + '"'
+        + ' data-line="' + escapeHtml(p.line) + '" data-odds="' + escapeHtml(p.over_odds) + '"'
         + ' data-side="over"'
-        + ' data-team-a="' + p.team_a + '" data-team-b="' + p.team_b + '"'
-        + ' data-date="' + p.match_date + '" data-game-id="' + p.game_id + '">O</button>'
+        + ' data-team-a="' + escapeHtml(p.team_a) + '" data-team-b="' + escapeHtml(p.team_b) + '"'
+        + ' data-date="' + escapeHtml(p.match_date) + '" data-game-id="' + escapeHtml(p.game_id) + '">O</button>'
         + '<button class="btn btn-xs btn-outline-danger prop-browse-btn"'
-        + ' data-player="' + p.player + '" data-market="' + p.market + '"'
-        + ' data-line="' + p.line + '" data-odds="' + p.under_odds + '"'
+        + ' data-player="' + escapeHtml(p.player) + '" data-market="' + escapeHtml(p.market) + '"'
+        + ' data-line="' + escapeHtml(p.line) + '" data-odds="' + escapeHtml(p.under_odds) + '"'
         + ' data-side="under"'
-        + ' data-team-a="' + p.team_a + '" data-team-b="' + p.team_b + '"'
-        + ' data-date="' + p.match_date + '" data-game-id="' + p.game_id + '">U</button>'
+        + ' data-team-a="' + escapeHtml(p.team_a) + '" data-team-b="' + escapeHtml(p.team_b) + '"'
+        + ' data-date="' + escapeHtml(p.match_date) + '" data-game-id="' + escapeHtml(p.game_id) + '">U</button>'
         + '</td>'
         + '</tr>';
     });
@@ -821,6 +849,7 @@
         setVal('ocr-stake',     data.stake);
         setVal('ocr-team-a',    data.team_a);
         setVal('ocr-team-b',    data.team_b);
+        setVal('ocr-game-id',   data.game_id);
 
         const ocrBetType = document.getElementById('ocr-bet-type');
         if (ocrBetType) ocrBetType.value = data.bet_type || 'over';
@@ -838,6 +867,7 @@
             setVal('ocr-ou-line', data.prop_line);
           }
         }
+        refreshOcrPickedWinnerOptions();
         setVal('ocr-picked-team', '');
 
         const rawPre = document.getElementById('ocr-raw-pre');
@@ -864,5 +894,11 @@
     const el = document.getElementById(id);
     if (el && val !== null && val !== undefined) el.value = val;
   }
+
+  const ocrTeamAEl = document.getElementById('ocr-team-a');
+  const ocrTeamBEl = document.getElementById('ocr-team-b');
+  if (ocrTeamAEl) ocrTeamAEl.addEventListener('input', refreshOcrPickedWinnerOptions);
+  if (ocrTeamBEl) ocrTeamBEl.addEventListener('input', refreshOcrPickedWinnerOptions);
+  refreshOcrPickedWinnerOptions();
 
 })();
