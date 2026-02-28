@@ -9,6 +9,7 @@ import os
 import sys
 import unittest
 from datetime import date, datetime, timedelta, timezone
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import requests as _requests
@@ -2388,6 +2389,203 @@ class TestPickQualityModel(BaseTestCase):
         self.assertEqual(result['recommendation'], 'no_model')
         self.assertEqual(result['red_flags'], [])
         self.assertIsNone(result['model_version'])
+
+    def test_model_name_global_and_user(self):
+        from app.services.pick_quality_model import _model_name
+
+        self.assertEqual(_model_name(None), 'pick_quality_nba')
+        self.assertEqual(_model_name(42), 'pick_quality_nba_user_42')
+
+    def test_get_feature_importance_invalid_metadata_json(self):
+        from app.services.pick_quality_model import get_feature_importance
+
+        with self.app.app_context():
+            db.session.add(ModelMetadata(
+                model_name='pick_quality_nba',
+                model_type='xgboost_classifier',
+                version='vbad',
+                file_path='/tmp/model.json',
+                training_date=datetime.now(timezone.utc),
+                training_samples=10,
+                val_accuracy=0.6,
+                is_active=True,
+                metadata_json='{bad json',
+            ))
+            db.session.commit()
+
+            feats = get_feature_importance()
+            self.assertEqual(feats, [])
+
+    def test_train_pick_quality_model_success(self):
+        from app.services import pick_quality_model
+
+        class _SliceableProba:
+            def __getitem__(self, item):
+                if isinstance(item, tuple):
+                    return [0.8, 0.2]
+                return [[0.2, 0.8], [0.8, 0.2]]
+
+        class _FakeXGBClassifier:
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+                self.feature_importances_ = [0.9, 0.1]
+
+            def fit(self, *args, **kwargs):
+                return None
+
+            def predict(self, _x):
+                return [1, 0]
+
+            def predict_proba(self, _x):
+                return _SliceableProba()
+
+            def save_model(self, _path):
+                return None
+
+        fake_xgboost = SimpleNamespace(XGBClassifier=_FakeXGBClassifier)
+        fake_np = SimpleNamespace(array=lambda x: x)
+        fake_metrics = SimpleNamespace(
+            accuracy_score=lambda y_true, y_pred: 0.5,
+            log_loss=lambda y_true, y_prob: 0.7,
+        )
+        fake_model_selection = SimpleNamespace(
+            train_test_split=lambda X, y, test_size, stratify, random_state: (
+                X[:2], X[2:], y[:2], y[2:],
+            )
+        )
+
+        features = [
+            {'projected_edge': 1.0, 'player_trend': 1},
+            {'projected_edge': 0.5, 'player_trend': 0},
+            {'projected_edge': -0.2, 'player_trend': -1},
+            {'projected_edge': 0.1, 'player_trend': 0},
+        ]
+        targets = [1, 0, 1, 0]
+
+        with self.app.app_context():
+            # Cover "deactivate previous active model" branch.
+            db.session.add(ModelMetadata(
+                model_name='pick_quality_nba',
+                model_type='xgboost_classifier',
+                version='old',
+                file_path='/tmp/old.json',
+                training_date=datetime.now(timezone.utc),
+                training_samples=10,
+                val_accuracy=0.55,
+                is_active=True,
+                metadata_json='{}',
+            ))
+            db.session.commit()
+
+            with patch.dict(sys.modules, {
+                'xgboost': fake_xgboost,
+                'numpy': fake_np,
+                'sklearn.metrics': fake_metrics,
+                'sklearn.model_selection': fake_model_selection,
+            }):
+                with patch.object(pick_quality_model, '_build_training_data', return_value=(features, targets)):
+                    with patch('app.services.pick_quality_model.persist_model_artifact', return_value='s3://bucket/model.json'):
+                        result = pick_quality_model.train_pick_quality_model()
+
+            self.assertIn('accuracy', result)
+            self.assertEqual(result['model_path'], 's3://bucket/model.json')
+            active = ModelMetadata.query.filter_by(model_name='pick_quality_nba', is_active=True).all()
+            self.assertEqual(len(active), 1)
+            self.assertEqual(active[0].file_path, 's3://bucket/model.json')
+
+    def test_predict_pick_quality_success(self):
+        from app.services import pick_quality_model
+
+        class _FakeXGBClassifier:
+            def load_model(self, _path):
+                return None
+
+            def predict_proba(self, _x):
+                return [[0.35, 0.65]]
+
+        fake_xgboost = SimpleNamespace(XGBClassifier=_FakeXGBClassifier)
+        fake_np = SimpleNamespace(array=lambda x: x)
+
+        with self.app.app_context():
+            db.session.add(ModelMetadata(
+                model_name='pick_quality_nba',
+                model_type='xgboost_classifier',
+                version='pq_v2',
+                file_path='s3://bucket/model.json',
+                training_date=datetime.now(timezone.utc),
+                training_samples=25,
+                val_accuracy=0.62,
+                is_active=True,
+                metadata_json='{"feature_names":["projected_edge","player_trend","minutes_trend","confidence_tier_num","injury_returning"]}',
+            ))
+            db.session.commit()
+
+            with patch.dict(sys.modules, {'xgboost': fake_xgboost, 'numpy': fake_np}):
+                with patch('app.services.pick_quality_model.materialize_model_artifact', return_value='/tmp/model.json'):
+                    result = pick_quality_model.predict_pick_quality({
+                        'projected_edge': 1.6,
+                        'back_to_back': True,
+                        'player_variance': 9.5,
+                        'injury_returning': True,
+                        'player_last5_trend': 'cold',
+                        'minutes_trend': 'increasing',
+                        'confidence_tier': 'moderate',
+                    })
+
+            self.assertEqual(result['recommendation'], 'take_it')
+            self.assertEqual(result['model_version'], 'pq_v2')
+            self.assertIn('back-to-back game', result['red_flags'])
+            self.assertIn('cold streak', result['red_flags'])
+
+    def test_predict_pick_quality_invalid_metadata_and_model_error(self):
+        from app.services import pick_quality_model
+
+        class _FailingXGBClassifier:
+            def load_model(self, _path):
+                return None
+
+            def predict_proba(self, _x):
+                raise RuntimeError('boom')
+
+        fake_xgboost = SimpleNamespace(XGBClassifier=_FailingXGBClassifier)
+        fake_np = SimpleNamespace(array=lambda x: x)
+
+        with self.app.app_context():
+            db.session.add(ModelMetadata(
+                model_name='pick_quality_nba',
+                model_type='xgboost_classifier',
+                version='bad_meta',
+                file_path='/tmp/model.json',
+                training_date=datetime.now(timezone.utc),
+                training_samples=10,
+                val_accuracy=0.5,
+                is_active=True,
+                metadata_json='{bad',
+            ))
+            db.session.commit()
+
+            with patch('app.services.pick_quality_model.materialize_model_artifact', return_value='/tmp/model.json'):
+                bad_meta_result = pick_quality_model.predict_pick_quality({'projected_edge': 1.0})
+            self.assertEqual(bad_meta_result['recommendation'], 'no_model')
+
+            ModelMetadata.query.update({'is_active': False})
+            db.session.add(ModelMetadata(
+                model_name='pick_quality_nba',
+                model_type='xgboost_classifier',
+                version='predict_fail',
+                file_path='/tmp/model.json',
+                training_date=datetime.now(timezone.utc),
+                training_samples=10,
+                val_accuracy=0.5,
+                is_active=True,
+                metadata_json='{"feature_names":["projected_edge"]}',
+            ))
+            db.session.commit()
+
+            with patch.dict(sys.modules, {'xgboost': fake_xgboost, 'numpy': fake_np}):
+                with patch('app.services.pick_quality_model.materialize_model_artifact', return_value='/tmp/model.json'):
+                    err_result = pick_quality_model.predict_pick_quality({'projected_edge': 1.0})
+            self.assertEqual(err_result['recommendation'], 'no_model')
 
 
 # ═══════════════════════════════════════════════════════════════════════════
