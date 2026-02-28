@@ -3,10 +3,13 @@ import io
 import json
 import logging
 import re
+import time
+from difflib import SequenceMatcher
 from datetime import datetime, date as date_type, timezone, timedelta
 
 from flask import Blueprint, render_template, redirect, url_for, flash, request, jsonify, Response
 from flask_login import login_required, current_user
+import requests
 
 from app import db
 from app.enums import BetSource, BetType, Outcome
@@ -18,6 +21,8 @@ from app.services.nba_service import (
     fetch_player_props_for_event,
     resolve_pending_bets,
     get_player_props,
+    fetch_espn_boxscore,
+    ESPN_SUMMARY_URL,
 )
 from app.services.projection_engine import ProjectionEngine
 from app.services.value_detector import ValueDetector, quarter_kelly
@@ -26,11 +31,17 @@ from app.services.stats_service import find_player_id, get_cached_logs, get_play
 logger = logging.getLogger(__name__)
 
 bet = Blueprint('bet', __name__)
+_PROP_PROGRESS_CACHE: dict[tuple, dict] = {}
+_PROP_PROGRESS_TTL_SECONDS = 30
 
 
 def _escape_like(value: str) -> str:
     """Escape LIKE special characters so user input is treated as a literal string."""
     return value.replace('\\', '\\\\').replace('%', r'\%').replace('_', r'\_')
+
+
+def _normalize_name(value: str) -> str:
+    return re.sub(r'[^a-z0-9]+', ' ', (value or '').lower()).strip()
 
 
 def _filtered_bets_query(user_id: int, args) -> "db.Query":
@@ -381,6 +392,100 @@ def nba_props(espn_id):
         db.session.commit()
 
     return jsonify(props)
+
+
+@bet.route('/nba/prop-progress/<espn_id>')
+@login_required
+def nba_prop_progress(espn_id):
+    player_name = (request.args.get('player') or '').strip()
+    prop_type = (request.args.get('prop_type') or '').strip()
+    if not player_name or not prop_type:
+        return jsonify({'ok': False, 'error': 'player and prop_type are required'}), 400
+
+    cache_key = (espn_id, _normalize_name(player_name), prop_type)
+    cached = _PROP_PROGRESS_CACHE.get(cache_key)
+    now_monotonic = time.monotonic()
+    if cached and cached.get('expires_at', 0) > now_monotonic:
+        return jsonify(cached['payload'])
+
+    boxscore = fetch_espn_boxscore(espn_id)
+    if not boxscore:
+        payload = {'ok': False, 'error': 'No boxscore data available yet'}
+        _PROP_PROGRESS_CACHE[cache_key] = {
+            'expires_at': now_monotonic + _PROP_PROGRESS_TTL_SECONDS,
+            'payload': payload,
+        }
+        return jsonify(payload), 404
+
+    target = _normalize_name(player_name)
+    best_name = None
+    best_stats = None
+    best_score = 0.0
+    for candidate_name, stats in boxscore.items():
+        candidate_norm = _normalize_name(candidate_name)
+        if not candidate_norm:
+            continue
+        score = SequenceMatcher(None, target, candidate_norm).ratio()
+        if target == candidate_norm:
+            score = 1.0
+        elif target in candidate_norm or candidate_norm in target:
+            score = max(score, 0.92)
+        if score > best_score:
+            best_score = score
+            best_name = candidate_name
+            best_stats = stats
+
+    if best_name is None or best_score < 0.72:
+        payload = {'ok': False, 'error': f'Player not found in boxscore for {player_name}'}
+        _PROP_PROGRESS_CACHE[cache_key] = {
+            'expires_at': now_monotonic + _PROP_PROGRESS_TTL_SECONDS,
+            'payload': payload,
+        }
+        return jsonify(payload), 404
+
+    stat_val = None if not best_stats else best_stats.get(prop_type)
+    if stat_val is None:
+        payload = {
+            'ok': False,
+            'error': f'Stat {prop_type} unavailable for {best_name}',
+            'player': best_name,
+        }
+        _PROP_PROGRESS_CACHE[cache_key] = {
+            'expires_at': now_monotonic + _PROP_PROGRESS_TTL_SECONDS,
+            'payload': payload,
+        }
+        return jsonify(payload), 404
+
+    status_text = 'Status unavailable'
+    try:
+        resp = requests.get(ESPN_SUMMARY_URL, params={'event': espn_id}, timeout=8)
+        resp.raise_for_status()
+        summary_data = resp.json()
+        status_type = (
+            summary_data.get('header', {})
+            .get('competitions', [{}])[0]
+            .get('status', {})
+            .get('type', {})
+        )
+        detail = status_type.get('detail') or status_type.get('description') or ''
+        status_name = status_type.get('name') or 'UNKNOWN'
+        status_text = f'{status_name}: {detail}'.strip(': ').strip()
+    except Exception:
+        pass
+
+    payload = {
+        'ok': True,
+        'player': best_name,
+        'prop_type': prop_type,
+        'stat': stat_val,
+        'status': status_text,
+        'match_score': round(best_score, 3),
+    }
+    _PROP_PROGRESS_CACHE[cache_key] = {
+        'expires_at': now_monotonic + _PROP_PROGRESS_TTL_SECONDS,
+        'payload': payload,
+    }
+    return jsonify(payload)
 
 
 @bet.route('/nba/place-bets', methods=['POST'])

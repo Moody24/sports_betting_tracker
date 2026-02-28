@@ -186,6 +186,19 @@
                   <i class="bi bi-journal-text me-1"></i>{{ b.notes[:80] }}{% if b.notes|length > 80 %}…{% endif %}
                 </div>
               {% endif %}
+              {% if b.outcome == 'pending' and b.is_player_prop and b.external_game_id %}
+                <div class="small mt-2">
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-outline-info py-0 px-2 check-prop-progress-btn"
+                    data-url="{{ url_for('bet.nba_prop_progress', espn_id=b.external_game_id, player=b.player_name, prop_type=b.prop_type) }}"
+                    data-target="prop-progress-{{ b.id }}"
+                  >
+                    Check progress
+                  </button>
+                  <span id="prop-progress-{{ b.id }}" class="ms-2 text-secondary"></span>
+                </div>
+              {% endif %}
             </td>
             <td>{{ b.match_date.strftime('%b %d, %Y') }}</td>
             <td>
@@ -230,4 +243,34 @@
     </table>
   </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  document.querySelectorAll('.check-prop-progress-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      const targetId = btn.dataset.target;
+      const target = document.getElementById(targetId);
+      if (target) target.textContent = 'Checking...';
+      btn.disabled = true;
+
+      fetch(btn.dataset.url)
+        .then(r => r.json())
+        .then(data => {
+          if (!target) return;
+          if (!data.ok) {
+            target.textContent = data.error || 'Unavailable';
+            return;
+          }
+          target.textContent = 'Live: ' + data.stat + ' (' + data.status + ')';
+        })
+        .catch(() => {
+          if (target) target.textContent = 'Progress check failed';
+        })
+        .finally(() => {
+          btn.disabled = false;
+        });
+    });
+  });
+</script>
 {% endblock %}

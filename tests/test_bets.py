@@ -294,6 +294,58 @@ class TestBetRoutes(BaseTestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.content_type, "application/json")
 
+    def test_nba_prop_progress_requires_query_params(self):
+        self.register_and_login()
+        resp = self.client.get("/nba/prop-progress/game123")
+        self.assertEqual(resp.status_code, 400)
+        data = json.loads(resp.data)
+        self.assertFalse(data["ok"])
+
+    @patch("app.routes.bet.requests.get")
+    @patch("app.routes.bet.fetch_espn_boxscore")
+    def test_nba_prop_progress_success(self, mock_boxscore, mock_get):
+        self.register_and_login()
+        mock_boxscore.return_value = {
+            "LeBron James": {"player_points": 22.0, "player_assists": 7.0},
+        }
+        mock_resp = mock_get.return_value
+        mock_resp.raise_for_status.return_value = None
+        mock_resp.json.return_value = {
+            "header": {
+                "competitions": [{
+                    "status": {"type": {"name": "STATUS_IN_PROGRESS", "detail": "Q3 05:12"}}
+                }]
+            }
+        }
+        resp = self.client.get(
+            "/nba/prop-progress/game123?player=LeBron%20James&prop_type=player_points"
+        )
+        self.assertEqual(resp.status_code, 200)
+        data = json.loads(resp.data)
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["player"], "LeBron James")
+        self.assertEqual(data["stat"], 22.0)
+        self.assertIn("STATUS_IN_PROGRESS", data["status"])
+
+    def test_bets_list_shows_prop_progress_button_for_pending_props(self):
+        user_id = self.register_and_login()
+        with self.app.app_context():
+            db.session.add(
+                make_bet(
+                    user_id,
+                    outcome="pending",
+                    bet_type="over",
+                    player_name="LeBron James",
+                    prop_type="player_points",
+                    prop_line=25.5,
+                    external_game_id="game123",
+                )
+            )
+            db.session.commit()
+        resp = self.client.get("/bets")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn(b"Check progress", resp.data)
+
     # JSON place-bets endpoint
     def test_place_bets_no_body(self):
         self.register_and_login()
