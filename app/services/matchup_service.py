@@ -27,6 +27,35 @@ LEAGUE_AVG = {
     'pace': 100.0,
 }
 
+POSITION_POINT_BASELINES = {
+    'pg': 27.0,
+    'sg': 25.0,
+    'sf': 23.0,
+    'pf': 21.0,
+    'c': 18.0,
+}
+
+POSITION_POINT_SHARE = {
+    'pg': 0.237,
+    'sg': 0.219,
+    'sf': 0.202,
+    'pf': 0.184,
+    'c': 0.158,
+}
+
+
+def _estimate_positional_points(opp_pts_pg: float) -> dict:
+    base = float(opp_pts_pg or 0.0)
+    if base <= 0:
+        base = LEAGUE_AVG['pts']
+    return {
+        'opp_pts_allowed_pg': round(base * POSITION_POINT_SHARE['pg'], 1),
+        'opp_pts_allowed_sg': round(base * POSITION_POINT_SHARE['sg'], 1),
+        'opp_pts_allowed_sf': round(base * POSITION_POINT_SHARE['sf'], 1),
+        'opp_pts_allowed_pf': round(base * POSITION_POINT_SHARE['pf'], 1),
+        'opp_pts_allowed_c': round(base * POSITION_POINT_SHARE['c'], 1),
+    }
+
 
 def _build_baseline_team_stats() -> list:
     """Fallback baseline when live NBA defensive endpoint is unavailable."""
@@ -51,6 +80,11 @@ def _build_baseline_team_stats() -> list:
             'opp_tov_pg': LEAGUE_AVG['tov'],
             'pace': LEAGUE_AVG['pace'],
             'def_rating': 114.0,
+            'opp_pts_allowed_pg': round(LEAGUE_AVG['pts'] * POSITION_POINT_SHARE['pg'], 1),
+            'opp_pts_allowed_sg': round(LEAGUE_AVG['pts'] * POSITION_POINT_SHARE['sg'], 1),
+            'opp_pts_allowed_sf': round(LEAGUE_AVG['pts'] * POSITION_POINT_SHARE['sf'], 1),
+            'opp_pts_allowed_pf': round(LEAGUE_AVG['pts'] * POSITION_POINT_SHARE['pf'], 1),
+            'opp_pts_allowed_c': round(LEAGUE_AVG['pts'] * POSITION_POINT_SHARE['c'], 1),
         })
     return baseline
 
@@ -91,6 +125,8 @@ def fetch_team_defense_stats() -> list:
         if def_rating_val <= 0:
             def_rating_val = 114.0
 
+        positional_defaults = _estimate_positional_points(float(row.get('OPP_PTS', 0) or 0))
+
         results.append({
             'team_id': str(row.get('TEAM_ID', '')),
             'team_name': str(row.get('TEAM_NAME', '')),
@@ -104,6 +140,11 @@ def fetch_team_defense_stats() -> list:
             'opp_tov_pg': float(row.get('OPP_TOV', 0) or 0),
             'pace': pace_val,
             'def_rating': def_rating_val,
+            'opp_pts_allowed_pg': float(row.get('OPP_PTS_ALLOWED_PG', 0) or 0) or positional_defaults['opp_pts_allowed_pg'],
+            'opp_pts_allowed_sg': float(row.get('OPP_PTS_ALLOWED_SG', 0) or 0) or positional_defaults['opp_pts_allowed_sg'],
+            'opp_pts_allowed_sf': float(row.get('OPP_PTS_ALLOWED_SF', 0) or 0) or positional_defaults['opp_pts_allowed_sf'],
+            'opp_pts_allowed_pf': float(row.get('OPP_PTS_ALLOWED_PF', 0) or 0) or positional_defaults['opp_pts_allowed_pf'],
+            'opp_pts_allowed_c': float(row.get('OPP_PTS_ALLOWED_C', 0) or 0) or positional_defaults['opp_pts_allowed_c'],
         })
 
     return results
@@ -151,6 +192,11 @@ def refresh_all_team_defense() -> int:
                 opp_tov_pg=ts.get('opp_tov_pg', 0),
                 pace=ts.get('pace', 0),
                 def_rating=ts.get('def_rating', 0),
+                opp_pts_allowed_pg=ts.get('opp_pts_allowed_pg', 0),
+                opp_pts_allowed_sg=ts.get('opp_pts_allowed_sg', 0),
+                opp_pts_allowed_sf=ts.get('opp_pts_allowed_sf', 0),
+                opp_pts_allowed_pf=ts.get('opp_pts_allowed_pf', 0),
+                opp_pts_allowed_c=ts.get('opp_pts_allowed_c', 0),
             )
             db.session.add(snap)
         count += 1
@@ -193,7 +239,37 @@ def get_team_defense(team_name: str, date: date_type = None) -> dict:
         'opp_tov_pg': snap.opp_tov_pg or 0,
         'pace': snap.pace or 0,
         'def_rating': snap.def_rating or 0,
+        'opp_pts_allowed_pg': snap.opp_pts_allowed_pg or 0,
+        'opp_pts_allowed_sg': snap.opp_pts_allowed_sg or 0,
+        'opp_pts_allowed_sf': snap.opp_pts_allowed_sf or 0,
+        'opp_pts_allowed_pf': snap.opp_pts_allowed_pf or 0,
+        'opp_pts_allowed_c': snap.opp_pts_allowed_c or 0,
     }
+
+
+def get_position_matchup_adjustment(opponent_name: str, position: str) -> float:
+    """Return a points adjustment factor based on opponent vs player position."""
+    position_key = (position or '').strip().lower()
+    field_map = {
+        'pg': 'opp_pts_allowed_pg',
+        'sg': 'opp_pts_allowed_sg',
+        'sf': 'opp_pts_allowed_sf',
+        'pf': 'opp_pts_allowed_pf',
+        'c': 'opp_pts_allowed_c',
+    }
+    field = field_map.get(position_key)
+    if not field:
+        return 1.0
+
+    defense = get_team_defense(opponent_name)
+    if not defense:
+        return 1.0
+
+    allowed = float(defense.get(field, 0) or 0)
+    league_baseline = float(POSITION_POINT_BASELINES.get(position_key, 0) or 0)
+    if allowed <= 0 or league_baseline <= 0:
+        return 1.0
+    return round(allowed / league_baseline, 3)
 
 
 def get_matchup_adjustment(opponent_name: str, stat_type: str) -> float:

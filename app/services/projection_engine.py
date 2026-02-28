@@ -17,8 +17,13 @@ from app.services.stats_service import (
     find_player_id,
     name_resolver,
 )
-from app.services.matchup_service import get_matchup_adjustment, get_pace_factor
+from app.services.matchup_service import (
+    get_matchup_adjustment,
+    get_pace_factor,
+    get_position_matchup_adjustment,
+)
 from app.services.context_service import get_game_context
+from app.services.feature_engine import infer_player_position
 
 logger = logging.getLogger(__name__)
 
@@ -129,8 +134,14 @@ class ProjectionEngine:
 
         # Matchup adjustment
         matchup_mult = get_matchup_adjustment(opponent_name, prop_type) if opponent_name else 1.0
+        player_position = infer_player_position(summary)
+        position_matchup_mult = (
+            get_position_matchup_adjustment(opponent_name, player_position)
+            if opponent_name and prop_type == 'player_points'
+            else 1.0
+        )
         pace_mult = get_pace_factor(opponent_name) if opponent_name else 1.0
-        matchup_adjusted = season_avg * matchup_mult * pace_mult
+        matchup_adjusted = season_avg * matchup_mult * position_matchup_mult * pace_mult
 
         # Weighted base projection
         base_projection = (
@@ -196,6 +207,11 @@ class ProjectionEngine:
             context_notes.append(f'favorable matchup vs {opponent_name}')
         elif opponent_name and matchup_mult < 0.95:
             context_notes.append(f'tough matchup vs {opponent_name}')
+        if prop_type == 'player_points' and opponent_name:
+            if position_matchup_mult > 1.05:
+                context_notes.append(f'favorable vs {player_position.upper()} defenders')
+            elif position_matchup_mult < 0.95:
+                context_notes.append(f'tough vs {player_position.upper()} defenders')
 
         if opponent_name and pace_mult > 1.03:
             context_notes.append('pace boost')
@@ -237,6 +253,8 @@ class ProjectionEngine:
                 'season_avg': round(season_avg, 1),
                 'matchup_adj': round(matchup_adjusted, 1),
                 'matchup_mult': round(matchup_mult, 3),
+                'position_matchup_mult': round(position_matchup_mult, 3),
+                'player_position': player_position,
                 'pace_mult': round(pace_mult, 3),
                 'modifier': round(modifier, 3),
                 'base_projection': round(base_projection, 1),

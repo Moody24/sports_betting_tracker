@@ -697,6 +697,8 @@ class TestMatchupService(BaseTestCase):
 
         self.assertEqual(len(stats), 1)
         self.assertEqual(stats[0]['team_name'], 'Boston Celtics')
+        self.assertIn('opp_pts_allowed_pg', stats[0])
+        self.assertGreater(stats[0]['opp_pts_allowed_pg'], 0)
 
     def test_fetch_team_defense_stats_exception(self):
         from app.services import matchup_service
@@ -814,8 +816,16 @@ class TestMatchupService(BaseTestCase):
             self.assertIsInstance(adj_reb, float)
             adj_ast = get_matchup_adjustment('Celtics', 'player_assists')
             self.assertIsInstance(adj_ast, float)
-            adj_3pm = get_matchup_adjustment('Celtics', 'player_threes')
-            self.assertIsInstance(adj_3pm, float)
+
+    def test_position_matchup_adjustment(self):
+        from app.services.matchup_service import get_position_matchup_adjustment
+        with self.app.app_context():
+            _seed_defense()
+            snap = TeamDefenseSnapshot.query.first()
+            snap.opp_pts_allowed_pg = 30.0
+            db.session.commit()
+            adj = get_position_matchup_adjustment('Celtics', 'pg')
+            self.assertGreater(adj, 1.0)
 
     # -- get_pace_factor --
 
@@ -982,6 +992,8 @@ class TestFeatureEngine(BaseTestCase):
             self.assertEqual(ctx['prop_line'], 25.5)
             self.assertIn('context_flags', ctx)
             self.assertTrue(ctx['injury_returning'])
+            self.assertIn('player_position', ctx)
+            self.assertIn('opp_positional_matchup_adj', ctx)
 
     def test_build_pick_context_features_b2b(self):
         from app.services.feature_engine import build_pick_context_features

@@ -8,7 +8,12 @@ import logging
 from datetime import date as date_type
 
 from app.services.stats_service import get_cached_logs, get_player_stats_summary
-from app.services.matchup_service import get_team_defense, get_matchup_adjustment, get_pace_factor
+from app.services.matchup_service import (
+    get_team_defense,
+    get_matchup_adjustment,
+    get_pace_factor,
+    get_position_matchup_adjustment,
+)
 from app.services.context_service import check_back_to_back, get_days_rest, get_player_injury_status
 
 logger = logging.getLogger(__name__)
@@ -109,6 +114,7 @@ def build_pick_context_features(
     season_avg = summary['season'].get(stat_key, 0)
     std_dev = summary['std_dev'].get(stat_key, 0)
     games = summary['games_played']
+    player_position = infer_player_position(summary)
     z_score = _compute_streak_zscore(logs, stat_key)
 
     # Determine trend
@@ -140,6 +146,7 @@ def build_pick_context_features(
     defense = get_team_defense(opponent_name) if opponent_name else {}
     def_rating = defense.get('def_rating', 0)
     pace = defense.get('pace', 0)
+    position_pts_allowed = defense.get(f"opp_pts_allowed_{player_position}", 0)
 
     # Injury returning
     injury = get_player_injury_status(player_name)
@@ -152,10 +159,20 @@ def build_pick_context_features(
     # Context flags
     flags = []
     matchup_adj = get_matchup_adjustment(opponent_name, prop_type) if opponent_name else 1.0
+    position_matchup_adj = (
+        get_position_matchup_adjustment(opponent_name, player_position)
+        if opponent_name and prop_type == 'player_points'
+        else 1.0
+    )
+    combined_matchup_adj = matchup_adj * position_matchup_adj
     if matchup_adj > 1.05:
         flags.append('favorable_matchup')
     elif matchup_adj < 0.95:
         flags.append('tough_matchup')
+    if position_matchup_adj > 1.05:
+        flags.append('favorable_positional_matchup')
+    elif position_matchup_adj < 0.95:
+        flags.append('tough_positional_matchup')
     if trend == 'hot':
         flags.append('hot_streak')
     if trend == 'cold':
@@ -177,12 +194,16 @@ def build_pick_context_features(
         'player_last5_trend': trend,
         'player_variance': round(std_dev, 2),
         'player_games_this_season': games,
+        'player_position': player_position,
         'player_hit_rate_vs_line': round(hit_rate, 3),
 
         # Matchup context
         'opp_defense_rating': round(def_rating, 1),
         'opp_pace': round(pace, 1),
+        'opp_pts_allowed_vs_position': round(position_pts_allowed, 1) if position_pts_allowed else 0,
         'opp_matchup_adj': round(matchup_adj, 3),
+        'opp_positional_matchup_adj': round(position_matchup_adj, 3),
+        'opp_combined_matchup_adj': round(combined_matchup_adj, 3),
 
         # Situational context
         'back_to_back': b2b,
@@ -261,3 +282,23 @@ def _compute_hit_rate(logs: list, stat_key: str, line: float) -> float:
 
     hits = sum(1 for l in logs if (getattr(l, stat_key, 0) or 0) > line)
     return hits / len(logs)
+
+
+def infer_player_position(summary: dict) -> str:
+    """Infer a rough position bucket from recent/season stat profile."""
+    season = summary.get('season', {}) or {}
+    ast = float(season.get('ast', 0) or 0)
+    reb = float(season.get('reb', 0) or 0)
+    fg3m = float(season.get('fg3m', 0) or 0)
+
+    if reb >= 9.0:
+        return 'c'
+    if reb >= 7.0 and ast < 4.5:
+        return 'pf'
+    if ast >= 7.0:
+        return 'pg'
+    if ast >= 4.5:
+        return 'sg'
+    if fg3m >= 2.0:
+        return 'sf'
+    return 'sf'
