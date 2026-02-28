@@ -137,11 +137,13 @@ def refresh_player_stats():
         )
 
         if os.getenv('ENABLE_NBA_API_PLAYER_REFRESH', 'false').lower() != 'true':
+            _capture_todays_snapshots(prefetch_props=True)
             return
 
         games = get_todays_games()
         count = update_player_logs_for_games(games)
         logger.info("Supplemental NBA API slate refresh for %d players", count)
+        _capture_todays_snapshots(prefetch_props=True)
 
 
 def refresh_defense_data():
@@ -177,6 +179,7 @@ def run_projections():
         from app.services.projection_engine import ProjectionEngine
         from app.services.value_detector import ValueDetector
 
+        _capture_todays_snapshots(prefetch_props=True)
         engine = ProjectionEngine()
         detector = ValueDetector(engine)
         plays = detector.score_all_todays_props()
@@ -185,6 +188,70 @@ def run_projections():
             "Projections complete: %d total props, %d strong value plays",
             len(plays), len(strong),
         )
+
+
+def _capture_todays_snapshots(prefetch_props: bool = True):
+    """Upsert today's game snapshots and optionally lock props while event ids exist."""
+    from app import db
+    from app.models import GameSnapshot
+    from app.services.nba_service import (
+        APP_TIMEZONE as NBA_APP_TIMEZONE,
+        get_todays_games,
+        fetch_player_props_for_event,
+    )
+
+    today = datetime.now(NBA_APP_TIMEZONE).date()
+    games = get_todays_games()
+    if not games:
+        logger.info("Snapshot capture skipped: no games from scoreboard.")
+        return
+
+    captured_props = 0
+    for game in games:
+        snap = GameSnapshot.query.filter_by(
+            espn_id=game['espn_id'], game_date=today
+        ).first()
+        if snap is None:
+            snap = GameSnapshot(
+                espn_id=game['espn_id'],
+                game_date=today,
+                home_team=game['home']['name'],
+                away_team=game['away']['name'],
+                home_logo=game['home'].get('logo', ''),
+                away_logo=game['away'].get('logo', ''),
+                home_score=game['home']['score'],
+                away_score=game['away']['score'],
+                status=game['status'],
+                over_under_line=game.get('over_under_line'),
+                moneyline_home=game.get('moneyline_home'),
+                moneyline_away=game.get('moneyline_away'),
+                is_final=(game['status'] == 'STATUS_FINAL'),
+            )
+            db.session.add(snap)
+        else:
+            snap.home_score = game['home']['score']
+            snap.away_score = game['away']['score']
+            snap.status = game['status']
+            if game['status'] == 'STATUS_FINAL':
+                snap.is_final = True
+            if not snap.home_logo:
+                snap.home_logo = game['home'].get('logo', '')
+            if not snap.away_logo:
+                snap.away_logo = game['away'].get('logo', '')
+
+        if prefetch_props and snap.props_json is None:
+            event_id = (game.get('odds_event_id') or '').strip()
+            if event_id:
+                props = fetch_player_props_for_event(event_id)
+                if props:
+                    snap.props_json = json.dumps(props)
+                    captured_props += 1
+
+    db.session.commit()
+    logger.info(
+        "Snapshot capture complete: %d games, %d props snapshots locked.",
+        len(games), captured_props,
+    )
 
 
 def _build_auto_pick_context(bet_obj, score: dict) -> dict:
