@@ -2343,6 +2343,16 @@ class TestCLI(BaseTestCase):
         self.assertIn('Generating daily auto picks', result.output)
         mock_fn.assert_called_once()
 
+    def test_data_quality_report(self):
+        runner = self._runner()
+        result = runner.invoke(args=['data_quality_report'])
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn('=== Data Quality Report ===', result.output)
+        self.assertIn('=== PlayerGameLog ===', result.output)
+        self.assertIn('=== Context Tables ===', result.output)
+        self.assertIn('=== Scheduler/Jobs ===', result.output)
+        self.assertIn('=== Verdict ===', result.output)
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # health/readiness endpoint tests
