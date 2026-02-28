@@ -102,7 +102,15 @@
         {# Picked team — shown only for moneyline #}
         <div class="col-md-4 d-none" id="single-picked-group">
           <label class="form-label">Picked Winner</label>
-          {{ form.picked_team(class='form-control', id='single-picked-team', placeholder='Team you bet on') }}
+          <select name="picked_team" id="single-picked-team" class="form-select">
+            <option value="">Select winner</option>
+            {% if form.team_a.data %}
+              <option value="{{ form.team_a.data }}" {% if form.picked_team.data == form.team_a.data %}selected{% endif %}>{{ form.team_a.data }}</option>
+            {% endif %}
+            {% if form.team_b.data %}
+              <option value="{{ form.team_b.data }}" {% if form.picked_team.data == form.team_b.data %}selected{% endif %}>{{ form.team_b.data }}</option>
+            {% endif %}
+          </select>
         </div>
 
         <div class="col-md-4">

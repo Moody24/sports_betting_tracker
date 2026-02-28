@@ -21,8 +21,15 @@ class TestBetRoutes(BaseTestCase):
         resp = self.client.get("/bets/new", follow_redirects=True)
         self.assertIn(b"Login", resp.data)
 
-    def test_create_moneyline_bet(self):
+    def test_new_bet_form_has_moneyline_winner_dropdown(self):
         self.register_and_login()
+        resp = self.client.get("/bets/new")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn(b'id="single-picked-team"', resp.data)
+        self.assertIn(b'Select winner', resp.data)
+
+    def test_create_moneyline_bet(self):
+        user_id = self.register_and_login()
         resp = self.client.post(
             "/bets/new",
             data={
@@ -31,12 +38,16 @@ class TestBetRoutes(BaseTestCase):
                 "match_date": "2025-03-01",
                 "bet_amount": "50",
                 "bet_type": "moneyline",
+                "picked_team": "Lakers",
                 "outcome": "pending",
             },
             follow_redirects=True,
         )
         self.assertEqual(resp.status_code, 200)
         self.assertIn(b"Bet recorded successfully", resp.data)
+        with self.app.app_context():
+            bet = Bet.query.filter_by(user_id=user_id).order_by(Bet.id.desc()).first()
+            self.assertEqual(bet.picked_team, "Lakers")
 
     def test_create_over_under_bet(self):
         self.register_and_login()

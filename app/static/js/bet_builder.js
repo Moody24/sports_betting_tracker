@@ -47,7 +47,7 @@
     })
     .catch(() => {});
 
-  function autofillFromPicker(inputEl, teamAEl, teamBEl, dateEl, gameIdEl, ouLineEl) {
+  function autofillFromPicker(inputEl, teamAEl, teamBEl, dateEl, gameIdEl, ouLineEl, onMatch) {
     if (!inputEl) return;
     inputEl.addEventListener('input', function () {
       const match = upcomingGames.find(g => g.label === this.value);
@@ -59,16 +59,48 @@
       if (ouLineEl && match.over_under_line) {
         ouLineEl.value = match.over_under_line;
       }
+      if (typeof onMatch === 'function') onMatch();
     });
+  }
+
+  const singleTeamA = document.getElementById('single-team-a');
+  const singleTeamB = document.getElementById('single-team-b');
+  const singlePickedTeam = document.getElementById('single-picked-team');
+
+  function refreshSinglePickedWinnerOptions() {
+    if (!singlePickedTeam) return;
+    const teamA = singleTeamA ? singleTeamA.value.trim() : '';
+    const teamB = singleTeamB ? singleTeamB.value.trim() : '';
+    const prev = singlePickedTeam.value;
+
+    singlePickedTeam.innerHTML = '';
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = 'Select winner';
+    singlePickedTeam.appendChild(placeholder);
+
+    [teamA, teamB].filter(Boolean).forEach(function (team) {
+      const opt = document.createElement('option');
+      opt.value = team;
+      opt.textContent = team;
+      singlePickedTeam.appendChild(opt);
+    });
+
+    if ([teamA, teamB].includes(prev)) {
+      singlePickedTeam.value = prev;
+    } else {
+      singlePickedTeam.value = '';
+    }
   }
 
   autofillFromPicker(
     document.getElementById('single-game-picker'),
-    document.getElementById('single-team-a'),
-    document.getElementById('single-team-b'),
+    singleTeamA,
+    singleTeamB,
     document.getElementById('single-match-date'),
     document.getElementById('single-game-id'),
-    document.getElementById('single-ou-line')
+    document.getElementById('single-ou-line'),
+    refreshSinglePickedWinnerOptions
   );
 
   autofillFromPicker(
@@ -95,6 +127,9 @@
     singleBetType.addEventListener('change', updateSingleFields);
     updateSingleFields();
   }
+  if (singleTeamA) singleTeamA.addEventListener('input', refreshSinglePickedWinnerOptions);
+  if (singleTeamB) singleTeamB.addEventListener('input', refreshSinglePickedWinnerOptions);
+  refreshSinglePickedWinnerOptions();
 
   // ── Bonus multiplier previews ─────────────────────────────────────
   function calcProfit(stake, odds) {
