@@ -28,6 +28,13 @@ class TestBetRoutes(BaseTestCase):
         self.assertIn(b'id="single-picked-team"', resp.data)
         self.assertIn(b'Select winner', resp.data)
 
+    def test_new_bet_form_has_parlay_grouped_props_browser_controls(self):
+        self.register_and_login()
+        resp = self.client.get("/bets/new")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn(b'id="load-parlay-props-btn"', resp.data)
+        self.assertIn(b'id="parlay-props-browser"', resp.data)
+
     def test_new_bet_form_shows_units_inputs_when_unit_size_set(self):
         user_id = self.register_and_login()
         with self.app.app_context():

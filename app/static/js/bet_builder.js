@@ -443,46 +443,107 @@
   const loadPropsBtn    = document.getElementById('load-all-props-btn');
   const propsBrowser    = document.getElementById('props-browser');
   const propsSearchInp  = document.getElementById('props-search-input');
+  const loadParlayPropsBtn = document.getElementById('load-parlay-props-btn');
+  const parlayPropsBrowser = document.getElementById('parlay-props-browser');
+  const parlayPropsSearchInp = document.getElementById('parlay-props-search-input');
+
+  function escapeHtml(s) {
+    return String(s || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function ensureAllPropsLoaded(onSuccess, onFail) {
+    if (allPropsLoaded && Array.isArray(allPropsData)) {
+      onSuccess(allPropsData);
+      return;
+    }
+    fetch(ALL_PROPS_URL)
+      .then(r => r.json())
+      .then(data => {
+        allPropsData = data;
+        allPropsLoaded = true;
+        onSuccess(data);
+      })
+      .catch(function () {
+        if (typeof onFail === 'function') onFail();
+      });
+  }
+
+  function filterProps(query) {
+    if (!allPropsData) return [];
+    const q = (query || '').toLowerCase().trim();
+    if (!q) return allPropsData;
+    return allPropsData.filter(p =>
+      (p.player || '').toLowerCase().includes(q) ||
+      (p.team_a || '').toLowerCase().includes(q) ||
+      (p.team_b || '').toLowerCase().includes(q) ||
+      (p.player_team || '').toLowerCase().includes(q) ||
+      (MARKET_LABELS[p.market] || p.market || '').toLowerCase().includes(q)
+    );
+  }
 
   if (loadPropsBtn) {
     loadPropsBtn.addEventListener('click', function () {
       if (allPropsLoaded) {
         propsBrowser.style.display = '';
         propsSearchInp.style.display = '';
+        renderPropsBrowser(allPropsData);
         return;
       }
 
       loadPropsBtn.disabled = true;
       loadPropsBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Loading...';
-
-      fetch(ALL_PROPS_URL)
-        .then(r => r.json())
-        .then(data => {
-          allPropsData = data;
-          allPropsLoaded = true;
-          renderPropsBrowser(data);
-          propsBrowser.style.display = '';
-          propsSearchInp.style.display = '';
-          loadPropsBtn.innerHTML = '<i class="bi bi-check-lg me-1"></i>Loaded ' + data.length + ' props';
-        })
-        .catch(() => {
-          loadPropsBtn.disabled = false;
-          loadPropsBtn.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>Failed — retry';
-          showFeedback('Could not load props. Check that ODDS_API_KEY is set.', 'warning');
-        });
+      ensureAllPropsLoaded(function (data) {
+        renderPropsBrowser(data);
+        propsBrowser.style.display = '';
+        propsSearchInp.style.display = '';
+        loadPropsBtn.innerHTML = '<i class="bi bi-check-lg me-1"></i>Loaded ' + data.length + ' props';
+      }, function () {
+        loadPropsBtn.disabled = false;
+        loadPropsBtn.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>Failed — retry';
+        showFeedback('Could not load props. Check that ODDS_API_KEY is set.', 'warning');
+      });
     });
   }
 
   if (propsSearchInp) {
     propsSearchInp.addEventListener('input', function () {
       if (!allPropsData) return;
-      var q = this.value.toLowerCase().trim();
-      var filtered = q
-        ? allPropsData.filter(p =>
-            p.player.toLowerCase().includes(q) ||
-            (MARKET_LABELS[p.market] || p.market).toLowerCase().includes(q))
-        : allPropsData;
-      renderPropsBrowser(filtered);
+      renderPropsBrowser(filterProps(this.value));
+    });
+  }
+
+  if (loadParlayPropsBtn) {
+    loadParlayPropsBtn.addEventListener('click', function () {
+      if (allPropsLoaded) {
+        parlayPropsBrowser.style.display = '';
+        parlayPropsSearchInp.style.display = '';
+        renderParlayPropsBrowser(allPropsData);
+        return;
+      }
+      loadParlayPropsBtn.disabled = true;
+      loadParlayPropsBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Loading...';
+      ensureAllPropsLoaded(function (data) {
+        renderParlayPropsBrowser(data);
+        parlayPropsBrowser.style.display = '';
+        parlayPropsSearchInp.style.display = '';
+        loadParlayPropsBtn.innerHTML = '<i class="bi bi-check-lg me-1"></i>Loaded ' + data.length + ' props';
+      }, function () {
+        loadParlayPropsBtn.disabled = false;
+        loadParlayPropsBtn.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>Failed — retry';
+        showFeedback('Could not load props. Check that ODDS_API_KEY is set.', 'warning');
+      });
+    });
+  }
+
+  if (parlayPropsSearchInp) {
+    parlayPropsSearchInp.addEventListener('input', function () {
+      if (!allPropsData) return;
+      renderParlayPropsBrowser(filterProps(this.value));
     });
   }
 
@@ -559,6 +620,122 @@
         // Visual feedback
         btn.classList.add('active');
         setTimeout(() => btn.classList.remove('active'), 800);
+      });
+    });
+  }
+
+  function addParlayPropLegFromButton(btn) {
+    if (!legsContainer) return;
+    legsContainer.insertAdjacentHTML('beforeend', makeLegHTML(legCount++));
+    const newLeg = legsContainer.lastElementChild;
+    bindLegEvents(newLeg);
+
+    const teamAEl = newLeg.querySelector('.leg-team-a');
+    const teamBEl = newLeg.querySelector('.leg-team-b');
+    const dateEl = newLeg.querySelector('.leg-date');
+    const gameIdEl = newLeg.querySelector('.leg-game-id');
+    const betTypeEl = newLeg.querySelector('.leg-bet-type');
+    const playerEl = newLeg.querySelector('.leg-player');
+    const propTypeEl = newLeg.querySelector('.leg-prop-type');
+    const propLineEl = newLeg.querySelector('.leg-prop-line');
+
+    if (teamAEl) teamAEl.value = btn.dataset.teamA || '';
+    if (teamBEl) teamBEl.value = btn.dataset.teamB || '';
+    if (dateEl) dateEl.value = btn.dataset.date || '';
+    if (gameIdEl) gameIdEl.value = btn.dataset.gameId || '';
+    if (playerEl) playerEl.value = btn.dataset.player || '';
+    if (propTypeEl) propTypeEl.value = btn.dataset.market || 'player_points';
+    if (propLineEl) propLineEl.value = btn.dataset.line || '';
+
+    if (betTypeEl) {
+      const side = btn.dataset.side || 'over';
+      for (let i = 0; i < betTypeEl.options.length; i += 1) {
+        const opt = betTypeEl.options[i];
+        if (opt.value === side && opt.dataset.prop === '1') {
+          betTypeEl.selectedIndex = i;
+          break;
+        }
+      }
+      betTypeEl.dispatchEvent(new Event('change'));
+    }
+
+    newLeg.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (playerEl) playerEl.focus();
+  }
+
+  function renderParlayPropsBrowser(props) {
+    if (!parlayPropsBrowser) return;
+    if (!props || !props.length) {
+      parlayPropsBrowser.innerHTML = '<p class="small text-secondary text-center py-2">No props match your search.</p>';
+      return;
+    }
+
+    const matchups = {};
+    props.forEach(function (p) {
+      const matchupKey = (p.team_a || '') + ' @ ' + (p.team_b || '');
+      if (!matchups[matchupKey]) matchups[matchupKey] = {};
+      const teamName = p.player_team || 'Unknown Team';
+      if (!matchups[matchupKey][teamName]) matchups[matchupKey][teamName] = {};
+      if (!matchups[matchupKey][teamName][p.player]) matchups[matchupKey][teamName][p.player] = [];
+      matchups[matchupKey][teamName][p.player].push(p);
+    });
+
+    let html = '<div class="small">';
+    Object.keys(matchups).sort().forEach(function (matchup) {
+      const teams = matchups[matchup];
+      let matchupCount = 0;
+      Object.keys(teams).forEach(function (t) {
+        Object.keys(teams[t]).forEach(function (player) {
+          matchupCount += teams[t][player].length;
+        });
+      });
+
+      html += '<details class="mb-2">';
+      html += '<summary class="fw-semibold">' + escapeHtml(matchup) + ' <span class="text-secondary">(' + matchupCount + ' props)</span></summary>';
+
+      Object.keys(teams).sort().forEach(function (teamName) {
+        html += '<details class="ms-3 mt-2">';
+        html += '<summary class="text-info">' + escapeHtml(teamName) + '</summary>';
+
+        Object.keys(teams[teamName]).sort().forEach(function (playerName) {
+          html += '<details class="ms-3 mt-1">';
+          html += '<summary>' + escapeHtml(playerName) + '</summary>';
+          html += '<div class="ms-3 mt-1">';
+
+          teams[teamName][playerName].forEach(function (p) {
+            const marketLabel = MARKET_LABELS[p.market] || p.market.replace('player_', '');
+            const overOdds = p.over_odds > 0 ? '+' + p.over_odds : p.over_odds;
+            const underOdds = p.under_odds > 0 ? '+' + p.under_odds : p.under_odds;
+            html += '<div class="d-flex align-items-center justify-content-between gap-2 border-top border-secondary-subtle py-1">';
+            html += '<div><span class="text-secondary">' + escapeHtml(marketLabel) + '</span> · <span>' + escapeHtml(p.line) + '</span></div>';
+            html += '<div>';
+            html += '<button type="button" class="btn btn-xs btn-outline-success me-1 parlay-prop-add-btn"'
+              + ' data-side="over" data-player="' + escapeHtml(p.player) + '" data-market="' + escapeHtml(p.market) + '"'
+              + ' data-line="' + escapeHtml(p.line) + '" data-team-a="' + escapeHtml(p.team_a) + '"'
+              + ' data-team-b="' + escapeHtml(p.team_b) + '" data-date="' + escapeHtml(p.match_date) + '"'
+              + ' data-game-id="' + escapeHtml(p.game_id) + '">Add Over (' + escapeHtml(overOdds) + ')</button>';
+            html += '<button type="button" class="btn btn-xs btn-outline-danger parlay-prop-add-btn"'
+              + ' data-side="under" data-player="' + escapeHtml(p.player) + '" data-market="' + escapeHtml(p.market) + '"'
+              + ' data-line="' + escapeHtml(p.line) + '" data-team-a="' + escapeHtml(p.team_a) + '"'
+              + ' data-team-b="' + escapeHtml(p.team_b) + '" data-date="' + escapeHtml(p.match_date) + '"'
+              + ' data-game-id="' + escapeHtml(p.game_id) + '">Add Under (' + escapeHtml(underOdds) + ')</button>';
+            html += '</div></div>';
+          });
+
+          html += '</div></details>';
+        });
+
+        html += '</details>';
+      });
+
+      html += '</details>';
+    });
+    html += '</div>';
+    parlayPropsBrowser.innerHTML = html;
+
+    parlayPropsBrowser.querySelectorAll('.parlay-prop-add-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        addParlayPropLegFromButton(btn);
       });
     });
   }

@@ -641,15 +641,43 @@ def nba_all_props():
     """Return a flat list of all player props across today's games for the prop browser."""
     games = get_todays_games()
     all_props = []
+    player_team_cache: dict[str, str] = {}
+
+    def _infer_player_team_abbr(player_name: str) -> str:
+        cached = player_team_cache.get(player_name)
+        if cached is not None:
+            return cached
+        team_abbr = ""
+        try:
+            player_id = find_player_id(player_name)
+            if player_id:
+                logs = get_cached_logs(player_id, last_n=1)
+                if logs:
+                    team_abbr = (logs[0].team_abbr or "").upper()
+        except Exception:
+            team_abbr = ""
+        player_team_cache[player_name] = team_abbr
+        return team_abbr
+
     for game in games:
         event_id = game.get('odds_event_id', '')
         if not event_id:
             continue
         props = fetch_player_props_for_event(event_id)
+        team_a_abbr = (game.get('away', {}).get('abbr') or '').upper()
+        team_b_abbr = (game.get('home', {}).get('abbr') or '').upper()
         for market_key, market_props in props.items():
             for prop in market_props:
+                player_name = prop['player']
+                player_team_abbr = _infer_player_team_abbr(player_name)
+                if player_team_abbr and player_team_abbr == team_a_abbr:
+                    player_team_name = game['away']['name']
+                elif player_team_abbr and player_team_abbr == team_b_abbr:
+                    player_team_name = game['home']['name']
+                else:
+                    player_team_name = ''
                 all_props.append({
-                    'player': prop['player'],
+                    'player': player_name,
                     'market': market_key,
                     'line': prop['line'],
                     'over_odds': prop['over_odds'],
@@ -657,6 +685,10 @@ def nba_all_props():
                     'game_id': game['espn_id'],
                     'team_a': game['away']['name'],
                     'team_b': game['home']['name'],
+                    'team_a_abbr': team_a_abbr,
+                    'team_b_abbr': team_b_abbr,
+                    'player_team_abbr': player_team_abbr,
+                    'player_team': player_team_name,
                     'match_date': game['start_time'][:10] if game.get('start_time') else '',
                 })
     return jsonify(all_props)

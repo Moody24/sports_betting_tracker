@@ -319,6 +319,17 @@
 ══════════════════════════════════════════════════════════════════ #}
 <div data-bb-panel="parlay" class="d-none">
   <div class="mx-auto" style="max-width:760px">
+    <div class="card-soft p-3 mb-3">
+      <div class="d-flex align-items-center justify-content-between mb-2">
+        <span class="small fw-semibold text-secondary"><i class="bi bi-search me-1"></i>Browse Props For Parlay</span>
+        <button type="button" id="load-parlay-props-btn" class="btn btn-sm btn-outline-info">
+          <i class="bi bi-cloud-download me-1"></i>Load Today's Props
+        </button>
+      </div>
+      <input type="text" id="parlay-props-search-input" class="form-control form-control-sm mb-2"
+             placeholder="Search matchup, player, or market..." style="display:none" autocomplete="off">
+      <div id="parlay-props-browser" style="display:none; max-height:320px; overflow-y:auto"></div>
+    </div>
 
     <div id="parlay-legs" class="mb-3"></div>
 
