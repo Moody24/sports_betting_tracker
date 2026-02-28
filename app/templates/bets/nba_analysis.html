@@ -89,6 +89,8 @@
         <tr>
           <th>Player</th>
           <th>Prop</th>
+          <th class="text-center">Pos</th>
+          <th class="text-center">Pos Edge</th>
           <th class="text-center">Line</th>
           <th class="text-center">Projection</th>
           <th class="text-center">Edge</th>
@@ -120,6 +122,25 @@
               'player_threes': '3-Pointers',
             }.get(play.prop_type, play.prop_type|replace('player_', '')|replace('_', ' ')|title) %}
             <span class="badge text-bg-dark">{{ prop_label }}</span>
+          </td>
+          <td class="text-center">
+            {% set pos = (play.breakdown.player_position if play.breakdown else '') %}
+            {% if pos %}
+              <span class="badge text-bg-secondary">{{ pos|upper }}</span>
+            {% else %}
+              <span class="text-secondary small">—</span>
+            {% endif %}
+          </td>
+          <td class="text-center tabular-num">
+            {% set pos_mult = (play.breakdown.position_matchup_mult if play.breakdown else none) %}
+            {% if pos_mult is not none %}
+              {% set pos_edge_pct = (pos_mult - 1) * 100 %}
+              <span class="{% if pos_edge_pct > 0 %}text-success{% elif pos_edge_pct < 0 %}text-danger{% else %}text-secondary{% endif %}">
+                {{ '%+.1f'|format(pos_edge_pct) }}%
+              </span>
+            {% else %}
+              <span class="text-secondary small">—</span>
+            {% endif %}
           </td>
           <td class="text-center tabular-num">{{ play.line }}</td>
           <td class="text-center tabular-num fw-semibold
@@ -285,6 +306,17 @@ document.addEventListener('DOMContentLoaded', function() {
             html += `<div class="col-4"><div class="card-soft p-2 text-center"><div class="small text-secondary">Last 5</div><div class="fw-semibold">${esc(data.breakdown.last_5_avg || '—')}</div></div></div>`;
             html += `<div class="col-4"><div class="card-soft p-2 text-center"><div class="small text-secondary">Last 10</div><div class="fw-semibold">${esc(data.breakdown.last_10_avg || '—')}</div></div></div>`;
             html += `<div class="col-4"><div class="card-soft p-2 text-center"><div class="small text-secondary">Season</div><div class="fw-semibold">${esc(data.breakdown.season_avg || '—')}</div></div></div>`;
+            html += '</div>';
+
+            const pos = (data.breakdown.player_position || '').toUpperCase();
+            const posMultRaw = Number(data.breakdown.position_matchup_mult);
+            const hasPosMult = Number.isFinite(posMultRaw) && posMultRaw > 0;
+            const posEdge = hasPosMult ? ((posMultRaw - 1) * 100).toFixed(1) : '—';
+            const posEdgeColor = !hasPosMult ? 'text-secondary' : (posMultRaw > 1 ? 'text-success' : (posMultRaw < 1 ? 'text-danger' : 'text-secondary'));
+            html += '<div class="row g-2 mb-3">';
+            html += `<div class="col-4"><div class="card-soft p-2 text-center"><div class="small text-secondary">Position</div><div class="fw-semibold">${esc(pos || '—')}</div></div></div>`;
+            html += `<div class="col-4"><div class="card-soft p-2 text-center"><div class="small text-secondary">Pos Matchup</div><div class="fw-semibold">${hasPosMult ? esc(posMultRaw.toFixed(3)) : '—'}</div></div></div>`;
+            html += `<div class="col-4"><div class="card-soft p-2 text-center"><div class="small text-secondary">Pos Edge</div><div class="fw-semibold ${posEdgeColor}">${hasPosMult ? esc((posMultRaw > 1 ? '+' : '') + posEdge + '%') : '—'}</div></div></div>`;
             html += '</div>';
           }
 
