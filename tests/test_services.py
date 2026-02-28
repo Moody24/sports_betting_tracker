@@ -718,6 +718,38 @@ class TestMatchupService(BaseTestCase):
 
         self.assertEqual(result, [])
 
+    def test_fetch_team_defense_stats_fills_missing_pace_and_def_rating(self):
+        from app.services import matchup_service
+
+        df = _FakeDataFrame([{
+            'TEAM_ID': 13, 'TEAM_NAME': 'No Pace Team',
+            'TEAM_ABBREVIATION': 'NPT',
+            'OPP_PTS': 111, 'OPP_REB': 44, 'OPP_AST': 25,
+            'OPP_FG3M': 12, 'OPP_STL': 7, 'OPP_BLK': 5,
+            'OPP_TOV': 14, 'PACE': 0, 'DEF_RATING': 0,
+        }])
+        mock_endpoint = MagicMock()
+        mock_endpoint.get_data_frames.return_value = [df]
+
+        mock_ldts = MagicMock()
+        mock_ldts.LeagueDashTeamStats.return_value = mock_endpoint
+
+        mock_endpoints = MagicMock()
+        mock_endpoints.leaguedashteamstats = mock_ldts
+
+        with patch.dict(sys.modules, {
+            'nba_api': MagicMock(),
+            'nba_api.stats': MagicMock(),
+            'nba_api.stats.endpoints': mock_endpoints,
+            'nba_api.stats.endpoints.leaguedashteamstats': mock_ldts,
+        }):
+            with patch('app.services.matchup_service.time.sleep'):
+                stats = matchup_service.fetch_team_defense_stats()
+
+        self.assertEqual(len(stats), 1)
+        self.assertEqual(stats[0]['pace'], 100.0)
+        self.assertEqual(stats[0]['def_rating'], 114.0)
+
     # -- refresh_all_team_defense --
 
     @patch('app.services.matchup_service.fetch_team_defense_stats')

@@ -83,6 +83,14 @@ def fetch_team_defense_stats() -> list:
 
     results = []
     for _, row in df.iterrows():
+        pace_val = float(row.get('PACE', 0) or row.get('OPP_PACE', 0) or 0)
+        if pace_val <= 0:
+            pace_val = LEAGUE_AVG['pace']
+
+        def_rating_val = float(row.get('DEF_RATING', 0) or 0)
+        if def_rating_val <= 0:
+            def_rating_val = 114.0
+
         results.append({
             'team_id': str(row.get('TEAM_ID', '')),
             'team_name': str(row.get('TEAM_NAME', '')),
@@ -94,8 +102,8 @@ def fetch_team_defense_stats() -> list:
             'opp_stl_pg': float(row.get('OPP_STL', 0) or 0),
             'opp_blk_pg': float(row.get('OPP_BLK', 0) or 0),
             'opp_tov_pg': float(row.get('OPP_TOV', 0) or 0),
-            'pace': float(row.get('PACE', 0) or row.get('OPP_PACE', 0) or 0),
-            'def_rating': float(row.get('DEF_RATING', 0) or 0),
+            'pace': pace_val,
+            'def_rating': def_rating_val,
         })
 
     return results
