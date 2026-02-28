@@ -7,7 +7,7 @@ import time
 from difflib import SequenceMatcher
 from datetime import datetime, date as date_type, timezone, timedelta
 
-from flask import Blueprint, render_template, redirect, url_for, flash, request, jsonify, Response
+from flask import Blueprint, render_template, redirect, url_for, flash, request, jsonify, Response, current_app
 from flask_login import login_required, current_user
 import requests
 
@@ -564,15 +564,19 @@ def nba_prop_progress(espn_id):
     if not player_name or not prop_type:
         return jsonify({'ok': False, 'error': 'player and prop_type are required'}), 400
 
+    use_cache = not current_app.testing
     cache_key = (espn_id, _normalize_name(player_name), prop_type)
     now_monotonic = time.monotonic()
-    _prune_prop_progress_cache(now_monotonic)
+    if use_cache:
+        _prune_prop_progress_cache(now_monotonic)
 
-    cached = _PROP_PROGRESS_CACHE.get(cache_key)
-    if cached and cached.get('expires_at', 0) > now_monotonic:
-        return jsonify(cached['payload'])
+        cached = _PROP_PROGRESS_CACHE.get(cache_key)
+        if cached and cached.get('expires_at', 0) > now_monotonic:
+            return jsonify(cached['payload'])
 
     def _cache_payload(payload: dict) -> None:
+        if not use_cache:
+            return
         _PROP_PROGRESS_CACHE[cache_key] = {
             'expires_at': now_monotonic + _PROP_PROGRESS_TTL_SECONDS,
             'created_at': now_monotonic,
