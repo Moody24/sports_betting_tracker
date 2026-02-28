@@ -22,6 +22,7 @@ from app.services.nba_service import (
     resolve_pending_bets,
     get_player_props,
     ESPN_SUMMARY_URL,
+    APP_TIMEZONE as NBA_APP_TIMEZONE,
 )
 from app.services.projection_engine import ProjectionEngine
 from app.services.value_detector import ValueDetector, quarter_kelly
@@ -417,7 +418,7 @@ def new_bet():
 def nba_today():
     games = get_todays_games()
     upcoming_games = fetch_upcoming_games()
-    today = date_type.today()
+    today = datetime.now(NBA_APP_TIMEZONE).date()
 
     # ── Upsert snapshots for today's games ──────────────────────────
     for game in games:
@@ -556,7 +557,7 @@ def nba_props(espn_id):
     """Return player props for a game as JSON and persist them to snapshot."""
     # Prefer stored snapshot props first so historical games still resolve even
     # when live Odds event mappings disappear after tip/final.
-    today = date_type.today()
+    today = datetime.now(NBA_APP_TIMEZONE).date()
     snap = GameSnapshot.query.filter_by(espn_id=espn_id, game_date=today).first()
     if snap and snap.props_json:
         try:
