@@ -18,6 +18,7 @@ from app.models import (
     InjuryReport,
     JobLog,
     ModelMetadata,
+    PickContext,
     PlayerGameLog,
     TeamDefenseSnapshot,
     Bet,
@@ -1941,6 +1942,108 @@ class TestScheduler(BaseTestCase):
                     scheduler_module.init_scheduler(self.app)
         self.assertTrue(fake.started)
         self.assertEqual(len(fake.jobs), 7)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# pick_quality_model tests
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestPickQualityModel(BaseTestCase):
+    """Tests for pick_quality_model helpers and data shaping."""
+
+    def test_build_training_data_insufficient(self):
+        from app.services import pick_quality_model
+
+        with self.app.app_context():
+            user = make_user('pq1', 'pq1@example.com')
+            db.session.add(user)
+            db.session.commit()
+
+            bet = make_bet(user.id, outcome='win')
+            db.session.add(bet)
+            db.session.commit()
+
+            db.session.add(PickContext(
+                bet_id=bet.id,
+                context_json='{"projected_edge": 1.2}',
+            ))
+            db.session.commit()
+
+            features, targets = pick_quality_model._build_training_data()
+            self.assertIsNone(features)
+            self.assertIsNone(targets)
+
+    def test_build_training_data_encodes_and_normalizes(self):
+        from app.services import pick_quality_model
+
+        with self.app.app_context():
+            user = make_user('pq2', 'pq2@example.com')
+            db.session.add(user)
+            db.session.commit()
+
+            bet1 = make_bet(user.id, outcome='win')
+            bet2 = make_bet(user.id, outcome='lose')
+            db.session.add_all([bet1, bet2])
+            db.session.commit()
+
+            db.session.add(PickContext(
+                bet_id=bet1.id,
+                context_json=(
+                    '{"projected_edge": "2.5", "back_to_back": true, '
+                    '"player_last5_trend": "hot", "minutes_trend": "increasing", '
+                    '"confidence_tier": "strong", "injury_returning": false}'
+                ),
+            ))
+            db.session.add(PickContext(
+                bet_id=bet2.id,
+                context_json=(
+                    '{"projected_edge": "bad", "back_to_back": false, '
+                    '"player_last5_trend": "cold", "minutes_trend": "decreasing", '
+                    '"confidence_tier": "slight", "injury_returning": true}'
+                ),
+            ))
+            db.session.commit()
+
+            with patch.object(pick_quality_model, 'MIN_RESOLVED_PICKS', 2):
+                features, targets = pick_quality_model._build_training_data()
+
+            self.assertEqual(len(features), 2)
+            self.assertEqual(targets, [1, 0])
+            self.assertEqual(features[0]['player_trend'], 1)
+            self.assertEqual(features[0]['minutes_trend'], 1)
+            self.assertEqual(features[0]['confidence_tier_num'], 3)
+            self.assertEqual(features[0]['injury_returning'], 0)
+            self.assertEqual(features[1]['projected_edge'], 0.0)
+            self.assertEqual(features[1]['player_trend'], -1)
+
+    def test_get_feature_importance_returns_active_model_features(self):
+        from app.services.pick_quality_model import get_feature_importance
+
+        with self.app.app_context():
+            db.session.add(ModelMetadata(
+                model_name='pick_quality_nba',
+                model_type='xgboost_classifier',
+                version='v1',
+                file_path='/tmp/model.json',
+                training_date=datetime.now(timezone.utc),
+                training_samples=10,
+                val_accuracy=0.6,
+                is_active=True,
+                metadata_json='{"top_features": [["projected_edge", 0.8]]}',
+            ))
+            db.session.commit()
+
+            feats = get_feature_importance()
+            self.assertEqual(feats, [['projected_edge', 0.8]])
+
+    def test_no_model_result_shape(self):
+        from app.services.pick_quality_model import _no_model_result
+
+        result = _no_model_result()
+        self.assertEqual(result['win_probability'], 0.5)
+        self.assertEqual(result['recommendation'], 'no_model')
+        self.assertEqual(result['red_flags'], [])
+        self.assertIsNone(result['model_version'])
 
 
 # ═══════════════════════════════════════════════════════════════════════════
