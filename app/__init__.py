@@ -1,5 +1,6 @@
 import logging
 import os
+import sys
 from datetime import datetime, timezone
 
 from flask import Flask, render_template
@@ -25,6 +26,24 @@ limiter = Limiter(
     default_limits=[],
     storage_uri=os.getenv('RATELIMIT_STORAGE_URI', 'memory://'),
 )
+
+
+def _is_non_server_invocation(argv: list[str] | None = None) -> bool:
+    """Detect one-off CLI/script invocations where scheduler should not start."""
+    args = [str(a).lower() for a in (argv if argv is not None else (sys.argv or []))]
+    argv0 = os.path.basename(args[0]) if args else ''
+    joined = ' '.join(args)
+    return (
+        argv0 in {'flask', 'pytest', 'py.test', 'alembic', '-'}
+        or 'unittest' in joined
+        or 'pytest' in joined
+        or (
+            argv0 in {'python', 'python3'}
+            and len(args) > 1
+            and args[1] in {'-c', '-m', '-'}
+        )
+    )
+
 
 def create_app(testing=False):
     app = Flask(__name__)
@@ -130,7 +149,12 @@ def create_app(testing=False):
             _upgrade()
 
     # ── Start background scheduler (production only) ─────────────
-    running_cli = os.getenv('FLASK_RUN_FROM_CLI', 'false').lower() == 'true' or os.getenv('RUNNING_CLI', '0') == '1'
+    non_server_invocation = _is_non_server_invocation()
+    running_cli = (
+        os.getenv('FLASK_RUN_FROM_CLI', 'false').lower() == 'true'
+        or os.getenv('RUNNING_CLI', '0') == '1'
+        or non_server_invocation
+    )
     if (
         not app.config.get('TESTING')
         and not running_cli
