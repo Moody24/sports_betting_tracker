@@ -3,6 +3,7 @@
 import json
 import os
 import unittest
+from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 from app.services import nba_service
@@ -489,6 +490,30 @@ class TestNBAService(unittest.TestCase):
         self.assertAlmostEqual(result["Steph Curry"]["player_threes"], 7.0)
 
     @patch("app.services.nba_service.requests.get")
+    def test_fetch_espn_boxscore_blocks_steals_parsing(self, mock_get):
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status.return_value = None
+        mock_resp.json.return_value = {
+            "boxscore": {
+                "players": [{
+                    "statistics": [{
+                        "names": ["PTS", "BLK", "STL"],
+                        "athletes": [{
+                            "athlete": {"displayName": "Anthony Davis"},
+                            "stats": ["22", "3", "2"],
+                        }],
+                    }],
+                }],
+            }
+        }
+        mock_get.return_value = mock_resp
+
+        result = nba_service.fetch_espn_boxscore("espn123")
+        self.assertIn("Anthony Davis", result)
+        self.assertAlmostEqual(result["Anthony Davis"]["player_blocks"], 3.0)
+        self.assertAlmostEqual(result["Anthony Davis"]["player_steals"], 2.0)
+
+    @patch("app.services.nba_service.requests.get")
     def test_fetch_espn_boxscore_skips_empty_name(self, mock_get):
         mock_resp = MagicMock()
         mock_resp.raise_for_status.return_value = None
@@ -687,3 +712,37 @@ class TestNBAService(unittest.TestCase):
             results = nba_service.resolve_pending_bets([bet])
         self.assertEqual(results, [])
         mock_boxscore.assert_not_called()
+
+    @patch("app.services.nba_service.fetch_espn_boxscore")
+    @patch("app.services.nba_service.fetch_espn_scoreboard")
+    def test_resolve_pending_bets_uses_match_date_window(self, mock_scoreboard, mock_boxscore):
+        class FakeBet:
+            external_game_id = "espn123"
+            bet_type = "over"
+            over_under_line = 210.5
+            is_player_prop = False
+            picked_team = None
+            player_name = None
+            prop_type = None
+            prop_line = None
+            match_date = datetime(2025, 3, 1)
+
+        target_game = {"espn_id": "espn123", "status": "STATUS_FINAL", "total_score": 218}
+
+        def _scoreboard_side_effect(*args, **kwargs):
+            date_str = kwargs.get("date_str")
+            if date_str == "20250301":
+                return [target_game]
+            return []
+
+        mock_scoreboard.side_effect = _scoreboard_side_effect
+        mock_boxscore.return_value = {}
+
+        results = nba_service.resolve_pending_bets([FakeBet()])
+
+        self.assertEqual(len(results), 1)
+        _, outcome, total = results[0]
+        self.assertEqual(outcome, "win")
+        self.assertEqual(total, 218.0)
+        called_dates = {c.kwargs.get("date_str") for c in mock_scoreboard.call_args_list}
+        self.assertIn("20250301", called_dates)

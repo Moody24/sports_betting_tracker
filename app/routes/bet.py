@@ -144,6 +144,8 @@ def _extract_prop_boxscore(summary_data: dict) -> dict:
         "player_rebounds": "REB",
         "player_assists": "AST",
         "player_threes": "3PT",
+        "player_blocks": "BLK",
+        "player_steals": "STL",
     }
     player_stats: dict = {}
     for team_block in summary_data.get("boxscore", {}).get("players", []):

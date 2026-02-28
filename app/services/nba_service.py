@@ -36,6 +36,8 @@ _PROP_STAT_COLUMN = {
     "player_rebounds": "REB",
     "player_assists": "AST",
     "player_threes": "3PT",  # "M-A" format; we take the made count
+    "player_blocks": "BLK",
+    "player_steals": "STL",
 }
 
 
@@ -491,10 +493,30 @@ def resolve_pending_bets(pending_bets: list) -> list[tuple]:
     Handles over/under, moneyline, and player prop bets.
     Returns list of (bet, new_outcome, actual_value) for bets that can be graded.
     """
-    games = fetch_espn_scoreboard()
+    # Collect scoreboards for relevant bet dates so older pending bets can settle.
+    # Fallback to "today" when no usable bet dates are present.
+    scoreboards: list[dict] = []
+    date_keys: set[str] = set()
+    for bet in pending_bets:
+        match_dt = getattr(bet, "match_date", None)
+        if not match_dt:
+            continue
+        try:
+            match_date = match_dt.date() if isinstance(match_dt, datetime) else match_dt
+            for delta_days in (-1, 0, 1):
+                day = match_date + timedelta(days=delta_days)
+                date_keys.add(day.strftime("%Y%m%d"))
+        except Exception:
+            continue
+
+    if date_keys:
+        for date_key in sorted(date_keys):
+            scoreboards.extend(fetch_espn_scoreboard(date_str=date_key))
+    else:
+        scoreboards = fetch_espn_scoreboard()
 
     espn_lookup: dict = {}
-    for g in games:
+    for g in scoreboards:
         espn_lookup[g["espn_id"]] = g
 
     # Cache box scores so we only fetch each game once
