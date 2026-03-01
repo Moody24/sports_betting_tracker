@@ -1119,12 +1119,6 @@ def ocr_screenshot():
         return jsonify({'error': f'OCR failed: {exc}'}), 500
 
 
-@bet.route('/view_bets')
-@login_required
-def view_bets():
-    return redirect(url_for('bet.place_bet'))
-
-
 @bet.route('/delete_bet/<int:bet_id>', methods=['POST'])
 @login_required
 def delete_bet(bet_id):

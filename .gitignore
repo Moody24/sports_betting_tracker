@@ -21,3 +21,9 @@ instance/app.db
 # Coverage reports
 .coverage
 htmlcov/
+
+# ML model artifacts — stored on S3 in production, not tracked in git
+app/ml_models/*.json
+
+# Local Python 3.10 venv created for dev
+venv310/

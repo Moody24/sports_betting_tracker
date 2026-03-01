@@ -254,11 +254,6 @@ class TestBetRoutes(BaseTestCase):
         resp = self.client.post("/delete_bet/99999", follow_redirects=True)
         self.assertEqual(resp.status_code, 404)
 
-    def test_view_bets_redirects(self):
-        self.register_and_login()
-        resp = self.client.get("/view_bets", follow_redirects=False)
-        self.assertEqual(resp.status_code, 302)
-
     def test_new_bet_form_prepopulated_from_query_params(self):
         self.register_and_login()
         resp = self.client.get(

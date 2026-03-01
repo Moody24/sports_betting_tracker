@@ -31,7 +31,7 @@
           <a class="nav-link {% if request.endpoint == 'main.dashboard' %}active{% endif %}" href="{{ url_for('main.dashboard') }}">
             <i class="bi bi-grid"></i><span>Dashboard</span>
           </a>
-          <a class="nav-link {% if request.endpoint in ['bet.place_bet', 'bet.view_bets'] %}active{% endif %}" href="{{ url_for('bet.place_bet') }}">
+          <a class="nav-link {% if request.endpoint == 'bet.place_bet' %}active{% endif %}" href="{{ url_for('bet.place_bet') }}">
             <i class="bi bi-journal-text"></i><span>Bets</span>
           </a>
           <a class="nav-link {% if request.endpoint == 'bet.new_bet' %}active{% endif %}" href="{{ url_for('bet.new_bet') }}">
@@ -118,6 +118,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
+  <script src="{{ url_for('static', filename='js/utils.js') }}"></script>
   <script src="{{ url_for('static', filename='js/script.js') }}"></script>
   {% block scripts %}{% endblock %}
 </body>

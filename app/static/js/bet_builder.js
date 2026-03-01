@@ -452,15 +452,6 @@
   const parlayPropsBrowser = document.getElementById('parlay-props-browser');
   const parlayPropsSearchInp = document.getElementById('parlay-props-search-input');
 
-  function escapeHtml(s) {
-    return String(s || '')
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
-  }
-
   function refreshOcrPickedWinnerOptions() {
     const pickedTeamEl = document.getElementById('ocr-picked-team');
     const teamAEl = document.getElementById('ocr-team-a');

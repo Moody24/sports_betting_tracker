@@ -26,15 +26,6 @@
     player_rebounds_assists: 'REB+AST'
   };
 
-  function escapeHtml(value) {
-    return String(value ?? '')
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
-  }
-
   // ── DOM refs ───────────────────────────────────────────────────
   var slipEl          = document.getElementById('bet-slip');
   var slipLegsEl      = document.getElementById('slip-legs');
