@@ -6,8 +6,11 @@ identify mispriced props and quantify the edge.
 
 import logging
 import math
+import time as _time
+from datetime import datetime
 from itertools import combinations
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from app.models import PlayerGameLog
 from app.services.projection_engine import ProjectionEngine
@@ -15,6 +18,17 @@ from app.services.context_service import is_player_available
 from app.services.stats_service import find_player_id, get_cached_logs
 
 logger = logging.getLogger(__name__)
+
+# Module-level cache for score_all_todays_props().
+# Keyed by ET date string; expires after TTL so stale data never persists.
+# Multiple web-request threads share this cache within the same worker process.
+_SCORE_CACHE: dict = {}
+_SCORE_CACHE_TTL = 300  # 5 minutes
+
+
+def _et_date_str() -> str:
+    return datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+
 
 # Confidence tier thresholds (edge %)
 TIER_STRONG = 0.15
@@ -257,8 +271,21 @@ class ValueDetector:
         """Score all available props across today's NBA games.
 
         Returns a list of score dicts sorted by absolute edge descending.
+
+        Results are cached for _SCORE_CACHE_TTL seconds (keyed by ET date) when
+        called without an explicit games list, so repeated dashboard/analysis
+        page loads skip the expensive API + DB computation within the TTL window.
+        Pass games explicitly (e.g. in tests or the scheduler) to bypass the cache.
         """
-        if games is None:
+        use_cache = games is None
+
+        if use_cache:
+            cache_date = _et_date_str()
+            cached = _SCORE_CACHE.get(cache_date)
+            if cached and _time.monotonic() < cached["expires_at"]:
+                logger.debug("score_all_todays_props: returning cached result (%d scores)", len(cached["scores"]))
+                return list(cached["scores"])
+
             from app.services.nba_service import get_todays_games
             games = get_todays_games()
 
@@ -337,6 +364,16 @@ class ValueDetector:
 
         # Sort by absolute edge descending
         all_scores.sort(key=lambda s: abs(s.get('edge', 0)), reverse=True)
+
+        # Populate module-level cache for subsequent requests within the TTL window.
+        if use_cache:
+            cache_date = _et_date_str()
+            _SCORE_CACHE.clear()  # drop any prior-date entry
+            _SCORE_CACHE[cache_date] = {
+                "scores": all_scores,
+                "expires_at": _time.monotonic() + _SCORE_CACHE_TTL,
+            }
+            logger.debug("score_all_todays_props: cached %d scores for %s", len(all_scores), cache_date)
 
         return all_scores
 

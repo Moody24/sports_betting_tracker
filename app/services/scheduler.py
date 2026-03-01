@@ -10,6 +10,7 @@ import logging
 import os
 import random
 from datetime import datetime, timezone, timedelta, time as dt_time
+from zoneinfo import ZoneInfo
 
 try:
     from apscheduler.schedulers.background import BackgroundScheduler
@@ -305,7 +306,7 @@ def generate_daily_auto_picks():
 
     app = create_app()
     with app.app_context():
-        today = datetime.now().date()
+        today = datetime.now(ZoneInfo("America/New_York")).date()
         day_start = datetime.combine(today, dt_time.min)
         day_end = day_start + timedelta(days=1)
 
