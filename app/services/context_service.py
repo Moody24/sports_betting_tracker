@@ -8,6 +8,7 @@ import logging
 import re
 from datetime import datetime, timezone, date as date_type, timedelta
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -15,6 +16,7 @@ from app import db
 from app.models import InjuryReport
 
 logger = logging.getLogger(__name__)
+APP_TIMEZONE = ZoneInfo("America/New_York")
 
 ESPN_INJURIES_URL = (
     "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries"
@@ -140,12 +142,16 @@ def _normalize_injury_status(raw: str) -> str:
     return raw_lower or 'unknown'
 
 
+def _today_et() -> date_type:
+    return datetime.now(APP_TIMEZONE).date()
+
+
 def refresh_injuries() -> int:
     """Refresh the injury report table with latest data.
 
     Clears today's entries and replaces them.  Returns count of injuries stored.
     """
-    today = date_type.today()
+    today = _today_et()
     injuries = fetch_espn_injuries()
     if not injuries:
         cloned = _clone_latest_injuries_for_today(today)
@@ -234,7 +240,7 @@ def check_back_to_back(team_name: str) -> bool:
 
     Uses ESPN scoreboard for yesterday's date.
     """
-    yesterday = date_type.today() - timedelta(days=1)
+    yesterday = _today_et() - timedelta(days=1)
     date_str = yesterday.strftime('%Y%m%d')
 
     try:
@@ -267,7 +273,7 @@ def get_days_rest(team_name: str, check_days: int = 5) -> int:
     Returns 0 if played yesterday, 1 if day before, etc.
     Defaults to 2 if no recent game is found.
     """
-    today = date_type.today()
+    today = _today_et()
     team_lower = team_name.lower().strip()
 
     for days_ago in range(1, check_days + 1):

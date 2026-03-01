@@ -7,11 +7,13 @@ engine's matchup adjustment calculations.
 import logging
 import time
 from datetime import datetime, timezone, date as date_type
+from zoneinfo import ZoneInfo
 
 from app import db
 from app.models import TeamDefenseSnapshot
 
 logger = logging.getLogger(__name__)
+APP_TIMEZONE = ZoneInfo("America/New_York")
 
 _NBA_API_DELAY = 0.6
 
@@ -150,13 +152,17 @@ def fetch_team_defense_stats() -> list:
     return results
 
 
+def _today_et() -> date_type:
+    return datetime.now(APP_TIMEZONE).date()
+
+
 def refresh_all_team_defense() -> int:
     """Refresh defensive snapshots for all 30 NBA teams.
 
     Fetches from NBA API and upserts into ``TeamDefenseSnapshot``.
     Returns the number of teams updated.
     """
-    today = date_type.today()
+    today = _today_et()
     team_stats = fetch_team_defense_stats()
     if not team_stats:
         team_stats = _build_baseline_team_stats()
@@ -213,7 +219,7 @@ def get_team_defense(team_name: str, date: date_type = None) -> dict:
     Returns a dict of defensive stats or empty dict if not found.
     """
     if date is None:
-        date = date_type.today()
+        date = _today_et()
 
     snap = (
         TeamDefenseSnapshot.query

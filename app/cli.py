@@ -3,6 +3,7 @@
 import logging
 import time
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 
 import click
 from sqlalchemy import func
@@ -17,6 +18,7 @@ from app.models import (
 )
 
 logger = logging.getLogger(__name__)
+APP_TIMEZONE = ZoneInfo("America/New_York")
 
 BACKFILL_COMMIT_BATCH = 300
 MAX_FETCH_FAILURES = 3
@@ -335,6 +337,7 @@ def register_cli(app):
         """Print freshness/integrity checks for model input tables."""
         now_utc = datetime.now(timezone.utc)
         stale_cutoff_date = (now_utc - timedelta(hours=stale_hours)).date()
+        report_today_et = datetime.now(APP_TIMEZONE).date()
 
         total_logs = PlayerGameLog.query.count()
         max_game_date = db.session.query(func.max(PlayerGameLog.game_date)).scalar()
@@ -365,14 +368,13 @@ def register_cli(app):
             .count()
         )
 
-        today = now_utc.date()
         injury_total = InjuryReport.query.count()
         injury_today = InjuryReport.query.filter(
-            InjuryReport.date_reported == today
+            InjuryReport.date_reported == report_today_et
         ).count()
         defense_total = TeamDefenseSnapshot.query.count()
         defense_today = TeamDefenseSnapshot.query.filter(
-            TeamDefenseSnapshot.snapshot_date == today
+            TeamDefenseSnapshot.snapshot_date == report_today_et
         ).count()
 
         stale_running_jobs = (
@@ -411,6 +413,7 @@ def register_cli(app):
 
         click.echo('=== Data Quality Report ===')
         click.echo(f'Generated UTC: {now_utc.isoformat()}')
+        click.echo(f'Report day (ET): {report_today_et}')
         click.echo(f'Staleness cutoff (date): {stale_cutoff_date}')
 
         click.echo('\n=== PlayerGameLog ===')
