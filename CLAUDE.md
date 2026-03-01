@@ -42,3 +42,15 @@ python -m coverage report --include="app/*"   # CI requires ≥ 80%
 ## Deployment
 - **Railway** — sole deployment target (`railway.toml`, `gunicorn.conf.py`)
 - **S3** (boto3) — ML model artifact storage
+- Live URL: `https://sportsbettingtracker-production.up.railway.app`
+- Project: `shimmering-youth` · Service: `sports_betting_tracker` · Environment: `production`
+
+## Railway Logs Access
+```
+railway login --browserless   # auth if needed (non-interactive)
+railway link                  # select: shimmering-youth → production
+railway service sports_betting_tracker
+railway logs
+```
+- Auto-deploys on every push to `main` (no manual deploy step needed)
+- Health check endpoint: `/health` → `{"status": "healthy"}`
