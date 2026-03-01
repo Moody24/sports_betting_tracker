@@ -38,7 +38,14 @@ class User(UserMixin, db.Model):
 
     def net_profit_loss(self) -> float:
         """Return net P/L, accounting for American odds and bonus multiplier."""
-        bets = db.session.query(Bet).filter_by(user_id=self.id).all()
+        # Only graded bets contribute to P/L; pending bets return 0 anyway.
+        from app.enums import Outcome
+        bets = (
+            db.session.query(Bet)
+            .filter_by(user_id=self.id)
+            .filter(Bet.outcome.in_([Outcome.WIN.value, Outcome.LOSE.value]))
+            .all()
+        )
         return round(sum(b.profit_loss() for b in bets), 2)
 
     def total_wins(self) -> int:

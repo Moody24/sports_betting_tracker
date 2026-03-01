@@ -33,6 +33,19 @@ scheduler = BackgroundScheduler(timezone=APP_TIMEZONE) if BackgroundScheduler el
 _scheduler_lock_fd = None
 STALE_JOB_MINUTES = 180
 
+# App instance captured in init_scheduler and reused by all job functions so
+# they don't each spin up a fresh Flask app + connection pool on every run.
+_scheduler_app = None
+
+
+def _get_app():
+    """Return the shared scheduler app, falling back to create_app() for
+    one-off invocations (CLI, tests) where init_scheduler was never called."""
+    if _scheduler_app is not None:
+        return _scheduler_app
+    from app import create_app
+    return create_app()
+
 
 def _acquire_scheduler_lock(lock_path='/tmp/sports_betting_scheduler.lock'):
     """Ensure only one process in the container starts APScheduler."""
@@ -55,10 +68,10 @@ def _acquire_scheduler_lock(lock_path='/tmp/sports_betting_scheduler.lock'):
 
 def _log_job(job_name, func):
     """Wrapper that logs job execution to the JobLog table."""
-    from app import create_app, db
+    from app import db
     from app.models import JobLog
 
-    app = create_app()
+    app = _get_app()
     with app.app_context():
         _close_stale_running_jobs(db, JobLog)
         log_entry = JobLog(
@@ -121,9 +134,7 @@ def _close_stale_running_jobs(db, JobLog):
 
 def refresh_player_stats():
     """Refresh player logs from completed games, with optional NBA API supplement."""
-    from app import create_app
-
-    app = create_app()
+    app = _get_app()
     with app.app_context():
         from app.services.nba_service import get_todays_games
         from app.services.stats_service import refresh_completed_game_logs, update_player_logs_for_games
@@ -149,9 +160,7 @@ def refresh_player_stats():
 
 def refresh_defense_data():
     """Update team defensive profiles."""
-    from app import create_app, db
-
-    app = create_app()
+    app = _get_app()
     with app.app_context():
         from app.services.matchup_service import refresh_all_team_defense
 
@@ -161,9 +170,7 @@ def refresh_defense_data():
 
 def refresh_injury_reports():
     """Pull latest injury designations."""
-    from app import create_app, db
-
-    app = create_app()
+    app = _get_app()
     with app.app_context():
         from app.services.context_service import refresh_injuries
 
@@ -173,9 +180,7 @@ def refresh_injury_reports():
 
 def run_projections():
     """Generate projections and value scores for all available props."""
-    from app import create_app, db
-
-    app = create_app()
+    app = _get_app()
     with app.app_context():
         from app.services.projection_engine import ProjectionEngine
         from app.services.value_detector import ValueDetector
@@ -298,13 +303,13 @@ def _ensure_autopicks_user(db, User):
 
 def generate_daily_auto_picks():
     """Generate a separated daily basket of auto picks for faster model learning."""
-    from app import create_app, db
+    from app import db
     from app.enums import BetSource, Outcome
     from app.models import Bet, PickContext, User
     from app.services.projection_engine import ProjectionEngine
     from app.services.value_detector import ValueDetector
 
-    app = create_app()
+    app = _get_app()
     with app.app_context():
         today = datetime.now(ZoneInfo("America/New_York")).date()
         day_start = datetime.combine(today, dt_time.min)
@@ -447,13 +452,13 @@ def generate_daily_auto_picks():
 
 def bootstrap_pick_quality_examples(target_resolved: int = 220, max_logs: int = 10000) -> dict:
     """Backfill hidden resolved auto picks + PickContext for Model 2 bootstrap."""
-    from app import create_app, db
+    from app import db
     from app.enums import BetSource, Outcome
     from app.models import Bet, PickContext, PlayerGameLog, User
     from app.services.feature_engine import build_pick_context_features
     from app.services.stats_service import get_player_stats_summary
 
-    app = create_app()
+    app = _get_app()
     with app.app_context():
         system_user = _ensure_autopicks_user(db, User)
 
@@ -595,12 +600,12 @@ def bootstrap_pick_quality_examples(target_resolved: int = 220, max_logs: int = 
 
 def resolve_and_grade():
     """Grade all pending bets using final scores."""
-    from app import create_app, db
+    from app import db
     from app.enums import Outcome
     from app.models import Bet
     from app.services.nba_service import resolve_pending_bets
 
-    app = create_app()
+    app = _get_app()
     with app.app_context():
         pending = (
             Bet.query
@@ -617,9 +622,7 @@ def resolve_and_grade():
 
 def retrain_models():
     """Scheduled model retrain using accumulated game log data."""
-    from app import create_app, db
-
-    app = create_app()
+    app = _get_app()
     with app.app_context():
         from app.models import ModelMetadata, PlayerGameLog
         from app.services.ml_model import retrain_all_models
@@ -694,6 +697,9 @@ def retrain_models():
 
 def init_scheduler(app):
     """Register all scheduled jobs.  Called once from create_app()."""
+    global _scheduler_app
+    _scheduler_app = app  # reused by all job functions — avoids per-run create_app()
+
     if scheduler is None or CronTrigger is None:
         logger.warning("APScheduler not installed; background jobs disabled")
         return

@@ -436,8 +436,8 @@ def _fetch_upcoming_games_espn(tomorrow) -> list[dict]:
 
     games = []
     for game in espn_games:
-        # Only include scheduled/pre-game events
-        if game.get("status") not in ("STATUS_SCHEDULED", "STATUS_FINAL", ""):
+        # Only include scheduled/pre-game events; skip in-progress and completed games.
+        if game.get("status") not in ("STATUS_SCHEDULED", ""):
             continue
 
         commence = game.get("start_time", "")

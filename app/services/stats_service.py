@@ -147,13 +147,16 @@ def fetch_player_game_logs(
     frame = df if last_n is None else df.head(last_n)
 
     for _, row in frame.iterrows():
+        game_date = _parse_game_date(row.get('GAME_DATE', ''))
+        if game_date is None:
+            continue
         matchup = str(row.get('MATCHUP', ''))
         home_away = 'home' if 'vs.' in matchup else 'away'
         rows.append({
             'player_id': str(player_id),
             'player_name': str(row.get('PLAYER_NAME', '')),
             'team_abbr': str(row.get('TEAM_ABBREVIATION', '')),
-            'game_date': _parse_game_date(row.get('GAME_DATE', '')),
+            'game_date': game_date,
             'matchup': matchup,
             'minutes': _parse_minutes(row.get('MIN', 0)),
             'pts': float(row.get('PTS', 0) or 0),
@@ -176,8 +179,12 @@ def fetch_player_game_logs(
     return rows
 
 
-def _parse_game_date(date_val) -> date_type:
-    """Parse a game date from NBA API (various formats)."""
+def _parse_game_date(date_val) -> Optional[date_type]:
+    """Parse a game date from NBA API (various formats).
+
+    Returns None on parse failure so callers can skip the row rather than
+    silently stamping logs with today's date.
+    """
     if isinstance(date_val, date_type):
         return date_val
     if isinstance(date_val, datetime):
@@ -188,7 +195,8 @@ def _parse_game_date(date_val) -> date_type:
             return datetime.strptime(s, fmt).date()
         except ValueError:
             continue
-    return date_type.today()
+    logger.warning("Could not parse game date %r; skipping row", date_val)
+    return None
 
 
 def find_player_id(player_name: str) -> Optional[str]:
@@ -235,11 +243,19 @@ def cache_player_logs(
     inserted = 0
     updated = 0
 
+    # Batch-fetch all existing rows for this player in one query instead of
+    # issuing one SELECT per game log (N+1 pattern).
+    game_dates = [log['game_date'] for log in game_logs]
+    existing_rows = (
+        PlayerGameLog.query
+        .filter_by(player_id=str(player_id))
+        .filter(PlayerGameLog.game_date.in_(game_dates))
+        .all()
+    )
+    existing_map: dict = {row.game_date: row for row in existing_rows}
+
     for log in game_logs:
-        existing = PlayerGameLog.query.filter_by(
-            player_id=str(player_id),
-            game_date=log['game_date'],
-        ).first()
+        existing = existing_map.get(log['game_date'])
 
         if existing:
             for key, val in log.items():

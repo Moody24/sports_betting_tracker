@@ -174,10 +174,10 @@ class TestStatsService(BaseTestCase):
         self.assertEqual(result.month, 2)
         self.assertEqual(result.day, 20)
 
-    def test_parse_game_date_invalid_returns_today(self):
+    def test_parse_game_date_invalid_returns_none(self):
         from app.services.stats_service import _parse_game_date
         result = _parse_game_date('not-a-date')
-        self.assertEqual(result, date.today())
+        self.assertIsNone(result)
 
     # -- cache_player_logs --
 
