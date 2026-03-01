@@ -149,11 +149,11 @@
           </td>
           <td class="text-center tabular-num">
             {% if play.confidence_tier == 'strong' %}
-              <span class="badge text-bg-success">{{ '%.1f'|format(play.edge * 100) }}%</span>
+              <span class="tier-strong">{{ '%.1f'|format(play.edge * 100) }}%</span>
             {% elif play.confidence_tier == 'moderate' %}
-              <span class="badge text-bg-warning text-dark">{{ '%.1f'|format(play.edge * 100) }}%</span>
+              <span class="tier-moderate">{{ '%.1f'|format(play.edge * 100) }}%</span>
             {% else %}
-              <span class="badge text-bg-secondary">{{ '%.1f'|format(play.edge * 100) }}%</span>
+              <span class="tier-slight">{{ '%.1f'|format(play.edge * 100) }}%</span>
             {% endif %}
           </td>
           <td class="text-center">

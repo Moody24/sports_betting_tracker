@@ -36,12 +36,12 @@
 <div class="row g-3 mb-5 align-items-start">
   {% for game in games %}
   <div class="col-md-6 col-xl-4">
-    <div class="card-soft p-3 h-100 d-flex flex-column">
+    <div class="card-soft p-3 h-100 d-flex flex-column{% if game.status == 'STATUS_IN_PROGRESS' %} game-card-live{% endif %}">
 
       {# Status badge + O/U line #}
       <div class="d-flex justify-content-between align-items-center mb-2">
         {% if game.status == 'STATUS_IN_PROGRESS' %}
-          <span class="badge text-bg-success">Live &middot; Q{{ game.period }} {{ game.clock }}</span>
+          <span class="badge text-bg-success d-flex align-items-center gap-1"><span class="live-pulse"></span>Live &middot; Q{{ game.period }} {{ game.clock }}</span>
         {% else %}
           <span class="badge text-bg-info">{{ game.status_detail }}</span>
         {% endif %}
@@ -56,10 +56,10 @@
       <div class="d-flex align-items-center justify-content-between mb-2">
         <div class="text-center" style="width:40%">
           {% if game.away.logo %}
-          <img src="{{ game.away.logo }}" alt="{{ game.away.abbr }}" width="40" height="40" class="mb-1">
+          <img src="{{ game.away.logo }}" alt="{{ game.away.abbr }}" class="team-logo-lg mb-1">
           {% endif %}
-          <div class="small fw-semibold">{{ game.away.name }}</div>
-          <div class="h5 mb-0">{{ game.away.score }}</div>
+          <div class="small fw-semibold text-truncate">{{ game.away.name }}</div>
+          <div class="score-main">{{ game.away.score }}</div>
           {% if game.moneyline_away %}
             <div class="small mt-1" style="color:var(--text-muted)">
               ML <span class="{{ 'text-success' if game.moneyline_away > 0 else 'text-danger' }}">
@@ -68,13 +68,13 @@
             </div>
           {% endif %}
         </div>
-        <div class="text-secondary fw-bold">@</div>
+        <div class="text-secondary fw-bold px-1">@</div>
         <div class="text-center" style="width:40%">
           {% if game.home.logo %}
-          <img src="{{ game.home.logo }}" alt="{{ game.home.abbr }}" width="40" height="40" class="mb-1">
+          <img src="{{ game.home.logo }}" alt="{{ game.home.abbr }}" class="team-logo-lg mb-1">
           {% endif %}
-          <div class="small fw-semibold">{{ game.home.name }}</div>
-          <div class="h5 mb-0">{{ game.home.score }}</div>
+          <div class="small fw-semibold text-truncate">{{ game.home.name }}</div>
+          <div class="score-main">{{ game.home.score }}</div>
           {% if game.moneyline_home %}
             <div class="small mt-1" style="color:var(--text-muted)">
               ML <span class="{{ 'text-success' if game.moneyline_home > 0 else 'text-danger' }}">

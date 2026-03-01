@@ -8,25 +8,27 @@
 {# Shared game datalist — populated by bet_builder.js #}
 <datalist id="game-datalist"></datalist>
 
-<div class="card-soft p-3 mb-4">
-  <div class="d-flex flex-wrap align-items-center gap-2">
-    <span class="small text-secondary fw-semibold me-2">Bet Mode</span>
-    <div class="btn-group btn-group-sm flex-wrap" role="group" aria-label="Bet builder modes">
-      <button class="btn btn-outline-light" data-bb-tab="single" type="button">
-        <i class="bi bi-bar-chart me-1"></i>Game Line
-      </button>
-      <button class="btn btn-outline-light" data-bb-tab="prop" type="button">
-        <i class="bi bi-person-fill me-1"></i>Player Prop
-      </button>
-      <button class="btn btn-outline-light" data-bb-tab="parlay" type="button">
-        <i class="bi bi-list-check me-1"></i>Parlay
-      </button>
-      <button class="btn btn-outline-light" data-bb-tab="screenshot" type="button">
-        <i class="bi bi-camera me-1"></i>Screenshot
-      </button>
-    </div>
-    <span class="small text-secondary ms-auto">Switch modes in one tap without leaving this page.</span>
-  </div>
+<div class="bet-mode-grid mb-4">
+  <button class="bet-mode-card" data-bb-tab="single" type="button">
+    <div class="bet-mode-icon"><i class="bi bi-bar-chart-fill"></i></div>
+    <div class="bet-mode-title">Game Line</div>
+    <div class="bet-mode-desc">ML · Over · Under</div>
+  </button>
+  <button class="bet-mode-card" data-bb-tab="prop" type="button">
+    <div class="bet-mode-icon"><i class="bi bi-person-fill"></i></div>
+    <div class="bet-mode-title">Player Prop</div>
+    <div class="bet-mode-desc">Pts · Reb · Ast</div>
+  </button>
+  <button class="bet-mode-card" data-bb-tab="parlay" type="button">
+    <div class="bet-mode-icon"><i class="bi bi-collection-fill"></i></div>
+    <div class="bet-mode-title">Parlay</div>
+    <div class="bet-mode-desc">Multi-leg builder</div>
+  </button>
+  <button class="bet-mode-card" data-bb-tab="screenshot" type="button">
+    <div class="bet-mode-icon"><i class="bi bi-camera-fill"></i></div>
+    <div class="bet-mode-title">Screenshot</div>
+    <div class="bet-mode-desc">OCR import</div>
+  </button>
 </div>
 
 {# ══════════════════════════════════════════════════════════════════
