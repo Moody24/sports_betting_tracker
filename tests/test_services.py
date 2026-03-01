@@ -638,13 +638,13 @@ class TestContextService(BaseTestCase):
 
     @patch('app.services.context_service.requests.get')
     def test_get_days_rest_found(self, mock_get):
-        from app.services.context_service import get_days_rest
+        from app.services.context_service import get_days_rest, _today_et
 
         def side_effect(url, params=None, timeout=None):
             resp = MagicMock()
             resp.raise_for_status.return_value = None
             date_str = params.get('dates', '') if params else ''
-            two_days_ago = (date.today() - timedelta(days=2)).strftime('%Y%m%d')
+            two_days_ago = (_today_et() - timedelta(days=2)).strftime('%Y%m%d')
             if date_str == two_days_ago:
                 resp.json.return_value = {
                     'events': [{'competitions': [{'competitors': [

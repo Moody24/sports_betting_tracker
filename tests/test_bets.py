@@ -6,12 +6,17 @@ from unittest.mock import patch
 
 from app import db
 from app.models import Bet, User, PickContext, GameSnapshot
+from app.services.nba_service import APP_TIMEZONE as NBA_APP_TIMEZONE
 
 from tests.helpers import BaseTestCase, make_bet, make_user
 
 
 class TestBetRoutes(BaseTestCase):
     """Tests for the bet blueprint."""
+
+    @staticmethod
+    def _et_today():
+        return datetime.now(NBA_APP_TIMEZONE).date()
 
     def test_bets_list_requires_auth(self):
         resp = self.client.get("/bets", follow_redirects=True)
@@ -320,7 +325,7 @@ class TestBetRoutes(BaseTestCase):
         with self.app.app_context():
             db.session.add(GameSnapshot(
                 espn_id="espn123",
-                game_date=date.today(),
+                game_date=self._et_today(),
                 home_team="Miami Heat",
                 away_team="Houston Rockets",
                 home_logo="",
@@ -373,7 +378,7 @@ class TestBetRoutes(BaseTestCase):
         resp = self.client.get("/nba/today")
         self.assertEqual(resp.status_code, 200)
         with self.app.app_context():
-            snap = GameSnapshot.query.filter_by(espn_id="espnA", game_date=date.today()).first()
+            snap = GameSnapshot.query.filter_by(espn_id="espnA", game_date=self._et_today()).first()
             self.assertIsNotNone(snap)
             self.assertIsNotNone(snap.props_json)
 
