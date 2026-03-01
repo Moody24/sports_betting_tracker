@@ -536,8 +536,14 @@ class TestNBAService(unittest.TestCase):
     # ── fetch_upcoming_games ─────────────────────────────────────────
 
     @patch.dict(os.environ, {}, clear=True)
-    def test_fetch_upcoming_games_no_api_key(self):
+    @patch("app.services.nba_service.requests.get")
+    def test_fetch_upcoming_games_no_api_key(self, mock_get):
         os.environ.pop("ODDS_API_KEY", None)
+        # No API key: Odds API is skipped, ESPN fallback is called.
+        # Mock ESPN returning no games so the overall result is empty.
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"events": []}
+        mock_get.return_value = mock_resp
         self.assertEqual(nba_service.fetch_upcoming_games(), [])
 
     @patch.dict(os.environ, {"ODDS_API_KEY": "test-key"})

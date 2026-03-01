@@ -335,20 +335,30 @@ def fetch_odds_events() -> dict:
 
 
 def fetch_upcoming_games() -> list[dict]:
-    """Return tomorrow's NBA games from The Odds API (pre-game lines available).
+    """Return tomorrow's NBA games, preferring Odds API (has O/U lines).
 
-    Returns a list of dicts with team names, date, event id, and O/U line.
+    Falls back to ESPN scoreboard when the Odds API key is missing, quota is
+    exhausted, or the API returns an empty list.  ESPN games won't have O/U
+    lines but will include team logos and game times.
     """
-    api_key = _get_odds_api_key()
-    if not api_key:
-        logger.warning("ODDS_API_KEY not set – upcoming games unavailable")
-        return []
-
     now_et = datetime.now(APP_TIMEZONE)
     tomorrow = now_et.date() + timedelta(days=1)
-    day_after = tomorrow + timedelta(days=1)
 
-    # Query the Odds API using a UTC window that corresponds to "tomorrow" in ET.
+    games = _fetch_upcoming_games_odds(tomorrow)
+    if not games:
+        logger.info("Odds API returned no upcoming games — falling back to ESPN scoreboard")
+        games = _fetch_upcoming_games_espn(tomorrow)
+    return games
+
+
+def _fetch_upcoming_games_odds(tomorrow) -> list[dict]:
+    """Fetch tomorrow's games with O/U lines from The Odds API."""
+    api_key = _get_odds_api_key()
+    if not api_key:
+        logger.warning("ODDS_API_KEY not set – skipping Odds API for upcoming games")
+        return []
+
+    day_after = tomorrow + timedelta(days=1)
     start_et = datetime.combine(tomorrow, datetime.min.time(), tzinfo=APP_TIMEZONE)
     end_et = datetime.combine(day_after, datetime.min.time(), tzinfo=APP_TIMEZONE)
     start_utc = start_et.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -392,7 +402,6 @@ def fetch_upcoming_games() -> list[dict]:
             if line is not None:
                 break
 
-        # Parse commence_time to a date string for the form
         match_date = tomorrow.isoformat()
         if commence:
             try:
@@ -415,6 +424,46 @@ def fetch_upcoming_games() -> list[dict]:
             "total_score": 0,
             "over_under_line": line,
             "odds_event_id": game.get("id", ""),
+        })
+
+    return games
+
+
+def _fetch_upcoming_games_espn(tomorrow) -> list[dict]:
+    """Fetch tomorrow's games from ESPN scoreboard (no O/U lines, but always available)."""
+    date_str = tomorrow.strftime("%Y%m%d")
+    espn_games = fetch_espn_scoreboard(date_str)
+
+    games = []
+    for game in espn_games:
+        # Only include scheduled/pre-game events
+        if game.get("status") not in ("STATUS_SCHEDULED", "STATUS_FINAL", ""):
+            continue
+
+        commence = game.get("start_time", "")
+        games.append({
+            "espn_id": game["espn_id"],
+            "home": {
+                "name": game["home"]["name"],
+                "abbr": game["home"].get("abbr", ""),
+                "score": 0,
+                "logo": game["home"].get("logo", ""),
+            },
+            "away": {
+                "name": game["away"]["name"],
+                "abbr": game["away"].get("abbr", ""),
+                "score": 0,
+                "logo": game["away"].get("logo", ""),
+            },
+            "start_time": commence,
+            "match_date": tomorrow.isoformat(),
+            "status": "STATUS_SCHEDULED",
+            "status_detail": "Tomorrow",
+            "clock": "",
+            "period": 0,
+            "total_score": 0,
+            "over_under_line": None,
+            "odds_event_id": "",
         })
 
     return games
