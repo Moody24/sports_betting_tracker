@@ -6,7 +6,7 @@
 
 {% block content %}
 {# ── Summary Cards ────────────────────────────────────────── #}
-<div class="row g-3 mb-4">
+<div class="row g-3 mb-4 fade-up fade-up-1">
   <div class="col-sm-6 col-xl-3">
     <div class="card-soft kpi-card h-100">
       <p class="kpi-label mb-1">Value Plays Found</p>
@@ -75,11 +75,106 @@
   </div>
 </div>
 
+{# ── Split plays by tier ──────────────────────────────────── #}
+{% set strong_plays = value_plays | selectattr('confidence_tier', 'equalto', 'strong') | list %}
+{% set other_plays  = value_plays | rejectattr('confidence_tier', 'equalto', 'strong') | list %}
+
+{# ── Featured Strong Plays ────────────────────────────────── #}
+{% if strong_plays %}
+<div class="mb-4 fade-up fade-up-2">
+  <div class="d-flex align-items-center gap-2 mb-3">
+    <h3 class="h5 mb-0"><i class="bi bi-stars me-2 text-success"></i>Strong Value Plays</h3>
+    <span class="tier-strong">{{ strong_plays|length }} plays</span>
+  </div>
+  <div class="row g-3">
+    {% for play in strong_plays %}
+    {% set prop_label = {
+      'player_points':   'PTS',
+      'player_rebounds': 'REB',
+      'player_assists':  'AST',
+      'player_threes':   '3PM',
+    }.get(play.prop_type, play.prop_type|replace('player_','')|upper) %}
+    <div class="col-sm-6 col-xl-4 analysis-row"
+         data-stat="{{ play.prop_type }}"
+         data-edge="{{ play.edge|abs }}"
+         data-tier="{{ play.confidence_tier }}">
+      <div class="featured-play-card">
+        <div class="d-flex justify-content-between align-items-start">
+          <button class="btn btn-link text-light text-decoration-none p-0 player-detail-btn text-start"
+                  data-player="{{ play.player }}"
+                  data-prop-type="{{ play.prop_type }}"
+                  data-game-id="{{ play.game_id }}">
+            <div class="featured-play-player">{{ play.player }}</div>
+          </button>
+          {% if play.recommended_side == 'over' %}
+            <span class="badge text-bg-success ms-2 flex-shrink-0"><i class="bi bi-arrow-up"></i> Over</span>
+          {% else %}
+            <span class="badge text-bg-danger ms-2 flex-shrink-0"><i class="bi bi-arrow-down"></i> Under</span>
+          {% endif %}
+        </div>
+        <div class="featured-play-meta">
+          <span class="badge text-bg-dark me-1">{{ prop_label }}</span>
+          {{ play.away_team }} vs {{ play.home_team }}
+        </div>
+        <div class="featured-play-numbers">
+          <div>
+            <div class="featured-play-meta">Line</div>
+            <div class="fw-semibold">{{ play.line }}</div>
+          </div>
+          <div>
+            <div class="featured-play-meta">Proj</div>
+            <div class="fw-semibold {{ 'text-success' if play.projection > play.line else 'text-danger' }}">{{ play.projection }}</div>
+          </div>
+          <div class="ms-auto text-end">
+            <div class="featured-play-meta">Edge</div>
+            <div class="featured-play-edge">{{ '%.1f'|format(play.edge * 100) }}%</div>
+          </div>
+        </div>
+        {% if play.context_notes %}
+        <div class="d-flex flex-wrap gap-1">
+          {% for note in play.context_notes[:2] %}
+          <span class="badge text-bg-dark" style="font-size:.65rem">{{ note }}</span>
+          {% endfor %}
+        </div>
+        {% endif %}
+        <div class="d-flex gap-2 mt-auto pt-1">
+          <button class="btn btn-sm btn-outline-success flex-fill quick-add-prop-btn"
+                  data-player="{{ play.player }}"
+                  data-prop-type="{{ play.prop_type }}"
+                  data-line="{{ play.line }}"
+                  data-side="{{ play.recommended_side }}"
+                  data-odds="{{ play.recommended_odds or '' }}"
+                  data-game-id="{{ play.game_id }}"
+                  data-home="{{ play.home_team }}"
+                  data-away="{{ play.away_team }}"
+                  data-date="{{ play.match_date }}">
+            <i class="bi bi-plus-lg me-1"></i>Bet
+          </button>
+          <button class="btn btn-sm btn-outline-info quick-add-parlay-btn"
+                  data-player="{{ play.player }}"
+                  data-prop-type="{{ play.prop_type }}"
+                  data-line="{{ play.line }}"
+                  data-side="{{ play.recommended_side }}"
+                  data-odds="{{ play.recommended_odds or '' }}"
+                  data-game-id="{{ play.game_id }}"
+                  data-home="{{ play.home_team }}"
+                  data-away="{{ play.away_team }}"
+                  data-date="{{ play.match_date }}">
+            Parlay
+          </button>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
 {# ── Value Plays Table ───────────────────────────────────── #}
 {% if value_plays %}
-<div class="card-soft p-3 mb-4">
+<div class="card-soft p-3 mb-4 fade-up fade-up-3">
   <div class="d-flex justify-content-between align-items-center mb-3">
-    <h3 class="h6 mb-0"><i class="bi bi-bullseye me-2"></i>Value Plays</h3>
+    <h3 class="h6 mb-0"><i class="bi bi-bullseye me-2"></i>{% if strong_plays %}All Plays{% else %}Value Plays{% endif %}</h3>
     <span class="text-secondary small">Sorted by edge (highest first, top 50 shown)</span>
   </div>
 

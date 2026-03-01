@@ -7,47 +7,47 @@
 
 {% block content %}
 <div class="row g-3 mb-4">
-  <div class="col-sm-6 col-xl-2">
-    <div class="card-soft kpi-card h-100">
+  <div class="col-sm-6 col-xl-2 fade-up fade-up-1">
+    <div class="card-soft kpi-card kpi-card-neutral h-100">
       <p class="kpi-label mb-1">Total Bets</p>
       <p class="kpi-value mb-0">{{ stats.total_bets }}</p>
     </div>
   </div>
-  <div class="col-sm-6 col-xl-2">
-    <div class="card-soft kpi-card h-100">
+  <div class="col-sm-6 col-xl-2 fade-up fade-up-2">
+    <div class="card-soft kpi-card {{ 'kpi-card-pl-pos' if stats.net >= 0 else 'kpi-card-pl-neg' }} h-100">
       <p class="kpi-label mb-1">Net P/L</p>
       <p class="kpi-value mb-0 {{ 'text-success' if stats.net >= 0 else 'text-danger' }}">
         {{ '+' if stats.net >= 0 else '' }}${{ '%.2f'|format(stats.net) }}
       </p>
     </div>
   </div>
-  <div class="col-sm-6 col-xl-2">
-    <div class="card-soft kpi-card h-100">
+  <div class="col-sm-6 col-xl-2 fade-up fade-up-3">
+    <div class="card-soft kpi-card {{ 'kpi-card-roi-pos' if stats.roi >= 0 else 'kpi-card-roi-neg' }} h-100">
       <p class="kpi-label mb-1">ROI</p>
       <p class="kpi-value mb-0 {{ 'text-success' if stats.roi >= 0 else 'text-danger' }}">{{ '%.1f'|format(stats.roi) }}%</p>
     </div>
   </div>
-  <div class="col-sm-6 col-xl-2">
-    <div class="card-soft kpi-card h-100">
+  <div class="col-sm-6 col-xl-2 fade-up fade-up-4">
+    <div class="card-soft kpi-card kpi-card-wins h-100">
       <p class="kpi-label mb-1">Win %</p>
       <p class="kpi-value mb-0">{{ '%.1f'|format(stats.win_pct) }}%</p>
     </div>
   </div>
-  <div class="col-sm-6 col-xl-2">
-    <div class="card-soft kpi-card h-100">
+  <div class="col-sm-6 col-xl-2 fade-up fade-up-5">
+    <div class="card-soft kpi-card kpi-card-neutral h-100">
       <p class="kpi-label mb-1">Total Wagered</p>
       <p class="kpi-value mb-0">${{ '%.2f'|format(stats.wagered) }}</p>
     </div>
   </div>
-  <div class="col-sm-6 col-xl-2">
-    <div class="card-soft kpi-card h-100">
+  <div class="col-sm-6 col-xl-2 fade-up fade-up-6">
+    <div class="card-soft kpi-card kpi-card-neutral h-100">
       <p class="kpi-label mb-1">Current Streak</p>
       <p class="kpi-value mb-0">{{ stats.current_streak }}</p>
     </div>
   </div>
 </div>
 
-<div class="card-soft p-3 mb-4">
+<div class="card-soft p-3 mb-4 fade-up fade-up-7">
   <div class="d-flex justify-content-between align-items-center mb-2">
     <h3 class="h6 mb-0">Bet Settings</h3>
     {% if current_user.unit_size %}
@@ -75,7 +75,7 @@
   </form>
 </div>
 
-<div class="row g-3 mb-4">
+<div class="row g-3 mb-4 fade-up fade-up-8">
   <div class="col-lg-6">
     <div class="card-soft chart-card p-3 h-100">
       <div class="d-flex justify-content-between align-items-center mb-2">
