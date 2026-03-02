@@ -581,10 +581,20 @@ def get_todays_games() -> list[dict]:
     if cached and _time.monotonic() < cached["expires_at"]:
         return list(cached["games"])
 
+    _t0 = _time.perf_counter()
     today_et = datetime.now(APP_TIMEZONE).strftime("%Y%m%d")
+
+    _t = _time.perf_counter()
     games = fetch_espn_scoreboard(date_str=today_et)
+    logger.info("PERF espn_scoreboard: games=%d elapsed=%.2fs", len(games), _time.perf_counter() - _t)
+
+    _t = _time.perf_counter()
     totals, h2h = fetch_odds_combined()
+    logger.info("PERF odds_combined: matchups=%d elapsed=%.2fs", len(totals), _time.perf_counter() - _t)
+
+    _t = _time.perf_counter()
     events = fetch_odds_events()
+    logger.info("PERF odds_events: events=%d elapsed=%.2fs", len(events), _time.perf_counter() - _t)
 
     for game in games:
         key = _matchup_key(game["home"]["name"], game["away"]["name"])
@@ -594,6 +604,7 @@ def get_todays_games() -> list[dict]:
         game["moneyline_home"] = ml.get("home")
         game["moneyline_away"] = ml.get("away")
 
+    logger.info("PERF get_todays_games: total_elapsed=%.2fs", _time.perf_counter() - _t0)
     _GAMES_CACHE.clear()
     _GAMES_CACHE[cache_date] = {"games": games, "expires_at": _time.monotonic() + _GAMES_CACHE_TTL}
     return games

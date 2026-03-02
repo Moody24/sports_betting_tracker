@@ -279,16 +279,19 @@ class ValueDetector:
         Pass games explicitly (e.g. in tests or the scheduler) to bypass the cache.
         """
         use_cache = games is None
+        _t0 = _time.perf_counter()
 
         if use_cache:
             cache_date = _et_date_str()
             cached = _SCORE_CACHE.get(cache_date)
             if cached and _time.monotonic() < cached["expires_at"]:
-                logger.debug("score_all_todays_props: returning cached result (%d scores)", len(cached["scores"]))
+                logger.info("PERF score_all_todays_props: cache_hit scores=%d elapsed=0.00s", len(cached["scores"]))
                 return list(cached["scores"])
 
             from app.services.nba_service import get_todays_games
+            _t_games = _time.perf_counter()
             games = get_todays_games()
+            logger.info("PERF get_todays_games: games=%d elapsed=%.2fs", len(games), _time.perf_counter() - _t_games)
 
         from app.services.nba_service import fetch_player_props_for_event
 
@@ -299,14 +302,20 @@ class ValueDetector:
 
         def _fetch(game_event):
             game, event_id = game_event
+            _t = _time.perf_counter()
             try:
-                return game, fetch_player_props_for_event(event_id)
+                props = fetch_player_props_for_event(event_id)
             except Exception as exc:
                 logger.error("Failed to fetch props for event %s: %s", event_id, exc)
-                return game, {}
+                props = {}
+            elapsed = _time.perf_counter() - _t
+            prop_count = sum(len(v) for v in props.values())
+            logger.info("PERF props_fetch event=%s props=%d elapsed=%.2fs", event_id[:8], prop_count, elapsed)
+            return game, props
 
         game_props_payloads = []
         all_player_names: set[str] = set()
+        _t_props = _time.perf_counter()
         with ThreadPoolExecutor(max_workers=min(8, len(games_with_events) or 1)) as pool:
             futures = {pool.submit(_fetch, ge): ge for ge in games_with_events}
             for future in as_completed(futures):
@@ -319,8 +328,13 @@ class ValueDetector:
                         player = prop.get('player', '')
                         if player:
                             all_player_names.add(player)
+        logger.info("PERF props_fetch_parallel: games=%d wall_elapsed=%.2fs", len(game_props_payloads), _time.perf_counter() - _t_props)
 
+        _t_team = _time.perf_counter()
         player_team_map = self._build_player_team_map(all_player_names)
+        logger.info("PERF player_team_map: players=%d elapsed=%.2fs", len(player_team_map), _time.perf_counter() - _t_team)
+
+        _t_score = _time.perf_counter()
         for game, props in game_props_payloads:
             espn_id = game.get('espn_id', '')
             home_team = game.get('home', {}).get('name', '')
@@ -372,6 +386,7 @@ class ValueDetector:
 
         # Sort by absolute edge descending
         all_scores.sort(key=lambda s: abs(s.get('edge', 0)), reverse=True)
+        logger.info("PERF scoring_loop: scored=%d elapsed=%.2fs", len(all_scores), _time.perf_counter() - _t_score)
 
         # Populate module-level cache for subsequent requests within the TTL window.
         if use_cache:
@@ -381,7 +396,7 @@ class ValueDetector:
                 "scores": all_scores,
                 "expires_at": _time.monotonic() + _SCORE_CACHE_TTL,
             }
-            logger.debug("score_all_todays_props: cached %d scores for %s", len(all_scores), cache_date)
+        logger.info("PERF score_all_todays_props: total_elapsed=%.2fs scores=%d", _time.perf_counter() - _t0, len(all_scores))
 
         return all_scores
 
