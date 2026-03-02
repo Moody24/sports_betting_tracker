@@ -47,6 +47,11 @@ MOCK_ESPN_RESPONSE = {
 class TestNBAService(unittest.TestCase):
     """Unit tests for nba_service with mocked HTTP calls."""
 
+    def setUp(self):
+        # Clear module-level caches so each test starts from a clean slate.
+        nba_service._GAMES_CACHE.clear()
+        nba_service._UPCOMING_CACHE.clear()
+
     # fetch_espn_scoreboard
     @patch("app.services.nba_service.requests.get")
     def test_fetch_espn_scoreboard_success(self, mock_get):

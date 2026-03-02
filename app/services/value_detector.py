@@ -7,6 +7,7 @@ identify mispriced props and quantify the edge.
 import logging
 import math
 import time as _time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from itertools import combinations
 from typing import Optional
@@ -293,24 +294,31 @@ class ValueDetector:
 
         all_scores = []
 
-        # Prefetch props and player team mapping once to reduce per-prop DB/API lookups.
-        game_props_payloads = []
-        all_player_names: set[str] = set()
-        for game in games:
-            event_id = game.get('odds_event_id', '')
-            if not event_id:
-                continue
+        # Prefetch props for all games in parallel to avoid sequential HTTP stalls.
+        games_with_events = [(g, g.get('odds_event_id', '')) for g in games if g.get('odds_event_id', '')]
+
+        def _fetch(game_event):
+            game, event_id = game_event
             try:
-                props = fetch_player_props_for_event(event_id)
+                return game, fetch_player_props_for_event(event_id)
             except Exception as exc:
                 logger.error("Failed to fetch props for event %s: %s", event_id, exc)
-                continue
-            game_props_payloads.append((game, props))
-            for market_props in props.values():
-                for prop in market_props:
-                    player = prop.get('player', '')
-                    if player:
-                        all_player_names.add(player)
+                return game, {}
+
+        game_props_payloads = []
+        all_player_names: set[str] = set()
+        with ThreadPoolExecutor(max_workers=min(8, len(games_with_events) or 1)) as pool:
+            futures = {pool.submit(_fetch, ge): ge for ge in games_with_events}
+            for future in as_completed(futures):
+                game, props = future.result()
+                if not props:
+                    continue
+                game_props_payloads.append((game, props))
+                for market_props in props.values():
+                    for prop in market_props:
+                        player = prop.get('player', '')
+                        if player:
+                            all_player_names.add(player)
 
         player_team_map = self._build_player_team_map(all_player_names)
         for game, props in game_props_payloads:

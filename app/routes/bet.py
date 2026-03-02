@@ -421,10 +421,16 @@ def nba_today():
     today = datetime.now(NBA_APP_TIMEZONE).date()
 
     # ── Upsert snapshots for today's games ──────────────────────────
+    espn_ids = [g['espn_id'] for g in games]
+    existing_snaps = (
+        GameSnapshot.query
+        .filter(GameSnapshot.espn_id.in_(espn_ids), GameSnapshot.game_date == today)
+        .all()
+    ) if espn_ids else []
+    snap_map = {s.espn_id: s for s in existing_snaps}
+
     for game in games:
-        snap = GameSnapshot.query.filter_by(
-            espn_id=game['espn_id'], game_date=today
-        ).first()
+        snap = snap_map.get(game['espn_id'])
 
         if snap is None:
             # First view: lock in odds/moneyline now

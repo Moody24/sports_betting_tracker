@@ -1,5 +1,6 @@
 import logging
 import os
+import time as _time
 from datetime import datetime, timezone, timedelta, date as date_type
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -22,6 +23,19 @@ ODDS_API_URL = "https://api.the-odds-api.com/v4/sports/basketball_nba/odds/"
 ODDS_API_EVENTS_URL = "https://api.the-odds-api.com/v4/sports/basketball_nba/events/"
 
 _STATUS_FINAL = "STATUS_FINAL"
+
+# Module-level caches for expensive API calls.
+# get_todays_games: 60s TTL (live scores update frequently)
+# fetch_upcoming_games: 5 min TTL (tomorrow's schedule rarely changes)
+_GAMES_CACHE: dict = {}
+_GAMES_CACHE_TTL = 60
+_UPCOMING_CACHE: dict = {}
+_UPCOMING_CACHE_TTL = 300
+
+
+def _et_date_str() -> str:
+    return datetime.now(APP_TIMEZONE).strftime("%Y-%m-%d")
+
 
 PLAYER_PROP_MARKETS = [
     "player_points",
@@ -338,9 +352,14 @@ def fetch_upcoming_games() -> list[dict]:
     """Return tomorrow's NBA games, preferring Odds API (has O/U lines).
 
     Falls back to ESPN scoreboard when the Odds API key is missing, quota is
-    exhausted, or the API returns an empty list.  ESPN games won't have O/U
-    lines but will include team logos and game times.
+    exhausted, or the API returns an empty list.  Cached for
+    _UPCOMING_CACHE_TTL seconds — tomorrow's schedule changes rarely.
     """
+    cache_date = _et_date_str()
+    cached = _UPCOMING_CACHE.get(cache_date)
+    if cached and _time.monotonic() < cached["expires_at"]:
+        return list(cached["games"])
+
     now_et = datetime.now(APP_TIMEZONE)
     tomorrow = now_et.date() + timedelta(days=1)
 
@@ -348,6 +367,9 @@ def fetch_upcoming_games() -> list[dict]:
     if not games:
         logger.info("Odds API returned no upcoming games — falling back to ESPN scoreboard")
         games = _fetch_upcoming_games_espn(tomorrow)
+
+    _UPCOMING_CACHE.clear()
+    _UPCOMING_CACHE[cache_date] = {"games": games, "expires_at": _time.monotonic() + _UPCOMING_CACHE_TTL}
     return games
 
 
@@ -548,7 +570,17 @@ def fetch_player_props_for_event(odds_event_id: str) -> dict:
 
 
 def get_todays_games() -> list[dict]:
-    """Combined view: ESPN live scores merged with Odds API lines + moneylines."""
+    """Combined view: ESPN live scores merged with Odds API lines + moneylines.
+
+    Cached for _GAMES_CACHE_TTL seconds per ET date to avoid repeated API
+    calls on every page load.  The scheduler and NBA Today upsert path call
+    this frequently, so even a 60-second cache cuts many redundant requests.
+    """
+    cache_date = _et_date_str()
+    cached = _GAMES_CACHE.get(cache_date)
+    if cached and _time.monotonic() < cached["expires_at"]:
+        return list(cached["games"])
+
     today_et = datetime.now(APP_TIMEZONE).strftime("%Y%m%d")
     games = fetch_espn_scoreboard(date_str=today_et)
     totals, h2h = fetch_odds_combined()
@@ -562,6 +594,8 @@ def get_todays_games() -> list[dict]:
         game["moneyline_home"] = ml.get("home")
         game["moneyline_away"] = ml.get("away")
 
+    _GAMES_CACHE.clear()
+    _GAMES_CACHE[cache_date] = {"games": games, "expires_at": _time.monotonic() + _GAMES_CACHE_TTL}
     return games
 
 
