@@ -16,6 +16,7 @@ from datetime import datetime, timezone, date as date_type
 from app import db
 from app.models import ModelMetadata, PlayerGameLog
 from app.services.model_storage import materialize_model_artifact, persist_model_artifact
+from app.services.ml_feature_builder import build_ml_features_from_history, build_team_game_aggregates
 
 logger = logging.getLogger(__name__)
 
@@ -41,15 +42,10 @@ def _ensure_model_dir():
     os.makedirs(MODEL_DIR, exist_ok=True)
 
 
-def _build_training_data(stat_type: str):
-    """Build feature matrix and target vector from cached game logs.
-
-    Uses a walk-forward approach: for each game log entry, features are
-    computed from prior games only (no future data leakage).
-    """
+def _build_training_rows(stat_type: str):
+    """Build dated training rows for walk-forward validation."""
     stat_key = STAT_KEY_MAP.get(stat_type, 'pts')
 
-    # Get all cached game logs ordered by player and date
     all_logs = (
         PlayerGameLog.query
         .order_by(PlayerGameLog.player_id, PlayerGameLog.game_date)
@@ -61,160 +57,44 @@ def _build_training_data(stat_type: str):
             "Insufficient data for %s model: %d rows (need %d)",
             stat_type, len(all_logs), MIN_TRAIN_SAMPLES,
         )
-        return None, None
+        return []
 
-    # Group by player
     player_logs = {}
     for log in all_logs:
         player_logs.setdefault(log.player_id, []).append(log)
 
-    # Precompute team-game totals for share/usage features.
-    team_game_totals = {}
-    for log in all_logs:
-        team = (log.team_abbr or '').strip().upper()
-        if not team or not log.game_date:
-            continue
-        key = (team, log.game_date)
-        agg = team_game_totals.setdefault(key, {'pts': 0.0, 'fga': 0.0, 'fta': 0.0, 'tov': 0.0})
-        agg['pts'] += float(log.pts or 0.0)
-        agg['fga'] += float(log.fga or 0.0)
-        agg['fta'] += float(log.fta or 0.0)
-        agg['tov'] += float(log.tov or 0.0)
-
-    def _share_avg(game_list, num_key: str, den_key: str) -> float:
-        shares = []
-        for g in game_list:
-            team = (g.team_abbr or '').strip().upper()
-            if not team or not g.game_date:
-                continue
-            totals = team_game_totals.get((team, g.game_date))
-            if not totals:
-                continue
-            den = float(totals.get(den_key, 0.0) or 0.0)
-            if den <= 0:
-                continue
-            shares.append(float(getattr(g, num_key, 0.0) or 0.0) / den)
-        return (sum(shares) / len(shares)) if shares else 0.0
-
-    def _usage_share_avg(game_list) -> float:
-        shares = []
-        for g in game_list:
-            team = (g.team_abbr or '').strip().upper()
-            if not team or not g.game_date:
-                continue
-            totals = team_game_totals.get((team, g.game_date))
-            if not totals:
-                continue
-            team_usage = float(totals.get('fga', 0.0) or 0.0) + 0.44 * float(totals.get('fta', 0.0) or 0.0) + float(totals.get('tov', 0.0) or 0.0)
-            if team_usage <= 0:
-                continue
-            player_usage = float(g.fga or 0.0) + 0.44 * float(g.fta or 0.0) + float(g.tov or 0.0)
-            shares.append(player_usage / team_usage)
-        return (sum(shares) / len(shares)) if shares else 0.0
-
-    def _lead_rate(game_list, threshold: float = 0.22) -> float:
-        if not game_list:
-            return 0.0
-        qualifies = 0
-        valid = 0
-        for g in game_list:
-            team = (g.team_abbr or '').strip().upper()
-            if not team or not g.game_date:
-                continue
-            totals = team_game_totals.get((team, g.game_date))
-            if not totals:
-                continue
-            team_fga = float(totals.get('fga', 0.0) or 0.0)
-            if team_fga <= 0:
-                continue
-            valid += 1
-            share = float(g.fga or 0.0) / team_fga
-            if share >= threshold:
-                qualifies += 1
-        return (qualifies / valid) if valid else 0.0
-
-    features_list = []
-    targets = []
+    team_totals, team_counts = build_team_game_aggregates(all_logs)
+    rows = []
 
     for pid, logs in player_logs.items():
+        logs = sorted(logs, key=lambda l: ((l.game_date is None), l.game_date))
         if len(logs) < 10:
             continue
 
         for i in range(10, len(logs)):
-            # Features from games before index i
             prior = logs[:i]
             current = logs[i]
+            target = float(getattr(current, stat_key, 0.0) or 0.0)
+            features = build_ml_features_from_history(
+                prior_logs=prior,
+                current_is_home=(current.home_away or '').lower() == 'home',
+                stat_key=stat_key,
+                team_totals=team_totals,
+                team_counts=team_counts,
+            )
+            rows.append((current.game_date, str(pid), features, target))
 
-            target = getattr(current, stat_key, 0) or 0
+    rows.sort(key=lambda r: ((r[0] is None), r[0], r[1]))
+    return rows
 
-            # Build features from prior games
-            last_5 = prior[-5:]
-            last_10 = prior[-10:]
 
-            def _avg(game_list, key):
-                vals = [getattr(g, key, 0) or 0 for g in game_list]
-                return sum(vals) / len(vals) if vals else 0
-
-            def _std(game_list, key):
-                vals = [getattr(g, key, 0) or 0 for g in game_list]
-                if len(vals) < 2:
-                    return 0
-                mean = sum(vals) / len(vals)
-                return (sum((v - mean) ** 2 for v in vals) / len(vals)) ** 0.5
-
-            def _sum(game_list, key):
-                return sum(getattr(g, key, 0) or 0 for g in game_list)
-
-            def _ratio_sum(game_list, num_key, den_key):
-                den = _sum(game_list, den_key)
-                if den <= 0:
-                    return 0.0
-                return _sum(game_list, num_key) / den
-
-            def _true_shooting_pct(game_list):
-                pts = _sum(game_list, 'pts')
-                fga = _sum(game_list, 'fga')
-                fta = _sum(game_list, 'fta')
-                denom = 2 * (fga + 0.44 * fta)
-                if denom <= 0:
-                    return 0.0
-                return pts / denom
-
-            home_logs = [g for g in prior if (g.home_away or '').lower() == 'home']
-            away_logs = [g for g in prior if (g.home_away or '').lower() == 'away']
-            current_is_home = (current.home_away or '').lower() == 'home'
-            context_logs = home_logs if current_is_home else away_logs
-
-            features = {
-                'avg_stat_last_5': _avg(last_5, stat_key),
-                'avg_stat_last_10': _avg(last_10, stat_key),
-                'avg_stat_season': _avg(prior, stat_key),
-                'std_stat_last_5': _std(last_5, stat_key),
-                'std_stat_last_10': _std(last_10, stat_key),
-                'min_last_3_avg': _avg(prior[-3:], 'minutes'),
-                'home_away': 1 if current_is_home else 0,
-                'games_played': len(prior),
-                'home_split_stat_avg': _avg(home_logs, stat_key),
-                'away_split_stat_avg': _avg(away_logs, stat_key),
-                'context_split_stat_avg': _avg(context_logs, stat_key),
-                'fg_pct_last_10': _ratio_sum(last_10, 'fgm', 'fga'),
-                'ts_pct_last_10': _true_shooting_pct(last_10),
-                'fga_last_5_avg': _avg(last_5, 'fga'),
-                'fg3a_last_5_avg': _avg(last_5, 'fg3a'),
-                'fg3m_last_5_avg': _avg(last_5, 'fg3m'),
-                'fta_last_5_avg': _avg(last_5, 'fta'),
-                'fga_share_last_5': _share_avg(last_5, 'fga', 'fga'),
-                'pts_share_last_5': _share_avg(last_5, 'pts', 'pts'),
-                'usage_share_last_5': _usage_share_avg(last_5),
-                'lead_usage_rate_last_10': _lead_rate(last_10),
-            }
-
-            features_list.append(features)
-            targets.append(target)
-
-    if not features_list:
+def _build_training_data(stat_type: str):
+    """Build globally time-ordered training data for a stat model."""
+    rows = _build_training_rows(stat_type)
+    if not rows:
         return None, None
-
+    features_list = [r[2] for r in rows]
+    targets = [r[3] for r in rows]
     return features_list, targets
 
 
@@ -232,33 +112,59 @@ def train_model(stat_type: str) -> dict:
         return {'error': 'Missing ML dependencies'}
 
     player_game_log_rows = PlayerGameLog.query.count()
-    features_list, targets = _build_training_data(stat_type)
-    if features_list is None:
+    training_rows = _build_training_rows(stat_type)
+    if not training_rows:
         return {'error': 'Insufficient training data', 'stat_type': stat_type}
 
-    # Convert to arrays
-    feature_names = list(features_list[0].keys())
-    X = np.array([[f[k] for k in feature_names] for f in features_list])
-    y = np.array(targets)
+    feature_names = list(training_rows[0][2].keys())
+    X = np.array([[row[2][k] for k in feature_names] for row in training_rows])
+    y = np.array([row[3] for row in training_rows])
 
-    # Walk-forward split: 80/20 by time order
-    split_idx = int(len(X) * 0.8)
-    X_train, X_val = X[:split_idx], X[split_idx:]
-    y_train, y_val = y[:split_idx], y[split_idx:]
+    split_method = 'date_cutoff'
+    cutoff_date = None
+    unique_dates = sorted({row[0] for row in training_rows if row[0] is not None})
+
+    train_idx = []
+    val_idx = []
+    if len(unique_dates) >= 2:
+        cutoff_idx = int(len(unique_dates) * 0.8) - 1
+        cutoff_idx = max(0, min(cutoff_idx, len(unique_dates) - 2))
+        cutoff_date = unique_dates[cutoff_idx]
+        for idx, row in enumerate(training_rows):
+            row_date = row[0]
+            if row_date is not None and row_date <= cutoff_date:
+                train_idx.append(idx)
+            else:
+                val_idx.append(idx)
+
+    if not train_idx or len(val_idx) < 1:
+        split_method = 'index_fallback'
+        split_idx = int(len(X) * 0.8)
+        split_idx = min(max(split_idx, 1), len(X) - 1)
+        train_idx = list(range(split_idx))
+        val_idx = list(range(split_idx, len(X)))
+
+    if not train_idx or not val_idx:
+        return {'error': 'Insufficient validation data', 'stat_type': stat_type}
+
+    X_train, X_val = X[train_idx], X[val_idx]
+    y_train, y_val = y[train_idx], y[val_idx]
 
     model = XGBRegressor(
-        n_estimators=200,
+        n_estimators=500,
         max_depth=5,
         learning_rate=0.05,
         subsample=0.8,
         colsample_bytree=0.8,
         reg_alpha=0.1,
         reg_lambda=1.0,
+        random_state=42,
     )
 
     model.fit(
         X_train, y_train,
         eval_set=[(X_val, y_val)],
+        early_stopping_rounds=25,
         verbose=False,
     )
 
@@ -295,6 +201,8 @@ def train_model(stat_type: str) -> dict:
             'val_samples': len(X_val),
             'train_samples': len(X_train),
             'player_game_log_rows': player_game_log_rows,
+            'split_method': split_method,
+            'cutoff_date': cutoff_date.isoformat() if cutoff_date else None,
         }),
     )
     db.session.add(meta)

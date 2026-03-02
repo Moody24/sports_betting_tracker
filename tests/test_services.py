@@ -1856,6 +1856,109 @@ class TestMLModel(BaseTestCase):
         ):
             self.assertIn(key, sample)
 
+    def test_build_training_rows_are_globally_date_sorted(self):
+        from app.services import ml_model
+        with self.app.app_context():
+            _seed_player_logs(count=20, player_id='200', player_name='Player A')
+            for i in range(20):
+                db.session.add(PlayerGameLog(
+                    player_id='100',
+                    player_name='Player B',
+                    team_abbr='BOS',
+                    game_date=date(2026, 2, 1) + timedelta(days=i),
+                    matchup='BOS vs. NYK',
+                    minutes=30,
+                    pts=20,
+                    reb=5,
+                    ast=5,
+                    fg3m=2,
+                    tov=2,
+                    fgm=8,
+                    fga=16,
+                    ftm=4,
+                    fta=5,
+                    fg3a=6,
+                    home_away='home',
+                ))
+            db.session.commit()
+            with patch.object(ml_model, 'MIN_TRAIN_SAMPLES', 1):
+                rows = ml_model._build_training_rows('player_points')
+
+        self.assertTrue(rows)
+        dates = [r[0] for r in rows]
+        self.assertEqual(dates, sorted(dates))
+
+    def test_training_share_features_zero_when_cache_incomplete(self):
+        from app.services import ml_model
+        with self.app.app_context():
+            _seed_player_logs(count=12, player_id='511', player_name='Solo Player')
+            with patch.object(ml_model, 'MIN_TRAIN_SAMPLES', 1):
+                feats, _ = ml_model._build_training_data('player_points')
+        self.assertTrue(feats)
+        sample = feats[0]
+        self.assertEqual(sample['fga_share_last_5'], 0.0)
+        self.assertEqual(sample['pts_share_last_5'], 0.0)
+        self.assertEqual(sample['usage_share_last_5'], 0.0)
+        self.assertGreaterEqual(sample['lead_usage_rate_last_10'], 0.0)
+        self.assertLessEqual(sample['lead_usage_rate_last_10'], 1.0)
+
+    def test_inference_share_features_non_zero_with_full_team_cache(self):
+        from app.services.projection_engine import ProjectionEngine
+        from app.services.stats_service import get_cached_logs
+
+        with self.app.app_context():
+            base_date = date(2026, 3, 1)
+            for pidx in range(6):
+                player_id = f'6{pidx}'
+                for didx in range(12):
+                    fga = 22 if pidx == 0 else 10
+                    pts = 30 if pidx == 0 else 12
+                    db.session.add(PlayerGameLog(
+                        player_id=player_id,
+                        player_name=f'Player {pidx}',
+                        team_abbr='TST',
+                        game_date=base_date + timedelta(days=didx),
+                        matchup='TST vs. OPP',
+                        minutes=34,
+                        pts=pts,
+                        reb=5,
+                        ast=4,
+                        fg3m=2,
+                        tov=2,
+                        fgm=8,
+                        fga=fga,
+                        ftm=4,
+                        fta=5,
+                        fg3a=6,
+                        home_away='home' if didx % 2 == 0 else 'away',
+                    ))
+            db.session.commit()
+
+            logs = get_cached_logs('60', last_n=82)
+            features = ProjectionEngine()._build_ml_features(logs, 'pts', is_home=True)
+
+        for key in ('fga_share_last_5', 'pts_share_last_5', 'usage_share_last_5', 'lead_usage_rate_last_10'):
+            self.assertIn(key, features)
+        self.assertGreater(features['fga_share_last_5'], 0.0)
+        self.assertLessEqual(features['fga_share_last_5'], 1.0)
+        self.assertGreater(features['usage_share_last_5'], 0.0)
+        self.assertLessEqual(features['usage_share_last_5'], 1.0)
+
+    def test_feature_builder_order_invariant(self):
+        from app.services.ml_feature_builder import build_ml_features_from_history
+        from app.services.stats_service import get_cached_logs
+
+        with self.app.app_context():
+            _seed_player_logs(count=15, player_id='701', player_name='Order Player')
+            logs = get_cached_logs('701', last_n=82)
+            asc_logs = list(reversed(logs))
+            f1 = build_ml_features_from_history(logs, True, 'pts', all_history_logs=logs)
+            f2 = build_ml_features_from_history(asc_logs, True, 'pts', all_history_logs=asc_logs)
+
+        self.assertEqual(set(f1.keys()), set(f2.keys()))
+        self.assertAlmostEqual(f1['avg_stat_last_5'], f2['avg_stat_last_5'])
+        self.assertAlmostEqual(f1['min_last_3_avg'], f2['min_last_3_avg'])
+
     def test_train_model_success_persists_metadata(self):
         from app.services import ml_model
         with self.app.app_context():
@@ -1882,7 +1985,14 @@ class TestMLModel(BaseTestCase):
 
             fake_model = MagicMock()
             fake_model.predict.return_value = [11.0]
-            with patch.object(ml_model, '_build_training_data', return_value=(mock_features, mock_targets)):
+            mock_rows = [
+                (date(2026, 1, 11), 'p1', mock_features[0], mock_targets[0]),
+                (date(2026, 1, 12), 'p1', mock_features[1], mock_targets[1]),
+                (date(2026, 1, 13), 'p1', mock_features[2], mock_targets[2]),
+                (date(2026, 1, 14), 'p1', mock_features[3], mock_targets[3]),
+                (date(2026, 1, 15), 'p1', mock_features[4], mock_targets[4]),
+            ]
+            with patch.object(ml_model, '_build_training_rows', return_value=mock_rows):
                 with patch.object(ml_model, '_ensure_model_dir'):
                     with patch('xgboost.XGBRegressor', return_value=fake_model):
                         with patch('sklearn.metrics.mean_absolute_error', return_value=1.234):
