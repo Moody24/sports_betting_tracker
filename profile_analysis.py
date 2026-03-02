@@ -157,80 +157,99 @@ with app.app_context():
     print(f"\n  Unique players: {len(all_player_names)}   Total props: {total_props}")
 
     # ── Phase 5: player team map ─────────────────────────────────────
-    with Timer("player team map") as t:
-        detector = ValueDetector(ProjectionEngine())
-        player_team_map = detector._build_player_team_map(all_player_names)
-    timers["player_team_map"] = t.elapsed
-    print(f"\n  [5] Player team map          {t.elapsed:6.2f}s  — {len(player_team_map)} resolved")
+    db_available = True
+    try:
+        with Timer("player team map") as t:
+            detector = ValueDetector(ProjectionEngine())
+            player_team_map = detector._build_player_team_map(all_player_names)
+        timers["player_team_map"] = t.elapsed
+        print(f"\n  [5] Player team map          {t.elapsed:6.2f}s  — {len(player_team_map)} resolved")
+    except Exception as e:
+        db_available = False
+        timers["player_team_map"] = None
+        print(f"\n  [5] Player team map          N/A   — no local DB ({type(e).__name__})")
+        player_team_map = {}
 
     # ── Phase 6: projection + scoring loop ───────────────────────────
-    engine = ProjectionEngine()
-    detector2 = ValueDetector(engine)
+    if db_available:
+        engine = ProjectionEngine()
+        detector2 = ValueDetector(engine)
 
-    with Timer("scoring loop") as t:
-        all_scores = []
-        for game, props in game_props_payloads:
-            espn_id    = game.get("espn_id", "")
-            home_team  = game.get("home", {}).get("name", "")
-            away_team  = game.get("away", {}).get("name", "")
-            home_abbr  = (game.get("home", {}).get("abbr") or "").upper()
-            away_abbr  = (game.get("away", {}).get("abbr") or "").upper()
+        with Timer("scoring loop") as t:
+            all_scores = []
+            for game, props in game_props_payloads:
+                espn_id    = game.get("espn_id", "")
+                home_team  = game.get("home", {}).get("name", "")
+                away_team  = game.get("away", {}).get("name", "")
+                home_abbr  = (game.get("home", {}).get("abbr") or "").upper()
+                away_abbr  = (game.get("away", {}).get("abbr") or "").upper()
 
-            for market_key, market_props in props.items():
-                for prop in market_props:
-                    player = prop.get("player", "")
-                    if not player or not is_player_available(player):
-                        continue
-                    team_name, opponent_name, is_home = detector2._resolve_game_context_for_player(
-                        player, home_team, away_team, home_abbr, away_abbr, player_team_map
-                    )
-                    score = detector2.score_prop(
-                        player_name=player,
-                        prop_type=market_key,
-                        line=prop.get("line", 0),
-                        over_odds=prop.get("over_odds", -110),
-                        under_odds=prop.get("under_odds", -110),
-                        opponent_name=opponent_name,
-                        team_name=team_name,
-                        is_home=is_home,
-                        game_id=espn_id,
-                    )
-                    all_scores.append(score)
-    timers["scoring_loop"] = t.elapsed
-    scored = len(all_scores)
-    print(f"  [6] Projection/scoring loop  {t.elapsed:6.2f}s  — {scored} props scored")
+                for market_key, market_props in props.items():
+                    for prop in market_props:
+                        player = prop.get("player", "")
+                        if not player or not is_player_available(player):
+                            continue
+                        team_name, opponent_name, is_home = detector2._resolve_game_context_for_player(
+                            player, home_team, away_team, home_abbr, away_abbr, player_team_map
+                        )
+                        score = detector2.score_prop(
+                            player_name=player,
+                            prop_type=market_key,
+                            line=prop.get("line", 0),
+                            over_odds=prop.get("over_odds", -110),
+                            under_odds=prop.get("under_odds", -110),
+                            opponent_name=opponent_name,
+                            team_name=team_name,
+                            is_home=is_home,
+                            game_id=espn_id,
+                        )
+                        all_scores.append(score)
+        timers["scoring_loop"] = t.elapsed
+        scored = len(all_scores)
+        print(f"  [6] Projection/scoring loop  {t.elapsed:6.2f}s  — {scored} props scored")
+    else:
+        timers["scoring_loop"] = None
+        print(f"  [6] Projection/scoring loop  N/A   — skipped (no local DB)")
 
     # ── Summary ──────────────────────────────────────────────────────
-    total_cold = (
+    api_total = (
         timers["ESPN scoreboard"]
         + timers["Odds API combined"]
         + timers["Odds API events"]
         + timers["props_parallel"]
-        + timers["player_team_map"]
-        + timers["scoring_loop"]
     )
+    db_total = sum(v for v in [timers["player_team_map"], timers["scoring_loop"]] if v is not None)
+    total_cold = api_total + db_total
 
     print("\n" + "=" * 58)
     print("  BREAKDOWN SUMMARY")
     print("=" * 58)
     phases = [
-        ("ESPN scoreboard",         timers["ESPN scoreboard"]),
-        ("Odds API combined",       timers["Odds API combined"]),
-        ("Odds API events list",    timers["Odds API events"]),
-        ("Props fetch (parallel)",  timers["props_parallel"]),
-        ("Props fetch (would-be sequential)", timers["props_sequential"]),
-        ("Player team map (DB)",    timers["player_team_map"]),
-        ("Projection/scoring loop", timers["scoring_loop"]),
+        ("ESPN scoreboard",                   timers["ESPN scoreboard"]),
+        ("Odds API combined (totals+h2h)",    timers["Odds API combined"]),
+        ("Odds API events list",              timers["Odds API events"]),
+        ("Props fetch — parallel (current)",  timers["props_parallel"]),
+        ("Props fetch — sequential (old)",    timers["props_sequential"]),
+        ("Player team map (DB)",              timers["player_team_map"]),
+        ("Projection/scoring loop (DB)",      timers["scoring_loop"]),
     ]
-    max_t = max(v for _, v in phases)
     for label, elapsed in phases:
+        if elapsed is None:
+            print(f"  {label:<42s}   N/A  (no local DB)")
+            continue
         pct = elapsed / total_cold * 100 if total_cold else 0
-        sep = "  ← saved" if "sequential" in label else ""
-        print(f"  {label:<38s}  {elapsed:5.2f}s  ({pct:4.0f}%){sep}")
+        note = "  ← old baseline" if "old" in label else ""
+        print(f"  {label:<42s}  {elapsed:5.2f}s  ({pct:4.0f}%){note}")
 
     print("-" * 58)
-    print(f"  COLD LOAD TOTAL (parallel)   {total_cold:6.2f}s")
+    print(f"  API phases total (parallel)    {api_total:6.2f}s")
+    if db_total:
+        print(f"  DB phases total                {db_total:6.2f}s")
+    print(f"  COLD LOAD TOTAL                {total_cold:6.2f}s")
     saved = timers["props_sequential"] - timers["props_parallel"]
-    print(f"  Time saved vs sequential     {saved:+6.2f}s  (props parallelization)")
-    print(f"  WARM LOAD (cache hit)         ~0.00s")
+    print(f"  Saved vs old sequential props  {saved:+6.2f}s  ({saved/timers['props_sequential']*100:.0f}% faster)")
+    print(f"  WARM LOAD (cache hit)           ~0.00s")
+    if not db_available:
+        print(f"\n  NOTE: DB phases not available locally (uses Neon in prod).")
+        print(f"  On production: expect +0.3-0.8s for DB lookup + scoring.")
     print("=" * 58 + "\n")
