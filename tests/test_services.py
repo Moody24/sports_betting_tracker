@@ -205,6 +205,40 @@ class TestStatsService(BaseTestCase):
             self.assertEqual(len(cached), 1)
             self.assertEqual(cached[0].pts, 30)
 
+    def test_cache_player_logs_dedup_same_date_does_not_duplicate(self):
+        from app.services.stats_service import cache_player_logs
+        with self.app.app_context():
+            logs = [
+                {
+                    'player_id': '201', 'player_name': 'Test Player',
+                    'team_abbr': 'TST', 'game_date': date(2026, 2, 10),
+                    'matchup': 'TST vs OPP', 'minutes': 30, 'pts': 20,
+                    'reb': 5, 'ast': 5, 'stl': 1, 'blk': 1, 'tov': 2,
+                    'fgm': 8, 'fga': 15, 'ftm': 3, 'fta': 4,
+                    'fg3m': 1, 'fg3a': 3, 'plus_minus': 5,
+                    'home_away': 'home', 'win_loss': 'W',
+                },
+                {
+                    'player_id': '201', 'player_name': 'Test Player',
+                    'team_abbr': 'TST', 'game_date': date(2026, 2, 10),
+                    'matchup': 'TST vs OPP', 'minutes': 32, 'pts': 33,
+                    'reb': 6, 'ast': 7, 'stl': 2, 'blk': 1, 'tov': 1,
+                    'fgm': 11, 'fga': 18, 'ftm': 4, 'fta': 5,
+                    'fg3m': 2, 'fg3a': 4, 'plus_minus': 9,
+                    'home_away': 'home', 'win_loss': 'W',
+                },
+            ]
+
+            cache_player_logs('201', logs)
+            rows = PlayerGameLog.query.filter_by(player_id='201').all()
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0].pts, 33)
+
+            cache_player_logs('201', logs)
+            rows = PlayerGameLog.query.filter_by(player_id='201').all()
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0].pts, 33)
+
     # -- get_player_stats_summary --
 
     def test_get_player_stats_summary_empty(self):
@@ -425,6 +459,52 @@ class TestStatsService(BaseTestCase):
             }]
             summary = refresh_completed_game_logs(days_back=0)
             self.assertEqual(summary['final_games_seen'], 0)
+
+    @patch('app.services.stats_service.find_player_id', return_value='2544')
+    @patch('app.services.stats_service.requests.get')
+    @patch('app.services.stats_service.fetch_espn_scoreboard')
+    def test_refresh_completed_game_logs_handles_duplicate_player_rows(self, mock_scoreboard, mock_get, _mock_pid):
+        from app.services.stats_service import refresh_completed_game_logs
+        with self.app.app_context():
+            mock_scoreboard.return_value = [{
+                'espn_id': 'game_dup',
+                'status': 'STATUS_FINAL',
+                'status_detail': 'Final',
+                'home': {'name': 'Boston Celtics', 'abbr': 'BOS', 'score': 120},
+                'away': {'name': 'Los Angeles Lakers', 'abbr': 'LAL', 'score': 110},
+            }]
+            mock_resp = MagicMock()
+            mock_resp.raise_for_status.return_value = None
+            mock_resp.json.return_value = {
+                'boxscore': {
+                    'players': [{
+                        'team': {'displayName': 'Boston Celtics', 'abbreviation': 'BOS'},
+                        'statistics': [
+                            {
+                                'names': ['MIN', 'FG', '3PT', 'FT', 'REB', 'AST', 'STL', 'BLK', 'TO', '+/-', 'PTS'],
+                                'athletes': [{
+                                    'athlete': {'displayName': 'Jayson Tatum', 'id': '300'},
+                                    'stats': ['36:00', '10-20', '3-8', '5-6', '8', '6', '1', '0', '2', '+7', '28'],
+                                }],
+                            },
+                            {
+                                'names': ['MIN', 'FG', '3PT', 'FT', 'REB', 'AST', 'STL', 'BLK', 'TO', '+/-', 'PTS'],
+                                'athletes': [{
+                                    'athlete': {'displayName': 'Jayson Tatum', 'id': '300'},
+                                    'stats': ['36:00', '11-20', '4-8', '5-6', '8', '6', '1', '0', '2', '+8', '31'],
+                                }],
+                            },
+                        ],
+                    }],
+                },
+            }
+            mock_get.return_value = mock_resp
+
+            summary = refresh_completed_game_logs(days_back=0)
+            self.assertEqual(summary['final_games_seen'], 1)
+            rows = PlayerGameLog.query.filter_by(player_id='2544').all()
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0].pts, 31)
 
     # -- PlayerNameResolver cache --
 
