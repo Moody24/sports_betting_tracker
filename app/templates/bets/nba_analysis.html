@@ -64,13 +64,13 @@
         <option value="slight">Slight</option>
       </select>
     </div>
-    <div class="ms-auto">
-      <label class="form-label small mb-1 text-secondary">&nbsp;</label>
-      <div>
-        <button class="btn btn-sm btn-outline-info" id="btn-refresh">
-          <i class="bi bi-arrow-repeat me-1"></i>Refresh
-        </button>
-      </div>
+    <div class="ms-auto d-flex align-items-end gap-2">
+      <a href="/bets/new#parlay" class="btn btn-sm btn-outline-warning" id="parlay-queue-btn">
+        <i class="bi bi-collection me-1"></i>Parlay (<span id="parlay-queue-count">0</span>)
+      </a>
+      <button class="btn btn-sm btn-outline-info" id="btn-refresh">
+        <i class="bi bi-arrow-repeat me-1"></i>Refresh
+      </button>
     </div>
   </div>
 </div>
@@ -346,6 +346,16 @@
     </div>
   </div>
 </div>
+
+
+<div class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index: 1080">
+  <div id="parlayQueueToast" class="toast text-bg-dark border border-secondary-subtle" role="status" aria-live="polite" aria-atomic="true">
+    <div class="toast-body d-flex justify-content-between align-items-center gap-3">
+      <span id="parlay-toast-message">Added to parlay.</span>
+      <a href="/bets/new#parlay" class="btn btn-sm btn-outline-light">Checkout</a>
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -494,21 +504,40 @@ document.addEventListener('DOMContentLoaded', function() {
     });
   });
 
-  // Quick-add to parlay builder with first leg prefilled
+  const parlayQueueCount = document.getElementById('parlay-queue-count');
+  const parlayQueueToastEl = document.getElementById('parlayQueueToast');
+  const parlayToastMsg = document.getElementById('parlay-toast-message');
+
+  function updateParlayQueueCount() {
+    if (!parlayQueueCount || typeof getParlayQueue !== 'function') return;
+    parlayQueueCount.textContent = getParlayQueue().length;
+  }
+
+  function showParlayToast(message) {
+    if (!parlayQueueToastEl || !parlayToastMsg || typeof bootstrap === 'undefined') return;
+    parlayToastMsg.textContent = message;
+    bootstrap.Toast.getOrCreateInstance(parlayQueueToastEl, { delay: 2200 }).show();
+  }
+
+  updateParlayQueueCount();
+
+  // Quick-add to parlay queue
   document.querySelectorAll('.quick-add-parlay-btn').forEach(btn => {
     btn.addEventListener('click', function() {
-      const params = new URLSearchParams({
-        add_to_parlay: '1',
-        team_a: this.dataset.away,
-        team_b: this.dataset.home,
-        match_date: this.dataset.date,
-        bet_type: this.dataset.side,
-        player_name: this.dataset.player,
-        prop_type: this.dataset.propType,
-        prop_line: this.dataset.line,
-        game_id: this.dataset.gameId,
-      });
-      window.location.href = '/bets/new?' + params.toString() + '#parlay';
+      if (typeof addParlayLeg !== 'function' || typeof getParlayQueue !== 'function') return;
+      const leg = {
+        team_a: this.dataset.away || '',
+        team_b: this.dataset.home || '',
+        match_date: this.dataset.date || '',
+        bet_type: (this.dataset.side || 'over').toLowerCase() === 'under' ? 'under' : 'over',
+        game_id: this.dataset.gameId || '',
+        player_name: this.dataset.player || '',
+        prop_type: this.dataset.propType || 'player_points',
+        prop_line: this.dataset.line || '',
+      };
+      const queue = addParlayLeg(leg);
+      updateParlayQueueCount();
+      showParlayToast(`Added to parlay (${queue.length} leg${queue.length === 1 ? '' : 's'})`);
     });
   });
 });
