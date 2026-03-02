@@ -24,6 +24,11 @@ from app.services.matchup_service import (
 )
 from app.services.context_service import get_game_context
 from app.services.feature_engine import infer_player_position
+from app.services.ml_feature_builder import (
+    build_ml_features_from_history,
+    build_team_game_aggregates,
+    compute_team_usage_features_for_player,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -340,84 +345,24 @@ class ProjectionEngine:
         if len(logs) < 10:
             return {}
 
-        recent = logs[:10]
-        last_5 = recent[:5]
-        last_10 = recent[:10]
+        usage_features = self._compute_team_usage_features(logs)
+        return build_ml_features_from_history(
+            prior_logs=logs,
+            current_is_home=is_home,
+            stat_key=stat_key,
+            team_totals=usage_features['team_totals'],
+            team_counts=usage_features['team_counts'],
+        )
 
-        def _avg(game_list, key):
-            vals = [getattr(g, key, 0) or 0 for g in game_list]
-            return sum(vals) / len(vals) if vals else 0
-
-        def _std(game_list, key):
-            vals = [getattr(g, key, 0) or 0 for g in game_list]
-            if len(vals) < 2:
-                return 0
-            mean = sum(vals) / len(vals)
-            return (sum((v - mean) ** 2 for v in vals) / len(vals)) ** 0.5
-
-        def _sum(game_list, key):
-            return sum(getattr(g, key, 0) or 0 for g in game_list)
-
-        def _ratio_sum(game_list, num_key, den_key):
-            den = _sum(game_list, den_key)
-            if den <= 0:
-                return 0.0
-            return _sum(game_list, num_key) / den
-
-        def _true_shooting_pct(game_list):
-            pts = _sum(game_list, 'pts')
-            fga = _sum(game_list, 'fga')
-            fta = _sum(game_list, 'fta')
-            denom = 2 * (fga + 0.44 * fta)
-            if denom <= 0:
-                return 0.0
-            return pts / denom
-
-        usage_features = self._compute_team_usage_features(logs, last_5, last_10)
-        home_logs = [g for g in logs if (g.home_away or '').lower() == 'home']
-        away_logs = [g for g in logs if (g.home_away or '').lower() == 'away']
-        context_logs = home_logs if is_home else away_logs
-
-        features = {
-            'avg_stat_last_5': _avg(last_5, stat_key),
-            'avg_stat_last_10': _avg(last_10, stat_key),
-            'avg_stat_season': _avg(logs, stat_key),
-            'std_stat_last_5': _std(last_5, stat_key),
-            'std_stat_last_10': _std(last_10, stat_key),
-            'min_last_3_avg': _avg(logs[:3], 'minutes'),
-            'home_away': 1 if is_home else 0,
-            'games_played': len(logs),
-            'home_split_stat_avg': _avg(home_logs, stat_key),
-            'away_split_stat_avg': _avg(away_logs, stat_key),
-            'context_split_stat_avg': _avg(context_logs, stat_key),
-            'fg_pct_last_10': _ratio_sum(last_10, 'fgm', 'fga'),
-            'ts_pct_last_10': _true_shooting_pct(last_10),
-            'fga_last_5_avg': _avg(last_5, 'fga'),
-            'fg3a_last_5_avg': _avg(last_5, 'fg3a'),
-            'fg3m_last_5_avg': _avg(last_5, 'fg3m'),
-            'fta_last_5_avg': _avg(last_5, 'fta'),
-        }
-        features.update(usage_features)
-        return features
-
-    def _compute_team_usage_features(self, logs: list, last_5: list, last_10: list) -> dict:
+    def _compute_team_usage_features(self, logs: list) -> dict:
         team_abbr = (getattr(logs[0], 'team_abbr', '') or '').strip().upper() if logs else ''
         if not team_abbr:
-            return {
-                'fga_share_last_5': 0.0,
-                'pts_share_last_5': 0.0,
-                'usage_share_last_5': 0.0,
-                'lead_usage_rate_last_10': 0.0,
-            }
+            return {'team_totals': {}, 'team_counts': {}}
 
-        dates = {getattr(g, 'game_date', None) for g in last_10 if getattr(g, 'game_date', None)}
+        sorted_logs = sorted(logs, key=lambda l: ((getattr(l, 'game_date', None) is None), getattr(l, 'game_date', None)))
+        dates = {getattr(g, 'game_date', None) for g in sorted_logs[-10:] if getattr(g, 'game_date', None)}
         if not dates:
-            return {
-                'fga_share_last_5': 0.0,
-                'pts_share_last_5': 0.0,
-                'usage_share_last_5': 0.0,
-                'lead_usage_rate_last_10': 0.0,
-            }
+            return {'team_totals': {}, 'team_counts': {}}
 
         rows = (
             PlayerGameLog.query
@@ -425,71 +370,12 @@ class ProjectionEngine:
             .filter(PlayerGameLog.game_date.in_(list(dates)))
             .all()
         )
-        totals = {}
-        for row in rows:
-            key = row.game_date
-            agg = totals.setdefault(key, {'pts': 0.0, 'fga': 0.0, 'fta': 0.0, 'tov': 0.0})
-            agg['pts'] += float(row.pts or 0.0)
-            agg['fga'] += float(row.fga or 0.0)
-            agg['fta'] += float(row.fta or 0.0)
-            agg['tov'] += float(row.tov or 0.0)
 
-        def _share_avg(game_list, num_key: str, den_key: str) -> float:
-            shares = []
-            for g in game_list:
-                d = getattr(g, 'game_date', None)
-                if not d:
-                    continue
-                game_totals = totals.get(d)
-                if not game_totals:
-                    continue
-                den = float(game_totals.get(den_key, 0.0) or 0.0)
-                if den <= 0:
-                    continue
-                shares.append(float(getattr(g, num_key, 0.0) or 0.0) / den)
-            return sum(shares) / len(shares) if shares else 0.0
+        totals, counts = build_team_game_aggregates(rows)
 
-        def _usage_share_avg(game_list) -> float:
-            shares = []
-            for g in game_list:
-                d = getattr(g, 'game_date', None)
-                if not d:
-                    continue
-                game_totals = totals.get(d)
-                if not game_totals:
-                    continue
-                team_usage = float(game_totals.get('fga', 0.0) or 0.0) + 0.44 * float(game_totals.get('fta', 0.0) or 0.0) + float(game_totals.get('tov', 0.0) or 0.0)
-                if team_usage <= 0:
-                    continue
-                player_usage = float(getattr(g, 'fga', 0.0) or 0.0) + 0.44 * float(getattr(g, 'fta', 0.0) or 0.0) + float(getattr(g, 'tov', 0.0) or 0.0)
-                shares.append(player_usage / team_usage)
-            return sum(shares) / len(shares) if shares else 0.0
-
-        def _lead_rate(game_list, threshold: float = 0.22) -> float:
-            valid = 0
-            leaders = 0
-            for g in game_list:
-                d = getattr(g, 'game_date', None)
-                if not d:
-                    continue
-                game_totals = totals.get(d)
-                if not game_totals:
-                    continue
-                team_fga = float(game_totals.get('fga', 0.0) or 0.0)
-                if team_fga <= 0:
-                    continue
-                valid += 1
-                share = float(getattr(g, 'fga', 0.0) or 0.0) / team_fga
-                if share >= threshold:
-                    leaders += 1
-            return leaders / valid if valid else 0.0
-
-        return {
-            'fga_share_last_5': _share_avg(last_5, 'fga', 'fga'),
-            'pts_share_last_5': _share_avg(last_5, 'pts', 'pts'),
-            'usage_share_last_5': _usage_share_avg(last_5),
-            'lead_usage_rate_last_10': _lead_rate(last_10),
-        }
+        # Trigger computation once so this path also uses shared gating logic.
+        compute_team_usage_features_for_player(sorted_logs, totals, counts)
+        return {'team_totals': totals, 'team_counts': counts}
 
     def _empty_projection(self) -> dict:
         return {
