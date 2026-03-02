@@ -962,4 +962,47 @@
   if (ocrTeamBEl) ocrTeamBEl.addEventListener('input', refreshOcrPickedWinnerOptions);
   refreshOcrPickedWinnerOptions();
 
+  // ── Bankroll warning ──────────────────────────────────────────────
+  function watchBankroll(stakeInputId, warnId) {
+    if (!USER_BANKROLL) return;
+    const stakeEl = document.getElementById(stakeInputId);
+    const warnEl  = document.getElementById(warnId);
+    if (!stakeEl || !warnEl) return;
+    stakeEl.addEventListener('input', function () {
+      const stake = parseFloat(stakeEl.value) || 0;
+      if (stake > USER_BANKROLL) {
+        warnEl.textContent = 'Warning: stake ($' + stake.toFixed(2) + ') exceeds remaining bankroll ($' + USER_BANKROLL.toFixed(2) + ')';
+        warnEl.className = 'small mt-1 text-warning';
+        warnEl.style.display = '';
+      } else {
+        warnEl.style.display = 'none';
+      }
+    });
+  }
+  watchBankroll('bet_amount',   'single-bankroll-warn');
+  watchBankroll('prop-stake',   'prop-bankroll-warn');
+  watchBankroll('parlay-stake', 'parlay-bankroll-warn');
+
+  // ── Live payout preview ───────────────────────────────────────────
+  function makeLivePayoutPreview(stakeInputId, oddsInputId, previewId) {
+    const stakeEl   = document.getElementById(stakeInputId);
+    const oddsEl    = document.getElementById(oddsInputId);
+    const previewEl = document.getElementById(previewId);
+    if (!stakeEl || !oddsEl || !previewEl) return;
+    function update() {
+      const stake = parseFloat(stakeEl.value) || 0;
+      const odds  = parseInt(oddsEl.value)   || 0;
+      if (!stake || !odds) { previewEl.textContent = ''; return; }
+      const profit = calcProfit(stake, odds);
+      if (profit === null) { previewEl.textContent = ''; return; }
+      const payout = stake + profit;
+      previewEl.textContent = 'Win: +$' + profit.toFixed(2) + ' · Total payout: $' + payout.toFixed(2);
+      previewEl.className = 'small text-info mt-1';
+    }
+    stakeEl.addEventListener('input', update);
+    oddsEl.addEventListener('input', update);
+  }
+  makeLivePayoutPreview('bet_amount', 'single-odds', 'single-payout-preview');
+  makeLivePayoutPreview('prop-stake', 'prop-odds',   'prop-payout-preview');
+
 })();

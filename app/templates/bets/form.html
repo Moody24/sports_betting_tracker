@@ -87,6 +87,15 @@
                id='bet_amount', placeholder='25.00') }}
           </div>
           {% for e in form.bet_amount.errors %}<div class="invalid-feedback d-block">{{ e }}</div>{% endfor %}
+          <div id="single-bankroll-warn" class="small mt-1" style="display:none"></div>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Odds (American)</label>
+          <div class="input-group">
+            <span class="input-group-text bg-dark border-secondary-subtle"><i class="bi bi-percent"></i></span>
+            <input type="number" name="american_odds" id="single-odds" class="form-control" placeholder="-110">
+          </div>
+          <div id="single-payout-preview" class="small text-info mt-1"></div>
         </div>
         {% if current_user.unit_size %}
         <div class="col-md-4">
@@ -261,6 +270,7 @@
             <span class="input-group-text bg-dark border-secondary-subtle">$</span>
             <input type="number" id="prop-stake" name="bet_amount" class="form-control" placeholder="25.00" min="1" step="0.01" required>
           </div>
+          <div id="prop-bankroll-warn" class="small mt-1" style="display:none"></div>
         </div>
         {% if current_user.unit_size %}
         <div class="col-md-3">
@@ -279,6 +289,14 @@
             <option value="win">Win</option>
             <option value="lose">Lose</option>
           </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Odds (American)</label>
+          <div class="input-group">
+            <span class="input-group-text bg-dark border-secondary-subtle"><i class="bi bi-percent"></i></span>
+            <input type="number" name="american_odds" id="prop-odds" class="form-control" placeholder="-110">
+          </div>
+          <div id="prop-payout-preview" class="small text-info mt-1"></div>
         </div>
 
         {# Bonus Bet section #}
@@ -350,6 +368,7 @@
             <input type="number" id="parlay-stake" class="form-control"
               placeholder="25.00" min="1" step="0.01" required>
           </div>
+          <div id="parlay-bankroll-warn" class="small mt-1" style="display:none"></div>
           {% if current_user.unit_size %}
           <div class="input-group mt-2">
             <span class="input-group-text bg-dark border-secondary-subtle">u</span>
@@ -546,6 +565,7 @@
   var ALL_PROPS_URL      = '{{ url_for("bet.nba_all_props") }}';
   var OCR_URL            = '{{ url_for("bet.ocr_screenshot") }}';
   var USER_UNIT_SIZE     = {{ current_user.unit_size|tojson }};
+  var USER_BANKROLL      = {{ remaining_bankroll|default(none)|tojson }};
 </script>
 <script src="{{ url_for('static', filename='js/bet_builder.js') }}"></script>
 {% endblock %}

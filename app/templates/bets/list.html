@@ -132,16 +132,25 @@
                   <span class="text-success">All legs won</span>
                 {% elif p_status == 'lose' %}
                   <span class="text-danger">At least one leg lost</span>
+                {% elif p_status == 'push' %}
+                  <span class="text-warning">Push</span>
                 {% else %}
                   <span class="text-warning">In progress</span>
                 {% endif %}
                 <span class="text-secondary ms-2">· ${{ '%.2f'|format(b.bet_amount) }} staked</span>
+                <button class="parlay-toggle-btn btn btn-link btn-sm p-0 ms-2 text-secondary"
+                        data-parlay-id="{{ b.parlay_id }}" aria-expanded="true" type="button">
+                  <i class="bi bi-chevron-down toggle-icon" style="transition:transform .2s"></i>
+                </button>
               </td>
               <td class="text-end py-1">
+                {% set pl = parlay_pl_map.get(b.parlay_id, 0) %}
                 {% if p_status == 'win' %}
-                  <span class="text-success fw-semibold">+${{ '%.2f'|format(b.bet_amount) }}</span>
+                  <span class="text-success fw-semibold">+${{ '%.2f'|format(pl) }}</span>
                 {% elif p_status == 'lose' %}
                   <span class="text-danger fw-semibold">-${{ '%.2f'|format(b.bet_amount) }}</span>
+                {% elif p_status == 'push' %}
+                  <span class="text-warning fw-semibold">$0.00</span>
                 {% else %}
                   <span class="text-secondary">—</span>
                 {% endif %}
@@ -151,7 +160,7 @@
           {% endif %}
 
           {# ── Bet row ── #}
-          <tr {% if b.is_parlay %}class="parlay-leg-row"{% endif %}>
+          <tr {% if b.is_parlay %}class="parlay-leg-row" data-parlay-id="{{ b.parlay_id }}"{% endif %}>
             <td>
               {% if b.is_parlay %}
                 <span class="text-secondary small me-1">↳</span>
@@ -247,6 +256,17 @@
 
 {% block scripts %}
 <script>
+  document.querySelectorAll('.parlay-toggle-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      const pid  = this.dataset.parlayId;
+      const legs = document.querySelectorAll('tr[data-parlay-id="' + pid + '"]');
+      const open = this.getAttribute('aria-expanded') === 'true';
+      legs.forEach(function (l) { l.style.display = open ? 'none' : ''; });
+      this.setAttribute('aria-expanded', open ? 'false' : 'true');
+      this.querySelector('.toggle-icon').style.transform = open ? 'rotate(-90deg)' : '';
+    });
+  });
+
   document.querySelectorAll('.check-prop-progress-btn').forEach(function (btn) {
     btn.addEventListener('click', function () {
       const targetId = btn.dataset.target;

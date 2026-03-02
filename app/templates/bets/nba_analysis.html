@@ -241,6 +241,11 @@
           <td class="text-center tabular-num fw-semibold
             {% if play.projection > play.line %}text-success{% elif play.projection < play.line %}text-danger{% endif %}">
             {{ play.projection }}
+            {% if play.breakdown %}
+            <div class="small text-secondary fw-normal" style="font-size:.65rem">
+              L5: {{ '%.1f'|format(play.breakdown.last_5_avg or 0) }} · Szn: {{ '%.1f'|format(play.breakdown.season_avg or 0) }}
+            </div>
+            {% endif %}
           </td>
           <td class="text-center tabular-num">
             {% if play.confidence_tier == 'strong' %}
@@ -428,6 +433,15 @@ document.addEventListener('DOMContentLoaded', function() {
             html += `<div class="col-4"><div class="card-soft p-2 text-center"><div class="small text-secondary">Pos Matchup</div><div class="fw-semibold">${hasPosMult ? esc(posMultRaw.toFixed(3)) : '—'}</div></div></div>`;
             html += `<div class="col-4"><div class="card-soft p-2 text-center"><div class="small text-secondary">Pos Edge</div><div class="fw-semibold ${posEdgeColor}">${hasPosMult ? esc((posMultRaw > 1 ? '+' : '') + posEdge + '%') : '—'}</div></div></div>`;
             html += '</div>';
+
+            if (data.std_dev !== undefined || data.z_score !== undefined) {
+              html += '<div class="row g-2 mb-3">';
+              html += `<div class="col-4"><div class="card-soft p-2 text-center"><div class="small text-secondary">Std Dev</div><div class="fw-semibold">${esc((data.std_dev || 0).toFixed(2))}</div></div></div>`;
+              const zColor = data.z_score > 1 ? 'text-success' : (data.z_score < -1 ? 'text-danger' : '');
+              html += `<div class="col-4"><div class="card-soft p-2 text-center"><div class="small text-secondary">Z-Score</div><div class="fw-semibold ${zColor}">${esc((data.z_score > 0 ? '+' : '') + (data.z_score || 0).toFixed(2))}</div></div></div>`;
+              html += `<div class="col-4"><div class="card-soft p-2 text-center"><div class="small text-secondary">Games</div><div class="fw-semibold">${esc(data.games_played || 0)}</div></div></div>`;
+              html += '</div>';
+            }
           }
 
           // Context notes

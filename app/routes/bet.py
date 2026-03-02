@@ -262,6 +262,10 @@ def place_bet():
         else:
             parlay_status[pid] = 'pending'
 
+    parlay_pl_map: dict = {}
+    for pid, legs in parlay_groups.items():
+        parlay_pl_map[pid] = Bet.parlay_profit_loss(legs)
+
     filters = {
         'status': status,
         'q': search_query,
@@ -284,6 +288,7 @@ def place_bet():
         bets=bets,
         filters=filters,
         parlay_status=parlay_status,
+        parlay_pl_map=parlay_pl_map,
         filter_stats=filter_stats,
     )
 
@@ -409,7 +414,10 @@ def new_bet():
         flash('Bet recorded successfully!', 'success')
         return redirect(url_for('bet.place_bet'))
 
-    return render_template('bets/form.html', form=form, bet=None)
+    remaining_bankroll = None
+    if current_user.starting_bankroll:
+        remaining_bankroll = round(current_user.starting_bankroll + current_user.net_profit_loss(), 2)
+    return render_template('bets/form.html', form=form, bet=None, remaining_bankroll=remaining_bankroll)
 
 
 # ── NBA Today ────────────────────────────────────────────────────────
