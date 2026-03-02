@@ -14,6 +14,8 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 
 import requests
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app import db
 from app.models import PlayerGameLog
@@ -199,6 +201,97 @@ def _parse_game_date(date_val) -> Optional[date_type]:
     return None
 
 
+def _dedupe_logs_by_date(game_logs: list[dict]) -> list[dict]:
+    """Deduplicate logs by game_date, keeping the last entry for each date."""
+    seen_dates: set[date_type] = set()
+    deduped_reversed: list[dict] = []
+
+    for log in reversed(game_logs or []):
+        parsed_date = _parse_game_date(log.get('game_date'))
+        if parsed_date is None:
+            continue
+        if parsed_date in seen_dates:
+            continue
+
+        normalized_log = dict(log)
+        normalized_log['game_date'] = parsed_date
+        deduped_reversed.append(normalized_log)
+        seen_dates.add(parsed_date)
+
+    deduped_reversed.reverse()
+    return deduped_reversed
+
+
+def _is_postgres() -> bool:
+    """Return True when the current DB bind is PostgreSQL."""
+    bind = db.session.bind
+    return bool(bind and bind.dialect and bind.dialect.name == 'postgresql')
+
+
+def _upsert_player_logs_postgres(player_id: str, rows_dicts: list[dict], expires: datetime) -> None:
+    """PostgreSQL race-safe upsert for PlayerGameLog rows."""
+    now_utc = datetime.now(timezone.utc)
+    rows_to_insert = []
+    for log in rows_dicts:
+        rows_to_insert.append({
+            'player_id': str(player_id),
+            'player_name': log.get('player_name', ''),
+            'team_abbr': log.get('team_abbr', ''),
+            'game_date': log['game_date'],
+            'matchup': log.get('matchup', ''),
+            'minutes': log.get('minutes', 0),
+            'pts': log.get('pts', 0),
+            'reb': log.get('reb', 0),
+            'ast': log.get('ast', 0),
+            'stl': log.get('stl', 0),
+            'blk': log.get('blk', 0),
+            'tov': log.get('tov', 0),
+            'fgm': log.get('fgm', 0),
+            'fga': log.get('fga', 0),
+            'ftm': log.get('ftm', 0),
+            'fta': log.get('fta', 0),
+            'fg3m': log.get('fg3m', 0),
+            'fg3a': log.get('fg3a', 0),
+            'plus_minus': log.get('plus_minus', 0),
+            'home_away': log.get('home_away', ''),
+            'win_loss': log.get('win_loss', ''),
+            'context_flags': log.get('context_flags'),
+            'cache_expires': expires,
+            'fetched_at': now_utc,
+        })
+
+    stmt = pg_insert(PlayerGameLog).values(rows_to_insert)
+    excluded = stmt.excluded
+    stmt = stmt.on_conflict_do_update(
+        index_elements=['player_id', 'game_date'],
+        set_={
+            'player_name': excluded.player_name,
+            'team_abbr': excluded.team_abbr,
+            'matchup': excluded.matchup,
+            'minutes': excluded.minutes,
+            'pts': excluded.pts,
+            'reb': excluded.reb,
+            'ast': excluded.ast,
+            'stl': excluded.stl,
+            'blk': excluded.blk,
+            'tov': excluded.tov,
+            'fgm': excluded.fgm,
+            'fga': excluded.fga,
+            'ftm': excluded.ftm,
+            'fta': excluded.fta,
+            'fg3m': excluded.fg3m,
+            'fg3a': excluded.fg3a,
+            'plus_minus': excluded.plus_minus,
+            'home_away': excluded.home_away,
+            'win_loss': excluded.win_loss,
+            'context_flags': excluded.context_flags,
+            'cache_expires': excluded.cache_expires,
+            'fetched_at': excluded.fetched_at,
+        },
+    )
+    db.session.execute(stmt)
+
+
 def find_player_id(player_name: str) -> Optional[str]:
     """Look up an NBA API player ID by name.
 
@@ -238,65 +331,85 @@ def cache_player_logs(
     Existing rows for the same player+date are updated; new rows are inserted.
     Sets cache_expires to ``ttl_days`` from now.
     """
+    deduped_logs = _dedupe_logs_by_date(game_logs)
+    if not deduped_logs:
+        return {'inserted': 0, 'updated': 0, 'total': 0}
+
     expires = datetime.now(timezone.utc) + timedelta(days=ttl_days)
+    game_dates = [log['game_date'] for log in deduped_logs]
 
-    inserted = 0
-    updated = 0
+    for attempt in range(2):
+        try:
+            with db.session.no_autoflush:
+                existing_rows = (
+                    PlayerGameLog.query
+                    .filter_by(player_id=str(player_id))
+                    .filter(PlayerGameLog.game_date.in_(game_dates))
+                    .all()
+                )
 
-    # Batch-fetch all existing rows for this player in one query instead of
-    # issuing one SELECT per game log (N+1 pattern).
-    game_dates = [log['game_date'] for log in game_logs]
-    existing_rows = (
-        PlayerGameLog.query
-        .filter_by(player_id=str(player_id))
-        .filter(PlayerGameLog.game_date.in_(game_dates))
-        .all()
-    )
-    existing_map: dict = {row.game_date: row for row in existing_rows}
+            existing_dates = {row.game_date for row in existing_rows}
+            inserted = sum(1 for log in deduped_logs if log['game_date'] not in existing_dates)
+            updated = len(deduped_logs) - inserted
 
-    for log in game_logs:
-        existing = existing_map.get(log['game_date'])
+            if _is_postgres():
+                _upsert_player_logs_postgres(player_id, deduped_logs, expires)
+            else:
+                existing_map: dict = {row.game_date: row for row in existing_rows}
+                for log in deduped_logs:
+                    existing = existing_map.get(log['game_date'])
 
-        if existing:
-            for key, val in log.items():
-                if key not in ('player_id', 'game_date') and hasattr(existing, key):
-                    setattr(existing, key, val)
-            existing.cache_expires = expires
-            existing.fetched_at = datetime.now(timezone.utc)
-            updated += 1
-        else:
-            row = PlayerGameLog(
-                player_id=str(player_id),
-                player_name=log['player_name'],
-                team_abbr=log.get('team_abbr', ''),
-                game_date=log['game_date'],
-                matchup=log.get('matchup', ''),
-                minutes=log.get('minutes', 0),
-                pts=log.get('pts', 0),
-                reb=log.get('reb', 0),
-                ast=log.get('ast', 0),
-                stl=log.get('stl', 0),
-                blk=log.get('blk', 0),
-                tov=log.get('tov', 0),
-                fgm=log.get('fgm', 0),
-                fga=log.get('fga', 0),
-                ftm=log.get('ftm', 0),
-                fta=log.get('fta', 0),
-                fg3m=log.get('fg3m', 0),
-                fg3a=log.get('fg3a', 0),
-                plus_minus=log.get('plus_minus', 0),
-                home_away=log.get('home_away', ''),
-                win_loss=log.get('win_loss', ''),
-                context_flags=log.get('context_flags'),
-                cache_expires=expires,
+                    if existing:
+                        for key, val in log.items():
+                            if key not in ('player_id', 'game_date') and hasattr(existing, key):
+                                setattr(existing, key, val)
+                        existing.cache_expires = expires
+                        existing.fetched_at = datetime.now(timezone.utc)
+                    else:
+                        row = PlayerGameLog(
+                            player_id=str(player_id),
+                            player_name=log.get('player_name', ''),
+                            team_abbr=log.get('team_abbr', ''),
+                            game_date=log['game_date'],
+                            matchup=log.get('matchup', ''),
+                            minutes=log.get('minutes', 0),
+                            pts=log.get('pts', 0),
+                            reb=log.get('reb', 0),
+                            ast=log.get('ast', 0),
+                            stl=log.get('stl', 0),
+                            blk=log.get('blk', 0),
+                            tov=log.get('tov', 0),
+                            fgm=log.get('fgm', 0),
+                            fga=log.get('fga', 0),
+                            ftm=log.get('ftm', 0),
+                            fta=log.get('fta', 0),
+                            fg3m=log.get('fg3m', 0),
+                            fg3a=log.get('fg3a', 0),
+                            plus_minus=log.get('plus_minus', 0),
+                            home_away=log.get('home_away', ''),
+                            win_loss=log.get('win_loss', ''),
+                            context_flags=log.get('context_flags'),
+                            cache_expires=expires,
+                        )
+                        db.session.add(row)
+                        existing_map[log['game_date']] = row
+
+            if commit:
+                db.session.commit()
+
+            return {'inserted': inserted, 'updated': updated, 'total': inserted + updated}
+        except IntegrityError as exc:
+            logger.warning(
+                "IntegrityError caching logs for player %s on attempt %d: %s",
+                player_id,
+                attempt + 1,
+                exc,
             )
-            db.session.add(row)
-            inserted += 1
+            db.session.rollback()
+            if attempt == 1:
+                raise
 
-    if commit:
-        db.session.commit()
-
-    return {'inserted': inserted, 'updated': updated, 'total': inserted + updated}
+    return {'inserted': 0, 'updated': 0, 'total': 0}
 
 
 def get_cached_logs(player_id: str, last_n: int = 15) -> list:
