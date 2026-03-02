@@ -640,3 +640,159 @@ class TestBetRoutes(BaseTestCase):
             db.session.commit()
         resp = self.client.get("/bets/export?status=win&q=Lakers")
         self.assertEqual(resp.status_code, 200)
+
+    # ── P2 coverage additions ─────────────────────────────────────────
+
+    def test_bets_list_with_winning_parlay_computes_pl_map(self):
+        """parlay_pl_map is built when parlay bets appear in the list."""
+        user_id = self.register_and_login()
+        pid = "test-parlay-pl"
+        with self.app.app_context():
+            db.session.add(make_bet(
+                user_id, outcome="win", is_parlay=True, parlay_id=pid,
+                american_odds=-110,
+            ))
+            db.session.add(make_bet(
+                user_id, outcome="win", is_parlay=True, parlay_id=pid,
+                american_odds=-110,
+            ))
+            db.session.commit()
+        resp = self.client.get("/bets")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn(b"Parlay", resp.data)
+
+    def test_bets_list_with_losing_parlay_shows_header(self):
+        """Losing parlay header renders correctly via parlay_status."""
+        user_id = self.register_and_login()
+        pid = "test-parlay-lose"
+        with self.app.app_context():
+            db.session.add(make_bet(
+                user_id, outcome="lose", is_parlay=True, parlay_id=pid,
+            ))
+            db.session.add(make_bet(
+                user_id, outcome="win", is_parlay=True, parlay_id=pid,
+            ))
+            db.session.commit()
+        resp = self.client.get("/bets")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn(b"leg lost", resp.data)
+
+    def test_new_bet_form_includes_bankroll_var_when_starting_bankroll_set(self):
+        """USER_BANKROLL is non-null when user has starting_bankroll configured."""
+        user_id = self.register_and_login()
+        with self.app.app_context():
+            user = db.session.get(User, user_id)
+            user.starting_bankroll = 500.0
+            db.session.commit()
+        resp = self.client.get("/bets/new")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn(b"USER_BANKROLL", resp.data)
+        self.assertNotIn(b"USER_BANKROLL = null", resp.data)
+
+    def test_new_bet_with_american_odds_saves_value(self):
+        """american_odds form field is parsed and stored on the bet."""
+        user_id = self.register_and_login()
+        self.client.post(
+            "/bets/new",
+            data={
+                "team_a": "Lakers", "team_b": "Celtics",
+                "match_date": "2025-03-01", "bet_amount": "25",
+                "bet_type": "moneyline", "outcome": "pending",
+                "american_odds": "-110",
+            },
+            follow_redirects=True,
+        )
+        with self.app.app_context():
+            bet = Bet.query.filter_by(user_id=user_id).order_by(Bet.id.desc()).first()
+            self.assertEqual(bet.american_odds, -110)
+
+    def test_new_bet_with_invalid_american_odds_ignored(self):
+        """Non-integer american_odds falls back to None without error."""
+        self.register_and_login()
+        resp = self.client.post(
+            "/bets/new",
+            data={
+                "team_a": "Lakers", "team_b": "Celtics",
+                "match_date": "2025-03-01", "bet_amount": "25",
+                "bet_type": "moneyline", "outcome": "pending",
+                "american_odds": "notanint",
+            },
+            follow_redirects=True,
+        )
+        self.assertIn(b"Bet recorded successfully", resp.data)
+
+    def test_new_bet_with_invalid_bonus_multiplier_ignored(self):
+        """Non-numeric bonus_multiplier falls back to 1.0 without error."""
+        self.register_and_login()
+        resp = self.client.post(
+            "/bets/new",
+            data={
+                "team_a": "Lakers", "team_b": "Celtics",
+                "match_date": "2025-03-01", "bet_amount": "25",
+                "bet_type": "moneyline", "outcome": "pending",
+                "bonus_multiplier": "notafloat",
+            },
+            follow_redirects=True,
+        )
+        self.assertIn(b"Bet recorded successfully", resp.data)
+
+    def test_new_bet_player_prop_without_prop_line_rejected(self):
+        """Player prop (over) with no prop_line is rejected with 400."""
+        user_id = self.register_and_login()
+        resp = self.client.post(
+            "/bets/new",
+            data={
+                "team_a": "Warriors", "team_b": "Nets",
+                "match_date": "2025-03-01", "bet_amount": "25",
+                "bet_type": "over",
+                "player_name": "Stephen Curry",
+                "prop_type": "player_points",
+                "outcome": "pending",
+                # no prop_line
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn(b"prop line is required", resp.data)
+        with self.app.app_context():
+            self.assertEqual(Bet.query.filter_by(user_id=user_id).count(), 0)
+
+    def test_new_bet_with_invalid_units_ignored(self):
+        """Non-numeric units value is silently skipped."""
+        self.register_and_login()
+        resp = self.client.post(
+            "/bets/new",
+            data={
+                "team_a": "Lakers", "team_b": "Celtics",
+                "match_date": "2025-03-01", "bet_amount": "25",
+                "bet_type": "moneyline", "outcome": "pending",
+                "units": "notafloat",
+            },
+            follow_redirects=True,
+        )
+        self.assertIn(b"Bet recorded successfully", resp.data)
+
+    @patch("app.routes.bet.requests.get", side_effect=Exception("network error"))
+    def test_nba_prop_progress_request_exception_returns_404(self, _mock):
+        """Network error from ESPN returns 404 with error payload."""
+        self.register_and_login()
+        resp = self.client.get(
+            "/nba/prop-progress/game123?player=LeBron%20James&prop_type=player_points"
+        )
+        self.assertEqual(resp.status_code, 404)
+        data = json.loads(resp.data)
+        self.assertFalse(data["ok"])
+
+    @patch("app.routes.bet.requests.get")
+    def test_nba_prop_progress_empty_boxscore_returns_404(self, mock_get):
+        """ESPN response with no boxscore players returns 404."""
+        self.register_and_login()
+        mock_resp = mock_get.return_value
+        mock_resp.raise_for_status.return_value = None
+        mock_resp.json.return_value = {"boxscore": {"players": []}, "header": {}}
+        resp = self.client.get(
+            "/nba/prop-progress/game123?player=LeBron%20James&prop_type=player_points"
+        )
+        self.assertEqual(resp.status_code, 404)
+        data = json.loads(resp.data)
+        self.assertFalse(data["ok"])
