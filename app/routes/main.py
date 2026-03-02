@@ -7,7 +7,7 @@ from sqlalchemy import func, case, text
 
 from app import db
 from app.enums import Outcome
-from app.models import Bet
+from app.models import Bet, compute_bets_net_pl
 
 logger = logging.getLogger(__name__)
 
@@ -81,30 +81,46 @@ def dashboard():
             break
     current_streak = f"{streak} {streak_type.title()}" if streak else 'No streak'
 
-    # ── Daily P/L chart (recent bets only) ────────────────────────────
-    grouped_units = defaultdict(float)
-    for b in reversed(recent_bets):
-        label = b.match_date.strftime('%b %d')
-        grouped_units[label] += b.profit_loss()
-
-    chart_labels = list(grouped_units.keys())
-    chart_values = [round(v, 2) for v in grouped_units.values()]
+    # ── Daily P/L chart (recent bets, parlay-aware grouping) ──────────
+    # Group bets by date first, then compute parlay-aware P/L per day.
+    daily_bets: dict = defaultdict(list)
+    for b in recent_bets:
+        daily_bets[b.match_date.strftime('%b %d')].append(b)
+    # Preserve chronological order (recent_bets is desc, so reverse keys)
+    chart_labels = list(reversed(list(daily_bets.keys())))
+    chart_values = [round(compute_bets_net_pl(daily_bets[lbl]), 2) for lbl in chart_labels]
 
     # ── Cumulative P/L (last 30 graded bets, oldest first) ───────────
     cumul_bets = (
         Bet.query.filter_by(user_id=uid)
-        .filter(Bet.outcome.in_([Outcome.WIN.value, Outcome.LOSE.value]))
+        .filter(Bet.outcome.in_([Outcome.WIN.value, Outcome.LOSE.value, Outcome.PUSH.value]))
         .order_by(Bet.match_date.desc())
-        .limit(30)
+        .limit(60)  # fetch more to account for parlay legs occupying multiple slots
         .all()
     )
     cumul_bets.reverse()  # oldest first
+
+    # Collapse parlay legs so each parlay is one cumulative data point.
+    parlay_seen: set = set()
+    cumul_events: list = []  # (date_label, pl)
+    for b in cumul_bets:
+        if b.is_parlay and b.parlay_id:
+            if b.parlay_id in parlay_seen:
+                continue
+            parlay_seen.add(b.parlay_id)
+            # Gather all legs for this parlay from the current window
+            legs = [x for x in cumul_bets if x.is_parlay and x.parlay_id == b.parlay_id]
+            cumul_events.append((b.match_date.strftime('%b %d'), Bet.parlay_profit_loss(legs)))
+        else:
+            cumul_events.append((b.match_date.strftime('%b %d'), b.profit_loss()))
+
+    cumul_events = cumul_events[-30:]  # keep last 30 events
     cumulative = 0.0
     cumul_labels = []
     cumul_values = []
-    for b in cumul_bets:
-        cumulative = round(cumulative + b.profit_loss(), 2)
-        cumul_labels.append(b.match_date.strftime('%b %d'))
+    for label, pl in cumul_events:
+        cumulative = round(cumulative + pl, 2)
+        cumul_labels.append(label)
         cumul_values.append(cumulative)
 
     stats = {

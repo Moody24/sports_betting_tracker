@@ -14,7 +14,7 @@ import requests
 from app import db
 from app.enums import BetSource, BetType, Outcome
 from app.forms import BetForm
-from app.models import Bet, GameSnapshot, PickContext, PlayerGameLog
+from app.models import Bet, GameSnapshot, PickContext, PlayerGameLog, compute_bets_net_pl
 from app.services.nba_service import (
     get_todays_games,
     fetch_upcoming_games,
@@ -256,6 +256,9 @@ def place_bet():
             parlay_status[pid] = 'lose'
         elif all(o == Outcome.WIN.value for o in outcomes):
             parlay_status[pid] = 'win'
+        elif all(o in (Outcome.WIN.value, Outcome.PUSH.value) for o in outcomes):
+            # All legs settled but at least one pushed — reduced payout, not a loss
+            parlay_status[pid] = 'push'
         else:
             parlay_status[pid] = 'pending'
 
@@ -267,14 +270,13 @@ def place_bet():
     }
 
     # Summary stats for the current filtered view
-    graded = [b for b in bets if b.outcome in ('win', 'lose')]
     filter_stats = {
         'count': len(bets),
         'wins': sum(1 for b in bets if b.outcome == 'win'),
         'losses': sum(1 for b in bets if b.outcome == 'lose'),
         'pending': sum(1 for b in bets if b.outcome == 'pending'),
         'wagered': sum(b.bet_amount for b in bets),
-        'net': sum(b.profit_loss() for b in bets),
+        'net': compute_bets_net_pl(bets),
     }
 
     return render_template(

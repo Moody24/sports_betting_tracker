@@ -11,6 +11,34 @@ from . import db
 from .enums import BetType, Outcome
 
 
+def _american_to_decimal(odds: int) -> float:
+    """Convert American odds to decimal odds (includes stake)."""
+    if odds > 0:
+        return 1.0 + odds / 100.0
+    if odds < 0:
+        return 1.0 + 100.0 / abs(odds)
+    return 1.0  # 0 is not a valid real-world line; treat as even
+
+
+def compute_bets_net_pl(bets: list) -> float:
+    """Parlay-aware net P/L across a list of Bet objects.
+
+    Parlay legs sharing a parlay_id are collapsed into a single group and
+    their combined profit/loss is calculated with the correct multiplicative-
+    odds formula.  Non-parlay bets use the existing profit_loss() method.
+    """
+    parlay_groups: dict = {}
+    total = 0.0
+    for b in bets:
+        if b.is_parlay and b.parlay_id:
+            parlay_groups.setdefault(b.parlay_id, []).append(b)
+        else:
+            total += b.profit_loss()
+    for legs in parlay_groups.values():
+        total += Bet.parlay_profit_loss(legs)
+    return round(total, 2)
+
+
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(20), unique=True, nullable=False)
@@ -37,16 +65,19 @@ class User(UserMixin, db.Model):
         return float(total or 0.0)
 
     def net_profit_loss(self) -> float:
-        """Return net P/L, accounting for American odds and bonus multiplier."""
-        # Only graded bets contribute to P/L; pending bets return 0 anyway.
-        from app.enums import Outcome
+        """Return net P/L using parlay-aware combined-odds calculation.
+
+        Parlay legs are grouped and computed as a single event so that:
+        - A losing parlay deducts the stake once (not once per leg).
+        - A winning parlay profit reflects the correct multiplicative payout.
+        """
         bets = (
             db.session.query(Bet)
             .filter_by(user_id=self.id)
-            .filter(Bet.outcome.in_([Outcome.WIN.value, Outcome.LOSE.value]))
+            .filter(Bet.outcome.in_([Outcome.WIN.value, Outcome.LOSE.value, Outcome.PUSH.value]))
             .all()
         )
-        return round(sum(b.profit_loss() for b in bets), 2)
+        return compute_bets_net_pl(bets)
 
     def total_wins(self) -> int:
         return db.session.query(Bet).filter_by(user_id=self.id, outcome=Outcome.WIN.value).count()
@@ -112,11 +143,53 @@ class Bet(db.Model):
         return round(profit * multiplier, 2)
 
     def profit_loss(self) -> float:
+        """P/L for a single straight bet.
+
+        For parlay legs, call Bet.parlay_profit_loss(legs) on the whole group
+        instead of summing this method per-leg — per-leg results are incorrect
+        because they ignore combined odds and double-count the stake on losses.
+        """
         if self.outcome == Outcome.WIN.value:
             return self.expected_profit_for_win()
         if self.outcome == Outcome.LOSE.value:
             return -float(self.bet_amount)
         return 0.0
+
+    @staticmethod
+    def parlay_profit_loss(legs: list) -> float:
+        """Correct combined P/L for a complete set of parlay legs.
+
+        Rules:
+        - Any LOSE leg   → stake lost once (not once per leg)
+        - Any PENDING    → unsettled, returns 0
+        - All WIN/PUSH   → stake × (∏ decimal_odds of WIN legs) − stake
+        - All PUSH       → stake returned (profit = 0)
+
+        The stake used is legs[0].bet_amount — all legs share the same stake.
+        """
+        if not legs:
+            return 0.0
+
+        stake = float(legs[0].bet_amount)
+        multiplier = float(legs[0].bonus_multiplier or 1.0)
+        outcomes = [l.outcome for l in legs]
+
+        if any(o == Outcome.LOSE.value for o in outcomes):
+            return -stake
+        if any(o == Outcome.PENDING.value for o in outcomes):
+            return 0.0
+
+        # All legs are WIN or PUSH — multiply decimal odds of WIN legs only.
+        combined_decimal = 1.0
+        for leg in legs:
+            if leg.outcome == Outcome.WIN.value:
+                combined_decimal *= _american_to_decimal(leg.american_odds or 0)
+
+        if combined_decimal == 1.0:
+            return 0.0  # every leg pushed — stake returned
+
+        profit = round(stake * combined_decimal - stake, 2)
+        return round(profit * multiplier, 2)
 
     @property
     def margin(self) -> Optional[float]:

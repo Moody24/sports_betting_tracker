@@ -300,15 +300,43 @@ def cache_player_logs(
 
 
 def get_cached_logs(player_id: str, last_n: int = 15) -> list:
-    """Retrieve cached game logs for a player, ordered by date descending."""
-    rows = (
+    """Retrieve cached game logs for a player, ordered by date descending.
+
+    Prefers rows whose cache_expires has not yet passed.  If no fresh rows
+    exist (e.g. scheduler hasn't run), falls back to all rows with a warning
+    so projections degrade gracefully rather than break entirely.
+    """
+    now = datetime.now(timezone.utc)
+
+    fresh_rows = (
+        PlayerGameLog.query
+        .filter_by(player_id=str(player_id))
+        .filter(
+            (PlayerGameLog.cache_expires == None) |  # noqa: E711
+            (PlayerGameLog.cache_expires > now)
+        )
+        .order_by(PlayerGameLog.game_date.desc())
+        .limit(last_n)
+        .all()
+    )
+    if fresh_rows:
+        return fresh_rows
+
+    # No fresh rows — fall back to all rows and surface the staleness.
+    stale_rows = (
         PlayerGameLog.query
         .filter_by(player_id=str(player_id))
         .order_by(PlayerGameLog.game_date.desc())
         .limit(last_n)
         .all()
     )
-    return rows
+    if stale_rows:
+        logger.warning(
+            "get_cached_logs: all logs for player_id=%s are stale (cache expired); "
+            "scheduler may not have run recently",
+            player_id,
+        )
+    return stale_rows
 
 
 def get_player_stats_summary(player_id: str, logs: list = None) -> dict:
