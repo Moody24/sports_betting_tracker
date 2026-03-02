@@ -417,7 +417,7 @@ class PickContext(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     bet_id = db.Column(
-        db.Integer, db.ForeignKey('bet.id'), nullable=False, unique=True
+        db.Integer, db.ForeignKey('bet.id', ondelete='CASCADE'), nullable=False, unique=True
     )
     context_json = db.Column(db.Text, nullable=False)
     projected_stat = db.Column(db.Float, nullable=True)
@@ -427,7 +427,7 @@ class PickContext(db.Model):
         db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
     )
 
-    bet = db.relationship('Bet', backref=db.backref('pick_context', uselist=False))
+    bet = db.relationship('Bet', backref=db.backref('pick_context', uselist=False, cascade='all, delete-orphan', single_parent=True))
 
     def __repr__(self) -> str:
         return f"<PickContext bet_id={self.bet_id}>"

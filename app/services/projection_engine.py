@@ -163,13 +163,26 @@ class ProjectionEngine:
                 ctx = get_game_context(player_name, team_name)
                 self._context_cache[ctx_key] = ctx
 
+            injury_status = ctx.get('injury_status', 'healthy')
+
+            # Hard block: out or doubtful players should not receive projections.
+            # value_detector filters these via is_player_available(), but direct
+            # calls to project_stat() (e.g. player modal) also need this guard.
+            if injury_status in ('out', 'doubtful'):
+                result = self._empty_projection()
+                result['context_notes'] = [f'player listed as {injury_status} — no projection']
+                result['confidence'] = 'low'
+                return result
+
             if ctx.get('back_to_back'):
                 modifier *= self.B2B_FACTOR
                 context_notes.append('back-to-back (-8%)')
 
-            if ctx.get('injury_status') not in ('healthy', ''):
-                if ctx['injury_status'] in ('questionable', 'probable'):
-                    context_notes.append(f"injury: {ctx['injury_status']}")
+            if injury_status == 'day-to-day':
+                modifier *= self.INJURY_RETURN_FACTOR
+                context_notes.append('day-to-day (-10%)')
+            elif injury_status in ('questionable', 'probable'):
+                context_notes.append(f'injury: {injury_status}')
         else:
             ctx = {}
 

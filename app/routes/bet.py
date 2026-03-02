@@ -636,14 +636,19 @@ def nba_prop_progress(espn_id):
         score = SequenceMatcher(None, target, candidate_norm).ratio()
         if target == candidate_norm:
             score = 1.0
-        elif target in candidate_norm or candidate_norm in target:
+        elif (
+            # Only boost full-name substring matches (both tokens present),
+            # not partial overlaps that could misidentify different players.
+            len(target) >= 8 and len(candidate_norm) >= 8
+            and (target in candidate_norm or candidate_norm in target)
+        ):
             score = max(score, 0.92)
         if score > best_score:
             best_score = score
             best_name = candidate_name
             best_stats = stats
 
-    if best_name is None or best_score < 0.72:
+    if best_name is None or best_score < 0.85:
         payload = {'ok': False, 'error': f'Player not found in boxscore for {player_name}'}
         _cache_payload(payload)
         return jsonify(payload), 404
@@ -1125,6 +1130,101 @@ def ocr_screenshot():
     except Exception as exc:
         logger.error("OCR processing failed: %s", exc)
         return jsonify({'error': f'OCR failed: {exc}'}), 500
+
+
+@bet.route('/bets/<int:bet_id>/edit', methods=['POST'])
+@login_required
+def edit_bet(bet_id):
+    """Edit an existing bet post-placement.
+
+    Accepts JSON. Only a safe subset of fields can be changed — those that
+    correct data-entry errors without altering the bet's identity:
+      bet_amount, american_odds, notes, outcome,
+      over_under_line, prop_line, picked_team
+
+    Returns JSON {success, message} or {error}.
+    """
+    found_bet = Bet.query.get_or_404(bet_id)
+    if found_bet.user_id != current_user.id:
+        return jsonify({'error': 'Permission denied'}), 403
+
+    data = request.get_json(silent=True) or {}
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    EDITABLE_FIELDS = {
+        'bet_amount', 'american_odds', 'notes',
+        'outcome', 'over_under_line', 'prop_line', 'picked_team',
+    }
+    unknown = set(data.keys()) - EDITABLE_FIELDS
+    if unknown:
+        return jsonify({'error': f'Cannot edit field(s): {", ".join(sorted(unknown))}'}), 400
+
+    changes = []
+
+    if 'bet_amount' in data:
+        try:
+            val = float(data['bet_amount'])
+            if val <= 0:
+                return jsonify({'error': 'bet_amount must be positive'}), 400
+        except (TypeError, ValueError):
+            return jsonify({'error': 'bet_amount must be a number'}), 400
+        found_bet.bet_amount = val
+        changes.append('stake')
+
+    if 'american_odds' in data:
+        if data['american_odds'] is None:
+            found_bet.american_odds = None
+        else:
+            try:
+                val = int(data['american_odds'])
+                if val == 0:
+                    return jsonify({'error': 'american_odds cannot be 0'}), 400
+            except (TypeError, ValueError):
+                return jsonify({'error': 'american_odds must be an integer'}), 400
+            found_bet.american_odds = val
+        changes.append('odds')
+
+    if 'notes' in data:
+        found_bet.notes = str(data['notes'])[:2000] if data['notes'] is not None else None
+        changes.append('notes')
+
+    if 'outcome' in data:
+        allowed_outcomes = {Outcome.WIN.value, Outcome.LOSE.value, Outcome.PENDING.value, Outcome.PUSH.value}
+        if data['outcome'] not in allowed_outcomes:
+            return jsonify({'error': f'outcome must be one of: {", ".join(sorted(allowed_outcomes))}'}), 400
+        found_bet.outcome = data['outcome']
+        changes.append('outcome')
+
+    if 'over_under_line' in data:
+        if data['over_under_line'] is None:
+            found_bet.over_under_line = None
+        else:
+            try:
+                found_bet.over_under_line = float(data['over_under_line'])
+            except (TypeError, ValueError):
+                return jsonify({'error': 'over_under_line must be a number'}), 400
+        changes.append('line')
+
+    if 'prop_line' in data:
+        if data['prop_line'] is None:
+            found_bet.prop_line = None
+        else:
+            try:
+                found_bet.prop_line = float(data['prop_line'])
+            except (TypeError, ValueError):
+                return jsonify({'error': 'prop_line must be a number'}), 400
+        changes.append('prop line')
+
+    if 'picked_team' in data:
+        found_bet.picked_team = str(data['picked_team'])[:80] if data['picked_team'] else None
+        changes.append('picked team')
+
+    if not changes:
+        return jsonify({'success': True, 'message': 'No changes made'}), 200
+
+    db.session.commit()
+    return jsonify({'success': True, 'message': f'Updated: {", ".join(changes)}'}), 200
 
 
 @bet.route('/delete_bet/<int:bet_id>', methods=['POST'])
