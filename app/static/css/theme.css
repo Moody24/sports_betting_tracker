@@ -432,10 +432,6 @@ h1, h2, h3, h4, h5, h6,
 /* ── Mobile sidebar toggle button ────────────────────────────── */
 
 .sidebar-toggle {
-  position: fixed;
-  top: 1rem;
-  left: 1rem;
-  z-index: 200;
   background: var(--bg-soft);
   border: 1px solid rgba(255,255,255,.1);
   color: var(--text-main);
@@ -445,6 +441,7 @@ h1, h2, h3, h4, h5, h6,
   line-height: 1;
   display: none;
   cursor: pointer;
+  flex-shrink: 0;
 }
 
 /* ── Sidebar overlay for mobile ──────────────────────────────── */
@@ -798,6 +795,6 @@ h1, h2, h3, h4, h5, h6,
   }
 
   .main-content {
-    padding-top: 4rem;
+    padding-top: 1.5rem;
   }
 }
