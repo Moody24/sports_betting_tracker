@@ -3386,15 +3386,15 @@ class TestSchedulerDriftJob(BaseTestCase):
             self.assertEqual(len(drift_logs), 0)  # no warning logged
 
     def test_check_model_drift_logs_warn_on_large_drift(self):
-        """check_model_drift creates JobLog warning when delta > 5%."""
+        """check_model_drift creates JobLog warning when delta > 4%."""
         from app.services import scheduler as sched
         with self.app.app_context():
             user = make_user('dm2', 'dm2@ex.com')
             db.session.add(user)
             db.session.commit()
-            # 9/10 wins → 90% rolling rate vs 55% val_accuracy → 35% drift
-            for i in range(10):
-                bet = make_bet(user.id, outcome='win' if i < 9 else 'lose',
+            # 45/50 wins → 90% rolling rate vs 55% val_accuracy → 35% drift
+            for i in range(50):
+                bet = make_bet(user.id, outcome='win' if i < 45 else 'lose',
                                match_date=datetime.now(timezone.utc))
                 db.session.add(bet)
                 db.session.flush()
@@ -3421,15 +3421,15 @@ class TestSchedulerDriftJob(BaseTestCase):
             self.assertIn('drift', warn_log.message.lower())
 
     def test_check_model_drift_no_warn_within_threshold(self):
-        """check_model_drift does not warn when delta ≤ 5%."""
+        """check_model_drift does not warn when delta ≤ 4%."""
         from app.services import scheduler as sched
         with self.app.app_context():
             user = make_user('dm3', 'dm3@ex.com')
             db.session.add(user)
             db.session.commit()
-            # 6/10 wins → 60% rolling rate vs 58% val_accuracy → 2% drift (OK)
-            for i in range(10):
-                bet = make_bet(user.id, outcome='win' if i < 6 else 'lose',
+            # 30/50 wins → 60% rolling rate vs 58% val_accuracy → 2% drift (OK)
+            for i in range(50):
+                bet = make_bet(user.id, outcome='win' if i < 30 else 'lose',
                                match_date=datetime.now(timezone.utc))
                 db.session.add(bet)
                 db.session.flush()

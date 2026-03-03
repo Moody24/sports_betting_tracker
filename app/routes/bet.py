@@ -290,6 +290,7 @@ def place_bet():
         parlay_status=parlay_status,
         parlay_pl_map=parlay_pl_map,
         filter_stats=filter_stats,
+        now_date=date_type.today(),
     )
 
 
@@ -623,15 +624,15 @@ def nba_prop_progress(espn_id):
         resp.raise_for_status()
         summary_data = resp.json()
     except Exception:
-        payload = {'ok': False, 'error': 'No boxscore data available yet'}
+        payload = {'ok': False, 'status': 'game_not_started', 'error': 'No boxscore data available yet'}
         _cache_payload(payload)
-        return jsonify(payload), 404
+        return jsonify(payload), 200
 
     boxscore = _extract_prop_boxscore(summary_data)
     if not boxscore:
-        payload = {'ok': False, 'error': 'No boxscore data available yet'}
+        payload = {'ok': False, 'status': 'game_not_started', 'error': 'No boxscore data available yet'}
         _cache_payload(payload)
-        return jsonify(payload), 404
+        return jsonify(payload), 200
 
     target = _normalize_name(player_name)
     best_name = None

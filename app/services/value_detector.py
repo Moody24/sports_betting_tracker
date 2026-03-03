@@ -4,6 +4,7 @@ Compares the projection engine's output against sportsbook lines to
 identify mispriced props and quantify the edge.
 """
 
+import json
 import logging
 import math
 import time as _time
@@ -25,7 +26,7 @@ logger = logging.getLogger(__name__)
 # Keyed by ET date string; expires after TTL so stale data never persists.
 # Multiple web-request threads share this cache within the same worker process.
 _SCORE_CACHE: dict = {}
-_SCORE_CACHE_TTL = 300  # 5 minutes
+_SCORE_CACHE_TTL = 600  # 10 minutes — pre-game props rarely change faster than this
 
 
 def _et_date_str() -> str:
@@ -354,6 +355,21 @@ class ValueDetector:
             except Exception as exc:
                 logger.error("Failed to fetch props for event %s: %s", event_id, exc)
                 props = {}
+
+            # Fallback to cached snapshot if API returned nothing (e.g. 429 rate limit)
+            if not props:
+                try:
+                    from app.models import GameSnapshot
+                    today = datetime.now(ZoneInfo("America/New_York")).date()
+                    snap = GameSnapshot.query.filter_by(
+                        espn_id=game.get('espn_id', ''), game_date=today
+                    ).first()
+                    if snap and snap.props_json:
+                        props = json.loads(snap.props_json)
+                        logger.info("PERF props_fetch event=%s using cached snapshot fallback", event_id[:8])
+                except Exception:
+                    pass
+
             elapsed = _time.perf_counter() - _t
             prop_count = sum(len(v) for v in props.values())
             logger.info("PERF props_fetch event=%s props=%d elapsed=%.2fs", event_id[:8], prop_count, elapsed)

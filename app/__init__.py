@@ -122,6 +122,12 @@ def create_app(testing=False):
     def health():
         return {'status': 'healthy'}, 200
 
+    @app.route('/favicon.ico')
+    def favicon():
+        return app.send_static_file('favicon.ico') if os.path.exists(
+            os.path.join(app.static_folder, 'favicon.ico')
+        ) else ('', 204)
+
     from app.routes.auth import auth
     from app.routes.bet import bet
     from app.routes.main import main

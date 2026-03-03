@@ -1,3 +1,7 @@
+# NOTE: Migration history has 13 files including a merge migration (c6c23cce68d8).
+# Consider squashing into a single initial migration once the schema stabilizes.
+# See: https://alembic.sqlalchemy.org/en/latest/cookbook.html#building-an-up-to-date-database-from-scratch
+
 import logging
 from logging.config import fileConfig
 
