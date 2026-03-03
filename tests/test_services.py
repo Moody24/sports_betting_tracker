@@ -5,6 +5,7 @@ Covers: feature_engine, projection_engine, context_service,
 All external API calls are mocked.
 """
 
+import json
 import os
 import sys
 import unittest
@@ -2531,7 +2532,8 @@ class TestPickQualityModel(BaseTestCase):
                 context_json=(
                     '{"projected_edge": "2.5", "back_to_back": true, '
                     '"player_last5_trend": "hot", "minutes_trend": "increasing", '
-                    '"confidence_tier": "strong", "injury_returning": false}'
+                    '"confidence_tier": "strong", "injury_returning": false, '
+                    '"opp_defense_rating": 110.5, "opp_pace": 100.2, "opp_matchup_adj": 1.05}'
                 ),
             ))
             db.session.add(PickContext(
@@ -2539,7 +2541,8 @@ class TestPickQualityModel(BaseTestCase):
                 context_json=(
                     '{"projected_edge": "bad", "back_to_back": false, '
                     '"player_last5_trend": "cold", "minutes_trend": "decreasing", '
-                    '"confidence_tier": "slight", "injury_returning": true}'
+                    '"confidence_tier": "slight", "injury_returning": true, '
+                    '"opp_defense_rating": 108.0, "opp_pace": 98.5, "opp_matchup_adj": 0.95}'
                 ),
             ))
             db.session.commit()
@@ -3423,6 +3426,9 @@ class TestSchedulerDriftJob(BaseTestCase):
     def test_check_model_drift_no_warn_within_threshold(self):
         """check_model_drift does not warn when delta ≤ 4%."""
         from app.services import scheduler as sched
+        clean_ctx = json.dumps({
+            'opp_defense_rating': 110.0, 'opp_pace': 99.5, 'opp_matchup_adj': 1.02,
+        })
         with self.app.app_context():
             user = make_user('dm3', 'dm3@ex.com')
             db.session.add(user)
@@ -3433,7 +3439,7 @@ class TestSchedulerDriftJob(BaseTestCase):
                                match_date=datetime.now(timezone.utc))
                 db.session.add(bet)
                 db.session.flush()
-                db.session.add(PickContext(bet_id=bet.id, context_json='{}'))
+                db.session.add(PickContext(bet_id=bet.id, context_json=clean_ctx))
             db.session.add(ModelMetadata(
                 model_name='pick_quality_nba',
                 model_type='xgboost_classifier',

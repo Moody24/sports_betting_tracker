@@ -262,7 +262,12 @@ def _capture_todays_snapshots(prefetch_props: bool = True):
 
 
 def _build_auto_pick_context(bet_obj, score: dict) -> dict:
-    """Build context payload for auto-generated player prop bets."""
+    """Build context payload for auto-generated player prop bets.
+
+    Extracts opponent and team names from the scored prop dict so that
+    matchup features (defense rating, pace, back-to-back, etc.) are
+    populated instead of being zeroed out.
+    """
     from app.services.stats_service import find_player_id
     from app.services.feature_engine import build_pick_context_features
 
@@ -277,6 +282,15 @@ def _build_auto_pick_context(bet_obj, score: dict) -> dict:
     elif bet_obj.bet_type == 'under':
         projected_edge = score.get('edge_under', projected_edge)
 
+    # Extract real opponent/team context from the scored prop so that
+    # matchup features are populated — previously these were always empty,
+    # producing zeroed-out defense/pace/B2B features that polluted Model 2.
+    home_team = str(score.get('home_team') or '')
+    away_team = str(score.get('away_team') or '')
+    player_team = str(score.get('player_team') or '')
+    is_home = bool(score.get('is_home', True))
+    opponent_name = away_team if is_home else home_team
+
     return build_pick_context_features(
         player_name=bet_obj.player_name or '',
         player_id=str(player_id),
@@ -286,9 +300,9 @@ def _build_auto_pick_context(bet_obj, score: dict) -> dict:
         projected_stat=float(score.get('projection', 0.0) or 0.0),
         projected_edge=float(projected_edge or 0.0),
         confidence_tier=score.get('confidence_tier', 'no_edge'),
-        opponent_name='',
-        team_name='',
-        is_home=True,
+        opponent_name=opponent_name,
+        team_name=player_team,
+        is_home=is_home,
     )
 
 
@@ -540,6 +554,17 @@ def bootstrap_pick_quality_examples(target_resolved: int = 220, max_logs: int = 
             else:
                 tier = 'slight'
 
+            # Extract opponent abbreviation from matchup string (e.g. "LAL vs. BOS"
+            # or "LAL @ BOS") so bootstrap rows get real matchup context instead of
+            # zeroed-out features that pollute Model 2 training.
+            matchup = log.matchup or ''
+            is_home = (log.home_away or '').lower() == 'home'
+            opponent_abbr = ''
+            if ' vs. ' in matchup:
+                opponent_abbr = matchup.split(' vs. ', 1)[1].strip()
+            elif ' @ ' in matchup:
+                opponent_abbr = matchup.split(' @ ', 1)[1].strip()
+
             context = build_pick_context_features(
                 player_name=log.player_name,
                 player_id=str(log.player_id),
@@ -549,9 +574,9 @@ def bootstrap_pick_quality_examples(target_resolved: int = 220, max_logs: int = 
                 projected_stat=float(round(projected_stat, 2)),
                 projected_edge=float(round(projected_edge, 4)),
                 confidence_tier=tier,
-                opponent_name='',
-                team_name='',
-                is_home=(log.home_away or '').lower() == 'home',
+                opponent_name=opponent_abbr,
+                team_name=str(log.team_abbr or ''),
+                is_home=is_home,
             )
 
             bet_obj = Bet(
@@ -697,16 +722,20 @@ def retrain_models():
 
 
 def check_model_drift():
-    """Check 30-day rolling win-rate against model val_accuracy; log warn if drift > 5%.
+    """Check 30-day rolling win-rate against model val_accuracy; log warn if drift > 4%.
 
     Excludes AUTO_BOOTSTRAP_HIDDEN synthetic bets from the comparison — those rows are
     part of the model's own training set, so including them would make the delta circular.
     Only real bets (manual + real auto picks) are compared against val_accuracy.
+
+    Also reports training-data pollution ratio so drift can be attributed to data
+    quality issues rather than model degradation.
     """
     app = _get_app()
     with app.app_context():
         from app import db
         from app.models import Bet, JobLog, ModelMetadata, PickContext
+        from app.services.pick_quality_model import _is_polluted_context
 
         cutoff = datetime.now(timezone.utc) - timedelta(days=30)
         resolved = (
@@ -733,6 +762,24 @@ def check_model_drift():
         wins = sum(1 for b, _ in resolved if b.outcome == 'win')
         rolling_rate = wins / len(resolved)
 
+        # Check training-data pollution ratio
+        all_training = (
+            db.session.query(Bet, PickContext)
+            .join(PickContext, Bet.id == PickContext.bet_id)
+            .filter(Bet.outcome.in_(['win', 'lose']))
+            .all()
+        )
+        polluted = 0
+        for _, pc in all_training:
+            try:
+                ctx = json.loads(pc.context_json) if pc.context_json else {}
+            except (ValueError, TypeError):
+                polluted += 1
+                continue
+            if _is_polluted_context(ctx):
+                polluted += 1
+        pollution_ratio = polluted / max(len(all_training), 1)
+
         # Calibration: compare average predicted edge to actual win rate
         avg_edge = 0.0
         edge_count = 0
@@ -754,15 +801,24 @@ def check_model_drift():
         delta = rolling_rate - pq_model.val_accuracy
         logger.info(
             "Drift check: rolling_rate=%.3f val_accuracy=%.3f delta=%+.3f "
-            "avg_edge=%.3f resolved=%d",
-            rolling_rate, pq_model.val_accuracy, delta, avg_edge, len(resolved),
+            "avg_edge=%.3f resolved=%d pollution_ratio=%.1f%%",
+            rolling_rate, pq_model.val_accuracy, delta, avg_edge,
+            len(resolved), pollution_ratio * 100,
         )
 
-        if abs(delta) > 0.04:
-            warning_msg = (
-                f"Model drift detected: rolling_win_rate={rolling_rate:.3f}, "
-                f"val_accuracy={pq_model.val_accuracy:.3f}, delta={delta:+.3f}"
-            )
+        if abs(delta) > 0.04 or pollution_ratio > 0.3:
+            parts = []
+            if abs(delta) > 0.04:
+                parts.append(
+                    f"rolling_win_rate={rolling_rate:.3f}, "
+                    f"val_accuracy={pq_model.val_accuracy:.3f}, delta={delta:+.3f}"
+                )
+            if pollution_ratio > 0.3:
+                parts.append(
+                    f"training_pollution={pollution_ratio:.0%} "
+                    f"({polluted}/{len(all_training)} rows have zeroed matchup context)"
+                )
+            warning_msg = "Model drift detected: " + "; ".join(parts)
             logger.warning(warning_msg)
             now = datetime.now(timezone.utc)
             db.session.add(JobLog(
