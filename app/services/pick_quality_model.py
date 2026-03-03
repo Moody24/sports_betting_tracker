@@ -55,8 +55,26 @@ def _model_name(user_id: int | None) -> str:
     return f'pick_quality_nba_user_{int(user_id)}'
 
 
-def _build_training_data(user_id: int | None = None):
+def _is_polluted_context(ctx: dict) -> bool:
+    """Detect PickContext rows with missing/zeroed matchup data.
+
+    Bootstrap and early auto-pick rows were generated with empty opponent_name
+    and team_name, producing zeros for all matchup features.  Including these
+    rows in training teaches the model to ignore matchup signals entirely and
+    is the primary driver of model drift.
+    """
+    matchup_keys = ('opp_defense_rating', 'opp_pace', 'opp_matchup_adj')
+    zeroed = sum(1 for k in matchup_keys if float(ctx.get(k, 0) or 0) == 0)
+    return zeroed == len(matchup_keys)
+
+
+def _build_training_data(user_id: int | None = None, include_bootstrap: bool = False):
     """Build training data from resolved bets that have PickContext.
+
+    By default, excludes AUTO_BOOTSTRAP_HIDDEN synthetic bets and rows with
+    polluted (all-zero) matchup context — these are the primary sources of
+    model drift.  Pass ``include_bootstrap=True`` only if you explicitly want
+    the synthetic rows (e.g. when real data is still sparse).
 
     Returns (features_list, targets) or (None, None) if insufficient data.
     """
@@ -68,6 +86,10 @@ def _build_training_data(user_id: int | None = None):
     )
     if user_id is not None:
         query = query.filter(Bet.user_id == int(user_id))
+    if not include_bootstrap:
+        query = query.filter(
+            db.or_(Bet.notes.is_(None), ~Bet.notes.like('AUTO_BOOTSTRAP_HIDDEN%'))
+        )
     resolved = query.all()
 
     if len(resolved) < MIN_RESOLVED_PICKS:
@@ -79,11 +101,19 @@ def _build_training_data(user_id: int | None = None):
 
     features_list = []
     targets = []
+    skipped_polluted = 0
 
     for bet_obj, pick_ctx in resolved:
         try:
             ctx = json.loads(pick_ctx.context_json) if pick_ctx.context_json else {}
         except (ValueError, TypeError):
+            continue
+
+        # Skip rows with polluted (all-zero) matchup context — these were
+        # generated without opponent/team info and would teach the model to
+        # ignore the most predictive features.
+        if _is_polluted_context(ctx):
+            skipped_polluted += 1
             continue
 
         features = {}
@@ -105,6 +135,12 @@ def _build_training_data(user_id: int | None = None):
 
         features_list.append(features)
         targets.append(1 if bet_obj.outcome == 'win' else 0)
+
+    if skipped_polluted:
+        logger.info(
+            "Model 2 training: skipped %d rows with polluted (all-zero) matchup context",
+            skipped_polluted,
+        )
 
     if not features_list:
         return None, None

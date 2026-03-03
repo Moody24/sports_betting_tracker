@@ -341,12 +341,19 @@ class TestPickQualityModel(BaseTestCase):
             user = make_user()
             db.session.add(user)
             db.session.commit()
+            # Include real matchup context so rows aren't filtered as polluted
+            clean_ctx = {
+                'projected_stat': 10,
+                'opp_defense_rating': 110.0,
+                'opp_pace': 99.5,
+                'opp_matchup_adj': 1.02,
+            }
             for i in range(MIN_RESOLVED_PICKS + 5):
                 b = make_bet(user.id, outcome='win')
                 db.session.add(b)
                 db.session.flush()
                 # Half with invalid JSON
-                cj = 'not-json' if i % 2 == 0 else json.dumps({'projected_stat': 10})
+                cj = 'not-json' if i % 2 == 0 else json.dumps(clean_ctx)
                 db.session.add(PickContext(bet_id=b.id, context_json=cj))
             db.session.commit()
 
@@ -355,6 +362,129 @@ class TestPickQualityModel(BaseTestCase):
             self.assertIsNotNone(features)
             # The valid ones should have parsed
             self.assertGreater(len(features), 0)
+
+
+# ── pick quality pollution detection ──────────────────────────────────
+
+
+class TestPickQualityPollutionFilter(BaseTestCase):
+    """Tests for _is_polluted_context and bootstrap exclusion in Model 2 training."""
+
+    def test_is_polluted_context_all_zeros(self):
+        from app.services.pick_quality_model import _is_polluted_context
+        ctx = {'opp_defense_rating': 0, 'opp_pace': 0, 'opp_matchup_adj': 0}
+        self.assertTrue(_is_polluted_context(ctx))
+
+    def test_is_polluted_context_missing_keys(self):
+        from app.services.pick_quality_model import _is_polluted_context
+        self.assertTrue(_is_polluted_context({}))
+
+    def test_is_polluted_context_clean(self):
+        from app.services.pick_quality_model import _is_polluted_context
+        ctx = {'opp_defense_rating': 110.5, 'opp_pace': 99.0, 'opp_matchup_adj': 1.05}
+        self.assertFalse(_is_polluted_context(ctx))
+
+    def test_is_polluted_context_partial_zeros(self):
+        from app.services.pick_quality_model import _is_polluted_context
+        # Only one zero — not all three; should not be considered polluted
+        ctx = {'opp_defense_rating': 110.5, 'opp_pace': 0, 'opp_matchup_adj': 1.05}
+        self.assertFalse(_is_polluted_context(ctx))
+
+    def test_build_training_data_excludes_bootstrap(self):
+        """_build_training_data excludes AUTO_BOOTSTRAP_HIDDEN bets by default."""
+        from app.services import pick_quality_model
+        clean_ctx = json.dumps({
+            'opp_defense_rating': 110.0, 'opp_pace': 99.5, 'opp_matchup_adj': 1.02,
+        })
+        with self.app.app_context():
+            user = make_user('pqboot', 'pqboot@ex.com')
+            db.session.add(user)
+            db.session.commit()
+            # Create 3 bootstrap bets and 2 real bets
+            for i in range(3):
+                b = make_bet(user.id, outcome='win', source='auto_generated',
+                             notes='AUTO_BOOTSTRAP_HIDDEN:model2')
+                db.session.add(b)
+                db.session.flush()
+                db.session.add(PickContext(bet_id=b.id, context_json=clean_ctx))
+            for i in range(2):
+                b = make_bet(user.id, outcome='lose')
+                db.session.add(b)
+                db.session.flush()
+                db.session.add(PickContext(bet_id=b.id, context_json=clean_ctx))
+            db.session.commit()
+
+            with patch.object(pick_quality_model, 'MIN_RESOLVED_PICKS', 2):
+                features, targets = pick_quality_model._build_training_data()
+            # Should only include the 2 real bets, not the 3 bootstrap bets
+            self.assertIsNotNone(features)
+            self.assertEqual(len(features), 2)
+            self.assertEqual(targets, [0, 0])
+
+    def test_build_training_data_skips_polluted_context(self):
+        """Rows with all-zero matchup context are skipped in training."""
+        from app.services import pick_quality_model
+        polluted_ctx = json.dumps({'projected_stat': 25.0})  # no matchup keys
+        clean_ctx = json.dumps({
+            'projected_stat': 25.0,
+            'opp_defense_rating': 110.0, 'opp_pace': 99.5, 'opp_matchup_adj': 1.02,
+        })
+        with self.app.app_context():
+            user = make_user('pqpoll', 'pqpoll@ex.com')
+            db.session.add(user)
+            db.session.commit()
+            # 2 polluted + 2 clean
+            for ctx_json in [polluted_ctx, polluted_ctx, clean_ctx, clean_ctx]:
+                b = make_bet(user.id, outcome='win')
+                db.session.add(b)
+                db.session.flush()
+                db.session.add(PickContext(bet_id=b.id, context_json=ctx_json))
+            db.session.commit()
+
+            with patch.object(pick_quality_model, 'MIN_RESOLVED_PICKS', 2):
+                features, targets = pick_quality_model._build_training_data()
+            # Only the 2 clean rows should pass
+            self.assertIsNotNone(features)
+            self.assertEqual(len(features), 2)
+
+
+# ── pollution report CLI ─────────────────────────────────────────────
+
+
+class TestPollutionReportCLI(BaseTestCase):
+    """Test the pollution_report CLI command."""
+
+    def test_pollution_report_basic(self):
+        """CLI command runs without errors and reports counts."""
+        from click.testing import CliRunner
+        with self.app.app_context():
+            user = make_user('pruser', 'pruser@ex.com')
+            db.session.add(user)
+            db.session.commit()
+            # Create one clean and one polluted bet
+            b1 = make_bet(user.id, outcome='win')
+            db.session.add(b1)
+            db.session.flush()
+            db.session.add(PickContext(
+                bet_id=b1.id,
+                context_json=json.dumps({
+                    'opp_defense_rating': 110, 'opp_pace': 99, 'opp_matchup_adj': 1.0,
+                }),
+            ))
+            b2 = make_bet(user.id, outcome='lose',
+                          notes='AUTO_BOOTSTRAP_HIDDEN:model2',
+                          source='auto_generated')
+            db.session.add(b2)
+            db.session.flush()
+            db.session.add(PickContext(bet_id=b2.id, context_json='{}'))
+            db.session.commit()
+
+        runner = CliRunner()
+        result = runner.invoke(self.app.cli, ['pollution_report'])
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn('Data Pollution Report', result.output)
+        self.assertIn('Clean (real matchup data): 1', result.output)
+        self.assertIn('Polluted (zeroed matchup): 1', result.output)
 
 
 # ── scheduler drift check ─────────────────────────────────────────────

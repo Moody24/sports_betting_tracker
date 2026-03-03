@@ -684,3 +684,136 @@ def register_cli(app):
             click.echo('WATCH: mild confidence skew detected; monitor next retrains.')
         else:
             click.echo('WARN: significant over/under-confidence; recalibration advised.')
+
+    @app.cli.command('pollution_report')
+    @click.option('--fix', is_flag=True, default=False,
+                  help='Delete polluted bootstrap rows and deactivate stale models.')
+    @click.option('--retrain-after', is_flag=True, default=False,
+                  help='Retrain Model 2 after cleaning polluted rows.')
+    def cli_pollution_report(fix, retrain_after):
+        """Diagnose and optionally clean data pollution that causes model drift.
+
+        Checks for:
+        - Bootstrap synthetic bets with zeroed-out matchup context
+        - Auto-pick bets with polluted (empty opponent/team) PickContext
+        - Stale or orphaned model metadata entries
+        """
+        import json as _json
+
+        click.echo('=== Data Pollution Report ===')
+
+        # 1. Count bootstrap bets
+        bootstrap_total = (
+            Bet.query
+            .filter(Bet.notes.like('AUTO_BOOTSTRAP_HIDDEN%'))
+            .count()
+        )
+        click.echo(f'\nBootstrap synthetic bets: {bootstrap_total}')
+
+        # 2. Count pick contexts with polluted matchup features
+        all_contexts = (
+            db.session.query(Bet, PickContext)
+            .join(PickContext, Bet.id == PickContext.bet_id)
+            .filter(Bet.outcome.in_(['win', 'lose']))
+            .all()
+        )
+        polluted_count = 0
+        polluted_bootstrap = 0
+        polluted_auto = 0
+        clean_count = 0
+        matchup_keys = ('opp_defense_rating', 'opp_pace', 'opp_matchup_adj')
+
+        for bet_obj, pick_ctx in all_contexts:
+            try:
+                ctx = _json.loads(pick_ctx.context_json) if pick_ctx.context_json else {}
+            except (ValueError, TypeError):
+                polluted_count += 1
+                continue
+            zeroed = sum(1 for k in matchup_keys if float(ctx.get(k, 0) or 0) == 0)
+            if zeroed == len(matchup_keys):
+                polluted_count += 1
+                if (bet_obj.notes or '').startswith('AUTO_BOOTSTRAP_HIDDEN'):
+                    polluted_bootstrap += 1
+                elif bet_obj.source == 'auto_generated':
+                    polluted_auto += 1
+            else:
+                clean_count += 1
+
+        click.echo(f'Resolved bets with PickContext: {len(all_contexts)}')
+        click.echo(f'  Clean (real matchup data): {clean_count}')
+        click.echo(f'  Polluted (zeroed matchup): {polluted_count}')
+        click.echo(f'    - Bootstrap synthetic: {polluted_bootstrap}')
+        click.echo(f'    - Auto picks (no opponent): {polluted_auto}')
+        click.echo(f'    - Other: {polluted_count - polluted_bootstrap - polluted_auto}')
+
+        # 3. Model metadata audit
+        active_models = ModelMetadata.query.filter_by(is_active=True).all()
+        inactive_models = ModelMetadata.query.filter_by(is_active=False).count()
+        click.echo(f'\nActive models: {len(active_models)}')
+        click.echo(f'Inactive (historical) models: {inactive_models}')
+        for m in active_models:
+            click.echo(
+                f'  {m.model_name} v{m.version} | samples={m.training_samples} | '
+                f'mae={m.val_mae} | acc={m.val_accuracy} | '
+                f'trained={m.training_date.isoformat() if m.training_date else "n/a"}'
+            )
+
+        # 4. Pollution ratio
+        if len(all_contexts) > 0:
+            ratio = polluted_count / len(all_contexts)
+            click.echo(f'\nPollution ratio: {ratio:.1%}')
+            if ratio > 0.3:
+                click.echo('CRITICAL: >30% of training data is polluted — model drift is expected.')
+            elif ratio > 0.1:
+                click.echo('WARNING: >10% pollution — model accuracy degraded.')
+            else:
+                click.echo('OK: pollution level is manageable.')
+
+        if not fix:
+            click.echo('\nRun with --fix to delete polluted bootstrap rows and deactivate stale models.')
+            return
+
+        # === FIX MODE ===
+        click.echo('\n=== Cleaning Polluted Data ===')
+
+        # Delete polluted bootstrap bets (and cascaded PickContext via FK)
+        deleted_bootstrap = 0
+        bootstrap_bets = (
+            Bet.query
+            .filter(Bet.notes.like('AUTO_BOOTSTRAP_HIDDEN%'))
+            .all()
+        )
+        for bet_obj in bootstrap_bets:
+            # Check if its context is polluted
+            pc = PickContext.query.filter_by(bet_id=bet_obj.id).first()
+            if pc:
+                try:
+                    ctx = _json.loads(pc.context_json) if pc.context_json else {}
+                except (ValueError, TypeError):
+                    ctx = {}
+                zeroed = sum(1 for k in matchup_keys if float(ctx.get(k, 0) or 0) == 0)
+                if zeroed == len(matchup_keys):
+                    db.session.delete(bet_obj)
+                    deleted_bootstrap += 1
+
+        db.session.commit()
+        click.echo(f'Deleted {deleted_bootstrap} polluted bootstrap bets (+ cascaded PickContext).')
+
+        # Deactivate stale pick-quality models trained on polluted data
+        pq_models = ModelMetadata.query.filter_by(
+            model_name='pick_quality_nba', is_active=True,
+        ).all()
+        deactivated = 0
+        for m in pq_models:
+            m.is_active = False
+            deactivated += 1
+        db.session.commit()
+        click.echo(f'Deactivated {deactivated} pick_quality_nba model(s) trained on polluted data.')
+
+        if retrain_after:
+            from app.services.pick_quality_model import train_pick_quality_model
+            click.echo('Retraining Model 2 on clean data...')
+            result = train_pick_quality_model()
+            click.echo(f'Retrain result: {result}')
+
+        click.echo('Done.')
