@@ -2129,10 +2129,14 @@ class TestMLModel(BaseTestCase):
                 {'stat_type': 'player_rebounds', 'mae': 2.0, 'train_samples': 10, 'val_samples': 2, 'model_path': '/tmp/a'},
                 {'stat_type': 'player_assists', 'mae': 1.0, 'train_samples': 10, 'val_samples': 2, 'model_path': '/tmp/b'},
                 {'stat_type': 'player_threes', 'mae': 0.8, 'train_samples': 10, 'val_samples': 2, 'model_path': '/tmp/c'},
+                {'stat_type': 'player_steals', 'mae': 0.3, 'train_samples': 10, 'val_samples': 2, 'model_path': '/tmp/d'},
+                {'stat_type': 'player_blocks', 'mae': 0.4, 'train_samples': 10, 'val_samples': 2, 'model_path': '/tmp/e'},
             ]):
                 out = ml_model.retrain_all_models()
             self.assertIn('player_points', out)
             self.assertIn('player_threes', out)
+            self.assertIn('player_steals', out)
+            self.assertIn('player_blocks', out)
 
             db.session.add(ModelMetadata(
                 model_name='projection_player_points',
@@ -2476,7 +2480,7 @@ class TestScheduler(BaseTestCase):
                 with patch.object(scheduler_module, '_acquire_scheduler_lock', return_value=True):
                     scheduler_module.init_scheduler(self.app)
         self.assertTrue(fake.started)
-        self.assertEqual(len(fake.jobs), 8)
+        self.assertEqual(len(fake.jobs), 9)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -2942,6 +2946,539 @@ class TestHealthEndpoint(BaseTestCase):
             data = resp.get_json()
             self.assertEqual(data['status'], 'unhealthy')
             self.assertEqual(data['database'], 'disconnected')
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Unit 1: ValueDetector Model 2 integration
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestValueDetectorModel2Integration(BaseTestCase):
+    """Tests for Model 2 integration in score_prop()."""
+
+    def _make_engine_with_proj(self, projection=25.0, std_dev=4.0, games=20,
+                                confidence='medium', z_score=0.0, context_notes=None):
+        engine = MagicMock()
+        engine.project_stat.return_value = {
+            'projection': projection,
+            'std_dev': std_dev,
+            'games_played': games,
+            'confidence': confidence,
+            'context_notes': context_notes or [],
+            'z_score': z_score,
+            'projection_source': 'heuristic',
+            'breakdown': {'season_avg': projection},
+        }
+        return engine
+
+    def test_score_prop_returns_win_probability_key(self):
+        """score_prop always returns win_probability (None when Model 2 unavailable)."""
+        from app.services.value_detector import ValueDetector
+        engine = self._make_engine_with_proj()
+        detector = ValueDetector(engine=engine)
+        with self.app.app_context():
+            with patch('app.services.pick_quality_model.predict_pick_quality',
+                       side_effect=Exception('no model')):
+                result = detector.score_prop(
+                    'LeBron James', 'player_points', 24.5, -110, -110,
+                )
+        # win_probability is None when Model 2 is unavailable (exception swallowed)
+        self.assertIn('win_probability', result)
+        self.assertIn('pick_quality_recommendation', result)
+        self.assertIsNone(result['win_probability'])
+        self.assertEqual(result['pick_quality_recommendation'], 'no_model')
+
+    def test_score_prop_model2_downgrades_moderate_to_slight(self):
+        """confidence_tier is downgraded from moderate to slight when win_prob < 0.42."""
+        from app.services.value_detector import ValueDetector
+        # Use confidence='low' so even large edges don't become 'strong'
+        # Then edge lands in 'moderate' range
+        engine = self._make_engine_with_proj(projection=25.0, games=20, confidence='low')
+        detector = ValueDetector(engine=engine)
+
+        fake_quality = {
+            'win_probability': 0.35,
+            'recommendation': 'skip',
+            'red_flags': [],
+            'model_version': 'v1',
+        }
+        with self.app.app_context():
+            with patch('app.services.pick_quality_model.predict_pick_quality',
+                       return_value=fake_quality):
+                result = detector.score_prop(
+                    'LeBron James', 'player_points', 22.5, -110, -110,
+                )
+        # With confidence='low' (not in STRONG_CONFIDENCE_LEVELS), the tier is 'moderate'
+        # Model 2 downgrades 'moderate' to 'slight' because win_prob < 0.42
+        self.assertEqual(result['win_probability'], 0.35)
+        self.assertEqual(result['pick_quality_recommendation'], 'skip')
+        # The tier should have been downgraded from moderate to slight
+        self.assertIn(result['confidence_tier'], ('slight', 'no_edge'))
+
+    def test_score_prop_model2_adds_quality_note_high_prob(self):
+        """High win_prob adds ML quality context note."""
+        from app.services.value_detector import ValueDetector
+        engine = self._make_engine_with_proj(projection=28.0, games=20, confidence='high')
+        detector = ValueDetector(engine=engine)
+
+        fake_quality = {
+            'win_probability': 0.72,
+            'recommendation': 'take_it',
+            'red_flags': [],
+            'model_version': 'v1',
+        }
+        with self.app.app_context():
+            with patch('app.services.pick_quality_model.predict_pick_quality',
+                       return_value=fake_quality):
+                result = detector.score_prop(
+                    'LeBron James', 'player_points', 20.5, -110, -110,
+                )
+        self.assertEqual(result['win_probability'], 0.72)
+        self.assertTrue(any('ML quality' in n for n in result['context_notes']))
+
+    def test_score_prop_model2_adds_caution_note_low_prob(self):
+        """Low win_prob adds ML caution context note."""
+        from app.services.value_detector import ValueDetector
+        engine = self._make_engine_with_proj(projection=22.0, games=20, confidence='medium')
+        detector = ValueDetector(engine=engine)
+
+        fake_quality = {
+            'win_probability': 0.30,
+            'recommendation': 'skip',
+            'red_flags': ['high variance'],
+            'model_version': 'v1',
+        }
+        with self.app.app_context():
+            with patch('app.services.pick_quality_model.predict_pick_quality',
+                       return_value=fake_quality):
+                result = detector.score_prop(
+                    'LeBron James', 'player_points', 22.5, -110, -110,
+                )
+        self.assertEqual(result['win_probability'], 0.30)
+        self.assertTrue(any('ML caution' in n for n in result['context_notes']))
+
+    def test_score_prop_b2b_detected_from_context_notes(self):
+        """B2B flag is correctly inferred from projection context_notes."""
+        from app.services.value_detector import ValueDetector
+        engine = self._make_engine_with_proj(
+            projection=22.0, games=20, confidence='medium',
+            context_notes=['back-to-back (-8%)', 'away game (-3%)']
+        )
+        detector = ValueDetector(engine=engine)
+
+        captured_ctx = {}
+
+        def capture_ctx(ctx, **kwargs):
+            captured_ctx.update(ctx)
+            return {'win_probability': 0.55, 'recommendation': 'caution', 'red_flags': []}
+
+        with self.app.app_context():
+            with patch('app.services.pick_quality_model.predict_pick_quality',
+                       side_effect=capture_ctx):
+                detector.score_prop('LeBron James', 'player_points', 22.5, -110, -110)
+
+        self.assertEqual(captured_ctx.get('back_to_back'), 1)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Unit 2: Model 2 calibration + cold-start
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestPickQualityModelCalibration(BaseTestCase):
+    """Tests for calibration, cold-start threshold, and local fallback."""
+
+    def test_min_resolved_picks_is_100(self):
+        from app.services import pick_quality_model
+        self.assertEqual(pick_quality_model.MIN_RESOLVED_PICKS, 100)
+
+    def test_find_local_model_fallback_no_files(self):
+        """Returns None when no local model files exist."""
+        from app.services.pick_quality_model import _find_local_model_fallback
+        with patch('glob.glob', return_value=[]):
+            result = _find_local_model_fallback('pick_quality_nba')
+        self.assertIsNone(result)
+
+    def test_find_local_model_fallback_returns_latest_pkl(self):
+        """Returns the most recent .pkl file when available."""
+        from app.services.pick_quality_model import _find_local_model_fallback
+        fake_files = ['/models/pick_quality_nba_2026-02-28.pkl']
+        with patch('glob.glob', return_value=fake_files):
+            result = _find_local_model_fallback('pick_quality_nba')
+        self.assertEqual(result, fake_files[0])
+
+    def test_find_local_model_fallback_falls_back_to_json(self):
+        """Falls back to .json when no .pkl exists."""
+        from app.services.pick_quality_model import _find_local_model_fallback
+
+        def fake_glob(pattern):
+            if pattern.endswith('.pkl'):
+                return []
+            return ['/models/pick_quality_nba_2026-02-28.json']
+
+        with patch('glob.glob', side_effect=fake_glob):
+            result = _find_local_model_fallback('pick_quality_nba')
+        self.assertIsNotNone(result)
+        self.assertTrue(result.endswith('.json'))
+
+    def test_predict_uses_local_fallback_when_s3_fails(self):
+        """predict_pick_quality uses local fallback when S3 returns None."""
+        from app.services import pick_quality_model
+
+        class _FakeModel:
+            def predict_proba(self, x):
+                return [[0.4, 0.6]]
+
+        with self.app.app_context():
+            db.session.add(ModelMetadata(
+                model_name='pick_quality_nba',
+                model_type='xgboost_classifier',
+                version='s3_fail_v1',
+                file_path='s3://bucket/model.pkl',
+                training_date=datetime.now(timezone.utc),
+                training_samples=200,
+                val_accuracy=0.6,
+                is_active=True,
+                metadata_json='{"feature_names":["projected_edge","player_trend","minutes_trend","confidence_tier_num","injury_returning"]}',
+            ))
+            db.session.commit()
+
+            with patch('app.services.pick_quality_model.materialize_model_artifact',
+                       return_value=None):
+                with patch.object(pick_quality_model, '_find_local_model_fallback',
+                                  return_value='/tmp/fallback_model.pkl'):
+                    with patch('builtins.open', MagicMock()):
+                        with patch('joblib.load', return_value=_FakeModel()):
+                            result = pick_quality_model.predict_pick_quality(
+                                {'projected_edge': 0.1}
+                            )
+            # Model was loaded via fallback → win_probability should be a real prediction
+            self.assertIsNotNone(result)
+            self.assertIn('win_probability', result)
+
+    def test_predict_loads_pkl_via_joblib(self):
+        """predict_pick_quality loads .pkl files using joblib.load."""
+        from app.services import pick_quality_model
+
+        class _FakeModel:
+            def predict_proba(self, x):
+                return [[0.4, 0.6]]
+
+        fake_np = SimpleNamespace(array=lambda x: x)
+
+        with self.app.app_context():
+            db.session.add(ModelMetadata(
+                model_name='pick_quality_nba',
+                model_type='xgboost_classifier',
+                version='pkl_v1',
+                file_path='/tmp/model.pkl',
+                training_date=datetime.now(timezone.utc),
+                training_samples=200,
+                val_accuracy=0.6,
+                is_active=True,
+                metadata_json='{"feature_names":["projected_edge","player_trend","minutes_trend","confidence_tier_num","injury_returning"]}',
+            ))
+            db.session.commit()
+
+            with patch.dict(sys.modules, {'numpy': fake_np}):
+                with patch('app.services.pick_quality_model.materialize_model_artifact',
+                           return_value='/tmp/model.pkl'):
+                    with patch('joblib.load', return_value=_FakeModel()):
+                        result = pick_quality_model.predict_pick_quality(
+                            {'projected_edge': 0.1}
+                        )
+            self.assertIn('win_probability', result)
+            self.assertNotEqual(result['recommendation'], 'no_model')
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Unit 3: Model 1 steals/blocks in STAT_TYPES and ML_STAT_MAP
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestModel1StealsBocks(BaseTestCase):
+    """Tests for steals/blocks in Model 1 configuration."""
+
+    def test_stat_types_includes_steals_and_blocks(self):
+        from app.services.ml_model import STAT_TYPES
+        self.assertIn('player_steals', STAT_TYPES)
+        self.assertIn('player_blocks', STAT_TYPES)
+
+    def test_stat_key_map_includes_steals_and_blocks(self):
+        from app.services.ml_model import STAT_KEY_MAP
+        self.assertEqual(STAT_KEY_MAP['player_steals'], 'stl')
+        self.assertEqual(STAT_KEY_MAP['player_blocks'], 'blk')
+
+    def test_ml_stat_map_in_projection_engine_includes_steals_blocks(self):
+        from app.services.projection_engine import ML_STAT_MAP
+        self.assertIn('player_steals', ML_STAT_MAP)
+        self.assertIn('player_blocks', ML_STAT_MAP)
+        self.assertEqual(ML_STAT_MAP['player_steals'], 'player_steals')
+        self.assertEqual(ML_STAT_MAP['player_blocks'], 'player_blocks')
+
+    def test_train_model_metadata_includes_cv_fields(self):
+        """train_model source contains cv_mean_mae/cv_std_mae metadata keys."""
+        import inspect
+        from app.services import ml_model
+        source = inspect.getsource(ml_model.train_model)
+        self.assertIn('cv_mean_mae', source)
+        self.assertIn('cv_std_mae', source)
+        self.assertIn('TimeSeriesSplit', source)
+        self.assertIn('early_stopping_rounds', source)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Unit 4: CLI drift_report + model_status rolling win rate
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestCLIDriftReport(BaseTestCase):
+    """Tests for flask drift_report CLI command."""
+
+    def _runner(self):
+        return self.app.test_cli_runner(mix_stderr=False)
+
+    def test_drift_report_no_data(self):
+        """drift_report outputs message when no resolved bets exist."""
+        runner = self._runner()
+        result = runner.invoke(args=['drift_report'])
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn('Drift Report', result.output)
+        self.assertIn('No resolved bets', result.output)
+
+    def test_drift_report_with_bets_no_model(self):
+        """drift_report shows rolling win rate without model comparison."""
+        with self.app.app_context():
+            user = make_user('drift1', 'drift1@ex.com')
+            db.session.add(user)
+            db.session.commit()
+            for i in range(5):
+                bet = make_bet(user.id, outcome='win' if i < 3 else 'lose',
+                               match_date=datetime.now(timezone.utc))
+                db.session.add(bet)
+                db.session.flush()
+                db.session.add(PickContext(bet_id=bet.id, context_json='{}'))
+            db.session.commit()
+
+        runner = self._runner()
+        result = runner.invoke(args=['drift_report'])
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn('Rolling win rate', result.output)
+        self.assertIn('No active pick_quality_nba', result.output)
+
+    def test_drift_report_detects_drift(self):
+        """drift_report outputs DRIFT DETECTED when delta > 5%."""
+        with self.app.app_context():
+            user = make_user('drift2', 'drift2@ex.com')
+            db.session.add(user)
+            db.session.commit()
+            # 10 wins out of 10 → 100% rolling rate vs 55% model accuracy → drift
+            for i in range(10):
+                bet = make_bet(user.id, outcome='win',
+                               match_date=datetime.now(timezone.utc))
+                db.session.add(bet)
+                db.session.flush()
+                db.session.add(PickContext(bet_id=bet.id, context_json='{}'))
+            db.session.add(ModelMetadata(
+                model_name='pick_quality_nba',
+                model_type='xgboost_classifier',
+                version='drift_v1',
+                file_path='/tmp/model.json',
+                training_date=datetime.now(timezone.utc),
+                training_samples=200,
+                val_accuracy=0.55,
+                is_active=True,
+            ))
+            db.session.commit()
+
+        runner = self._runner()
+        result = runner.invoke(args=['drift_report'])
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn('DRIFT DETECTED', result.output)
+
+    def test_drift_report_no_drift(self):
+        """drift_report outputs OK when rolling rate is within 5% of val_accuracy."""
+        with self.app.app_context():
+            user = make_user('drift3', 'drift3@ex.com')
+            db.session.add(user)
+            db.session.commit()
+            # 6 wins out of 10 → 60% rolling rate vs 58% model accuracy → OK
+            for i in range(10):
+                bet = make_bet(user.id, outcome='win' if i < 6 else 'lose',
+                               match_date=datetime.now(timezone.utc))
+                db.session.add(bet)
+                db.session.flush()
+                db.session.add(PickContext(bet_id=bet.id, context_json='{}'))
+            db.session.add(ModelMetadata(
+                model_name='pick_quality_nba',
+                model_type='xgboost_classifier',
+                version='nodrift_v1',
+                file_path='/tmp/model.json',
+                training_date=datetime.now(timezone.utc),
+                training_samples=200,
+                val_accuracy=0.58,
+                is_active=True,
+            ))
+            db.session.commit()
+
+        runner = self._runner()
+        result = runner.invoke(args=['drift_report'])
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn('OK', result.output)
+
+    def test_model_status_shows_30d_rolling_rate(self):
+        """model_status includes 30-day rolling win rate section."""
+        with self.app.app_context():
+            user = make_user('ms1', 'ms1@ex.com')
+            db.session.add(user)
+            db.session.commit()
+            for i in range(4):
+                bet = make_bet(user.id, outcome='win' if i < 3 else 'lose',
+                               match_date=datetime.now(timezone.utc))
+                db.session.add(bet)
+                db.session.flush()
+                db.session.add(PickContext(bet_id=bet.id, context_json='{}'))
+            db.session.commit()
+
+        runner = self._runner()
+        result = runner.invoke(args=['model_status'])
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn('30-day Rolling Win Rate', result.output)
+        self.assertIn('Rolling win rate', result.output)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Unit 5: Scheduler drift monitoring job
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestSchedulerDriftJob(BaseTestCase):
+    """Tests for check_model_drift() scheduler function."""
+
+    def test_check_model_drift_no_data(self):
+        """check_model_drift logs info and returns when no resolved bets."""
+        from app.services import scheduler as sched
+        with self.app.app_context():
+            with patch.object(sched, '_get_app', return_value=self.app):
+                sched.check_model_drift()  # should not raise
+        # No JobLog entries created (no drift to report)
+        with self.app.app_context():
+            drift_logs = JobLog.query.filter_by(job_name='drift_check').all()
+            self.assertEqual(len(drift_logs), 0)
+
+    def test_check_model_drift_no_model_metadata(self):
+        """check_model_drift logs info when no active model exists."""
+        from app.services import scheduler as sched
+        with self.app.app_context():
+            user = make_user('dm1', 'dm1@ex.com')
+            db.session.add(user)
+            db.session.commit()
+            for i in range(5):
+                bet = make_bet(user.id, outcome='win' if i < 3 else 'lose',
+                               match_date=datetime.now(timezone.utc))
+                db.session.add(bet)
+                db.session.flush()
+                db.session.add(PickContext(bet_id=bet.id, context_json='{}'))
+            db.session.commit()
+
+        with self.app.app_context():
+            with patch.object(sched, '_get_app', return_value=self.app):
+                sched.check_model_drift()
+
+        with self.app.app_context():
+            drift_logs = JobLog.query.filter_by(job_name='drift_check').all()
+            self.assertEqual(len(drift_logs), 0)  # no warning logged
+
+    def test_check_model_drift_logs_warn_on_large_drift(self):
+        """check_model_drift creates JobLog warning when delta > 5%."""
+        from app.services import scheduler as sched
+        with self.app.app_context():
+            user = make_user('dm2', 'dm2@ex.com')
+            db.session.add(user)
+            db.session.commit()
+            # 9/10 wins → 90% rolling rate vs 55% val_accuracy → 35% drift
+            for i in range(10):
+                bet = make_bet(user.id, outcome='win' if i < 9 else 'lose',
+                               match_date=datetime.now(timezone.utc))
+                db.session.add(bet)
+                db.session.flush()
+                db.session.add(PickContext(bet_id=bet.id, context_json='{}'))
+            db.session.add(ModelMetadata(
+                model_name='pick_quality_nba',
+                model_type='xgboost_classifier',
+                version='drift_sched_v1',
+                file_path='/tmp/model.json',
+                training_date=datetime.now(timezone.utc),
+                training_samples=200,
+                val_accuracy=0.55,
+                is_active=True,
+            ))
+            db.session.commit()
+
+        with self.app.app_context():
+            with patch.object(sched, '_get_app', return_value=self.app):
+                sched.check_model_drift()
+
+        with self.app.app_context():
+            warn_log = JobLog.query.filter_by(job_name='drift_check', status='warn').first()
+            self.assertIsNotNone(warn_log)
+            self.assertIn('drift', warn_log.message.lower())
+
+    def test_check_model_drift_no_warn_within_threshold(self):
+        """check_model_drift does not warn when delta ≤ 5%."""
+        from app.services import scheduler as sched
+        with self.app.app_context():
+            user = make_user('dm3', 'dm3@ex.com')
+            db.session.add(user)
+            db.session.commit()
+            # 6/10 wins → 60% rolling rate vs 58% val_accuracy → 2% drift (OK)
+            for i in range(10):
+                bet = make_bet(user.id, outcome='win' if i < 6 else 'lose',
+                               match_date=datetime.now(timezone.utc))
+                db.session.add(bet)
+                db.session.flush()
+                db.session.add(PickContext(bet_id=bet.id, context_json='{}'))
+            db.session.add(ModelMetadata(
+                model_name='pick_quality_nba',
+                model_type='xgboost_classifier',
+                version='nodrift_sched_v1',
+                file_path='/tmp/model.json',
+                training_date=datetime.now(timezone.utc),
+                training_samples=200,
+                val_accuracy=0.58,
+                is_active=True,
+            ))
+            db.session.commit()
+
+        with self.app.app_context():
+            with patch.object(sched, '_get_app', return_value=self.app):
+                sched.check_model_drift()
+
+        with self.app.app_context():
+            warn_logs = JobLog.query.filter_by(job_name='drift_check', status='warn').all()
+            self.assertEqual(len(warn_logs), 0)
+
+    def test_drift_check_job_registered_in_scheduler(self):
+        """init_scheduler registers a weekly drift_check job."""
+        from app.services import scheduler as sched_module
+
+        class FakeScheduler:
+            def __init__(self):
+                self.running = False
+                self.jobs = []
+                self.started = False
+
+            def add_job(self, func, trigger, id=None, replace_existing=None):
+                self.jobs.append(id)
+
+            def start(self):
+                self.started = True
+
+            def get_jobs(self):
+                return self.jobs
+
+        fake = FakeScheduler()
+        with patch.object(sched_module, 'scheduler', fake):
+            with patch.object(sched_module, 'CronTrigger', side_effect=lambda **kw: kw):
+                with patch.object(sched_module, '_acquire_scheduler_lock', return_value=True):
+                    sched_module.init_scheduler(self.app)
+
+        self.assertIn('drift_check', fake.jobs)
 
 
 if __name__ == '__main__':

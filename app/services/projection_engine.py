@@ -47,6 +47,8 @@ ML_STAT_MAP = {
     'player_rebounds': 'player_rebounds',
     'player_assists': 'player_assists',
     'player_threes': 'player_threes',
+    'player_steals': 'player_steals',
+    'player_blocks': 'player_blocks',
 }
 
 

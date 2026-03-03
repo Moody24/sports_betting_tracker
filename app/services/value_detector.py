@@ -14,6 +14,7 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 
 from app.models import PlayerGameLog
+from app.services.pick_quality_model import predict_pick_quality
 from app.services.projection_engine import ProjectionEngine
 from app.services.context_service import is_player_available
 from app.services.stats_service import find_player_id, get_cached_logs
@@ -200,6 +201,49 @@ class ValueDetector:
         else:
             confidence_tier = 'no_edge'
 
+        # Model 2 (pick quality) enhancement
+        context_notes = list(proj.get('context_notes', []))
+        win_probability = None
+        pick_quality_recommendation = 'no_model'
+        try:
+            b2b = any('back-to-back' in note for note in context_notes)
+            z = proj.get('z_score', 0)
+            trend_str = 'hot' if z > 1.5 else ('cold' if z < -1.5 else 'neutral')
+            qctx = {
+                'projected_stat': projection,
+                'projected_edge': edge,
+                'model1_vs_line_diff': projection - line,
+                'player_variance': proj.get('std_dev', 5),
+                'player_games_this_season': proj.get('games_played', 0),
+                'player_hit_rate_vs_line': 0.5,
+                'opp_defense_rating': 110,
+                'opp_pace': 100,
+                'opp_matchup_adj': 1.0,
+                'back_to_back': int(b2b),
+                'home_game': int(is_home),
+                'days_rest': 2,
+                'prop_line': line,
+                'american_odds': recommended_odds,
+                'line_vs_season_avg': projection - proj.get('breakdown', {}).get('season_avg', projection),
+                'player_last5_trend': trend_str,
+                'minutes_trend': 'stable',
+                'confidence_tier': confidence_tier,
+                'injury_returning': 0,
+            }
+            quality = predict_pick_quality(qctx)
+            win_prob = quality.get('win_probability', 0.5)
+            win_probability = round(win_prob, 3)
+            pick_quality_recommendation = quality.get('recommendation', 'no_model')
+            # Downgrade moderate → slight if model says <42% win probability
+            if win_prob < 0.42 and confidence_tier == 'moderate':
+                confidence_tier = 'slight'
+            if win_prob >= 0.60:
+                context_notes.append(f'ML quality: {win_prob:.0%} win prob')
+            elif win_prob < 0.40:
+                context_notes.append(f'ML caution: {win_prob:.0%} win prob')
+        except Exception:
+            pass  # Model 2 unavailable — degrade gracefully
+
         return {
             'player': player_name,
             'prop_type': prop_type,
@@ -215,7 +259,7 @@ class ValueDetector:
             'model_prob_under': round(model_prob_under, 4),
             'book_prob_over': round(book_prob_over, 4),
             'book_prob_under': round(book_prob_under, 4),
-            'context_notes': proj.get('context_notes', []),
+            'context_notes': context_notes,
             'std_dev': round(std_dev, 2),
             'z_score': proj.get('z_score', 0),
             'games_played': games_played,
@@ -223,6 +267,8 @@ class ValueDetector:
             'projection_source': proj.get('projection_source', 'heuristic'),
             'breakdown': proj.get('breakdown', {}),
             'game_id': game_id,
+            'win_probability': win_probability,
+            'pick_quality_recommendation': pick_quality_recommendation,
         }
 
     def _model_prob_over(self, projection: float, line: float, std_dev: float) -> float:

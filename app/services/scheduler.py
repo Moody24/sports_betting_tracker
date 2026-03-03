@@ -695,6 +695,58 @@ def retrain_models():
         logger.info("Pick quality model retrain: %s", pq_result)
 
 
+def check_model_drift():
+    """Check 30-day rolling win-rate against model val_accuracy; log warn if drift > 5%."""
+    app = _get_app()
+    with app.app_context():
+        from app import db
+        from app.models import Bet, JobLog, ModelMetadata, PickContext
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+        resolved = (
+            db.session.query(Bet, PickContext)
+            .join(PickContext, Bet.id == PickContext.bet_id)
+            .filter(Bet.outcome.in_(['win', 'lose']))
+            .filter(Bet.match_date >= cutoff)
+            .all()
+        )
+        if not resolved:
+            logger.info("Drift check: no resolved bets with context in last 30 days.")
+            return
+
+        wins = sum(1 for b, _ in resolved if b.outcome == 'win')
+        rolling_rate = wins / len(resolved)
+
+        pq_model = ModelMetadata.query.filter_by(
+            model_name='pick_quality_nba', is_active=True,
+        ).first()
+        if not pq_model or not pq_model.val_accuracy:
+            logger.info("Drift check: no active pick_quality_nba model for comparison.")
+            return
+
+        delta = rolling_rate - pq_model.val_accuracy
+        logger.info(
+            "Drift check: rolling_rate=%.3f val_accuracy=%.3f delta=%+.3f resolved=%d",
+            rolling_rate, pq_model.val_accuracy, delta, len(resolved),
+        )
+
+        if abs(delta) > 0.05:
+            warning_msg = (
+                f"Model drift detected: rolling_win_rate={rolling_rate:.3f}, "
+                f"val_accuracy={pq_model.val_accuracy:.3f}, delta={delta:+.3f}"
+            )
+            logger.warning(warning_msg)
+            now = datetime.now(timezone.utc)
+            db.session.add(JobLog(
+                job_name='drift_check',
+                started_at=now,
+                finished_at=now,
+                status='warn',
+                message=warning_msg[:500],
+            ))
+            db.session.commit()
+
+
 def init_scheduler(app):
     """Register all scheduled jobs.  Called once from create_app()."""
     global _scheduler_app
@@ -768,6 +820,14 @@ def init_scheduler(app):
         lambda: _log_job('retrain', retrain_models),
         CronTrigger(hour=10, minute=30, timezone=APP_TIMEZONE),
         id='retrain',
+        replace_existing=True,
+    )
+
+    # Weekly drift monitoring (Monday 9:00 AM ET)
+    scheduler.add_job(
+        lambda: _log_job('drift_check', check_model_drift),
+        CronTrigger(day_of_week='mon', hour=9, minute=0, timezone=APP_TIMEZONE),
+        id='drift_check',
         replace_existing=True,
     )
 

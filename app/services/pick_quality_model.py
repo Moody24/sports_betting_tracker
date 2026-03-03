@@ -7,11 +7,13 @@ per-user data exists.
 Requires 200+ resolved picks before training has enough signal.
 """
 
+import glob
 import json
 import logging
 import os
 import math
 from datetime import datetime, timezone, date as date_type
+from typing import Optional
 
 from app import db
 from app.models import Bet, PickContext, ModelMetadata
@@ -20,7 +22,7 @@ from app.services.model_storage import materialize_model_artifact, persist_model
 logger = logging.getLogger(__name__)
 
 MODEL_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'ml_models')
-MIN_RESOLVED_PICKS = 200
+MIN_RESOLVED_PICKS = 100
 
 # Feature keys extracted from PickContext.context_json for training
 PICK_FEATURES = [
@@ -162,27 +164,47 @@ def train_pick_quality_model(user_id: int | None = None) -> dict:
     model.fit(
         X_train, y_train,
         eval_set=[(X_val, y_val)],
+        early_stopping_rounds=20,
         verbose=False,
     )
 
-    # Evaluate
-    y_pred = model.predict(X_val)
-    y_prob = model.predict_proba(X_val)[:, 1]
+    # Calibrate with isotonic regression on the validation set (graceful fallback)
+    calibration_method = 'none'
+    final_model = model
+    try:
+        from sklearn.calibration import CalibratedClassifierCV
+        calibrated = CalibratedClassifierCV(model, method='isotonic', cv='prefit')
+        calibrated.fit(X_val, y_val)
+        final_model = calibrated
+        calibration_method = 'isotonic'
+    except Exception as exc:
+        logger.warning("Isotonic calibration failed; using uncalibrated model: %s", exc)
+
+    # Evaluate the final model
+    y_pred = final_model.predict(X_val)
+    y_prob = final_model.predict_proba(X_val)[:, 1]
     accuracy = accuracy_score(y_val, y_pred)
     logloss = log_loss(y_val, y_prob)
 
-    # Feature importance
+    # Feature importance from base XGBoost model
     importance = dict(zip(feature_names, [float(v) for v in model.feature_importances_]))
     top_features = sorted(importance.items(), key=lambda x: x[1], reverse=True)[:10]
 
-    # Save model
+    # Save model: calibrated → joblib .pkl; uncalibrated → XGBoost .json
     os.makedirs(MODEL_DIR, exist_ok=True)
     today = date_type.today().isoformat()
     model_name = _model_name(user_id)
     file_tag = model_name.replace('pick_quality_', '')
-    filename = f"pick_quality_{file_tag}_{today}.json"
-    filepath = os.path.join(MODEL_DIR, filename)
-    model.save_model(filepath)
+    try:
+        import joblib
+        filename = f"pick_quality_{file_tag}_{today}.pkl"
+        filepath = os.path.join(MODEL_DIR, filename)
+        joblib.dump(final_model, filepath)
+    except Exception as exc:
+        logger.warning("joblib save failed; falling back to JSON: %s", exc)
+        filename = f"pick_quality_{file_tag}_{today}.json"
+        filepath = os.path.join(MODEL_DIR, filename)
+        model.save_model(filepath)
     artifact_path = persist_model_artifact(filepath, filename)
 
     # Store metadata
@@ -204,6 +226,7 @@ def train_pick_quality_model(user_id: int | None = None) -> dict:
             'val_samples': len(X_val),
             'logloss': round(logloss, 4),
             'top_features': top_features,
+            'calibration_method': calibration_method,
         }),
     )
     db.session.add(meta)
@@ -223,6 +246,17 @@ def train_pick_quality_model(user_id: int | None = None) -> dict:
         'model_path': artifact_path,
         'user_id': user_id,
     }
+
+
+def _find_local_model_fallback(model_name: str) -> Optional[str]:
+    """Find the most recent local model file when the stored path is unavailable."""
+    file_tag = model_name.replace('pick_quality_', '')
+    for ext in ('pkl', 'json'):
+        pattern = os.path.join(MODEL_DIR, f"pick_quality_{file_tag}_*.{ext}")
+        files = sorted(glob.glob(pattern), reverse=True)
+        if files:
+            return files[0]
+    return None
 
 
 def predict_pick_quality(context: dict, user_id: int | None = None) -> dict:
@@ -255,6 +289,9 @@ def predict_pick_quality(context: dict, user_id: int | None = None) -> dict:
     if not meta:
         return _no_model_result()
     local_model_path = materialize_model_artifact(meta.file_path)
+    # S3 unavailable — scan for most recent local model file
+    if not local_model_path:
+        local_model_path = _find_local_model_fallback(_model_name(user_id))
     if not local_model_path:
         return _no_model_result()
 
@@ -267,8 +304,17 @@ def predict_pick_quality(context: dict, user_id: int | None = None) -> dict:
     if not feature_names:
         return _no_model_result()
 
-    model = XGBClassifier()
-    model.load_model(local_model_path)
+    # Load model: .pkl = joblib-serialized (calibrated), .json = XGBoost native
+    if local_model_path.endswith('.pkl'):
+        try:
+            import joblib
+            model = joblib.load(local_model_path)
+        except Exception as exc:
+            logger.error("Failed to load calibrated model: %s", exc)
+            return _no_model_result()
+    else:
+        model = XGBClassifier()
+        model.load_model(local_model_path)
 
     # Build feature vector from context
     features = {}

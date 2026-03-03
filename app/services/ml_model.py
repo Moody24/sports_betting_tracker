@@ -24,13 +24,18 @@ logger = logging.getLogger(__name__)
 MODEL_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'ml_models')
 
 # Stat types we build models for
-STAT_TYPES = ['player_points', 'player_rebounds', 'player_assists', 'player_threes']
+STAT_TYPES = [
+    'player_points', 'player_rebounds', 'player_assists', 'player_threes',
+    'player_steals', 'player_blocks',
+]
 
 STAT_KEY_MAP = {
     'player_points': 'pts',
     'player_rebounds': 'reb',
     'player_assists': 'ast',
     'player_threes': 'fg3m',
+    'player_steals': 'stl',
+    'player_blocks': 'blk',
 }
 
 # Minimum training samples required
@@ -106,6 +111,7 @@ def train_model(stat_type: str) -> dict:
     try:
         from xgboost import XGBRegressor
         from sklearn.metrics import mean_absolute_error
+        from sklearn.model_selection import TimeSeriesSplit
         import numpy as np
     except ImportError:
         logger.error("xgboost or scikit-learn not installed")
@@ -120,6 +126,34 @@ def train_model(stat_type: str) -> dict:
     X = np.array([[row[2][k] for k in feature_names] for row in training_rows])
     y = np.array([row[3] for row in training_rows])
 
+    xgb_params = dict(
+        n_estimators=500,
+        max_depth=5,
+        learning_rate=0.05,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        reg_alpha=0.1,
+        reg_lambda=1.0,
+        random_state=42,
+    )
+
+    # TimeSeriesSplit CV to estimate MAE variance across time folds
+    tscv = TimeSeriesSplit(n_splits=3)
+    cv_maes = []
+    for cv_train_idx, cv_val_idx in tscv.split(X):
+        cv_model = XGBRegressor(**xgb_params)
+        cv_model.fit(
+            X[cv_train_idx], y[cv_train_idx],
+            eval_set=[(X[cv_val_idx], y[cv_val_idx])],
+            early_stopping_rounds=25,
+            verbose=False,
+        )
+        cv_preds = cv_model.predict(X[cv_val_idx])
+        cv_maes.append(mean_absolute_error(y[cv_val_idx], cv_preds))
+    cv_mean_mae = float(np.mean(cv_maes))
+    cv_std_mae = float(np.std(cv_maes))
+
+    # Final model: date-based walk-forward split
     split_method = 'date_cutoff'
     cutoff_date = None
     unique_dates = sorted({row[0] for row in training_rows if row[0] is not None})
@@ -150,16 +184,7 @@ def train_model(stat_type: str) -> dict:
     X_train, X_val = X[train_idx], X[val_idx]
     y_train, y_val = y[train_idx], y[val_idx]
 
-    model = XGBRegressor(
-        n_estimators=500,
-        max_depth=5,
-        learning_rate=0.05,
-        subsample=0.8,
-        colsample_bytree=0.8,
-        reg_alpha=0.1,
-        reg_lambda=1.0,
-        random_state=42,
-    )
+    model = XGBRegressor(**xgb_params)
 
     model.fit(
         X_train, y_train,
@@ -203,6 +228,8 @@ def train_model(stat_type: str) -> dict:
             'player_game_log_rows': player_game_log_rows,
             'split_method': split_method,
             'cutoff_date': cutoff_date.isoformat() if cutoff_date else None,
+            'cv_mean_mae': round(cv_mean_mae, 3),
+            'cv_std_mae': round(cv_std_mae, 3),
         }),
     )
     db.session.add(meta)

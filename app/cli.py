@@ -10,9 +10,11 @@ from sqlalchemy import func
 
 from app import db
 from app.models import (
+    Bet,
     InjuryReport,
     JobLog,
     ModelMetadata,
+    PickContext,
     PlayerGameLog,
     TeamDefenseSnapshot,
 )
@@ -32,6 +34,25 @@ def _parse_player_ids(raw_player_ids: str) -> list[str]:
 
 def _season_start_year(season: str) -> int:
     return int(str(season).split('-')[0])
+
+
+def _resolved_win_rate(days: int):
+    """Return (resolved_bets, wins, rate) for resolved bets with pick context in the last N days.
+
+    Returns None if there are no matching rows.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    resolved = (
+        db.session.query(Bet, PickContext)
+        .join(PickContext, Bet.id == PickContext.bet_id)
+        .filter(Bet.outcome.in_(['win', 'lose']))
+        .filter(Bet.match_date >= cutoff)
+        .all()
+    )
+    if not resolved:
+        return None
+    wins = sum(1 for b, _ in resolved if b.outcome == 'win')
+    return resolved, wins, wins / len(resolved)
 
 
 def register_cli(app):
@@ -315,6 +336,29 @@ def register_cli(app):
                 f"trained={model.training_date.isoformat() if model.training_date else 'n/a'}"
             )
 
+        # 30-day rolling win-rate vs model training accuracy
+        click.echo('\n=== 30-day Rolling Win Rate (pick quality) ===')
+        win_rate_result = _resolved_win_rate(30)
+        if win_rate_result:
+            resolved_recent, wins_30d, rolling_win_rate = win_rate_result
+            click.echo(f'Bets resolved (last 30d): {len(resolved_recent)}')
+            click.echo(f'Rolling win rate: {rolling_win_rate:.3f} ({wins_30d}/{len(resolved_recent)})')
+            pq_model = ModelMetadata.query.filter_by(
+                model_name='pick_quality_nba', is_active=True,
+            ).first()
+            if pq_model and pq_model.val_accuracy:
+                delta = rolling_win_rate - pq_model.val_accuracy
+                click.echo(
+                    f'vs model val_accuracy ({pq_model.val_accuracy:.3f}): '
+                    f'delta={delta:+.3f}'
+                )
+                if abs(delta) > 0.05:
+                    click.echo('WARN: >5% drift detected — consider retraining.')
+            else:
+                click.echo('No active pick_quality model metadata for comparison.')
+        else:
+            click.echo('No resolved bets with context in last 30 days.')
+
         click.echo('\n=== Recent JobLog entries ===')
         jobs = JobLog.query.order_by(JobLog.started_at.desc()).limit(20).all()
         if not jobs:
@@ -441,6 +485,35 @@ def register_cli(app):
                 click.echo(f'- {issue}')
         else:
             click.echo('PASS')
+
+    @app.cli.command('drift_report')
+    @click.option('--days', type=int, default=30, show_default=True, help='Rolling window in days.')
+    def cli_drift_report(days):
+        """Report rolling win-rate vs model training accuracy."""
+        click.echo(f'=== Drift Report (last {days} days) ===')
+        win_rate_result = _resolved_win_rate(days)
+        if not win_rate_result:
+            click.echo(f'No resolved bets with pick context in last {days} days.')
+            return
+
+        resolved, wins, rolling_rate = win_rate_result
+        click.echo(f'Resolved bets: {len(resolved)}')
+        click.echo(f'Rolling win rate: {rolling_rate:.3f} ({wins}/{len(resolved)})')
+
+        pq_model = ModelMetadata.query.filter_by(
+            model_name='pick_quality_nba', is_active=True,
+        ).first()
+        if pq_model and pq_model.val_accuracy:
+            delta = rolling_rate - pq_model.val_accuracy
+            click.echo(f'Model val_accuracy: {pq_model.val_accuracy:.3f}')
+            click.echo(f'Delta (rolling - val): {delta:+.3f}')
+            if abs(delta) > 0.05:
+                click.echo('VERDICT: DRIFT DETECTED — rolling accuracy has drifted >5% from training.')
+            else:
+                click.echo('VERDICT: OK — rolling accuracy within 5% of training accuracy.')
+        else:
+            click.echo('No active pick_quality_nba model found for comparison.')
+            click.echo(f'VERDICT: Rolling win rate only: {rolling_rate:.3f}')
 
     @app.cli.command('model_calibration_report')
     @click.option(
