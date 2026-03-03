@@ -59,6 +59,15 @@ def _get_odds_api_key() -> str:
     return os.getenv("ODDS_API_KEY", "")
 
 
+def _sanitize_api_error(exc: Exception) -> str:
+    """Strip the Odds API key from error messages to prevent log leakage."""
+    msg = str(exc)
+    api_key = _get_odds_api_key()
+    if api_key and api_key in msg:
+        msg = msg.replace(api_key, "***REDACTED***")
+    return msg
+
+
 # ── ESPN: live scores ────────────────────────────────────────────────
 
 
@@ -204,7 +213,7 @@ def fetch_odds_combined() -> tuple:
         resp.raise_for_status()
         data = resp.json()
     except (requests.RequestException, ValueError) as exc:
-        logger.error("Odds API (combined) fetch failed: %s", exc)
+        logger.error("Odds API (combined) fetch failed: %s", _sanitize_api_error(exc))
         return {}, {}
 
     totals_map: dict = {}
@@ -335,7 +344,7 @@ def fetch_odds_events() -> dict:
         resp.raise_for_status()
         data = resp.json()
     except (requests.RequestException, ValueError) as exc:
-        logger.error("Odds API (events) fetch failed: %s", exc)
+        logger.error("Odds API (events) fetch failed: %s", _sanitize_api_error(exc))
         return {}
 
     event_map = {}
@@ -402,7 +411,7 @@ def _fetch_upcoming_games_odds(tomorrow) -> list[dict]:
         resp.raise_for_status()
         data = resp.json()
     except (requests.RequestException, ValueError) as exc:
-        logger.error("Odds API (upcoming games) fetch failed: %s", exc)
+        logger.error("Odds API (upcoming games) fetch failed: %s", _sanitize_api_error(exc))
         return []
 
     games = []
@@ -516,7 +525,7 @@ def fetch_player_props_for_event(odds_event_id: str) -> dict:
         resp.raise_for_status()
         data = resp.json()
     except (requests.RequestException, ValueError) as exc:
-        logger.error("Odds API (player props) fetch failed for event %s: %s", odds_event_id, exc)
+        logger.error("Odds API (player props) fetch failed for event %s: %s", odds_event_id, _sanitize_api_error(exc))
         return {}
 
     props = {}

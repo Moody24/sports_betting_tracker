@@ -158,7 +158,6 @@ def train_pick_quality_model(user_id: int | None = None) -> dict:
         reg_lambda=1.5,
         scale_pos_weight=scale_pos,
         eval_metric='logloss',
-        use_label_encoder=False,
         early_stopping_rounds=20,
     )
 

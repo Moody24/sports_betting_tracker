@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import random
+import secrets
 from datetime import datetime, timezone, timedelta, time as dt_time
 from zoneinfo import ZoneInfo
 
@@ -295,7 +296,7 @@ def _ensure_autopicks_user(db, User):
     system_user = User.query.filter_by(username='__autopicks__').first()
     if system_user is None:
         system_user = User(username='__autopicks__', email='autopicks@local.invalid')
-        system_user.set_password('auto-picks-system-user')
+        system_user.set_password(secrets.token_hex(32))
         db.session.add(system_user)
         db.session.flush()
     return system_user
@@ -722,8 +723,26 @@ def check_model_drift():
             logger.info("Drift check: no resolved real bets with context in last 30 days.")
             return
 
+        if len(resolved) < 50:
+            logger.info(
+                "Drift check: only %d resolved bets in 30 days (need 50+), skipping.",
+                len(resolved),
+            )
+            return
+
         wins = sum(1 for b, _ in resolved if b.outcome == 'win')
         rolling_rate = wins / len(resolved)
+
+        # Calibration: compare average predicted edge to actual win rate
+        avg_edge = 0.0
+        edge_count = 0
+        for _, ctx in resolved:
+            pe = ctx.projected_edge
+            if pe is not None:
+                avg_edge += float(pe)
+                edge_count += 1
+        if edge_count > 0:
+            avg_edge /= edge_count
 
         pq_model = ModelMetadata.query.filter_by(
             model_name='pick_quality_nba', is_active=True,
@@ -734,11 +753,12 @@ def check_model_drift():
 
         delta = rolling_rate - pq_model.val_accuracy
         logger.info(
-            "Drift check: rolling_rate=%.3f val_accuracy=%.3f delta=%+.3f resolved=%d",
-            rolling_rate, pq_model.val_accuracy, delta, len(resolved),
+            "Drift check: rolling_rate=%.3f val_accuracy=%.3f delta=%+.3f "
+            "avg_edge=%.3f resolved=%d",
+            rolling_rate, pq_model.val_accuracy, delta, avg_edge, len(resolved),
         )
 
-        if abs(delta) > 0.05:
+        if abs(delta) > 0.04:
             warning_msg = (
                 f"Model drift detected: rolling_win_rate={rolling_rate:.3f}, "
                 f"val_accuracy={pq_model.val_accuracy:.3f}, delta={delta:+.3f}"

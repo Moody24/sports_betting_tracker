@@ -773,19 +773,20 @@ class TestBetRoutes(BaseTestCase):
         self.assertIn(b"Bet recorded successfully", resp.data)
 
     @patch("app.routes.bet.requests.get", side_effect=Exception("network error"))
-    def test_nba_prop_progress_request_exception_returns_404(self, _mock):
-        """Network error from ESPN returns 404 with error payload."""
+    def test_nba_prop_progress_request_exception_returns_200(self, _mock):
+        """Network error from ESPN returns 200 with game_not_started status."""
         self.register_and_login()
         resp = self.client.get(
             "/nba/prop-progress/game123?player=LeBron%20James&prop_type=player_points"
         )
-        self.assertEqual(resp.status_code, 404)
+        self.assertEqual(resp.status_code, 200)
         data = json.loads(resp.data)
         self.assertFalse(data["ok"])
+        self.assertEqual(data["status"], "game_not_started")
 
     @patch("app.routes.bet.requests.get")
-    def test_nba_prop_progress_empty_boxscore_returns_404(self, mock_get):
-        """ESPN response with no boxscore players returns 404."""
+    def test_nba_prop_progress_empty_boxscore_returns_200(self, mock_get):
+        """ESPN response with no boxscore players returns 200 with game_not_started."""
         self.register_and_login()
         mock_resp = mock_get.return_value
         mock_resp.raise_for_status.return_value = None
@@ -793,6 +794,7 @@ class TestBetRoutes(BaseTestCase):
         resp = self.client.get(
             "/nba/prop-progress/game123?player=LeBron%20James&prop_type=player_points"
         )
-        self.assertEqual(resp.status_code, 404)
+        self.assertEqual(resp.status_code, 200)
         data = json.loads(resp.data)
         self.assertFalse(data["ok"])
+        self.assertEqual(data["status"], "game_not_started")
