@@ -223,9 +223,11 @@ def _dedupe_logs_by_date(game_logs: list[dict]) -> list[dict]:
 
 
 def _is_postgres() -> bool:
-    """Return True when the current DB bind is PostgreSQL."""
-    bind = db.session.bind
-    return bool(bind and bind.dialect and bind.dialect.name == 'postgresql')
+    """Return True when the current DB engine is PostgreSQL."""
+    try:
+        return db.engine.dialect.name == 'postgresql'
+    except Exception:
+        return False
 
 
 def _upsert_player_logs_postgres(player_id: str, rows_dicts: list[dict], expires: datetime) -> None:
@@ -621,8 +623,8 @@ def _extract_logs_from_espn_summary(summary_data: dict, game: dict, game_date: d
 
                 resolved_player_id = find_player_id(player_name)
                 if not resolved_player_id:
-                    espn_id = athlete_info.get('id') or player_name.lower().replace(' ', '_')
-                    resolved_player_id = f"espn_{espn_id}"
+                    logger.debug("Skipping unresolved player: %s", player_name)
+                    continue
 
                 logs.append({
                     'player_id': str(resolved_player_id),
@@ -697,11 +699,15 @@ def refresh_completed_game_logs(days_back: int = 2) -> dict:
                 grouped.setdefault(str(row['player_id']), []).append(row)
 
             for pid, player_rows in grouped.items():
-                result = cache_player_logs(pid, player_rows, ttl_days=3650, commit=False)
-                inserted += result['inserted']
-                updated += result['updated']
-                if result['total'] > 0:
-                    players_upserted += 1
+                try:
+                    result = cache_player_logs(pid, player_rows, ttl_days=3650, commit=False)
+                    inserted += result['inserted']
+                    updated += result['updated']
+                    if result['total'] > 0:
+                        players_upserted += 1
+                except Exception as exc:
+                    logger.warning("Failed to cache logs for player %s: %s", pid, exc)
+                    db.session.rollback()
 
     db.session.commit()
     summary = {
@@ -716,12 +722,27 @@ def refresh_completed_game_logs(days_back: int = 2) -> dict:
 
 
 def prune_expired_cache():
-    """Remove cached game log rows whose TTL has passed."""
+    """Remove expired and unresolvable cached game log rows.
+
+    Deletes two categories of dead rows:
+    - TTL-expired rows (cache_expires in the past)
+    - espn_* pseudo-IDs inserted when find_player_id() previously failed;
+      these rows can never be used for projections and are now skipped at
+      ingest time, so any that exist from earlier runs should be removed.
+    """
     now = datetime.now(timezone.utc)
-    deleted = PlayerGameLog.query.filter(
+    expired = PlayerGameLog.query.filter(
         PlayerGameLog.cache_expires.isnot(None),
         PlayerGameLog.cache_expires < now,
     ).delete()
+
+    unresolved = PlayerGameLog.query.filter(
+        PlayerGameLog.player_id.like('espn_%'),
+    ).delete()
+
     db.session.commit()
-    logger.info("Pruned %d expired player game log cache rows", deleted)
-    return deleted
+    logger.info(
+        "Pruned %d expired and %d unresolved (espn_*) player game log rows",
+        expired, unresolved,
+    )
+    return {'expired': expired, 'unresolved': unresolved}

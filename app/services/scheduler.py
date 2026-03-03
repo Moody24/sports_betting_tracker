@@ -747,6 +747,15 @@ def check_model_drift():
             db.session.commit()
 
 
+def prune_cache():
+    """Remove expired and espn_* unresolvable rows from PlayerGameLog."""
+    app = _get_app()
+    with app.app_context():
+        from app.services.stats_service import prune_expired_cache
+        result = prune_expired_cache()
+        logger.info("Cache prune complete: %s", result)
+
+
 def init_scheduler(app):
     """Register all scheduled jobs.  Called once from create_app()."""
     global _scheduler_app
@@ -820,6 +829,14 @@ def init_scheduler(app):
         lambda: _log_job('retrain', retrain_models),
         CronTrigger(hour=10, minute=30, timezone=APP_TIMEZONE),
         id='retrain',
+        replace_existing=True,
+    )
+
+    # Nightly cache prune: expired rows + espn_* dead rows (2:00 AM ET)
+    scheduler.add_job(
+        lambda: _log_job('cache_prune', prune_cache),
+        CronTrigger(hour=2, minute=0, timezone=APP_TIMEZONE),
+        id='cache_prune',
         replace_existing=True,
     )
 

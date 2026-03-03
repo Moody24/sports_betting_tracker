@@ -486,6 +486,19 @@ def register_cli(app):
         else:
             click.echo('PASS')
 
+    @app.cli.command('prune_player_logs')
+    def cli_prune_player_logs():
+        """Delete expired and espn_* unresolvable rows from PlayerGameLog.
+
+        Safe to run at any time. Use this to clean up rows created before the
+        stat refresh was fixed to skip unresolvable players.
+        """
+        from app.services.stats_service import prune_expired_cache
+        result = prune_expired_cache()
+        click.echo(f"Pruned {result['expired']} expired rows.")
+        click.echo(f"Pruned {result['unresolved']} unresolvable espn_* rows.")
+        click.echo('Done.')
+
     @app.cli.command('drift_report')
     @click.option('--days', type=int, default=30, show_default=True, help='Rolling window in days.')
     def cli_drift_report(days):

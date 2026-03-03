@@ -279,8 +279,9 @@ class TestStatsService(BaseTestCase):
             )
             db.session.add(expired_log)
             db.session.commit()
-            deleted = prune_expired_cache()
-            self.assertEqual(deleted, 1)
+            result = prune_expired_cache()
+            self.assertEqual(result['expired'], 1)
+            self.assertEqual(result['unresolved'], 0)
 
     # -- fetch_player_game_logs --
 
@@ -2480,7 +2481,7 @@ class TestScheduler(BaseTestCase):
                 with patch.object(scheduler_module, '_acquire_scheduler_lock', return_value=True):
                     scheduler_module.init_scheduler(self.app)
         self.assertTrue(fake.started)
-        self.assertEqual(len(fake.jobs), 9)
+        self.assertEqual(len(fake.jobs), 10)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -2976,7 +2977,7 @@ class TestValueDetectorModel2Integration(BaseTestCase):
         engine = self._make_engine_with_proj()
         detector = ValueDetector(engine=engine)
         with self.app.app_context():
-            with patch('app.services.pick_quality_model.predict_pick_quality',
+            with patch('app.services.value_detector.predict_pick_quality',
                        side_effect=Exception('no model')):
                 result = detector.score_prop(
                     'LeBron James', 'player_points', 24.5, -110, -110,
@@ -3002,7 +3003,7 @@ class TestValueDetectorModel2Integration(BaseTestCase):
             'model_version': 'v1',
         }
         with self.app.app_context():
-            with patch('app.services.pick_quality_model.predict_pick_quality',
+            with patch('app.services.value_detector.predict_pick_quality',
                        return_value=fake_quality):
                 result = detector.score_prop(
                     'LeBron James', 'player_points', 22.5, -110, -110,
@@ -3027,7 +3028,7 @@ class TestValueDetectorModel2Integration(BaseTestCase):
             'model_version': 'v1',
         }
         with self.app.app_context():
-            with patch('app.services.pick_quality_model.predict_pick_quality',
+            with patch('app.services.value_detector.predict_pick_quality',
                        return_value=fake_quality):
                 result = detector.score_prop(
                     'LeBron James', 'player_points', 20.5, -110, -110,
@@ -3048,7 +3049,7 @@ class TestValueDetectorModel2Integration(BaseTestCase):
             'model_version': 'v1',
         }
         with self.app.app_context():
-            with patch('app.services.pick_quality_model.predict_pick_quality',
+            with patch('app.services.value_detector.predict_pick_quality',
                        return_value=fake_quality):
                 result = detector.score_prop(
                     'LeBron James', 'player_points', 22.5, -110, -110,
@@ -3072,7 +3073,7 @@ class TestValueDetectorModel2Integration(BaseTestCase):
             return {'win_probability': 0.55, 'recommendation': 'caution', 'red_flags': []}
 
         with self.app.app_context():
-            with patch('app.services.pick_quality_model.predict_pick_quality',
+            with patch('app.services.value_detector.predict_pick_quality',
                        side_effect=capture_ctx):
                 detector.score_prop('LeBron James', 'player_points', 22.5, -110, -110)
 
