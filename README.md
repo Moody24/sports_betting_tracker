@@ -9,13 +9,15 @@ Sports Betting Tracker is a Flask web application for recording bets, tracking o
 - Dashboard with betting history and key totals.
 - Relational data model for users, bets, and matches.
 - Database migrations with Flask-Migrate.
+- Model retraining artifacts can be stored in AWS S3.
 - Environment-based configuration via `.env`.
 
 ## Tech Stack
 
 - **Backend:** Flask, SQLAlchemy, Flask-Login, Flask-Migrate, Gunicorn
 - **Frontend:** Jinja2 templates (Bootstrap-friendly)
-- **Database:** SQLite by default (configurable through `DATABASE_URL`)
+- **Database:** Neon Postgres (via `DATABASE_URL`)
+- **Storage:** AWS S3 (for retrained model artifacts)
 - **Deployment:** Docker / Railway
 
 ## Quick Start (Local)
@@ -47,7 +49,13 @@ Sports Betting Tracker is a Flask web application for recording bets, tracking o
    ```bash
    cp .env.example .env
    ```
-   Then update values as needed (minimum expected keys include `SECRET_KEY` and `DATABASE_URL`).
+   Then update values as needed (minimum expected keys include `SECRET_KEY` and `DATABASE_URL`; add S3 vars if you store retrained model artifacts in AWS).
+   Example Neon connection string:
+   ```env
+   DATABASE_URL=postgresql://<user>:<password>@<your-neon-host>/<database>?sslmode=require
+   ```
+
+   > If your provider gives a URL that starts with `postgres://`, the app automatically rewrites it to `postgresql://` for SQLAlchemy compatibility.
 
 5. **Run database migrations**
    ```bash
@@ -74,6 +82,31 @@ SCHEDULER_ENABLED=false flask --app run.py db upgrade heads
 ```
 
 before starting Gunicorn.
+
+## Database Notes (Neon Postgres)
+
+- This project is intended to run against Neon Postgres in development and production.
+- Ensure your Neon database is reachable from your runtime environment and that SSL is enabled (`sslmode=require`).
+- Run migrations whenever the schema changes:
+  ```bash
+  flask --app run.py db upgrade heads
+  ```
+
+
+## Model Artifact Storage (AWS S3)
+
+Retrained model artifacts can be persisted to an AWS S3 bucket.
+
+Set these environment variables when using S3-backed model storage:
+
+```env
+MODEL_STORAGE=s3
+S3_MODEL_BUCKET=your-s3-bucket-name
+S3_MODEL_PREFIX=models/
+AWS_REGION=us-east-1
+```
+
+If `MODEL_STORAGE` is not `s3`, the app falls back to local filesystem paths for model artifacts.
 
 ## Deployment Notes
 
