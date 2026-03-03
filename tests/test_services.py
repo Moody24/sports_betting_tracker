@@ -3454,6 +3454,46 @@ class TestSchedulerDriftJob(BaseTestCase):
             warn_logs = JobLog.query.filter_by(job_name='drift_check', status='warn').all()
             self.assertEqual(len(warn_logs), 0)
 
+    def test_check_model_drift_excludes_bootstrap_bets(self):
+        """check_model_drift ignores AUTO_BOOTSTRAP_HIDDEN bets (synthetic training data)."""
+        from app.services import scheduler as sched
+        with self.app.app_context():
+            user = make_user('dm4', 'dm4@ex.com')
+            db.session.add(user)
+            db.session.commit()
+            # All bootstrap bets (100% wins) — would trigger drift if counted
+            for i in range(10):
+                bet = make_bet(
+                    user.id,
+                    outcome='win',
+                    source='auto_generated',
+                    notes='AUTO_BOOTSTRAP_HIDDEN:model2',
+                    match_date=datetime.now(timezone.utc),
+                )
+                db.session.add(bet)
+                db.session.flush()
+                db.session.add(PickContext(bet_id=bet.id, context_json='{}'))
+            db.session.add(ModelMetadata(
+                model_name='pick_quality_nba',
+                model_type='xgboost_classifier',
+                version='boot_test_v1',
+                file_path='/tmp/model.json',
+                training_date=datetime.now(timezone.utc),
+                training_samples=200,
+                val_accuracy=0.55,
+                is_active=True,
+            ))
+            db.session.commit()
+
+        with self.app.app_context():
+            with patch.object(sched, '_get_app', return_value=self.app):
+                sched.check_model_drift()
+
+        with self.app.app_context():
+            # No warn because bootstrap bets are excluded → no real bets to compare
+            warn_logs = JobLog.query.filter_by(job_name='drift_check', status='warn').all()
+            self.assertEqual(len(warn_logs), 0)
+
     def test_drift_check_job_registered_in_scheduler(self):
         """init_scheduler registers a weekly drift_check job."""
         from app.services import scheduler as sched_module

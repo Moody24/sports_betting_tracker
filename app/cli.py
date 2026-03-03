@@ -37,22 +37,56 @@ def _season_start_year(season: str) -> int:
 
 
 def _resolved_win_rate(days: int):
-    """Return (resolved_bets, wins, rate) for resolved bets with pick context in the last N days.
+    """Return segmented win rates for resolved bets with pick context in the last N days.
 
-    Returns None if there are no matching rows.
+    Returns a dict with keys: manual, auto, real (manual+auto), bootstrap, all.
+    Each value is (count, wins, rate) or None when that segment has no rows.
+    Returns None when there are no matching rows at all.
+
+    Segments:
+      manual    — source='manual' bets placed by a real user
+      auto      — source='auto_generated' real system picks (not bootstrap synthetic data)
+      real      — manual + auto combined; used for drift comparison vs val_accuracy
+      bootstrap — source='auto_generated' + notes starting with 'AUTO_BOOTSTRAP_HIDDEN';
+                  synthetic training data — excluded from drift comparison to avoid
+                  comparing the model against its own training set
+      all       — every resolved bet with a PickContext
     """
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-    resolved = (
+    rows = (
         db.session.query(Bet, PickContext)
         .join(PickContext, Bet.id == PickContext.bet_id)
         .filter(Bet.outcome.in_(['win', 'lose']))
         .filter(Bet.match_date >= cutoff)
         .all()
     )
-    if not resolved:
+    if not rows:
         return None
-    wins = sum(1 for b, _ in resolved if b.outcome == 'win')
-    return resolved, wins, wins / len(resolved)
+
+    def _rate(subset):
+        if not subset:
+            return None
+        wins = sum(1 for b, _ in subset if b.outcome == 'win')
+        return len(subset), wins, wins / len(subset)
+
+    manual = [(b, pc) for b, pc in rows if b.source == 'manual']
+    auto = [
+        (b, pc) for b, pc in rows
+        if b.source == 'auto_generated'
+        and not (b.notes or '').startswith('AUTO_BOOTSTRAP_HIDDEN')
+    ]
+    bootstrap = [
+        (b, pc) for b, pc in rows
+        if b.source == 'auto_generated'
+        and (b.notes or '').startswith('AUTO_BOOTSTRAP_HIDDEN')
+    ]
+    return {
+        'manual': _rate(manual),
+        'auto': _rate(auto),
+        'real': _rate(manual + auto),
+        'bootstrap': _rate(bootstrap),
+        'all': _rate(rows),
+    }
 
 
 def register_cli(app):
@@ -351,22 +385,36 @@ def register_cli(app):
         click.echo('\n=== 30-day Rolling Win Rate (pick quality) ===')
         win_rate_result = _resolved_win_rate(30)
         if win_rate_result:
-            resolved_recent, wins_30d, rolling_win_rate = win_rate_result
-            click.echo(f'Bets resolved (last 30d): {len(resolved_recent)}')
-            click.echo(f'Rolling win rate: {rolling_win_rate:.3f} ({wins_30d}/{len(resolved_recent)})')
+            def _fmt(label, seg):
+                if seg is None:
+                    click.echo(f'  {label}: no data')
+                else:
+                    count, wins, rate = seg
+                    click.echo(f'  {label}: {rate:.1%} ({wins}/{count})')
+
+            _fmt('Manual bets', win_rate_result['manual'])
+            _fmt('Auto picks (real)', win_rate_result['auto'])
+            real = win_rate_result['real']
+            if real:
+                count, wins_30d, rolling_win_rate = real
+                click.echo(f'  Rolling win rate: {rolling_win_rate:.3f} ({wins_30d}/{count})')
+            _fmt('Bootstrap synthetic', win_rate_result['bootstrap'])
+
             pq_model = ModelMetadata.query.filter_by(
                 model_name='pick_quality_nba', is_active=True,
             ).first()
-            if pq_model and pq_model.val_accuracy:
+            if real and pq_model and pq_model.val_accuracy:
                 delta = rolling_win_rate - pq_model.val_accuracy
                 click.echo(
-                    f'vs model val_accuracy ({pq_model.val_accuracy:.3f}): '
+                    f'  vs model val_accuracy ({pq_model.val_accuracy:.3f}): '
                     f'delta={delta:+.3f}'
                 )
                 if abs(delta) > 0.05:
-                    click.echo('WARN: >5% drift detected — consider retraining.')
+                    click.echo('  WARN: >5% drift detected — consider retraining.')
+            elif not real:
+                click.echo('  No real (non-bootstrap) resolved bets in last 30 days.')
             else:
-                click.echo('No active pick_quality model metadata for comparison.')
+                click.echo('  No active pick_quality model metadata for comparison.')
         else:
             click.echo('No resolved bets with context in last 30 days.')
 
@@ -513,16 +561,31 @@ def register_cli(app):
     @app.cli.command('drift_report')
     @click.option('--days', type=int, default=30, show_default=True, help='Rolling window in days.')
     def cli_drift_report(days):
-        """Report rolling win-rate vs model training accuracy."""
+        """Report rolling win-rate vs model training accuracy, segmented by bet source."""
         click.echo(f'=== Drift Report (last {days} days) ===')
         win_rate_result = _resolved_win_rate(days)
         if not win_rate_result:
             click.echo(f'No resolved bets with pick context in last {days} days.')
             return
 
-        resolved, wins, rolling_rate = win_rate_result
-        click.echo(f'Resolved bets: {len(resolved)}')
-        click.echo(f'Rolling win rate: {rolling_rate:.3f} ({wins}/{len(resolved)})')
+        def _fmt(label, seg):
+            if seg is None:
+                click.echo(f'  {label}: no data')
+            else:
+                count, wins, rate = seg
+                click.echo(f'  {label}: {rate:.1%} ({wins}/{count})')
+
+        _fmt('Manual bets', win_rate_result['manual'])
+        _fmt('Auto picks (real)', win_rate_result['auto'])
+        real = win_rate_result['real']
+        if real:
+            count, wins, rolling_rate = real
+            click.echo(f'Rolling win rate: {rolling_rate:.3f} ({wins}/{count})')
+        _fmt('Bootstrap synthetic', win_rate_result['bootstrap'])
+
+        if not real:
+            click.echo('No real (non-bootstrap) bets for drift comparison.')
+            return
 
         pq_model = ModelMetadata.query.filter_by(
             model_name='pick_quality_nba', is_active=True,

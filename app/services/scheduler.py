@@ -696,7 +696,12 @@ def retrain_models():
 
 
 def check_model_drift():
-    """Check 30-day rolling win-rate against model val_accuracy; log warn if drift > 5%."""
+    """Check 30-day rolling win-rate against model val_accuracy; log warn if drift > 5%.
+
+    Excludes AUTO_BOOTSTRAP_HIDDEN synthetic bets from the comparison — those rows are
+    part of the model's own training set, so including them would make the delta circular.
+    Only real bets (manual + real auto picks) are compared against val_accuracy.
+    """
     app = _get_app()
     with app.app_context():
         from app import db
@@ -708,10 +713,13 @@ def check_model_drift():
             .join(PickContext, Bet.id == PickContext.bet_id)
             .filter(Bet.outcome.in_(['win', 'lose']))
             .filter(Bet.match_date >= cutoff)
+            .filter(
+                db.or_(Bet.notes.is_(None), ~Bet.notes.like('AUTO_BOOTSTRAP_HIDDEN%'))
+            )
             .all()
         )
         if not resolved:
-            logger.info("Drift check: no resolved bets with context in last 30 days.")
+            logger.info("Drift check: no resolved real bets with context in last 30 days.")
             return
 
         wins = sum(1 for b, _ in resolved if b.outcome == 'win')
