@@ -94,10 +94,21 @@ def register_cli(app):
         click.echo('Done.')
 
     @app.cli.command('retrain')
-    def cli_retrain():
+    @click.option('--force', is_flag=True, default=False,
+                  help='Skip age and row-count guardrails and retrain projection models immediately.')
+    def cli_retrain(force):
         from app.services.scheduler import retrain_models
+        from app.services.pick_quality_model import train_pick_quality_model
         click.echo('Retraining models...')
-        retrain_models()
+        if force:
+            from app.services.ml_model import retrain_all_models
+            click.echo('--force: bypassing guardrails for projection models.')
+            results = retrain_all_models()
+            click.echo(f'Projection retrain: {results}')
+            pq_result = train_pick_quality_model()
+            click.echo(f'Pick quality retrain: {pq_result}')
+        else:
+            retrain_models()
         click.echo('Done.')
 
     @app.cli.command('generate-auto-picks')
