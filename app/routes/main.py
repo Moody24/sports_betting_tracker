@@ -1,4 +1,5 @@
 import logging
+import time
 from collections import defaultdict
 
 from flask import Blueprint, jsonify, render_template, request, redirect, url_for, flash
@@ -12,6 +13,11 @@ from app.models import Bet, compute_bets_net_pl
 logger = logging.getLogger(__name__)
 
 main = Blueprint('main', __name__)
+
+# Simple in-memory cache for expensive ML projections (per-process).
+# Avoids blocking dashboard rendering with ~1s+ of ML computation on every load.
+_plays_cache: dict = {'key': None, 'top_plays': [], 'best_parlay': None, 'ts': 0}
+_PLAYS_CACHE_TTL = 300  # 5 minutes
 
 
 @main.route('/ready')
@@ -56,22 +62,30 @@ def dashboard():
         .all()
     )
 
-    # ── Net P/L (needs per-bet odds calculation, but only graded bets) ─
-    units_won = current_user.net_profit_loss()
+    # Pre-compute parlay leg counts in one query to avoid N+1 in display_label
+    _attach_parlay_leg_counts(recent_bets)
+
+    # ── Graded bets: single query reused for net P/L, streak, and cumulative chart
+    graded_bets = (
+        Bet.query.filter_by(user_id=uid)
+        .filter(Bet.outcome.in_([Outcome.WIN.value, Outcome.LOSE.value, Outcome.PUSH.value]))
+        .order_by(Bet.match_date.desc())
+        .limit(200)
+        .all()
+    )
+
+    # ── Net P/L (reuse graded_bets instead of separate query) ─────────
+    units_won = compute_bets_net_pl(graded_bets)
     roi = (units_won / wagered * 100) if wagered else 0
     graded_count = wins + losses
     win_pct = (wins / graded_count * 100) if graded_count else 0
 
-    # ── Streak (only need recent graded bets until streak breaks) ─────
+    # ── Streak (walk graded_bets until streak breaks — no extra query) ─
     streak = 0
     streak_type = 'No streak'
-    streak_bets = (
-        Bet.query.filter_by(user_id=uid)
-        .filter(Bet.outcome.in_([Outcome.WIN.value, Outcome.LOSE.value]))
-        .order_by(Bet.created_at.desc())
-        .all()
-    )
-    for b in streak_bets:
+    for b in graded_bets:
+        if b.outcome == Outcome.PUSH.value:
+            continue
         if streak == 0:
             streak = 1
             streak_type = b.outcome
@@ -82,39 +96,27 @@ def dashboard():
     current_streak = f"{streak} {streak_type.title()}" if streak else 'No streak'
 
     # ── Daily P/L chart (recent bets, parlay-aware grouping) ──────────
-    # Group bets by date first, then compute parlay-aware P/L per day.
     daily_bets: dict = defaultdict(list)
     for b in recent_bets:
         daily_bets[b.match_date.strftime('%b %d')].append(b)
-    # Preserve chronological order (recent_bets is desc, so reverse keys)
     chart_labels = list(reversed(list(daily_bets.keys())))
     chart_values = [round(compute_bets_net_pl(daily_bets[lbl]), 2) for lbl in chart_labels]
 
-    # ── Cumulative P/L (last 30 graded bets, oldest first) ───────────
-    cumul_bets = (
-        Bet.query.filter_by(user_id=uid)
-        .filter(Bet.outcome.in_([Outcome.WIN.value, Outcome.LOSE.value, Outcome.PUSH.value]))
-        .order_by(Bet.match_date.desc())
-        .limit(60)  # fetch more to account for parlay legs occupying multiple slots
-        .all()
-    )
-    cumul_bets.reverse()  # oldest first
-
-    # Collapse parlay legs so each parlay is one cumulative data point.
+    # ── Cumulative P/L (reuse graded_bets, last 60 → collapse parlays) ─
+    cumul_bets = list(reversed(graded_bets[:60]))  # oldest first
     parlay_seen: set = set()
-    cumul_events: list = []  # (date_label, pl)
+    cumul_events: list = []
     for b in cumul_bets:
         if b.is_parlay and b.parlay_id:
             if b.parlay_id in parlay_seen:
                 continue
             parlay_seen.add(b.parlay_id)
-            # Gather all legs for this parlay from the current window
             legs = [x for x in cumul_bets if x.is_parlay and x.parlay_id == b.parlay_id]
             cumul_events.append((b.match_date.strftime('%b %d'), Bet.parlay_profit_loss(legs)))
         else:
             cumul_events.append((b.match_date.strftime('%b %d'), b.profit_loss()))
 
-    cumul_events = cumul_events[-30:]  # keep last 30 events
+    cumul_events = cumul_events[-30:]
     cumulative = 0.0
     cumul_labels = []
     cumul_values = []
@@ -135,7 +137,52 @@ def dashboard():
         'current_streak': current_streak,
     }
 
-    # ── Today's top plays from the analysis engine ──────────────────
+    # ── Today's top plays (cached to avoid blocking page loads) ───────
+    top_plays, best_parlay = _get_cached_plays()
+
+    return render_template(
+        'dashboard.html',
+        stats=stats,
+        recent_bets=recent_bets,
+        chart_labels=chart_labels,
+        chart_values=chart_values,
+        cumul_labels=cumul_labels,
+        cumul_values=cumul_values,
+        top_plays=top_plays,
+        best_parlay=best_parlay,
+    )
+
+
+def _attach_parlay_leg_counts(bets: list) -> None:
+    """Pre-compute parlay leg counts in one query, attaching to each bet.
+
+    Prevents an N+1 query in ``Bet.display_label`` which otherwise issues
+    a COUNT per parlay bet when ``_parlay_legs_count`` is not set.
+    """
+    parlay_ids = {b.parlay_id for b in bets if b.is_parlay and b.parlay_id}
+    if not parlay_ids:
+        return
+    counts = dict(
+        db.session.query(Bet.parlay_id, func.count(Bet.id))
+        .filter(Bet.parlay_id.in_(parlay_ids))
+        .group_by(Bet.parlay_id)
+        .all()
+    )
+    for b in bets:
+        if b.is_parlay and b.parlay_id:
+            b._parlay_legs_count = counts.get(b.parlay_id, 1)
+
+
+def _get_cached_plays() -> tuple:
+    """Return (top_plays, best_parlay) from a time-based cache.
+
+    The ML projection engine is expensive (~1s+). Caching its output for
+    5 minutes prevents it from blocking every dashboard page load.
+    """
+    now = time.time()
+    if _plays_cache['key'] == 'loaded' and (now - _plays_cache['ts']) < _PLAYS_CACHE_TTL:
+        return _plays_cache['top_plays'], _plays_cache['best_parlay']
+
     top_plays = []
     best_parlay = None
     try:
@@ -153,20 +200,11 @@ def dashboard():
             min_legs=2,
             max_legs=3,
         )
+        _plays_cache.update(key='loaded', top_plays=top_plays, best_parlay=best_parlay, ts=now)
     except Exception as exc:
         logger.debug("Top plays unavailable: %s", exc)
 
-    return render_template(
-        'dashboard.html',
-        stats=stats,
-        recent_bets=recent_bets,
-        chart_labels=chart_labels,
-        chart_values=chart_values,
-        cumul_labels=cumul_labels,
-        cumul_values=cumul_values,
-        top_plays=top_plays,
-        best_parlay=best_parlay,
-    )
+    return top_plays, best_parlay
 
 
 @main.route('/dashboard/settings', methods=['POST'])

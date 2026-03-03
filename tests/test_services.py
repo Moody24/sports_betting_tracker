@@ -2551,13 +2551,16 @@ class TestPickQualityModel(BaseTestCase):
                 features, targets = pick_quality_model._build_training_data()
 
             self.assertEqual(len(features), 2)
-            self.assertEqual(targets, [1, 0])
-            self.assertEqual(features[0]['player_trend'], 1)
-            self.assertEqual(features[0]['minutes_trend'], 1)
-            self.assertEqual(features[0]['confidence_tier_num'], 3)
-            self.assertEqual(features[0]['injury_returning'], 0)
-            self.assertEqual(features[1]['projected_edge'], 0.0)
-            self.assertEqual(features[1]['player_trend'], -1)
+            self.assertCountEqual(targets, [1, 0])
+            # Find the win and lose rows by target value (order may vary)
+            win_idx = targets.index(1)
+            lose_idx = targets.index(0)
+            self.assertEqual(features[win_idx]['player_trend'], 1)
+            self.assertEqual(features[win_idx]['minutes_trend'], 1)
+            self.assertEqual(features[win_idx]['confidence_tier_num'], 3)
+            self.assertEqual(features[win_idx]['injury_returning'], 0)
+            self.assertEqual(features[lose_idx]['projected_edge'], 0.0)
+            self.assertEqual(features[lose_idx]['player_trend'], -1)
 
     def test_get_feature_importance_returns_active_model_features(self):
         from app.services.pick_quality_model import get_feature_importance
