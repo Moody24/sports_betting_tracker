@@ -159,12 +159,12 @@ def train_pick_quality_model(user_id: int | None = None) -> dict:
         scale_pos_weight=scale_pos,
         eval_metric='logloss',
         use_label_encoder=False,
+        early_stopping_rounds=20,
     )
 
     model.fit(
         X_train, y_train,
         eval_set=[(X_val, y_val)],
-        early_stopping_rounds=20,
         verbose=False,
     )
 

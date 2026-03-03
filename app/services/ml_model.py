@@ -135,6 +135,7 @@ def train_model(stat_type: str) -> dict:
         reg_alpha=0.1,
         reg_lambda=1.0,
         random_state=42,
+        early_stopping_rounds=25,
     )
 
     # TimeSeriesSplit CV to estimate MAE variance across time folds
@@ -145,7 +146,6 @@ def train_model(stat_type: str) -> dict:
         cv_model.fit(
             X[cv_train_idx], y[cv_train_idx],
             eval_set=[(X[cv_val_idx], y[cv_val_idx])],
-            early_stopping_rounds=25,
             verbose=False,
         )
         cv_preds = cv_model.predict(X[cv_val_idx])
@@ -189,7 +189,6 @@ def train_model(stat_type: str) -> dict:
     model.fit(
         X_train, y_train,
         eval_set=[(X_val, y_val)],
-        early_stopping_rounds=25,
         verbose=False,
     )
 
