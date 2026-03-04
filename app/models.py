@@ -129,10 +129,9 @@ class Bet(db.Model):
         stake = float(self.bet_amount)
         multiplier = float(self.bonus_multiplier or 1.0)
 
-        if self.american_odds is None:
-            return round(stake * multiplier, 2)
-
-        odds = int(self.american_odds)
+        # Default to -110 (standard vig) when no odds stored.
+        # Previously returned the stake itself, which inflated net P/L.
+        odds = int(self.american_odds) if self.american_odds is not None else -110
         if odds > 0:
             profit = round(stake * odds / 100.0, 2)
         elif odds < 0:

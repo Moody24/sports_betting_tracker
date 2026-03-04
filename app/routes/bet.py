@@ -1251,6 +1251,137 @@ def delete_bet(bet_id):
     return redirect(url_for('bet.place_bet'))
 
 
+@bet.route('/quick-add', methods=['POST'])
+@login_required
+def quick_add_bet():
+    """Create a single straight bet from a dashboard top-play row."""
+    player = (request.form.get('player') or '').strip()[:100]
+    prop_type = (request.form.get('prop_type') or '').strip()[:40]
+    prop_line = request.form.get('prop_line', type=float)
+    bet_type = (request.form.get('bet_type') or 'over').strip()[:20]
+    american_odds = request.form.get('american_odds', type=int)
+    team_a = (request.form.get('team_a') or 'Away').strip()[:80]
+    team_b = (request.form.get('team_b') or 'Home').strip()[:80]
+    match_date_str = (request.form.get('match_date') or '').strip()
+    stake = request.form.get('stake', type=float)
+
+    if not stake or stake <= 0:
+        flash('Enter a stake amount.', 'danger')
+        return redirect(url_for('main.dashboard'))
+
+    try:
+        match_dt = datetime.strptime(match_date_str, '%Y-%m-%d') if match_date_str else datetime.now(timezone.utc)
+    except ValueError:
+        match_dt = datetime.now(timezone.utc)
+
+    bet_obj = Bet(
+        user_id=current_user.id,
+        team_a=team_a,
+        team_b=team_b,
+        match_date=match_dt,
+        bet_amount=stake,
+        outcome=Outcome.PENDING.value,
+        american_odds=american_odds,
+        is_parlay=False,
+        source=BetSource.NBA_PROPS.value,
+        bet_type=bet_type,
+        player_name=player or None,
+        prop_type=prop_type or None,
+        prop_line=prop_line,
+    )
+    db.session.add(bet_obj)
+    db.session.flush()
+
+    player_id = find_player_id(player) if player else None
+    if player_id:
+        projected_stat = request.form.get('projection', type=float) or 0.0
+        projected_edge = request.form.get('edge', type=float) or 0.0
+        confidence_tier = (request.form.get('confidence_tier') or 'slight').strip()
+        ctx = build_pick_context_features(
+            player_name=player,
+            player_id=str(player_id),
+            prop_type=prop_type,
+            prop_line=float(prop_line or 0),
+            american_odds=int(american_odds or -110),
+            projected_stat=projected_stat,
+            projected_edge=projected_edge,
+            confidence_tier=confidence_tier,
+            opponent_name='',
+            team_name='',
+            is_home=True,
+        )
+        db.session.add(PickContext(
+            bet_id=bet_obj.id,
+            context_json=json.dumps(ctx),
+            projected_stat=projected_stat,
+            projected_edge=projected_edge,
+            confidence_tier=confidence_tier,
+        ))
+
+    db.session.commit()
+    flash(f'Added: {player} {bet_type.capitalize()} {prop_line}', 'success')
+    return redirect(url_for('main.dashboard'))
+
+
+@bet.route('/quick-add-parlay', methods=['POST'])
+@login_required
+def quick_add_parlay():
+    """Create a parlay from the dashboard Best Play of the Day legs."""
+    stake = request.form.get('stake', type=float)
+    legs_json = request.form.get('legs', '')
+
+    if not stake or stake <= 0:
+        flash('Enter a stake amount.', 'danger')
+        return redirect(url_for('main.dashboard'))
+
+    try:
+        legs_data = json.loads(legs_json)
+    except (ValueError, TypeError):
+        flash('Invalid parlay data.', 'danger')
+        return redirect(url_for('main.dashboard'))
+
+    if len(legs_data) < 2:
+        flash('A parlay needs at least 2 legs.', 'danger')
+        return redirect(url_for('main.dashboard'))
+
+    parlay_id = Bet.generate_parlay_id()
+    for leg in legs_data:
+        player = (leg.get('player') or '')[:100]
+        prop_type = (leg.get('prop_type') or '')[:40]
+        prop_line_val = leg.get('line')
+        bet_type = (leg.get('side') or 'over')[:20]
+        american_odds = leg.get('odds')
+        team_a = (leg.get('away_team') or 'Away')[:80]
+        team_b = (leg.get('home_team') or 'Home')[:80]
+        match_date_str = leg.get('match_date') or ''
+
+        try:
+            match_dt = datetime.strptime(match_date_str, '%Y-%m-%d') if match_date_str else datetime.now(timezone.utc)
+        except ValueError:
+            match_dt = datetime.now(timezone.utc)
+
+        db.session.add(Bet(
+            user_id=current_user.id,
+            team_a=team_a,
+            team_b=team_b,
+            match_date=match_dt,
+            bet_amount=stake,
+            outcome=Outcome.PENDING.value,
+            american_odds=int(american_odds) if american_odds is not None else None,
+            is_parlay=True,
+            parlay_id=parlay_id,
+            source=BetSource.NBA_PROPS.value,
+            bet_type=bet_type,
+            player_name=player or None,
+            prop_type=prop_type or None,
+            prop_line=float(prop_line_val) if prop_line_val is not None else None,
+        ))
+
+    db.session.commit()
+    flash(f'Added {len(legs_data)}-leg parlay to your bets.', 'success')
+    return redirect(url_for('main.dashboard'))
+
+
 @bet.route('/bets/export')
 @login_required
 def export_bets():

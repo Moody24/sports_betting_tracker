@@ -63,8 +63,8 @@ class TestModels(BaseTestCase):
                 make_bet(user.id, bet_amount=5.0, outcome="pending"),
             ])
             db.session.commit()
-            # win=+20, lose=-10, pending=0 → net=10
-            self.assertAlmostEqual(user.net_profit_loss(), 10.0)
+            # win at default -110: +$18.18, lose=-10, pending=0 → net≈8.18
+            self.assertAlmostEqual(user.net_profit_loss(), 8.18, places=1)
 
     def test_user_total_wins_losses(self):
         with self.app.app_context():
@@ -82,8 +82,9 @@ class TestModels(BaseTestCase):
 
     # Bet.profit_loss
     def test_bet_profit_loss_win(self):
+        # No odds stored → defaults to -110: $50 * 100/110 ≈ $45.45
         b = make_bet(1, bet_amount=50.0, outcome="win")
-        self.assertAlmostEqual(b.profit_loss(), 50.0)
+        self.assertAlmostEqual(b.profit_loss(), 45.45, places=1)
 
     def test_bet_profit_loss_lose(self):
         b = make_bet(1, bet_amount=50.0, outcome="lose")
@@ -107,8 +108,9 @@ class TestModels(BaseTestCase):
         self.assertAlmostEqual(b.expected_profit_for_win(), 100.0)
 
     def test_expected_profit_no_odds(self):
+        # Defaults to -110 when no odds stored: $50 * 100/110 ≈ $45.45
         b = make_bet(1, bet_amount=50.0, american_odds=None)
-        self.assertAlmostEqual(b.expected_profit_for_win(), 50.0)
+        self.assertAlmostEqual(b.expected_profit_for_win(), 45.45, places=1)
 
     # Bet.margin
     def test_bet_margin(self):

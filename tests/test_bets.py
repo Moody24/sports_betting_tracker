@@ -798,3 +798,80 @@ class TestBetRoutes(BaseTestCase):
         data = json.loads(resp.data)
         self.assertFalse(data["ok"])
         self.assertEqual(data["status"], "game_not_started")
+
+    # ── Quick-add routes (dashboard bet-slip) ─────────────────────────
+
+    def test_quick_add_bet_creates_bet_and_redirects(self):
+        """POST /quick-add creates a straight bet and redirects to dashboard."""
+        user_id = self.register_and_login()
+        resp = self.client.post(
+            "/quick-add",
+            data={
+                "player": "LeBron James",
+                "prop_type": "player_points",
+                "prop_line": "25.5",
+                "bet_type": "over",
+                "american_odds": "-110",
+                "team_a": "Lakers",
+                "team_b": "Celtics",
+                "match_date": "2026-03-04",
+                "stake": "25.00",
+                "projection": "28.0",
+                "edge": "0.10",
+                "confidence_tier": "moderate",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(resp.status_code, 302)
+        with self.app.app_context():
+            b = Bet.query.filter_by(user_id=user_id, player_name="LeBron James").first()
+            self.assertIsNotNone(b)
+            self.assertEqual(b.prop_line, 25.5)
+            self.assertEqual(b.bet_amount, 25.0)
+            self.assertEqual(b.bet_type, "over")
+
+    def test_quick_add_bet_missing_stake_redirects_without_creating_bet(self):
+        """POST /quick-add with no stake redirects without creating a bet."""
+        user_id = self.register_and_login()
+        resp = self.client.post(
+            "/quick-add",
+            data={"player": "LeBron James", "prop_line": "25.5", "stake": ""},
+            follow_redirects=False,
+        )
+        self.assertEqual(resp.status_code, 302)
+        with self.app.app_context():
+            self.assertEqual(Bet.query.filter_by(user_id=user_id).count(), 0)
+
+    def test_quick_add_parlay_creates_legs_and_redirects(self):
+        """POST /quick-add-parlay creates multiple parlay legs sharing a parlay_id."""
+        user_id = self.register_and_login()
+        legs = [
+            {"player": "LeBron James", "prop_type": "player_points",
+             "line": 25.5, "side": "over", "odds": -110,
+             "away_team": "Lakers", "home_team": "Celtics", "match_date": "2026-03-04"},
+            {"player": "Steph Curry", "prop_type": "player_threes",
+             "line": 3.5, "side": "over", "odds": -115,
+             "away_team": "Warriors", "home_team": "Heat", "match_date": "2026-03-04"},
+        ]
+        resp = self.client.post(
+            "/quick-add-parlay",
+            data={"stake": "20.00", "legs": json.dumps(legs)},
+            follow_redirects=False,
+        )
+        self.assertEqual(resp.status_code, 302)
+        with self.app.app_context():
+            bets = Bet.query.filter_by(user_id=user_id, is_parlay=True).all()
+            self.assertEqual(len(bets), 2)
+            self.assertEqual(bets[0].parlay_id, bets[1].parlay_id)
+
+    def test_quick_add_parlay_missing_stake_no_bets_created(self):
+        """POST /quick-add-parlay with no stake does not create any bets."""
+        user_id = self.register_and_login()
+        resp = self.client.post(
+            "/quick-add-parlay",
+            data={"stake": "", "legs": "[]"},
+            follow_redirects=False,
+        )
+        self.assertEqual(resp.status_code, 302)
+        with self.app.app_context():
+            self.assertEqual(Bet.query.filter_by(user_id=user_id).count(), 0)
