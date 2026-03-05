@@ -625,11 +625,11 @@ def bootstrap_pick_quality_examples(target_resolved: int = 220, max_logs: int = 
 
 
 def resolve_and_grade():
-    """Grade all pending bets using final scores."""
+    """Grade all pending bets using final scores and mark game snapshots final."""
     from app import db
     from app.enums import Outcome
-    from app.models import Bet
-    from app.services.nba_service import resolve_pending_bets
+    from app.models import Bet, GameSnapshot
+    from app.services.nba_service import resolve_pending_bets, fetch_espn_scoreboard, _STATUS_FINAL
 
     app = _get_app()
     with app.app_context():
@@ -644,6 +644,21 @@ def resolve_and_grade():
             bet_obj.actual_total = actual_value
         db.session.commit()
         logger.info("Graded %d bets", len(resolved))
+
+        # Mark any final-game snapshots as is_final so NBA Today shows them.
+        try:
+            scoreboards = fetch_espn_scoreboard()
+            for game in scoreboards:
+                if game.get('status') != _STATUS_FINAL:
+                    continue
+                snap = GameSnapshot.query.filter_by(espn_id=game['espn_id']).first()
+                if snap and not snap.is_final:
+                    snap.is_final = True
+                    snap.home_score = game['home']['score']
+                    snap.away_score = game['away']['score']
+            db.session.commit()
+        except Exception as exc:
+            logger.warning("Snapshot final-mark failed: %s", exc)
 
 
 def retrain_models():
@@ -921,6 +936,14 @@ def init_scheduler(app):
         lambda: _log_job('cache_prune', prune_cache),
         CronTrigger(hour=2, minute=0, timezone=APP_TIMEZONE),
         id='cache_prune',
+        replace_existing=True,
+    )
+
+    # Late-night snapshot update — captures final scores after games end (11:15 PM ET)
+    scheduler.add_job(
+        lambda: _log_job('snapshot_update', resolve_and_grade),
+        CronTrigger(hour=23, minute=15, timezone=APP_TIMEZONE),
+        id='snapshot_update',
         replace_existing=True,
     )
 

@@ -203,6 +203,7 @@ def _filtered_bets_query(user_id: int, args) -> "db.Query":
     search_query = args.get('q', '').strip()
     start_date = args.get('start_date', '').strip()
     end_date = args.get('end_date', '').strip()
+    bet_type_filter = args.get('type', '').strip()
 
     if status:
         query = query.filter(Bet.outcome == status)
@@ -210,7 +211,8 @@ def _filtered_bets_query(user_id: int, args) -> "db.Query":
         safe_q = _escape_like(search_query)
         query = query.filter(
             Bet.team_a.ilike(f'%{safe_q}%', escape='\\') |
-            Bet.team_b.ilike(f'%{safe_q}%', escape='\\')
+            Bet.team_b.ilike(f'%{safe_q}%', escape='\\') |
+            Bet.player_name.ilike(f'%{safe_q}%', escape='\\')
         )
     if start_date:
         try:
@@ -224,6 +226,12 @@ def _filtered_bets_query(user_id: int, args) -> "db.Query":
             query = query.filter(Bet.match_date <= end_dt)
         except ValueError:
             pass
+    if bet_type_filter == 'parlay':
+        query = query.filter(Bet.is_parlay.is_(True))
+    elif bet_type_filter == 'straight':
+        query = query.filter(Bet.is_parlay.is_(False), Bet.player_name.is_(None))
+    elif bet_type_filter == 'player_prop':
+        query = query.filter(Bet.player_name.isnot(None))
 
     return query
 
@@ -232,12 +240,16 @@ def _filtered_bets_query(user_id: int, args) -> "db.Query":
 @login_required
 def place_bet():
     query = _filtered_bets_query(current_user.id, request.args)
-    bets = query.order_by(Bet.match_date.desc()).all()
+    # Pending bets first, then most-recent
+    from sqlalchemy import case as sa_case
+    pending_first = sa_case((Bet.outcome == Outcome.PENDING.value, 0), else_=1)
+    bets = query.order_by(pending_first, Bet.match_date.desc()).all()
 
     status = request.args.get('status', '').strip()
     search_query = request.args.get('q', '').strip()
     start_date = request.args.get('start_date', '').strip()
     end_date = request.args.get('end_date', '').strip()
+    bet_type_filter = request.args.get('type', '').strip()
 
     # Group parlay legs so the template can render them together
     parlay_groups: dict = {}
@@ -271,6 +283,7 @@ def place_bet():
         'q': search_query,
         'start_date': start_date,
         'end_date': end_date,
+        'type': bet_type_filter,
     }
 
     # Summary stats for the current filtered view
@@ -486,10 +499,12 @@ def nba_today():
 
     # Separate active (non-final) vs completed today
     active_games = [g for g in games if g['status'] != 'STATUS_FINAL']
+    yesterday = today - timedelta(days=1)
     completed_snaps = (
         GameSnapshot.query
-        .filter_by(game_date=today, is_final=True)
-        .order_by(GameSnapshot.snapshot_time)
+        .filter(GameSnapshot.is_final.is_(True))
+        .filter(GameSnapshot.game_date >= yesterday)
+        .order_by(GameSnapshot.game_date.desc(), GameSnapshot.snapshot_time)
         .all()
     )
 
@@ -1263,6 +1278,7 @@ def quick_add_bet():
     team_a = (request.form.get('team_a') or 'Away').strip()[:80]
     team_b = (request.form.get('team_b') or 'Home').strip()[:80]
     match_date_str = (request.form.get('match_date') or '').strip()
+    game_id = (request.form.get('game_id') or '').strip()[:50]
     stake = request.form.get('stake', type=float)
 
     if not stake or stake <= 0:
@@ -1288,6 +1304,7 @@ def quick_add_bet():
         player_name=player or None,
         prop_type=prop_type or None,
         prop_line=prop_line,
+        external_game_id=game_id or None,
     )
     db.session.add(bet_obj)
     db.session.flush()
@@ -1380,6 +1397,21 @@ def quick_add_parlay():
     db.session.commit()
     flash(f'Added {len(legs_data)}-leg parlay to your bets.', 'success')
     return redirect(url_for('main.dashboard'))
+
+
+@bet.route('/bets/<int:bet_id>/grade', methods=['POST'])
+@login_required
+def grade_bet(bet_id):
+    """Manually set the outcome of a pending bet."""
+    bet_obj = Bet.query.filter_by(id=bet_id, user_id=current_user.id).first_or_404()
+    outcome = (request.form.get('outcome') or '').strip()
+    if outcome not in ('win', 'lose', 'push'):
+        flash('Invalid outcome.', 'danger')
+        return redirect(request.referrer or url_for('bet.place_bet'))
+    bet_obj.outcome = outcome
+    db.session.commit()
+    flash(f'Bet graded as {outcome}.', 'success')
+    return redirect(request.referrer or url_for('bet.place_bet'))
 
 
 @bet.route('/bets/export')

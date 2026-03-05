@@ -435,7 +435,7 @@ class TestBetRoutes(BaseTestCase):
             db.session.commit()
         resp = self.client.get("/bets")
         self.assertEqual(resp.status_code, 200)
-        self.assertIn(b"Check progress", resp.data)
+        self.assertIn(b"check-prop-progress-btn", resp.data)
 
     # JSON place-bets endpoint
     def test_place_bets_no_body(self):
@@ -675,7 +675,7 @@ class TestBetRoutes(BaseTestCase):
             db.session.commit()
         resp = self.client.get("/bets")
         self.assertEqual(resp.status_code, 200)
-        self.assertIn(b"leg lost", resp.data)
+        self.assertIn(b"Lost", resp.data)
 
     def test_new_bet_form_includes_bankroll_var_when_starting_bankroll_set(self):
         """USER_BANKROLL is non-null when user has starting_bankroll configured."""
@@ -875,3 +875,65 @@ class TestBetRoutes(BaseTestCase):
         self.assertEqual(resp.status_code, 302)
         with self.app.app_context():
             self.assertEqual(Bet.query.filter_by(user_id=user_id).count(), 0)
+
+    def test_quick_add_bet_captures_game_id(self):
+        """game_id in form should be stored as external_game_id on the bet."""
+        user_id = self.register_and_login()
+        resp = self.client.post(
+            "/quick-add",
+            data={
+                "player": "LeBron James",
+                "prop_type": "player_points",
+                "prop_line": "27.5",
+                "bet_type": "over",
+                "team_a": "Lakers",
+                "team_b": "Celtics",
+                "match_date": "2026-03-05",
+                "stake": "15.00",
+                "game_id": "espn_abc123",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(resp.status_code, 302)
+        with self.app.app_context():
+            b = Bet.query.filter_by(user_id=user_id).first()
+            self.assertIsNotNone(b)
+            self.assertEqual(b.external_game_id, "espn_abc123")
+
+    def test_grade_bet_sets_outcome(self):
+        """POST /bets/<id>/grade sets bet outcome for the owning user."""
+        user_id = self.register_and_login()
+        with self.app.app_context():
+            b = make_bet(user_id, outcome='pending', team_a='Heat', team_b='Bulls')
+            db.session.add(b)
+            db.session.commit()
+            bet_id = b.id
+
+        resp = self.client.post(
+            f"/bets/{bet_id}/grade",
+            data={"outcome": "win"},
+            follow_redirects=False,
+        )
+        self.assertEqual(resp.status_code, 302)
+        with self.app.app_context():
+            b = Bet.query.filter_by(id=bet_id).first()
+            self.assertEqual(b.outcome, 'win')
+
+    def test_grade_bet_invalid_outcome_rejected(self):
+        """POST /bets/<id>/grade with invalid outcome does not change bet."""
+        user_id = self.register_and_login()
+        with self.app.app_context():
+            b = make_bet(user_id, outcome='pending', team_a='Heat', team_b='Bulls')
+            db.session.add(b)
+            db.session.commit()
+            bet_id = b.id
+
+        resp = self.client.post(
+            f"/bets/{bet_id}/grade",
+            data={"outcome": "invalid"},
+            follow_redirects=False,
+        )
+        self.assertEqual(resp.status_code, 302)
+        with self.app.app_context():
+            b = Bet.query.filter_by(id=bet_id).first()
+            self.assertEqual(b.outcome, 'pending')

@@ -3,85 +3,97 @@
 
 {% block title %}Bets · Sports Betting Tracker{% endblock %}
 {% block page_title %}Bets{% endblock %}
-{% block page_subtitle %}Filter and review all your wagers in one clean table.{% endblock %}
+{% block page_subtitle %}Filter and review all your wagers.{% endblock %}
 
 {% block content %}
 
-{# ── Pending quick-resolve ── #}
+{# ── Pending banner ── #}
 {% set pending_bets = bets | selectattr('outcome', 'equalto', 'pending') | list %}
 {% if pending_bets %}
-<div class="card-soft p-3 mb-4 d-flex flex-wrap align-items-center justify-content-between gap-2">
+<div class="alert d-flex flex-wrap align-items-center justify-content-between gap-2 mb-4"
+     style="background:rgba(255,193,7,.08); border:1px solid rgba(255,193,7,.25); border-radius:.75rem; padding:.75rem 1rem">
   <div>
-    <span class="fw-semibold">{{ pending_bets|length }} pending bet{{ 's' if pending_bets|length != 1 }}</span>
-    <span class="text-secondary small ms-2">— click to check for final results</span>
+    <i class="bi bi-hourglass-split text-warning me-2"></i>
+    <span class="fw-semibold text-warning">{{ pending_bets|length }} pending</span>
+    <span class="text-secondary small ms-2">— auto-grades run at 1 AM ET, or resolve manually below</span>
   </div>
   <form action="{{ url_for('bet.nba_update_results') }}" method="POST" class="d-inline">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <button type="submit" class="btn btn-sm btn-outline-light">
-      <i class="bi bi-arrow-repeat me-1"></i>Update Results
+    <button type="submit" class="btn btn-sm btn-warning text-dark fw-semibold">
+      <i class="bi bi-arrow-repeat me-1"></i>Check Now
     </button>
   </form>
 </div>
 {% endif %}
 
 {# ── Filters ── #}
-<div class="card-soft p-3 mb-4 filter-row">
+<div class="card-soft p-3 mb-4">
   <form method="GET" class="row g-2 align-items-end">
-    <div class="col-sm-6 col-lg-3">
-      <label class="form-label">Status</label>
-      <select class="form-select" name="status">
+    <div class="col-6 col-sm-4 col-lg-2">
+      <label class="form-label small text-secondary mb-1">Status</label>
+      <select class="form-select form-select-sm" name="status">
         <option value="" {% if not filters.status %}selected{% endif %}>All</option>
+        <option value="pending" {% if filters.status == 'pending' %}selected{% endif %}>Pending</option>
         <option value="win"     {% if filters.status == 'win' %}selected{% endif %}>Win</option>
         <option value="lose"    {% if filters.status == 'lose' %}selected{% endif %}>Loss</option>
-        <option value="pending" {% if filters.status == 'pending' %}selected{% endif %}>Pending</option>
         <option value="push"    {% if filters.status == 'push' %}selected{% endif %}>Push</option>
       </select>
     </div>
-    <div class="col-sm-6 col-lg-2">
-      <label class="form-label">From</label>
-      <input type="date" class="form-control" name="start_date" value="{{ filters.start_date }}">
+    <div class="col-6 col-sm-4 col-lg-2">
+      <label class="form-label small text-secondary mb-1">Type</label>
+      <select class="form-select form-select-sm" name="type">
+        <option value="" {% if not filters.type %}selected{% endif %}>All Types</option>
+        <option value="player_prop" {% if filters.type == 'player_prop' %}selected{% endif %}>Player Props</option>
+        <option value="straight"    {% if filters.type == 'straight' %}selected{% endif %}>Game Bets</option>
+        <option value="parlay"      {% if filters.type == 'parlay' %}selected{% endif %}>Parlays</option>
+      </select>
     </div>
-    <div class="col-sm-6 col-lg-2">
-      <label class="form-label">To</label>
-      <input type="date" class="form-control" name="end_date" value="{{ filters.end_date }}">
+    <div class="col-6 col-sm-4 col-lg-2">
+      <label class="form-label small text-secondary mb-1">From</label>
+      <input type="date" class="form-control form-control-sm" name="start_date" value="{{ filters.start_date }}">
     </div>
-    <div class="col-sm-6 col-lg-3">
-      <label class="form-label">Search</label>
-      <input type="search" class="form-control" name="q" value="{{ filters.q }}" placeholder="Team name or matchup">
+    <div class="col-6 col-sm-4 col-lg-2">
+      <label class="form-label small text-secondary mb-1">To</label>
+      <input type="date" class="form-control form-control-sm" name="end_date" value="{{ filters.end_date }}">
     </div>
-    <div class="col-lg-2 d-grid">
-      <button class="btn btn-primary" type="submit">Apply</button>
+    <div class="col-sm-8 col-lg-3">
+      <label class="form-label small text-secondary mb-1">Search</label>
+      <input type="search" class="form-control form-control-sm" name="q" value="{{ filters.q }}"
+             placeholder="Player, team…">
+    </div>
+    <div class="col-sm-4 col-lg-1 d-grid">
+      <button class="btn btn-primary btn-sm" type="submit">Apply</button>
     </div>
   </form>
 </div>
 
-{# ── Filter summary stats ── #}
+{# ── Summary stats ── #}
 {% if filter_stats.count > 0 %}
 <div class="card-soft p-3 mb-4">
-  <div class="row g-3 text-center">
-    <div class="col-6 col-sm-4 col-md-2">
+  <div class="row g-0 text-center divide-x">
+    <div class="col">
       <p class="kpi-label mb-1">Bets</p>
-      <p class="kpi-value mb-0 fs-5">{{ filter_stats.count }}</p>
+      <p class="kpi-value mb-0">{{ filter_stats.count }}</p>
     </div>
-    <div class="col-6 col-sm-4 col-md-2">
+    <div class="col">
       <p class="kpi-label mb-1">Wins</p>
-      <p class="kpi-value mb-0 fs-5 text-success">{{ filter_stats.wins }}</p>
+      <p class="kpi-value mb-0 text-success">{{ filter_stats.wins }}</p>
     </div>
-    <div class="col-6 col-sm-4 col-md-2">
+    <div class="col">
       <p class="kpi-label mb-1">Losses</p>
-      <p class="kpi-value mb-0 fs-5 text-danger">{{ filter_stats.losses }}</p>
+      <p class="kpi-value mb-0 text-danger">{{ filter_stats.losses }}</p>
     </div>
-    <div class="col-6 col-sm-4 col-md-2">
+    <div class="col">
       <p class="kpi-label mb-1">Pending</p>
-      <p class="kpi-value mb-0 fs-5 text-warning">{{ filter_stats.pending }}</p>
+      <p class="kpi-value mb-0 text-warning">{{ filter_stats.pending }}</p>
     </div>
-    <div class="col-6 col-sm-4 col-md-2">
+    <div class="col d-none d-sm-block">
       <p class="kpi-label mb-1">Wagered</p>
-      <p class="kpi-value mb-0 fs-5">${{ '%.2f'|format(filter_stats.wagered) }}</p>
+      <p class="kpi-value mb-0">${{ '%.2f'|format(filter_stats.wagered) }}</p>
     </div>
-    <div class="col-6 col-sm-4 col-md-2">
+    <div class="col">
       <p class="kpi-label mb-1">Net P/L</p>
-      <p class="kpi-value mb-0 fs-5 {{ 'text-success' if filter_stats.net >= 0 else 'text-danger' }}">
+      <p class="kpi-value mb-0 {{ 'text-success' if filter_stats.net >= 0 else 'text-danger' }}">
         {{ '+' if filter_stats.net >= 0 else '' }}${{ '%.2f'|format(filter_stats.net) }}
       </p>
     </div>
@@ -89,12 +101,20 @@
 </div>
 {% endif %}
 
+{# ── Bets table ── #}
 <div class="card-soft p-3">
   <div class="d-flex justify-content-between align-items-center mb-3">
-    <h3 class="h6 mb-0">All Bets</h3>
+    <h3 class="h6 mb-0">
+      {% if filters.status or filters.type or filters.q or filters.start_date or filters.end_date %}
+        Filtered Results
+        <a href="{{ url_for('bet.place_bet') }}" class="btn btn-link btn-sm text-secondary p-0 ms-2">Clear</a>
+      {% else %}
+        All Bets
+      {% endif %}
+    </h3>
     <div class="d-flex gap-2">
       <a href="{{ url_for('bet.export_bets', **filters) }}" class="btn btn-outline-secondary btn-sm">
-        <i class="bi bi-download me-1"></i>Export CSV
+        <i class="bi bi-download me-1"></i>CSV
       </a>
       <a href="{{ url_for('bet.new_bet') }}" class="btn btn-primary btn-sm">
         <i class="bi bi-plus-lg me-1"></i>Add Bet
@@ -103,12 +123,11 @@
   </div>
 
   <div class="table-wrap">
-    <table class="table table-dark table-hover align-middle mb-0">
+    <table class="table table-dark table-hover align-middle mb-0" style="font-size:.875rem">
       <thead>
-        <tr>
-          <th>Matchup</th>
+        <tr class="text-secondary" style="font-size:.75rem; text-transform:uppercase; letter-spacing:.04em">
+          <th>Bet</th>
           <th>Date</th>
-          <th>Type</th>
           <th class="text-end">Stake</th>
           <th>Status</th>
           <th class="text-end">P/L</th>
@@ -116,7 +135,6 @@
         </tr>
       </thead>
       <tbody>
-        {# Track which parlay_ids we've already rendered a header for #}
         {% set rendered_parlays = namespace(ids=[]) %}
 
         {% for b in bets %}
@@ -125,137 +143,203 @@
           {% if b.is_parlay and b.parlay_id and b.parlay_id not in rendered_parlays.ids %}
             {% set _ = rendered_parlays.ids.append(b.parlay_id) %}
             {% set p_status = parlay_status.get(b.parlay_id, 'pending') %}
-            <tr class="table-secondary">
-              <td colspan="5" class="small fw-semibold py-1 ps-3">
-                <i class="bi bi-list-check me-1"></i>Parlay &middot;
-                {% if p_status == 'win' %}
-                  <span class="text-success">All legs won</span>
-                {% elif p_status == 'lose' %}
-                  <span class="text-danger">At least one leg lost</span>
-                {% elif p_status == 'push' %}
-                  <span class="text-warning">Push</span>
-                {% else %}
-                  <span class="text-warning">In progress</span>
-                {% endif %}
-                <span class="text-secondary ms-2">· ${{ '%.2f'|format(b.bet_amount) }} staked</span>
+            <tr style="background:rgba(255,255,255,.04); border-top:1px solid rgba(255,255,255,.08)">
+              <td colspan="3" class="py-2 ps-3">
+                <i class="bi bi-list-check me-1 text-info"></i>
+                <span class="fw-semibold text-info">Parlay</span>
+                <span class="text-secondary ms-2 small">
+                  {% if p_status == 'win' %}<span class="text-success">All legs won</span>
+                  {% elif p_status == 'lose' %}<span class="text-danger">Lost</span>
+                  {% elif p_status == 'push' %}<span class="text-warning">Push</span>
+                  {% else %}<span class="text-warning">In progress</span>{% endif %}
+                  &middot; ${{ '%.2f'|format(b.bet_amount) }} staked
+                </span>
                 <button class="parlay-toggle-btn btn btn-link btn-sm p-0 ms-2 text-secondary"
                         data-parlay-id="{{ b.parlay_id }}" aria-expanded="true" type="button">
-                  <i class="bi bi-chevron-down toggle-icon" style="transition:transform .2s"></i>
+                  <i class="bi bi-chevron-up toggle-icon" style="transition:transform .2s; font-size:.75rem"></i>
                 </button>
               </td>
-              <td class="text-end py-1">
+              <td class="py-2">
+                {% if p_status == 'win' %}<span class="badge text-bg-success">Win</span>
+                {% elif p_status == 'lose' %}<span class="badge text-bg-danger">Loss</span>
+                {% elif p_status == 'push' %}<span class="badge text-bg-warning text-dark">Push</span>
+                {% else %}<span class="badge text-bg-secondary">Pending</span>{% endif %}
+              </td>
+              <td class="text-end py-2 fw-semibold">
                 {% set pl = parlay_pl_map.get(b.parlay_id, 0) %}
-                {% if p_status == 'win' %}
-                  <span class="text-success fw-semibold">+${{ '%.2f'|format(pl) }}</span>
-                {% elif p_status == 'lose' %}
-                  <span class="text-danger fw-semibold">-${{ '%.2f'|format(b.bet_amount) }}</span>
-                {% elif p_status == 'push' %}
-                  <span class="text-warning fw-semibold">$0.00</span>
-                {% else %}
-                  <span class="text-secondary">—</span>
-                {% endif %}
+                {% if p_status == 'win' %}<span class="text-success">+${{ '%.2f'|format(pl) }}</span>
+                {% elif p_status == 'lose' %}<span class="text-danger">-${{ '%.2f'|format(b.bet_amount) }}</span>
+                {% elif p_status == 'push' %}<span class="text-warning">$0.00</span>
+                {% else %}<span class="text-secondary">—</span>{% endif %}
               </td>
               <td></td>
             </tr>
           {% endif %}
 
           {# ── Bet row ── #}
-          <tr {% if b.is_parlay %}class="parlay-leg-row" data-parlay-id="{{ b.parlay_id }}"{% endif %}>
-            <td>
+          {% set is_overdue = (b.outcome == 'pending' and b.match_date.date() < now_date) %}
+          <tr class="{% if b.is_parlay %}parlay-leg-row{% endif %} {% if is_overdue %}bet-row-overdue{% endif %}"
+              {% if b.is_parlay %}data-parlay-id="{{ b.parlay_id }}"{% endif %}>
+
+            {# Bet description #}
+            <td style="max-width:280px">
               {% if b.is_parlay %}
-                <span class="text-secondary small me-1">↳</span>
+                <span class="text-secondary" style="font-size:.7rem; margin-right:.25rem">LEG</span>
               {% endif %}
-              <div class="fw-semibold">{{ b.display_label }}</div>
-              <div class="small text-secondary">{{ b.team_a }} <span class="text-secondary">vs</span> {{ b.team_b }}</div>
-              {% if b.actual_total is not none and b.is_player_prop %}
-                <div class="small mt-1">
-                  Final: <span class="fw-semibold">{{ b.actual_total }}</span> vs line {{ b.prop_line }}
-                  {% if b.outcome == 'win' %}
-                    <span class="badge text-bg-success ms-1">Hit</span>
-                  {% elif b.outcome == 'lose' %}
-                    <span class="badge text-bg-danger ms-1">Miss</span>
-                  {% elif b.outcome == 'push' %}
-                    <span class="badge text-bg-warning text-dark ms-1">Push</span>
-                  {% endif %}
-                </div>
-              {% elif b.actual_total is not none and b.over_under_line is not none %}
-                <div class="small mt-1">
-                  Final Total: <span class="fw-semibold">{{ b.actual_total }}</span> vs line {{ b.over_under_line }}
-                  {% if b.outcome == 'win' %}
-                    <span class="badge text-bg-success ms-1">Hit</span>
-                  {% elif b.outcome == 'lose' %}
-                    <span class="badge text-bg-danger ms-1">Miss</span>
-                  {% elif b.outcome == 'push' %}
-                    <span class="badge text-bg-warning text-dark ms-1">Push</span>
-                  {% endif %}
-                </div>
+              <span class="fw-semibold">{{ b.display_label }}</span>
+              {% if b.source == 'auto_generated' %}
+                <span class="badge text-bg-dark ms-1" style="font-size:.65rem">Auto</span>
               {% endif %}
-              {% if b.notes %}
-                <div class="small text-secondary fst-italic mt-1" title="{{ b.notes }}">
-                  <i class="bi bi-journal-text me-1"></i>{{ b.notes[:80] }}{% if b.notes|length > 80 %}…{% endif %}
-                </div>
-              {% endif %}
-              {% if b.outcome == 'pending' and b.is_player_prop and b.external_game_id and b.match_date.date() <= now_date %}
-                <div class="small mt-2">
-                  <button
-                    type="button"
-                    class="btn btn-sm btn-outline-info py-0 px-2 check-prop-progress-btn"
-                    data-url="{{ url_for('bet.nba_prop_progress', espn_id=b.external_game_id, player=b.player_name, prop_type=b.prop_type) }}"
-                    data-target="prop-progress-{{ b.id }}"
-                  >
-                    Check progress
-                  </button>
-                  <span id="prop-progress-{{ b.id }}" class="ms-2 text-secondary"></span>
-                </div>
-              {% endif %}
-            </td>
-            <td>{{ b.match_date.strftime('%b %d, %Y') }}</td>
-            <td>
-              <span class="badge text-bg-dark">{{ b.bet_type|capitalize }}</span>
-              {# O/U line + margin #}
-              {% if b.over_under_line and not b.is_player_prop %}
-                <span class="small text-secondary">{{ b.over_under_line }}</span>
-              {% endif %}
-              {% if b.margin is not none %}
-                {% if b.margin > 0 %}
-                  <span class="small text-success">(+{{ b.margin }})</span>
-                {% elif b.margin < 0 %}
-                  <span class="small text-danger">({{ b.margin }})</span>
-                {% else %}
-                  <span class="small text-warning">(push)</span>
+              <div class="small text-secondary mt-1">
+                {{ b.team_a }} <span class="mx-1 opacity-50">vs</span> {{ b.team_b }}
+                {% if b.over_under_line and not b.is_player_prop %}
+                  <span class="ms-1 opacity-75">· O/U {{ b.over_under_line }}</span>
                 {% endif %}
+                {% if b.american_odds %}
+                  <span class="ms-1 opacity-75">
+                    ({{ '%+d'|format(b.american_odds) }})
+                  </span>
+                {% endif %}
+              </div>
+              {# Final result line #}
+              {% if b.actual_total is not none %}
+                <div class="small mt-1">
+                  {% if b.is_player_prop %}
+                    <span class="text-secondary">Final:</span>
+                    <strong>{{ b.actual_total }}</strong>
+                    <span class="text-secondary">vs {{ b.prop_line }}</span>
+                  {% elif b.over_under_line is not none %}
+                    <span class="text-secondary">Total:</span>
+                    <strong>{{ b.actual_total }}</strong>
+                    <span class="text-secondary">vs {{ b.over_under_line }}</span>
+                    {% set diff = b.actual_total - b.over_under_line %}
+                    {% if diff > 0 %}<span class="text-success">(+{{ '%.1f'|format(diff) }})</span>
+                    {% elif diff < 0 %}<span class="text-danger">({{ '%.1f'|format(diff) }})</span>
+                    {% else %}<span class="text-warning">(push)</span>{% endif %}
+                  {% endif %}
+                </div>
+              {% endif %}
+              {# Notes — hide AUTO_BOOTSTRAP internal prefix #}
+              {% if b.notes and not b.notes.startswith('AUTO_BOOTSTRAP_HIDDEN') %}
+                <div class="small text-secondary fst-italic mt-1 text-truncate" style="max-width:240px"
+                     title="{{ b.notes }}">
+                  <i class="bi bi-chat-left-text me-1 opacity-50"></i>{{ b.notes[:80] }}{% if b.notes|length > 80 %}…{% endif %}
+                </div>
+              {% endif %}
+              {# Live progress for pending props #}
+              {% if b.outcome == 'pending' and b.is_player_prop and b.external_game_id and b.match_date.date() <= now_date %}
+                <div class="mt-1">
+                  <button type="button"
+                          class="btn btn-link btn-sm p-0 text-info check-prop-progress-btn"
+                          style="font-size:.75rem"
+                          data-url="{{ url_for('bet.nba_prop_progress', espn_id=b.external_game_id, player=b.player_name, prop_type=b.prop_type) }}"
+                          data-target="prop-progress-{{ b.id }}">
+                    <i class="bi bi-broadcast me-1"></i>Live
+                  </button>
+                  <span id="prop-progress-{{ b.id }}" class="ms-1 text-secondary small"></span>
+                </div>
               {% endif %}
             </td>
-            <td class="text-end">${{ '%.2f'|format(b.bet_amount) }}</td>
-            <td>{{ outcome_badge(b.outcome) }}</td>
-            <td class="text-end {% if b.outcome == 'win' %}text-success{% elif b.outcome == 'lose' %}text-danger{% else %}text-secondary{% endif %}">
-              ${{ '%.2f'|format(b.profit_loss()) }}
+
+            {# Date #}
+            <td class="text-secondary small text-nowrap">
+              {{ b.match_date.strftime('%b %d') }}
+              {% if is_overdue %}
+                <span class="badge text-bg-danger ms-1" style="font-size:.6rem">Past</span>
+              {% endif %}
             </td>
-            <td class="text-end">
+
+            {# Stake #}
+            <td class="text-end text-nowrap">${{ '%.2f'|format(b.bet_amount) }}</td>
+
+            {# Status #}
+            <td>{{ outcome_badge(b.outcome) }}</td>
+
+            {# P/L #}
+            <td class="text-end fw-semibold text-nowrap
+                        {% if b.outcome == 'win' %}text-success
+                        {% elif b.outcome == 'lose' %}text-danger
+                        {% else %}text-secondary{% endif %}">
+              {% if b.outcome == 'win' %}+{% endif %}${{ '%.2f'|format(b.profit_loss()) }}
+            </td>
+
+            {# Actions #}
+            <td class="text-end text-nowrap">
+              {% if b.outcome == 'pending' %}
+              <div class="dropdown d-inline-block">
+                <button class="btn btn-sm btn-outline-warning dropdown-toggle py-0 px-2"
+                        data-bs-toggle="dropdown" title="Grade this bet">
+                  Grade
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end dropdown-menu-dark">
+                  <li>
+                    <form action="{{ url_for('bet.grade_bet', bet_id=b.id) }}" method="POST">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                      <button type="submit" name="outcome" value="win"
+                              class="dropdown-item text-success">
+                        <i class="bi bi-check-circle me-2"></i>Win
+                      </button>
+                    </form>
+                  </li>
+                  <li>
+                    <form action="{{ url_for('bet.grade_bet', bet_id=b.id) }}" method="POST">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                      <button type="submit" name="outcome" value="lose"
+                              class="dropdown-item text-danger">
+                        <i class="bi bi-x-circle me-2"></i>Loss
+                      </button>
+                    </form>
+                  </li>
+                  <li>
+                    <form action="{{ url_for('bet.grade_bet', bet_id=b.id) }}" method="POST">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                      <button type="submit" name="outcome" value="push"
+                              class="dropdown-item text-warning">
+                        <i class="bi bi-dash-circle me-2"></i>Push
+                      </button>
+                    </form>
+                  </li>
+                </ul>
+              </div>
+              {% endif %}
               <form action="{{ url_for('bet.delete_bet', bet_id=b.id) }}" method="POST"
                     class="d-inline delete-bet-form">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button type="submit" class="btn btn-sm btn-outline-danger"
-                        aria-label="Delete bet {{ b.id }}">
+                <button type="submit" class="btn btn-sm btn-outline-danger py-0 px-2 ms-1"
+                        aria-label="Delete bet {{ b.id }}" title="Delete">
                   <i class="bi bi-trash"></i>
                 </button>
               </form>
             </td>
+
           </tr>
 
         {% else %}
         <tr>
-          <td colspan="7" class="text-center py-4 text-secondary">No bets found for selected filters.</td>
+          <td colspan="6" class="text-center py-5 text-secondary">
+            <i class="bi bi-inbox" style="font-size:1.5rem; opacity:.4"></i>
+            <p class="mt-2 mb-0">No bets found for selected filters.</p>
+            {% if filters.status or filters.type or filters.q %}
+              <a href="{{ url_for('bet.place_bet') }}" class="btn btn-link btn-sm mt-1">Clear filters</a>
+            {% endif %}
+          </td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
 </div>
+
+<style>
+.bet-row-overdue { border-left: 2px solid rgba(220,53,69,.5); }
+.divide-x > .col { border-right: 1px solid rgba(255,255,255,.07); }
+.divide-x > .col:last-child { border-right: none; }
+</style>
 {% endblock %}
 
 {% block scripts %}
 <script>
+  // Parlay collapse toggle
   document.querySelectorAll('.parlay-toggle-btn').forEach(function (btn) {
     btn.addEventListener('click', function () {
       const pid  = this.dataset.parlayId;
@@ -263,33 +347,34 @@
       const open = this.getAttribute('aria-expanded') === 'true';
       legs.forEach(function (l) { l.style.display = open ? 'none' : ''; });
       this.setAttribute('aria-expanded', open ? 'false' : 'true');
-      this.querySelector('.toggle-icon').style.transform = open ? 'rotate(-90deg)' : '';
+      const icon = this.querySelector('.toggle-icon');
+      icon.style.transform = open ? 'rotate(180deg)' : '';
     });
   });
 
+  // Delete confirmation
+  document.querySelectorAll('.delete-bet-form').forEach(function (form) {
+    form.addEventListener('submit', function (e) {
+      if (!confirm('Delete this bet?')) e.preventDefault();
+    });
+  });
+
+  // Live prop progress
   document.querySelectorAll('.check-prop-progress-btn').forEach(function (btn) {
     btn.addEventListener('click', function () {
-      const targetId = btn.dataset.target;
-      const target = document.getElementById(targetId);
-      if (target) target.textContent = 'Checking...';
+      const target = document.getElementById(btn.dataset.target);
+      if (target) target.textContent = 'Loading…';
       btn.disabled = true;
-
       fetch(btn.dataset.url)
         .then(r => r.json())
         .then(data => {
           if (!target) return;
-          if (!data.ok) {
-            target.textContent = data.error || 'Unavailable';
-            return;
-          }
-          target.textContent = 'Live: ' + data.stat + ' (' + data.status + ')';
+          target.textContent = data.ok
+            ? data.stat + ' (' + data.status + ')'
+            : (data.error || 'Unavailable');
         })
-        .catch(() => {
-          if (target) target.textContent = 'Progress check failed';
-        })
-        .finally(() => {
-          btn.disabled = false;
-        });
+        .catch(() => { if (target) target.textContent = 'Failed'; })
+        .finally(() => { btn.disabled = false; });
     });
   });
 </script>
