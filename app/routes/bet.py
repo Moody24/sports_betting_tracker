@@ -346,8 +346,11 @@ def place_bet():
             parlay_status[pid] = 'pending'
 
     parlay_pl_map: dict = {}
+    parlay_game_count: dict = {}
     for pid, legs in parlay_groups.items():
         parlay_pl_map[pid] = Bet.parlay_profit_loss(legs)
+        unique_matchups = {(leg.team_a, leg.team_b, leg.match_date.date()) for leg in legs}
+        parlay_game_count[pid] = len(unique_matchups) or 1
 
     filters = {
         'status': status,
@@ -373,6 +376,7 @@ def place_bet():
         filters=filters,
         parlay_status=parlay_status,
         parlay_pl_map=parlay_pl_map,
+        parlay_game_count=parlay_game_count,
         filter_stats=filter_stats,
         now_date=date_type.today(),
     )
@@ -686,8 +690,17 @@ def nba_prop_progress(espn_id):
     if not player_name or not prop_type:
         return jsonify({'ok': False, 'error': 'player and prop_type are required'}), 400
 
+    line = _safe_float(request.args.get('line'), 0.0)
+    bet_type = (request.args.get('bet_type') or '').strip().lower()
+
     use_cache = not current_app.testing
-    cache_key = (espn_id, _normalize_name(player_name), prop_type)
+    cache_key = (
+        espn_id,
+        _normalize_name(player_name),
+        prop_type,
+        bet_type,
+        round(line, 2),
+    )
     now_monotonic = time.monotonic()
     if use_cache:
         _prune_prop_progress_cache(now_monotonic)
@@ -760,8 +773,6 @@ def nba_prop_progress(espn_id):
 
     status_meta = _derive_game_status(summary_data)
 
-    line = _safe_float(request.args.get('line'), 0.0)
-    bet_type = (request.args.get('bet_type') or '').strip().lower()
     current_stat = _safe_float(stat_val, 0.0)
     elapsed_ratio = status_meta['elapsed_ratio']
 

@@ -957,6 +957,19 @@ h1, h2, h3, h4, h5, h6,
   padding: .5rem .6rem;
 }
 
+.live-topline,
+.live-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: .35rem .8rem;
+}
+
+.live-meta > span {
+  white-space: nowrap;
+}
+
 @media (max-width: 991.98px) {
   .bet-row-card {
     grid-template-columns: 1fr;
@@ -983,5 +996,11 @@ h1, h2, h3, h4, h5, h6,
 
   .parlay-meta {
     justify-content: flex-start;
+  }
+
+  .live-topline,
+  .live-meta {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }

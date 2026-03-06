@@ -32,6 +32,9 @@
     const projEl = card.querySelector('[data-live-proj]');
     const deltaEl = card.querySelector('[data-live-delta]');
     const trendEl = card.querySelector('[data-live-trend]');
+    const periodEl = card.querySelector('[data-live-period]');
+    const clockEl = card.querySelector('[data-live-clock]');
+    const stateEl = card.querySelector('[data-live-state]');
 
     if (!data.ok) {
       if (statusEl) statusEl.textContent = data.error || 'Unavailable';
@@ -41,6 +44,9 @@
     if (currentEl) currentEl.textContent = formatNum(data.current_stat);
     if (statusEl) statusEl.textContent = data.status_text || 'Live';
     if (projEl) projEl.textContent = formatNum(data.projected_final);
+    if (periodEl) periodEl.textContent = `Period: ${data.period || '—'}`;
+    if (clockEl) clockEl.textContent = `Clock: ${data.clock || '—'}`;
+    if (stateEl) stateEl.textContent = `State: ${data.game_state || 'unknown'}`;
     if (deltaEl) {
       const delta = Number(data.delta_to_line || 0);
       deltaEl.textContent = `Δ line: ${delta >= 0 ? '+' : ''}${formatNum(delta)}`;
