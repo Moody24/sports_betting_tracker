@@ -483,6 +483,12 @@ class TestBetRoutes(BaseTestCase):
         self.assertEqual(data["player"], "LeBron James")
         self.assertEqual(data["stat"], 22.0)
         self.assertIn("STATUS_IN_PROGRESS", data["status"])
+        self.assertEqual(data["game_state"], "live")
+        self.assertIn("period", data)
+        self.assertIn("clock", data)
+        self.assertIn("projected_final", data)
+        self.assertIn("progress_pct", data)
+        self.assertIn("delta_to_line", data)
         self.assertEqual(mock_get.call_count, 1)
 
 
@@ -516,6 +522,83 @@ class TestBetRoutes(BaseTestCase):
         data = json.loads(resp.data)
         self.assertTrue(data["ok"])
         self.assertEqual(data["stat"], 37.0)
+
+    @patch("app.routes.bet.requests.get")
+    def test_nba_prop_progress_over_under_on_track_logic(self, mock_get):
+        self.register_and_login()
+        mock_resp = mock_get.return_value
+        mock_resp.raise_for_status.return_value = None
+        mock_resp.json.return_value = {
+            "boxscore": {
+                "players": [{
+                    "statistics": [{
+                        "names": ["PTS", "AST", "REB", "3PT"],
+                        "athletes": [{
+                            "athlete": {"displayName": "LeBron James"},
+                            "stats": ["22", "7", "8", "2-6"],
+                        }],
+                    }]
+                }]
+            },
+            "header": {
+                "competitions": [{
+                    "status": {"type": {"name": "STATUS_IN_PROGRESS", "detail": "Q3 06:00"}}
+                }]
+            }
+        }
+
+        over_resp = self.client.get(
+            "/nba/prop-progress/game123?player=LeBron%20James&prop_type=player_points&line=25.5&bet_type=over"
+        )
+        under_resp = self.client.get(
+            "/nba/prop-progress/game123?player=LeBron%20James&prop_type=player_points&line=25.5&bet_type=under"
+        )
+
+        over_data = json.loads(over_resp.data)
+        under_data = json.loads(under_resp.data)
+        self.assertTrue(over_data["on_track"])
+        self.assertFalse(under_data["on_track"])
+
+    @patch("app.routes.bet.requests.get")
+    def test_nba_prop_progress_cache_key_includes_line_and_bet_type(self, mock_get):
+        self.register_and_login()
+        mock_resp = mock_get.return_value
+        mock_resp.raise_for_status.return_value = None
+        mock_resp.json.return_value = {
+            "boxscore": {
+                "players": [{
+                    "statistics": [{
+                        "names": ["PTS", "AST", "REB", "3PT"],
+                        "athletes": [{
+                            "athlete": {"displayName": "LeBron James"},
+                            "stats": ["22", "7", "8", "2-6"],
+                        }],
+                    }]
+                }]
+            },
+            "header": {
+                "competitions": [{
+                    "status": {"type": {"name": "STATUS_IN_PROGRESS", "detail": "Q2 08:00"}}
+                }]
+            }
+        }
+
+        previous_testing = self.app.testing
+        self.app.testing = False
+        try:
+            self.client.get(
+                "/nba/prop-progress/game123?player=LeBron%20James&prop_type=player_points&line=25.5&bet_type=over"
+            )
+            self.client.get(
+                "/nba/prop-progress/game123?player=LeBron%20James&prop_type=player_points&line=29.5&bet_type=over"
+            )
+            self.client.get(
+                "/nba/prop-progress/game123?player=LeBron%20James&prop_type=player_points&line=29.5&bet_type=under"
+            )
+        finally:
+            self.app.testing = previous_testing
+
+        self.assertEqual(mock_get.call_count, 3)
 
     @patch("app.routes.bet.requests.get")
     def test_nba_prop_progress_blocks_success(self, mock_get):
@@ -597,6 +680,9 @@ class TestBetRoutes(BaseTestCase):
         resp = self.client.get("/bets")
         self.assertEqual(resp.status_code, 200)
         self.assertIn(b"check-prop-progress-btn", resp.data)
+        self.assertIn(b"data-live-period", resp.data)
+        self.assertIn(b"data-live-clock", resp.data)
+        self.assertIn(b"data-live-state", resp.data)
 
     # JSON place-bets endpoint
     def test_place_bets_no_body(self):
