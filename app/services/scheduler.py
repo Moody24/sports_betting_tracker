@@ -23,10 +23,11 @@ except ModuleNotFoundError:  # pragma: no cover - handled in environments withou
 logger = logging.getLogger(__name__)
 
 APP_TIMEZONE = "US/Eastern"
-AUTO_PICK_STRONG_COUNT = 3
-AUTO_PICK_EV_COUNT = 4
-AUTO_PICK_COINFLIP_COUNT = 3
-AUTO_PICK_LONGSHOT_PARLAY_LEGS = 3
+AUTO_PICK_MAX_TOTAL = 50            # hard cap on total bets per day
+AUTO_PICK_MIN_EDGE_STRAIGHT = 0.08  # straight bet: ≥8% edge required
+AUTO_PICK_MIN_EDGE_2LEG = 0.05      # 2-leg parlay leg: ≥5% edge required
+AUTO_PICK_MIN_EDGE_3LEG = 0.08      # 3-leg parlay leg: ≥8% edge required
+AUTO_PICK_MIN_GAMES = 15            # minimum game log history for any pick
 
 scheduler = BackgroundScheduler(timezone=APP_TIMEZONE) if BackgroundScheduler else None
 
@@ -346,40 +347,107 @@ def generate_daily_auto_picks():
 
         detector = ValueDetector(ProjectionEngine())
         scores = detector.score_all_todays_props()
-        actionable = [s for s in scores if s.get('games_played', 0) >= 10 and s.get('confidence_tier') != 'no_edge']
-        strong = [s for s in actionable if s.get('confidence_tier') == 'strong'][:AUTO_PICK_STRONG_COUNT]
-        ev_positive = [s for s in actionable if s.get('edge', 0) >= 0.05][:AUTO_PICK_EV_COUNT]
-        coin_flip = [s for s in scores if s.get('games_played', 0) >= 10 and abs(s.get('edge', 0)) <= 0.02][:AUTO_PICK_COINFLIP_COUNT]
-        longshot_pool = [s for s in actionable if int(s.get('recommended_odds') or 0) >= 120][:AUTO_PICK_LONGSHOT_PARLAY_LEGS]
 
-        selected = []
-        seen = set()
+        # ── Deduplicate and filter to plays with real history and positive edge ──
+        seen_keys: set = set()
+        scored_players: set = set()   # one bet per player max
+        all_qualifying: list = []
 
-        def _add_bucket(bucket_name: str, bucket_scores: list):
-            for play in bucket_scores:
-                key = (play.get('player'), play.get('prop_type'), play.get('line'), play.get('recommended_side'), play.get('game_id'))
-                if key in seen:
-                    continue
-                seen.add(key)
-                selected.append((bucket_name, play))
+        for s in sorted(scores, key=lambda x: x.get('edge', 0), reverse=True):
+            if (s.get('games_played') or 0) < AUTO_PICK_MIN_GAMES:
+                continue
+            key = (s.get('player'), s.get('prop_type'), s.get('line'),
+                   s.get('recommended_side'), s.get('game_id'))
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            all_qualifying.append(s)
 
-        _add_bucket('strong', strong)
-        _add_bucket('ev_positive', ev_positive)
-        _add_bucket('coin_flip', coin_flip)
-
-        if not selected:
-            logger.info("Auto pick generation skipped: no playable scores.")
+        if not all_qualifying:
+            logger.info("Auto pick generation skipped: no qualifying plays today.")
             db.session.commit()
             return
 
-        created_bets = []
-        for bucket, play in selected:
+        # ── Straight bets: one per player, edge ≥ 8% ─────────────────────
+        straight_plays: list = []
+        for s in all_qualifying:
+            if (s.get('edge') or 0) < AUTO_PICK_MIN_EDGE_STRAIGHT:
+                continue
+            player = s.get('player') or ''
+            if player in scored_players:
+                continue  # already have a bet on this player
+            scored_players.add(player)
+            straight_plays.append(s)
+
+        # ── Parlay pool: remaining quality plays not already straight-bet ──
+        # Each parlay leg must have edge ≥ 5%; legs come from different games;
+        # at most one prop type per player across all parlays.
+        parlay_players: set = set(scored_players)  # don't re-use straight-bet players
+        parlay_pool: list = [
+            s for s in all_qualifying
+            if (s.get('edge') or 0) >= AUTO_PICK_MIN_EDGE_2LEG
+            and s not in straight_plays
+        ]
+
+        def _pick_legs(pool: list, n: int, min_edge: float) -> list:
+            """Pick n legs from pool: different games, different players, all ≥ min_edge."""
+            legs: list = []
+            used_games: set = set()
+            for play in pool:
+                if len(legs) >= n:
+                    break
+                if (play.get('edge') or 0) < min_edge:
+                    continue
+                player = play.get('player') or ''
+                game_id = play.get('game_id') or ''
+                if player in parlay_players:
+                    continue
+                if game_id and game_id in used_games:
+                    continue
+                legs.append(play)
+                used_games.add(game_id)
+                parlay_players.add(player)
+            return legs
+
+        parlay_groups: list = []  # [(parlay_id, [plays])]
+        budget = AUTO_PICK_MAX_TOTAL - len(straight_plays)
+
+        # Tier 1: 3-leg parlays (all legs edge ≥ 8%) → highest EV / model signal
+        remaining_pool = list(parlay_pool)
+        while budget >= 3:
+            legs = _pick_legs(remaining_pool, 3, AUTO_PICK_MIN_EDGE_3LEG)
+            if len(legs) < 3:
+                break
+            parlay_groups.append((Bet.generate_parlay_id(), legs))
+            for leg in legs:
+                remaining_pool.remove(leg)
+            budget -= 3
+
+        # Tier 2: 2-leg parlays (both legs edge ≥ 5%)
+        while budget >= 2:
+            legs = _pick_legs(remaining_pool, 2, AUTO_PICK_MIN_EDGE_2LEG)
+            if len(legs) < 2:
+                break
+            parlay_groups.append((Bet.generate_parlay_id(), legs))
+            for leg in legs:
+                remaining_pool.remove(leg)
+            budget -= 2
+
+        if not straight_plays and not parlay_groups:
+            logger.info(
+                "Auto pick generation skipped: %d plays scored but none met edge/history thresholds.",
+                len(all_qualifying),
+            )
+            db.session.commit()
+            return
+
+        # ── Helper: persist one bet + context ─────────────────────────────
+        def _persist_bet(play: dict, is_parlay: bool, parlay_id: str | None, bucket: str) -> Bet:
             match_date = play.get('match_date') or today.isoformat()
             try:
                 match_dt = datetime.strptime(match_date, '%Y-%m-%d')
             except ValueError:
                 match_dt = day_start
-
             bet_obj = Bet(
                 user_id=system_user.id,
                 team_a=str(play.get('away_team') or '')[:80] or 'Away',
@@ -388,7 +456,8 @@ def generate_daily_auto_picks():
                 bet_amount=10.0,
                 outcome=Outcome.PENDING.value,
                 american_odds=int(play.get('recommended_odds') or -110),
-                is_parlay=False,
+                is_parlay=is_parlay,
+                parlay_id=parlay_id,
                 source=BetSource.AUTO_GENERATED.value,
                 bet_type=str(play.get('recommended_side') or 'over'),
                 over_under_line=None,
@@ -400,7 +469,6 @@ def generate_daily_auto_picks():
             )
             db.session.add(bet_obj)
             db.session.flush()
-
             context = _build_auto_pick_context(bet_obj, play)
             if context:
                 db.session.add(PickContext(
@@ -410,58 +478,28 @@ def generate_daily_auto_picks():
                     projected_edge=play.get('edge'),
                     confidence_tier=play.get('confidence_tier'),
                 ))
-            created_bets.append(bet_obj)
+            return bet_obj
 
-        # Create one long-shot parlay (2-3 legs) when possible.
-        if len(longshot_pool) >= 2:
-            parlay_legs = longshot_pool[:3]
-            parlay_id = Bet.generate_parlay_id()
-            for play in parlay_legs:
-                match_date = play.get('match_date') or today.isoformat()
-                try:
-                    match_dt = datetime.strptime(match_date, '%Y-%m-%d')
-                except ValueError:
-                    match_dt = day_start
-                leg = Bet(
-                    user_id=system_user.id,
-                    team_a=str(play.get('away_team') or '')[:80] or 'Away',
-                    team_b=str(play.get('home_team') or '')[:80] or 'Home',
-                    match_date=match_dt,
-                    bet_amount=10.0,
-                    outcome=Outcome.PENDING.value,
-                    american_odds=int(play.get('recommended_odds') or -110),
-                    is_parlay=True,
-                    parlay_id=parlay_id,
-                    source=BetSource.AUTO_GENERATED.value,
-                    bet_type=str(play.get('recommended_side') or 'over'),
-                    external_game_id=play.get('game_id') or None,
-                    player_name=str(play.get('player') or '')[:100] or None,
-                    prop_type=str(play.get('prop_type') or '')[:40] or None,
-                    prop_line=float(play.get('line') or 0.0),
-                    notes="AUTO_PICK_BUCKET:longshot_parlay",
-                )
-                db.session.add(leg)
-                db.session.flush()
-                context = _build_auto_pick_context(leg, play)
-                if context:
-                    db.session.add(PickContext(
-                        bet_id=leg.id,
-                        context_json=json.dumps(context),
-                        projected_stat=play.get('projection'),
-                        projected_edge=play.get('edge'),
-                        confidence_tier=play.get('confidence_tier'),
-                    ))
-                created_bets.append(leg)
+        created_bets: list = []
+
+        for play in straight_plays:
+            created_bets.append(_persist_bet(play, False, None, 'straight'))
+
+        for pid, legs in parlay_groups:
+            n = len(legs)
+            bucket = '3leg_parlay' if n == 3 else '2leg_parlay'
+            for play in legs:
+                created_bets.append(_persist_bet(play, True, pid, bucket))
 
         db.session.commit()
         logger.info(
-            "Generated %d auto picks for %s (strong<=%d, ev<=%d, coinflip<=%d, longshot_parlay_legs<=%d)",
+            "Generated %d auto picks for %s — %d straight | %d parlays (%d 3-leg, %d 2-leg)",
             len(created_bets),
             today.isoformat(),
-            AUTO_PICK_STRONG_COUNT,
-            AUTO_PICK_EV_COUNT,
-            AUTO_PICK_COINFLIP_COUNT,
-            AUTO_PICK_LONGSHOT_PARLAY_LEGS,
+            len(straight_plays),
+            len(parlay_groups),
+            sum(1 for _, legs in parlay_groups if len(legs) == 3),
+            sum(1 for _, legs in parlay_groups if len(legs) == 2),
         )
 
 
