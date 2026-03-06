@@ -52,6 +52,10 @@ class TestNBAService(unittest.TestCase):
         nba_service._GAMES_CACHE.clear()
         nba_service._UPCOMING_CACHE.clear()
 
+    def test_player_prop_markets_include_steals_and_blocks(self):
+        self.assertIn("player_steals", nba_service.PLAYER_PROP_MARKETS)
+        self.assertIn("player_blocks", nba_service.PLAYER_PROP_MARKETS)
+
     # fetch_espn_scoreboard
     @patch("app.services.nba_service.requests.get")
     def test_fetch_espn_scoreboard_success(self, mock_get):
@@ -316,6 +320,12 @@ class TestNBAService(unittest.TestCase):
                         {"description": "LeBron James", "name": "Over",  "price": -120, "point": 40.5},
                         {"description": "LeBron James", "name": "Under", "price": 100, "point": 40.5},
                     ],
+                }, {
+                    "key": "player_blocks",
+                    "outcomes": [
+                        {"description": "Anthony Davis", "name": "Over", "price": -112, "point": 2.5},
+                        {"description": "Anthony Davis", "name": "Under", "price": -108, "point": 2.5},
+                    ],
                 }],
             }],
         }
@@ -331,10 +341,12 @@ class TestNBAService(unittest.TestCase):
         self.assertEqual(lebron["under_odds"], -105)
         self.assertIn("player_points_rebounds_assists", props)
         self.assertEqual(props["player_points_rebounds_assists"][0]["line"], 40.5)
+        self.assertIn("player_blocks", props)
+        self.assertEqual(props["player_blocks"][0]["player"], "Anthony Davis")
 
     @patch.dict(os.environ, {"ODDS_API_KEY": "test-key"})
     @patch("app.services.nba_service.requests.get")
-    def test_fetch_player_props_skips_unknown_market(self, mock_get):
+    def test_fetch_player_props_supports_steals_market(self, mock_get):
         mock_resp = MagicMock()
         mock_resp.raise_for_status.return_value = None
         mock_resp.json.return_value = {
@@ -349,7 +361,9 @@ class TestNBAService(unittest.TestCase):
         }
         mock_get.return_value = mock_resp
         props = nba_service.fetch_player_props_for_event("event123")
-        self.assertEqual(props, {})
+        self.assertIn("player_steals", props)
+        self.assertEqual(props["player_steals"][0]["player"], "LeBron James")
+        self.assertEqual(props["player_steals"][0]["line"], 1.5)
 
     @patch.dict(os.environ, {"ODDS_API_KEY": "test-key"})
     @patch("app.services.nba_service.requests.get")

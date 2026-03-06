@@ -153,6 +153,46 @@ class TestModels(BaseTestCase):
         )
         self.assertIn("PTS+REB+AST", b.prop_display)
 
+    def test_bet_prop_display_blocks_label(self):
+        b = make_bet(
+            1,
+            player_name="Anthony Davis",
+            prop_type="player_blocks",
+            prop_line=2.5,
+            bet_type="over",
+        )
+        self.assertIn("BLK", b.prop_display)
+
+    def test_bet_market_display_steals_label(self):
+        b = make_bet(
+            1,
+            player_name="Shai Gilgeous-Alexander",
+            prop_type="player_steals",
+            prop_line=1.5,
+            bet_type="under",
+        )
+        self.assertEqual(b.market_display, "STL")
+
+    def test_bet_live_trackable_supports_blocks_and_steals(self):
+        blk_bet = make_bet(
+            1,
+            player_name="Anthony Davis",
+            prop_type="player_blocks",
+            prop_line=2.5,
+            bet_type="over",
+            external_game_id="espn123",
+        )
+        stl_bet = make_bet(
+            1,
+            player_name="Jimmy Butler",
+            prop_type="player_steals",
+            prop_line=1.5,
+            bet_type="over",
+            external_game_id="espn123",
+        )
+        self.assertTrue(blk_bet.live_trackable)
+        self.assertTrue(stl_bet.live_trackable)
+
     # Bet.display_label
     def test_display_label_player_prop(self):
         b = make_bet(

@@ -47,6 +47,13 @@ class TestBetRoutes(BaseTestCase):
         self.assertIn(b'id="load-parlay-props-btn"', resp.data)
         self.assertIn(b'id="parlay-props-browser"', resp.data)
 
+    def test_new_bet_form_lists_blocks_and_steals_prop_options(self):
+        self.register_and_login()
+        resp = self.client.get("/bets/new")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn(b'<option value="player_blocks"', resp.data)
+        self.assertIn(b'<option value="player_steals"', resp.data)
+
     def test_new_bet_form_shows_units_inputs_when_unit_size_set(self):
         user_id = self.register_and_login()
         with self.app.app_context():
@@ -161,6 +168,29 @@ class TestBetRoutes(BaseTestCase):
             self.assertEqual(bet.prop_line, 29.5)
             self.assertIsNone(bet.over_under_line)
             self.assertIsNotNone(PickContext.query.filter_by(bet_id=bet.id).first())
+
+    def test_new_bet_player_prop_blocks_can_be_submitted_and_stored(self):
+        user_id = self.register_and_login()
+        resp = self.client.post(
+            "/bets/new",
+            data={
+                "team_a": "Lakers",
+                "team_b": "Suns",
+                "match_date": "2025-03-01",
+                "bet_amount": "20",
+                "bet_type": "over",
+                "player_name": "Anthony Davis",
+                "prop_type": "player_blocks",
+                "prop_line": "2.5",
+                "outcome": "pending",
+            },
+            follow_redirects=True,
+        )
+        self.assertIn(b"Bet recorded successfully", resp.data)
+        with self.app.app_context():
+            bet = Bet.query.filter_by(user_id=user_id).order_by(Bet.id.desc()).first()
+            self.assertEqual(bet.prop_type, "player_blocks")
+            self.assertEqual(bet.prop_line, 2.5)
 
     def test_new_bet_over_under_without_any_line_is_rejected(self):
         user_id = self.register_and_login()
@@ -395,6 +425,25 @@ class TestBetRoutes(BaseTestCase):
         box = _extract_prop_boxscore(summary_data)
         self.assertEqual(box['LeBron James']['player_points_rebounds_assists'], 37.0)
 
+    def test_extract_prop_boxscore_extracts_blocks_and_steals(self):
+        from app.routes.bet import _extract_prop_boxscore
+        summary_data = {
+            "boxscore": {
+                "players": [{
+                    "statistics": [{
+                        "names": ["PTS", "AST", "REB", "BLK", "STL"],
+                        "athletes": [{
+                            "athlete": {"displayName": "Anthony Davis"},
+                            "stats": ["24", "4", "10", "3", "2"],
+                        }],
+                    }]
+                }]
+            }
+        }
+        box = _extract_prop_boxscore(summary_data)
+        self.assertEqual(box['Anthony Davis']['player_blocks'], 3.0)
+        self.assertEqual(box['Anthony Davis']['player_steals'], 2.0)
+
     def test_nba_prop_progress_requires_query_params(self):
         self.register_and_login()
         resp = self.client.get("/nba/prop-progress/game123")
@@ -467,6 +516,68 @@ class TestBetRoutes(BaseTestCase):
         data = json.loads(resp.data)
         self.assertTrue(data["ok"])
         self.assertEqual(data["stat"], 37.0)
+
+    @patch("app.routes.bet.requests.get")
+    def test_nba_prop_progress_blocks_success(self, mock_get):
+        self.register_and_login()
+        mock_resp = mock_get.return_value
+        mock_resp.raise_for_status.return_value = None
+        mock_resp.json.return_value = {
+            "boxscore": {
+                "players": [{
+                    "statistics": [{
+                        "names": ["PTS", "AST", "REB", "BLK", "STL"],
+                        "athletes": [{
+                            "athlete": {"displayName": "Anthony Davis"},
+                            "stats": ["24", "4", "10", "3", "2"],
+                        }],
+                    }]
+                }]
+            },
+            "header": {
+                "competitions": [{
+                    "status": {"type": {"name": "STATUS_IN_PROGRESS", "detail": "Q2 09:40"}}
+                }]
+            }
+        }
+        resp = self.client.get(
+            "/nba/prop-progress/game123?player=Anthony%20Davis&prop_type=player_blocks"
+        )
+        self.assertEqual(resp.status_code, 200)
+        data = json.loads(resp.data)
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["stat"], 3.0)
+
+    @patch("app.routes.bet.requests.get")
+    def test_nba_prop_progress_steals_success(self, mock_get):
+        self.register_and_login()
+        mock_resp = mock_get.return_value
+        mock_resp.raise_for_status.return_value = None
+        mock_resp.json.return_value = {
+            "boxscore": {
+                "players": [{
+                    "statistics": [{
+                        "names": ["PTS", "AST", "REB", "BLK", "STL"],
+                        "athletes": [{
+                            "athlete": {"displayName": "Anthony Davis"},
+                            "stats": ["24", "4", "10", "3", "2"],
+                        }],
+                    }]
+                }]
+            },
+            "header": {
+                "competitions": [{
+                    "status": {"type": {"name": "STATUS_IN_PROGRESS", "detail": "Q2 09:40"}}
+                }]
+            }
+        }
+        resp = self.client.get(
+            "/nba/prop-progress/game123?player=Anthony%20Davis&prop_type=player_steals"
+        )
+        self.assertEqual(resp.status_code, 200)
+        data = json.loads(resp.data)
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["stat"], 2.0)
 
     def test_bets_list_shows_prop_progress_button_for_pending_props(self):
         user_id = self.register_and_login()
