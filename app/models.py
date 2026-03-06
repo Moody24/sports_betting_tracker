@@ -288,6 +288,7 @@ class Bet(db.Model):
             'player_points',
             'player_rebounds',
             'player_assists',
+            'player_points_rebounds_assists',
             'player_threes',
         }
         return bool(self.is_player_prop and self.external_game_id and (self.prop_type or '') in supported)

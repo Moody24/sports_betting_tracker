@@ -43,6 +43,7 @@
         <option value="player_points">Points</option>
         <option value="player_rebounds">Rebounds</option>
         <option value="player_assists">Assists</option>
+        <option value="player_points_rebounds_assists">Points + Rebounds + Assists</option>
         <option value="player_threes">3-Pointers</option>
       </select>
     </div>
@@ -92,6 +93,7 @@
       'player_points':   'PTS',
       'player_rebounds': 'REB',
       'player_assists':  'AST',
+      'player_points_rebounds_assists': 'PTS+REB+AST',
       'player_threes':   '3PM',
     }.get(play.prop_type, play.prop_type|replace('player_','')|upper) %}
     <div class="col-sm-6 col-xl-4 analysis-row"
@@ -214,6 +216,7 @@
               'player_points': 'Points',
               'player_rebounds': 'Rebounds',
               'player_assists': 'Assists',
+              'player_points_rebounds_assists': 'Points + Rebounds + Assists',
               'player_threes': '3-Pointers',
             }.get(play.prop_type, play.prop_type|replace('player_', '')|replace('_', ' ')|title) %}
             <span class="badge text-bg-dark">{{ prop_label }}</span>

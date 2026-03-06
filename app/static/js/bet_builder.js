@@ -9,7 +9,7 @@
     player_threes: '3-Pointers',
     player_blocks: 'Blocks',
     player_steals: 'Steals',
-    player_points_rebounds_assists: 'PTS+REB+AST',
+    player_points_rebounds_assists: 'Points + Rebounds + Assists',
     player_points_rebounds: 'PTS+REB',
     player_points_assists: 'PTS+AST',
     player_rebounds_assists: 'REB+AST',
@@ -266,6 +266,7 @@
                 <option value="player_points">Points</option>
                 <option value="player_rebounds">Rebounds</option>
                 <option value="player_assists">Assists</option>
+                <option value="player_points_rebounds_assists">Points + Rebounds + Assists</option>
                 <option value="player_threes">3-Pointers Made</option>
                 <option value="player_blocks">Blocks</option>
                 <option value="player_steals">Steals</option>

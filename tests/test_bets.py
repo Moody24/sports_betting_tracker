@@ -377,6 +377,24 @@ class TestBetRoutes(BaseTestCase):
             self.assertIsNotNone(snap)
             self.assertIsNotNone(snap.props_json)
 
+    def test_extract_prop_boxscore_derives_pra(self):
+        from app.routes.bet import _extract_prop_boxscore
+        summary_data = {
+            "boxscore": {
+                "players": [{
+                    "statistics": [{
+                        "names": ["PTS", "AST", "REB", "3PT"],
+                        "athletes": [{
+                            "athlete": {"displayName": "LeBron James"},
+                            "stats": ["22", "7", "8", "2-6"],
+                        }],
+                    }]
+                }]
+            }
+        }
+        box = _extract_prop_boxscore(summary_data)
+        self.assertEqual(box['LeBron James']['player_points_rebounds_assists'], 37.0)
+
     def test_nba_prop_progress_requires_query_params(self):
         self.register_and_login()
         resp = self.client.get("/nba/prop-progress/game123")
@@ -417,6 +435,38 @@ class TestBetRoutes(BaseTestCase):
         self.assertEqual(data["stat"], 22.0)
         self.assertIn("STATUS_IN_PROGRESS", data["status"])
         self.assertEqual(mock_get.call_count, 1)
+
+
+    @patch("app.routes.bet.requests.get")
+    def test_nba_prop_progress_pra_success(self, mock_get):
+        self.register_and_login()
+        mock_resp = mock_get.return_value
+        mock_resp.raise_for_status.return_value = None
+        mock_resp.json.return_value = {
+            "boxscore": {
+                "players": [{
+                    "statistics": [{
+                        "names": ["PTS", "AST", "REB", "3PT"],
+                        "athletes": [{
+                            "athlete": {"displayName": "LeBron James"},
+                            "stats": ["22", "7", "8", "2-6"],
+                        }],
+                    }]
+                }]
+            },
+            "header": {
+                "competitions": [{
+                    "status": {"type": {"name": "STATUS_IN_PROGRESS", "detail": "Q2 01:12"}}
+                }]
+            }
+        }
+        resp = self.client.get(
+            "/nba/prop-progress/game123?player=LeBron%20James&prop_type=player_points_rebounds_assists"
+        )
+        self.assertEqual(resp.status_code, 200)
+        data = json.loads(resp.data)
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["stat"], 37.0)
 
     def test_bets_list_shows_prop_progress_button_for_pending_props(self):
         user_id = self.register_and_login()
@@ -496,6 +546,36 @@ class TestBetRoutes(BaseTestCase):
             self.assertEqual(bet.prop_line, 25.5)
             self.assertIsNone(bet.over_under_line)
             self.assertIsNotNone(PickContext.query.filter_by(bet_id=bet.id).first())
+
+    def test_place_bets_single_success_pra(self):
+        user_id = self.register_and_login()
+        payload = {
+            "stake": 25.0,
+            "is_parlay": False,
+            "legs": [{
+                "player_name": "LeBron James",
+                "prop_type": "player_points_rebounds_assists",
+                "prop_line": 40.5,
+                "bet_type": "over",
+                "american_odds": -115,
+                "team_a": "Lakers",
+                "team_b": "Celtics",
+                "game_id": "game123",
+                "match_date": "2025-03-01",
+            }],
+        }
+        resp = self.client.post(
+            "/nba/place-bets",
+            content_type="application/json",
+            data=json.dumps(payload),
+        )
+        self.assertEqual(resp.status_code, 200)
+        data = json.loads(resp.data)
+        self.assertTrue(data["success"])
+        with self.app.app_context():
+            bet = Bet.query.filter_by(user_id=user_id).order_by(Bet.id.desc()).first()
+            self.assertEqual(bet.prop_type, 'player_points_rebounds_assists')
+            self.assertEqual(bet.prop_line, 40.5)
 
     def test_place_bets_parlay_success(self):
         self.register_and_login()

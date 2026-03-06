@@ -310,6 +310,12 @@ class TestNBAService(unittest.TestCase):
                         {"description": "Anthony Davis", "name": "Over",  "price": -110, "point": 22.5},
                         {"description": "Anthony Davis", "name": "Under", "price": -110, "point": 22.5},
                     ],
+                }, {
+                    "key": "player_points_rebounds_assists",
+                    "outcomes": [
+                        {"description": "LeBron James", "name": "Over",  "price": -120, "point": 40.5},
+                        {"description": "LeBron James", "name": "Under", "price": 100, "point": 40.5},
+                    ],
                 }],
             }],
         }
@@ -323,6 +329,8 @@ class TestNBAService(unittest.TestCase):
         self.assertAlmostEqual(lebron["line"], 25.5)
         self.assertEqual(lebron["over_odds"], -115)
         self.assertEqual(lebron["under_odds"], -105)
+        self.assertIn("player_points_rebounds_assists", props)
+        self.assertEqual(props["player_points_rebounds_assists"][0]["line"], 40.5)
 
     @patch.dict(os.environ, {"ODDS_API_KEY": "test-key"})
     @patch("app.services.nba_service.requests.get")

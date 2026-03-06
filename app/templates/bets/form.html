@@ -246,6 +246,7 @@
             <option value="player_points" {% if request.args.get('prop_type') == 'player_points' %}selected{% endif %}>Points</option>
             <option value="player_rebounds" {% if request.args.get('prop_type') == 'player_rebounds' %}selected{% endif %}>Rebounds</option>
             <option value="player_assists" {% if request.args.get('prop_type') == 'player_assists' %}selected{% endif %}>Assists</option>
+            <option value="player_points_rebounds_assists" {% if request.args.get('prop_type') == 'player_points_rebounds_assists' %}selected{% endif %}>Points + Rebounds + Assists</option>
             <option value="player_threes" {% if request.args.get('prop_type') == 'player_threes' %}selected{% endif %}>3-Pointers Made</option>
             <option value="player_blocks" {% if request.args.get('prop_type') == 'player_blocks' %}selected{% endif %}>Blocks</option>
             <option value="player_steals" {% if request.args.get('prop_type') == 'player_steals' %}selected{% endif %}>Steals</option>
@@ -476,6 +477,7 @@
               <option value="player_points">Points</option>
               <option value="player_rebounds">Rebounds</option>
               <option value="player_assists">Assists</option>
+              <option value="player_points_rebounds_assists">Points + Rebounds + Assists</option>
               <option value="player_threes">3-Pointers Made</option>
               <option value="player_blocks">Blocks</option>
               <option value="player_steals">Steals</option>

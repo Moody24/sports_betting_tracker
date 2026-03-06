@@ -143,6 +143,16 @@ class TestModels(BaseTestCase):
     def test_bet_prop_display_none_when_not_prop(self):
         self.assertIsNone(make_bet(1).prop_display)
 
+    def test_bet_prop_display_pra_label(self):
+        b = make_bet(
+            1,
+            player_name="LeBron James",
+            prop_type="player_points_rebounds_assists",
+            prop_line=40.5,
+            bet_type="over",
+        )
+        self.assertIn("PTS+REB+AST", b.prop_display)
+
     # Bet.display_label
     def test_display_label_player_prop(self):
         b = make_bet(
