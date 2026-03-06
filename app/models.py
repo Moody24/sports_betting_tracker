@@ -215,6 +215,83 @@ class Bet(db.Model):
         ) else ""
         return f"{self.player_name} {direction} {self.prop_line} {label}".strip()
 
+    @property
+    def primary_display_name(self) -> str:
+        if self.is_player_prop:
+            return (self.player_name or 'Player prop').strip()
+        if self.bet_type == BetType.MONEYLINE.value:
+            return (self.picked_team or self.team_a or self.team_b or 'Moneyline').strip()
+        if self.bet_type == 'spread':
+            return (self.picked_team or self.team_a or self.team_b or 'Spread').strip()
+        if self.bet_type in (BetType.OVER.value, BetType.UNDER.value):
+            return f"{self.team_a} vs {self.team_b}".strip()
+        return (self.display_label or 'Bet').strip()
+
+    @property
+    def market_display(self) -> str:
+        if self.is_player_prop:
+            return self._prop_stat_label(self.prop_type)
+        labels = {
+            BetType.MONEYLINE.value: 'ML',
+            BetType.OVER.value: 'Total',
+            BetType.UNDER.value: 'Total',
+            'spread': 'Spread',
+        }
+        return labels.get((self.bet_type or '').lower(), (self.bet_type or 'Bet').upper())
+
+    @property
+    def selection_display(self) -> str:
+        bet_type = (self.bet_type or '').lower()
+        if self.is_player_prop:
+            direction = 'Over' if bet_type == BetType.OVER.value else 'Under' if bet_type == BetType.UNDER.value else ''
+            line = '?' if self.prop_line is None else f"{self.prop_line:g}"
+            return f"{direction} {line}".strip()
+
+        if bet_type == BetType.MONEYLINE.value:
+            team = self.picked_team or self.team_a or self.team_b
+            return f"{team} ML" if team else 'Moneyline'
+
+        if bet_type in (BetType.OVER.value, BetType.UNDER.value):
+            line = '?' if self.over_under_line is None else f"{self.over_under_line:g}"
+            return f"{'Over' if bet_type == BetType.OVER.value else 'Under'} {line}"
+
+        if bet_type == 'spread':
+            team = self.picked_team or self.team_a or self.team_b or 'Spread'
+            spread_line = getattr(self, 'spread_line', None)
+            if spread_line is not None:
+                return f"{team} {spread_line}"
+            return team
+
+        return self.display_label
+
+    @property
+    def odds_display(self) -> str:
+        if self.american_odds is None:
+            return '—'
+        return f"{int(self.american_odds):+d}"
+
+    @property
+    def matchup_display(self) -> str:
+        return f"{self.team_a} vs {self.team_b}"
+
+    @property
+    def bet_kind_display(self) -> str:
+        if self.is_parlay:
+            return 'Parlay Leg'
+        if self.is_player_prop:
+            return 'Prop'
+        return 'Straight'
+
+    @property
+    def live_trackable(self) -> bool:
+        supported = {
+            'player_points',
+            'player_rebounds',
+            'player_assists',
+            'player_threes',
+        }
+        return bool(self.is_player_prop and self.external_game_id and (self.prop_type or '') in supported)
+
     @staticmethod
     def _prop_stat_label(prop_type: Optional[str]) -> str:
         if not prop_type:
