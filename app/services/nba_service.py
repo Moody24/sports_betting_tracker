@@ -43,6 +43,8 @@ PLAYER_PROP_MARKETS = [
     "player_assists",
     "player_points_rebounds_assists",
     "player_threes",
+    "player_steals",
+    "player_blocks",
 ]
 
 # Maps prop_type value → ESPN box score column header
