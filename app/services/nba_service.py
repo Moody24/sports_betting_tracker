@@ -41,6 +41,7 @@ PLAYER_PROP_MARKETS = [
     "player_points",
     "player_rebounds",
     "player_assists",
+    "player_points_rebounds_assists",
     "player_threes",
 ]
 

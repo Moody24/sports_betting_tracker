@@ -20,7 +20,7 @@
     player_threes: '3-Pointers',
     player_blocks: 'Blocks',
     player_steals: 'Steals',
-    player_points_rebounds_assists: 'PTS+REB+AST',
+    player_points_rebounds_assists: 'Points + Rebounds + Assists',
     player_points_rebounds: 'PTS+REB',
     player_points_assists: 'PTS+AST',
     player_rebounds_assists: 'REB+AST'

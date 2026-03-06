@@ -45,17 +45,16 @@ def build_projection_features(
     logs = get_cached_logs(player_id, last_n=82)
     summary = get_player_stats_summary(player_id, logs)
 
-    stat_key = _prop_to_stat_key(prop_type)
     games_played = summary['games_played']
 
     # Stat averages
-    avg_last_5 = summary['last_5'].get(stat_key, 0)
-    avg_last_10 = summary['last_10'].get(stat_key, 0)
-    avg_season = summary['season'].get(stat_key, 0)
+    avg_last_5 = _summary_stat_for_prop(summary, prop_type, 'last_5')
+    avg_last_10 = _summary_stat_for_prop(summary, prop_type, 'last_10')
+    avg_season = _summary_stat_for_prop(summary, prop_type, 'season')
 
     # Variance
-    std_last_5 = _compute_std(logs[:5], stat_key)
-    std_last_10 = _compute_std(logs[:10], stat_key)
+    std_last_5 = _compute_std_for_prop(logs[:5], prop_type)
+    std_last_10 = _compute_std_for_prop(logs[:10], prop_type)
 
     # Minutes trend (last 3)
     min_last_3 = _average_stat(logs[:3], 'minutes')
@@ -67,7 +66,7 @@ def build_projection_features(
     pace = get_pace_factor(opponent_name) if opponent_name else 1.0
 
     # Streak z-score
-    z_score = _compute_streak_zscore(logs, stat_key)
+    z_score = _compute_streak_zscore_for_prop(logs, prop_type)
 
     return {
         'avg_stat_last_5': avg_last_5,
@@ -108,14 +107,20 @@ def build_pick_context_features(
     """
     logs = get_cached_logs(player_id, last_n=82)
     summary = get_player_stats_summary(player_id, logs)
-    stat_key = _prop_to_stat_key(prop_type)
-
     # Player context
-    season_avg = summary['season'].get(stat_key, 0)
-    std_dev = summary['std_dev'].get(stat_key, 0)
+    season_avg = _summary_stat_for_prop(summary, prop_type, 'season')
+    if prop_type == 'player_points_rebounds_assists':
+        std_dev = round((
+            float(summary['std_dev'].get('pts', 0) or 0) ** 2 +
+            float(summary['std_dev'].get('reb', 0) or 0) ** 2 +
+            float(summary['std_dev'].get('ast', 0) or 0) ** 2
+        ) ** 0.5, 2)
+    else:
+        stat_key = _prop_to_stat_key(prop_type)
+        std_dev = summary['std_dev'].get(stat_key, 0) if stat_key else 0
     games = summary['games_played']
     player_position = infer_player_position(summary)
-    z_score = _compute_streak_zscore(logs, stat_key)
+    z_score = _compute_streak_zscore_for_prop(logs, prop_type)
 
     # Determine trend
     if z_score > 1.5:
@@ -126,7 +131,7 @@ def build_pick_context_features(
         trend = 'neutral'
 
     # Hit rate vs this line (historical)
-    hit_rate = _compute_hit_rate(logs, stat_key, prop_line)
+    hit_rate = _compute_hit_rate_for_prop(logs, prop_type, prop_line)
 
     # Minutes trend
     min_last_5 = _average_stat(logs[:5], 'minutes')
@@ -223,6 +228,55 @@ def build_pick_context_features(
     }
 
 
+
+def _summary_stat_for_prop(summary: dict, prop_type: str, bucket: str) -> float:
+    if prop_type == 'player_points_rebounds_assists':
+        vals = summary.get(bucket, {}) or {}
+        return sum(float(vals.get(k, 0) or 0) for k in ('pts', 'reb', 'ast'))
+    stat_key = _prop_to_stat_key(prop_type)
+    if not stat_key:
+        return 0.0
+    return float((summary.get(bucket, {}) or {}).get(stat_key, 0) or 0)
+
+
+def _log_stat_for_prop(log, prop_type: str) -> float:
+    if prop_type == 'player_points_rebounds_assists':
+        return float((getattr(log, 'pts', 0) or 0) + (getattr(log, 'reb', 0) or 0) + (getattr(log, 'ast', 0) or 0))
+    stat_key = _prop_to_stat_key(prop_type)
+    if not stat_key:
+        return 0.0
+    return float(getattr(log, stat_key, 0) or 0)
+
+
+def _compute_std_for_prop(logs: list, prop_type: str) -> float:
+    if len(logs) < 2:
+        return 0.0
+    vals = [_log_stat_for_prop(l, prop_type) for l in logs]
+    mean = sum(vals) / len(vals)
+    variance = sum((v - mean) ** 2 for v in vals) / len(vals)
+    return round(variance ** 0.5, 2)
+
+
+def _compute_streak_zscore_for_prop(logs: list, prop_type: str, recent_n: int = 3) -> float:
+    if len(logs) < 10:
+        return 0.0
+    recent_vals = [_log_stat_for_prop(l, prop_type) for l in logs[:recent_n]]
+    all_vals = [_log_stat_for_prop(l, prop_type) for l in logs]
+    recent_mean = sum(recent_vals) / len(recent_vals) if recent_vals else 0
+    season_mean = sum(all_vals) / len(all_vals) if all_vals else 0
+    season_std = ((sum((v - season_mean) ** 2 for v in all_vals) / len(all_vals)) ** 0.5) if all_vals else 0
+    if season_std == 0:
+        return 0.0
+    return round((recent_mean - season_mean) / season_std, 2)
+
+
+def _compute_hit_rate_for_prop(logs: list, prop_type: str, line: float) -> float:
+    if not logs or line <= 0:
+        return 0.5
+    hits = sum(1 for l in logs if _log_stat_for_prop(l, prop_type) > line)
+    return hits / len(logs)
+
+
 def _prop_to_stat_key(prop_type: str) -> str:
     """Map prop market key to internal stat key."""
     mapping = {
@@ -233,7 +287,7 @@ def _prop_to_stat_key(prop_type: str) -> str:
         'player_steals': 'stl',
         'player_blocks': 'blk',
     }
-    return mapping.get(prop_type, 'pts')
+    return mapping.get(prop_type)
 
 
 def _compute_std(logs: list, stat_key: str) -> float:

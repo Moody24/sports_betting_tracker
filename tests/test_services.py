@@ -1280,6 +1280,28 @@ class TestProjectionEngine(BaseTestCase):
             self.assertIn('home court (+3%)', result['context_notes'])
             self.assertIn('breakdown', result)
 
+    def test_project_stat_pra_is_derived_sum(self):
+        from app.services.projection_engine import ProjectionEngine
+        with self.app.app_context():
+            self._setup_engine_data()
+            engine = ProjectionEngine()
+            with patch.object(engine, 'project_stat') as mock_project:
+                def side_effect(player_name, prop_type, opponent_name='', team_name='', is_home=True):
+                    if prop_type == 'player_points_rebounds_assists':
+                        return ProjectionEngine.project_stat(engine, player_name, prop_type, opponent_name, team_name, is_home)
+                    mapping = {
+                        'player_points': {'projection': 25.0, 'confidence': 'high', 'context_notes': ['home court (+3%)'], 'std_dev': 3.0, 'z_score': 0.5, 'games_played': 30, 'projection_source': 'heuristic', 'breakdown': {}},
+                        'player_rebounds': {'projection': 9.0, 'confidence': 'medium', 'context_notes': ['pace boost'], 'std_dev': 2.0, 'z_score': 0.2, 'games_played': 30, 'projection_source': 'heuristic', 'breakdown': {}},
+                        'player_assists': {'projection': 8.0, 'confidence': 'medium', 'context_notes': ['home court (+3%)'], 'std_dev': 2.5, 'z_score': 0.3, 'games_played': 28, 'projection_source': 'heuristic', 'breakdown': {}},
+                    }
+                    return mapping[prop_type]
+                mock_project.side_effect = side_effect
+                result = ProjectionEngine.project_stat(engine, 'LeBron James', 'player_points_rebounds_assists')
+            self.assertEqual(result['projection'], 42.0)
+            self.assertEqual(result['projection_source'], 'derived_combo')
+            self.assertEqual(result['games_played'], 28)
+            self.assertIn('components', result['breakdown'])
+
     def test_project_stat_away_game(self):
         from app.services.projection_engine import ProjectionEngine
         with self.app.app_context():

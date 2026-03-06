@@ -123,7 +123,7 @@ class TestFeatureEngine(BaseTestCase):
         self.assertEqual(_prop_to_stat_key('player_rebounds'), 'reb')
         self.assertEqual(_prop_to_stat_key('player_assists'), 'ast')
         self.assertEqual(_prop_to_stat_key('player_threes'), 'fg3m')
-        self.assertEqual(_prop_to_stat_key('unknown'), 'pts')  # default
+        self.assertIsNone(_prop_to_stat_key('unknown'))
 
     def test_compute_std_single_value(self):
         from app.services.feature_engine import _compute_std

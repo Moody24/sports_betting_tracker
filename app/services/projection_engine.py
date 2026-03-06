@@ -51,6 +51,14 @@ ML_STAT_MAP = {
     'player_blocks': 'player_blocks',
 }
 
+COMBO_PROP_COMPONENTS = {
+    'player_points_rebounds_assists': (
+        'player_points',
+        'player_rebounds',
+        'player_assists',
+    ),
+}
+
 
 class ProjectionEngine:
     """Generates projected stat values for player props.
@@ -110,6 +118,44 @@ class ProjectionEngine:
         )
         if cache_key in self._projection_cache:
             return deepcopy(self._projection_cache[cache_key])
+
+        components = COMBO_PROP_COMPONENTS.get(prop_type)
+        if components:
+            component_results = {
+                component: self.project_stat(
+                    player_name,
+                    component,
+                    opponent_name,
+                    team_name,
+                    is_home,
+                )
+                for component in components
+            }
+            total_projection = sum(r.get('projection', 0) or 0 for r in component_results.values())
+            total_variance = sum((r.get('std_dev', 0) or 0) ** 2 for r in component_results.values())
+            combo_context = []
+            for component in components:
+                for note in component_results[component].get('context_notes', []):
+                    if note not in combo_context:
+                        combo_context.append(note)
+
+            result = {
+                'projection': round(total_projection, 1),
+                'confidence': min(
+                    (r.get('confidence', 'low') for r in component_results.values()),
+                    key=lambda c: {'low': 0, 'medium': 1, 'high': 2}.get(c, 0),
+                ),
+                'context_notes': combo_context,
+                'std_dev': round(math.sqrt(total_variance), 2),
+                'z_score': round(sum(r.get('z_score', 0) or 0 for r in component_results.values()) / len(components), 2),
+                'games_played': min(r.get('games_played', 0) or 0 for r in component_results.values()),
+                'projection_source': 'derived_combo',
+                'breakdown': {
+                    'components': {k: deepcopy(v) for k, v in component_results.items()},
+                },
+            }
+            self._projection_cache[cache_key] = result
+            return deepcopy(result)
 
         stat_key = PROP_STAT_MAP.get(prop_type)
         if not stat_key:
@@ -403,7 +449,7 @@ class ProjectionEngine:
         Returns {prop_type: projection_dict}.
         """
         results = {}
-        for prop_type in PROP_STAT_MAP:
+        for prop_type in tuple(PROP_STAT_MAP) + tuple(COMBO_PROP_COMPONENTS):
             results[prop_type] = self.project_stat(
                 player_name, prop_type, opponent_name, team_name, is_home,
             )

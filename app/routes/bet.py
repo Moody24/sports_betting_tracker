@@ -172,6 +172,11 @@ def _extract_prop_boxscore(summary_data: dict) -> dict:
                     except (ValueError, TypeError):
                         continue
                 if entry:
+                    entry["player_points_rebounds_assists"] = (
+                        float(entry.get("player_points", 0) or 0)
+                        + float(entry.get("player_rebounds", 0) or 0)
+                        + float(entry.get("player_assists", 0) or 0)
+                    )
                     player_stats[name] = entry
     return player_stats
 
@@ -1169,6 +1174,7 @@ def _parse_ocr_text(text: str) -> dict:
 
     # Stat type detection
     stat_map = [
+        (r'\b(?:pra|points?\s*\+\s*rebounds?\s*\+\s*assists?|pts\s*\+\s*reb\s*\+\s*ast)\b', 'player_points_rebounds_assists'),
         (r'\bpoints?\b', 'player_points'),
         (r'\brebs?\b|\brebounds?\b', 'player_rebounds'),
         (r'\basts?\b|\bassists?\b', 'player_assists'),
