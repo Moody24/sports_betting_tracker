@@ -3,6 +3,8 @@
     <span class="badge text-bg-success badge-status">Win</span>
   {% elif outcome == 'lose' %}
     <span class="badge text-bg-danger badge-status">Loss</span>
+  {% elif outcome == 'push' %}
+    <span class="badge text-bg-warning text-dark badge-status">Push</span>
   {% else %}
     <span class="badge text-bg-secondary badge-status">Pending</span>
   {% endif %}

@@ -176,6 +176,72 @@ def _extract_prop_boxscore(summary_data: dict) -> dict:
     return player_stats
 
 
+def _safe_float(value, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _clock_to_seconds(clock_value: str) -> int:
+    if not clock_value or ':' not in str(clock_value):
+        return 0
+    parts = str(clock_value).split(':')
+    if len(parts) != 2:
+        return 0
+    try:
+        return int(parts[0]) * 60 + int(parts[1])
+    except (TypeError, ValueError):
+        return 0
+
+
+def _estimate_elapsed_ratio(period: int | None, clock: str, game_state: str) -> float:
+    # NBA regulation estimate. Keep robust for pregame/halftime/final.
+    total_seconds = 48 * 60
+    if game_state == 'final':
+        return 1.0
+    if game_state == 'pregame':
+        return 0.0
+
+    p = max(1, int(period or 1))
+    period_elapsed = 12 * 60 - _clock_to_seconds(clock)
+    elapsed = (p - 1) * 12 * 60 + max(0, min(12 * 60, period_elapsed))
+    return max(0.0, min(1.0, elapsed / total_seconds))
+
+
+def _derive_game_status(summary_data: dict) -> dict:
+    status_type = (
+        summary_data.get('header', {})
+        .get('competitions', [{}])[0]
+        .get('status', {})
+        .get('type', {})
+    )
+    short_detail = status_type.get('shortDetail', '')
+    detail = status_type.get('detail') or status_type.get('description') or short_detail or 'Status unavailable'
+    status_name = (status_type.get('name') or '').upper()
+    status_text = f"{status_name}: {detail}".strip(': ').strip()
+    period = int(status_type.get('period') or 0) if str(status_type.get('period') or '').isdigit() else 0
+    clock = status_type.get('displayClock') or ''
+
+    if status_name in {'STATUS_FINAL', 'FINAL'}:
+        game_state = 'final'
+    elif status_name in {'STATUS_SCHEDULED', 'STATUS_PRE'}:
+        game_state = 'pregame'
+    elif 'HALFTIME' in status_name:
+        game_state = 'halftime'
+    else:
+        game_state = 'live'
+
+    elapsed_ratio = _estimate_elapsed_ratio(period, clock, game_state)
+    return {
+        'status_text': status_text,
+        'period': period,
+        'clock': clock,
+        'game_state': game_state,
+        'elapsed_ratio': elapsed_ratio,
+    }
+
+
 def _prune_prop_progress_cache(now_monotonic: float) -> None:
     # Remove expired entries every request; keep bounded memory in long-lived workers.
     expired_keys = [k for k, v in _PROP_PROGRESS_CACHE.items() if v.get("expires_at", 0) <= now_monotonic]
@@ -687,26 +753,48 @@ def nba_prop_progress(espn_id):
         _cache_payload(payload)
         return jsonify(payload), 404
 
-    status_text = 'Status unavailable'
-    try:
-        status_type = (
-            summary_data.get('header', {})
-            .get('competitions', [{}])[0]
-            .get('status', {})
-            .get('type', {})
-        )
-        detail = status_type.get('detail') or status_type.get('description') or ''
-        status_name = status_type.get('name') or 'UNKNOWN'
-        status_text = f'{status_name}: {detail}'.strip(': ').strip()
-    except Exception:
-        pass
+    status_meta = _derive_game_status(summary_data)
+
+    line = _safe_float(request.args.get('line'), 0.0)
+    bet_type = (request.args.get('bet_type') or '').strip().lower()
+    current_stat = _safe_float(stat_val, 0.0)
+    elapsed_ratio = status_meta['elapsed_ratio']
+
+    if elapsed_ratio <= 0:
+        projected_final = current_stat
+    else:
+        projected_final = current_stat / max(elapsed_ratio, 0.01)
+
+    progress_pct = 0.0
+    delta_to_line = current_stat - line
+    if line > 0:
+        progress_pct = max(0.0, min(200.0, (current_stat / line) * 100.0))
+
+    on_track = None
+    if line > 0 and bet_type in (BetType.OVER.value, BetType.UNDER.value):
+        if bet_type == BetType.OVER.value:
+            on_track = projected_final >= line
+        else:
+            on_track = projected_final <= line
 
     payload = {
         'ok': True,
         'player': best_name,
         'prop_type': prop_type,
-        'stat': stat_val,
-        'status': status_text,
+        'bet_type': bet_type,
+        'line': line,
+        'current_stat': round(current_stat, 2),
+        'stat': round(current_stat, 2),
+        'status_text': status_meta['status_text'],
+        'status': status_meta['status_text'],
+        'period': status_meta['period'],
+        'clock': status_meta['clock'],
+        'game_state': status_meta['game_state'],
+        'elapsed_ratio': round(elapsed_ratio, 4),
+        'projected_final': round(projected_final, 2),
+        'progress_pct': round(progress_pct, 1),
+        'delta_to_line': round(delta_to_line, 2),
+        'on_track': on_track,
         'match_score': round(best_score, 3),
     }
     _cache_payload(payload)
