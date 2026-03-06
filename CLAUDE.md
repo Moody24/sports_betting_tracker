@@ -54,3 +54,12 @@ railway logs
 ```
 - Auto-deploys on every push to `main` (no manual deploy step needed)
 - Health check endpoint: `/health` → `{"status": "healthy"}`
+
+## Definition of Done
+- Ensure no horizontal overflow at `320px` viewport width on the bets list.
+- Ensure no overlap between status / P&L / actions at breakpoints `1200`, `992`, `768`, `576`, and `375`.
+- Ensure all live-progress rows show current stat, line, period, clock, game-state, projection, and trend.
+- Validate over/under trend semantics with at least one concrete **over** example and one concrete **under** example.
+- Verify existing controls remain unchanged: filters, search, export, add, check now, manual grading, parlay toggle, and delete.
+- Update tests for endpoint payload and key render paths.
+- If visual changes are substantial, include before/after screenshots for desktop and mobile widths.
