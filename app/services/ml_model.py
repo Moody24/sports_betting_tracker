@@ -14,7 +14,7 @@ import os
 from datetime import datetime, timezone, date as date_type
 
 from app import db
-from app.models import ModelMetadata, PlayerGameLog
+from app.models import ModelMetadata, PlayerGameLog, TeamDefenseSnapshot, GameSnapshot
 from app.services.model_storage import materialize_model_artifact, persist_model_artifact
 from app.services.ml_feature_builder import build_ml_features_from_history, build_team_game_aggregates
 
@@ -47,6 +47,61 @@ def _ensure_model_dir():
     os.makedirs(MODEL_DIR, exist_ok=True)
 
 
+def _build_defense_lookup() -> dict:
+    """Pre-fetch TeamDefenseSnapshot into {team_abbr: {field: value}} dict.
+
+    Only the most-recent snapshot per team is kept.  Falls back to team_name
+    for teams that lack an abbreviation.
+    """
+    rows = TeamDefenseSnapshot.query.order_by(TeamDefenseSnapshot.snapshot_date.desc()).all()
+    lookup: dict = {}
+    for row in rows:
+        key = (row.team_abbr or '').strip().upper() or row.team_name
+        if not key or key in lookup:
+            continue  # keep the first (most recent) snapshot per team
+        lookup[key] = {
+            'def_rating':  row.def_rating,
+            'pace':        row.pace,
+            'opp_pts_pg':  row.opp_pts_pg,
+            'opp_reb_pg':  row.opp_reb_pg,
+            'opp_ast_pg':  row.opp_ast_pg,
+            'opp_3pm_pg':  row.opp_3pm_pg,
+            'opp_stl_pg':  row.opp_stl_pg,
+            'opp_blk_pg':  row.opp_blk_pg,
+            # store full name so game-total lookup can cross-reference
+            '_team_name':  row.team_name,
+        }
+    return lookup
+
+
+def _build_game_total_lookup(defense_lookup: dict) -> dict:
+    """Pre-fetch GameSnapshot O/U totals into {(game_date, team_abbr): ou_line}.
+
+    Uses defense_lookup to map team full-names → abbreviations for the key.
+    """
+    # Build reverse map: normalised team name → abbr
+    name_to_abbr: dict = {}
+    for abbr, info in defense_lookup.items():
+        tname = (info.get('_team_name') or '').strip().lower()
+        if tname:
+            name_to_abbr[tname] = abbr
+
+    rows = GameSnapshot.query.filter(GameSnapshot.over_under_line.isnot(None)).all()
+    lookup: dict = {}
+    for row in rows:
+        ou = row.over_under_line
+        if not ou:
+            continue
+        home = (row.home_team or '').strip().lower()
+        away = (row.away_team or '').strip().lower()
+        gdate = row.game_date
+        for tname in (home, away):
+            abbr = name_to_abbr.get(tname)
+            if abbr and gdate:
+                lookup[(gdate, abbr)] = float(ou)
+    return lookup
+
+
 def _build_training_rows(stat_type: str):
     """Build dated training rows for walk-forward validation."""
     stat_key = STAT_KEY_MAP.get(stat_type, 'pts')
@@ -69,6 +124,11 @@ def _build_training_rows(stat_type: str):
         player_logs.setdefault(log.player_id, []).append(log)
 
     team_totals, team_counts = build_team_game_aggregates(all_logs)
+
+    # Phase 1.1: pre-build context lookups once to avoid per-row DB queries
+    defense_lookup = _build_defense_lookup()
+    game_total_lookup = _build_game_total_lookup(defense_lookup)
+
     rows = []
 
     for pid, logs in player_logs.items():
@@ -80,12 +140,21 @@ def _build_training_rows(stat_type: str):
             prior = logs[:i]
             current = logs[i]
             target = float(getattr(current, stat_key, 0.0) or 0.0)
+
+            # Phase 1.1 context for this specific game row
+            team_abbr = (current.team_abbr or '').strip().upper()
+            ou_line = game_total_lookup.get((current.game_date, team_abbr), 0.0)
+
             features = build_ml_features_from_history(
                 prior_logs=prior,
                 current_is_home=(current.home_away or '').lower() == 'home',
                 stat_key=stat_key,
                 team_totals=team_totals,
                 team_counts=team_counts,
+                current_game_date=current.game_date,
+                current_matchup=current.matchup or '',
+                game_total_line=ou_line,
+                defense_lookup=defense_lookup,
             )
             rows.append((current.game_date, str(pid), features, target))
 

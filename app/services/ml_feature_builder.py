@@ -2,19 +2,115 @@
 
 from __future__ import annotations
 
-from datetime import date as date_type
-from typing import Dict, Iterable, List, Tuple
+from datetime import date as date_type, timedelta
+from typing import Dict, Iterable, List, Optional, Tuple
 
 MIN_TEAM_PLAYERS_FOR_SHARE_FEATURES = 6
 
+# Maps stat_key → TeamDefenseSnapshot field for opponent-allowed stats
+_STAT_KEY_TO_OPP_ALLOWED: Dict[str, str] = {
+    'pts':  'opp_pts_pg',
+    'reb':  'opp_reb_pg',
+    'ast':  'opp_ast_pg',
+    'fg3m': 'opp_3pm_pg',
+    'stl':  'opp_stl_pg',
+    'blk':  'opp_blk_pg',
+}
 
 FEATURE_KEYS = [
+    # Original 21 features
     'avg_stat_last_5', 'avg_stat_last_10', 'avg_stat_season', 'std_stat_last_5', 'std_stat_last_10',
     'min_last_3_avg', 'home_away', 'games_played', 'home_split_stat_avg', 'away_split_stat_avg',
     'context_split_stat_avg', 'fg_pct_last_10', 'ts_pct_last_10', 'fga_last_5_avg', 'fg3a_last_5_avg',
     'fg3m_last_5_avg', 'fta_last_5_avg', 'fga_share_last_5', 'pts_share_last_5',
     'usage_share_last_5', 'lead_usage_rate_last_10',
+    # Phase 1.1 — situational (3)
+    'days_rest', 'back_to_back', 'games_last_7_days',
+    # Phase 1.1 — opponent history (2)
+    'opp_hist_avg_stat', 'opp_hist_games',
+    # Phase 1.1 — game context (1)
+    'game_total_line',
+    # Phase 1.1 — defensive matchup (3)
+    'opp_def_rating', 'opp_pace', 'opp_stat_allowed',
 ]
+
+
+# ---------------------------------------------------------------------------
+# Phase 1.1 helper functions
+# ---------------------------------------------------------------------------
+
+def extract_opp_abbr(matchup: str) -> str:
+    """Return the opponent team abbreviation from a matchup string.
+
+    Handles both home ('LAL vs. BOS') and away ('LAL @ MIA') formats.
+    Returns '' when the string is unrecognised.
+    """
+    if not matchup:
+        return ''
+    m = matchup.strip()
+    if ' vs. ' in m:
+        return m.split(' vs. ', 1)[1].strip().upper()
+    if ' @ ' in m:
+        return m.split(' @ ', 1)[1].strip().upper()
+    return ''
+
+
+def compute_opp_history(
+    prior_logs: Iterable,
+    opp_abbr: str,
+    stat_key: str,
+) -> Tuple[float, int]:
+    """Return (avg_stat, game_count) for the player against *opp_abbr*.
+
+    Scans *prior_logs* for games whose matchup resolves to *opp_abbr*.
+    Returns (0.0, 0) when there are no matching games or opp_abbr is empty.
+    """
+    if not opp_abbr:
+        return 0.0, 0
+    opp_games = [
+        g for g in (prior_logs or [])
+        if extract_opp_abbr(getattr(g, 'matchup', '') or '') == opp_abbr
+    ]
+    if not opp_games:
+        return 0.0, 0
+    vals = [float(getattr(g, stat_key, 0.0) or 0.0) for g in opp_games]
+    return (sum(vals) / len(vals)), len(opp_games)
+
+
+def compute_days_rest_from_logs(
+    prior_logs: Iterable,
+    current_game_date: Optional[date_type],
+) -> float:
+    """Return the number of full days between the last game and *current_game_date*.
+
+    Returns 3.0 as a neutral default when date information is unavailable.
+    """
+    if not current_game_date:
+        return 3.0
+    dates = [
+        getattr(g, 'game_date', None)
+        for g in (prior_logs or [])
+        if getattr(g, 'game_date', None) is not None
+    ]
+    if not dates:
+        return 3.0
+    return float(max(0.0, (current_game_date - max(dates)).days))
+
+
+def compute_schedule_density(
+    prior_logs: Iterable,
+    current_game_date: Optional[date_type],
+    window_days: int = 7,
+) -> int:
+    """Return the number of games played in the *window_days* before *current_game_date*."""
+    if not current_game_date:
+        return 0
+    cutoff = current_game_date - timedelta(days=window_days)
+    return sum(
+        1 for g in (prior_logs or [])
+        if getattr(g, 'game_date', None) is not None
+        and cutoff <= getattr(g, 'game_date') < current_game_date
+    )
 
 
 def sort_logs_by_date(logs: Iterable, ascending: bool = True) -> List:
@@ -119,7 +215,20 @@ def compute_team_usage_features_for_player(game_list: Iterable, totals: Dict[tup
     }
 
 
-def build_ml_features_from_history(prior_logs: Iterable, current_is_home: bool, stat_key: str, all_history_logs: Iterable = None, team_totals: Dict[tuple, dict] = None, team_counts: Dict[tuple, int] = None) -> dict:
+def build_ml_features_from_history(
+    prior_logs: Iterable,
+    current_is_home: bool,
+    stat_key: str,
+    all_history_logs: Iterable = None,
+    team_totals: Dict[tuple, dict] = None,
+    team_counts: Dict[tuple, int] = None,
+    # Phase 1.1 context — all optional so callers that don't supply them get
+    # safe neutral defaults rather than errors.
+    current_game_date: Optional[date_type] = None,
+    current_matchup: str = '',
+    game_total_line: float = 0.0,
+    defense_lookup: Optional[Dict[str, dict]] = None,
+) -> dict:
     """Canonical feature builder for model training and live inference."""
     logs = sort_logs_by_date(prior_logs, ascending=True)
     if not logs:
@@ -182,4 +291,40 @@ def build_ml_features_from_history(prior_logs: Iterable, current_is_home: bool, 
         'fta_last_5_avg': _avg(last_5, 'fta'),
     }
     features.update(usage_features)
+
+    # ------------------------------------------------------------------
+    # Phase 1.1 — situational features (from game logs, no new API)
+    # ------------------------------------------------------------------
+    _rest = compute_days_rest_from_logs(logs, current_game_date)
+    features['days_rest'] = _rest
+    features['back_to_back'] = 1.0 if _rest <= 1.0 else 0.0
+    features['games_last_7_days'] = float(compute_schedule_density(logs, current_game_date))
+
+    # ------------------------------------------------------------------
+    # Phase 1.1 — opponent history (how the player has performed vs opp)
+    # ------------------------------------------------------------------
+    opp_abbr = extract_opp_abbr(current_matchup or '')
+    opp_avg, opp_cnt = compute_opp_history(logs, opp_abbr, stat_key)
+    features['opp_hist_avg_stat'] = opp_avg
+    features['opp_hist_games'] = float(opp_cnt)
+
+    # ------------------------------------------------------------------
+    # Phase 1.1 — game context
+    # ------------------------------------------------------------------
+    features['game_total_line'] = float(game_total_line or 0.0)
+
+    # ------------------------------------------------------------------
+    # Phase 1.1 — defensive matchup (from TeamDefenseSnapshot lookup)
+    # ------------------------------------------------------------------
+    def_rating, opp_pace, opp_stat_allowed = 0.0, 0.0, 0.0
+    if defense_lookup and opp_abbr:
+        def_data = defense_lookup.get(opp_abbr, {})
+        def_rating = float(def_data.get('def_rating', 0.0) or 0.0)
+        opp_pace = float(def_data.get('pace', 0.0) or 0.0)
+        allowed_field = _STAT_KEY_TO_OPP_ALLOWED.get(stat_key, 'opp_pts_pg')
+        opp_stat_allowed = float(def_data.get(allowed_field, 0.0) or 0.0)
+    features['opp_def_rating'] = def_rating
+    features['opp_pace'] = opp_pace
+    features['opp_stat_allowed'] = opp_stat_allowed
+
     return features

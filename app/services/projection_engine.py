@@ -98,6 +98,7 @@ class ProjectionEngine:
         opponent_name: str = '',
         team_name: str = '',
         is_home: bool = True,
+        game_total_line: float = 0.0,
     ) -> dict:
         """Generate a projection for a single player-stat combination.
 
@@ -115,6 +116,7 @@ class ProjectionEngine:
             str(opponent_name).strip().lower(),
             str(team_name).strip().lower(),
             bool(is_home),
+            float(game_total_line),
         )
         if cache_key in self._projection_cache:
             return deepcopy(self._projection_cache[cache_key])
@@ -291,7 +293,28 @@ class ProjectionEngine:
 
         projection_source = 'heuristic'
         if self._use_ml_projections() and games_played >= 10 and prop_type in ML_STAT_MAP:
-            ml_features = self._build_ml_features(logs, stat_key, is_home)
+            # Build matchup string so Phase 1 opponent features are populated
+            _current_matchup = ''
+            if team_name and opponent_name:
+                _sep = 'vs.' if is_home else '@'
+                _current_matchup = f"{team_name} {_sep} {opponent_name}"
+
+            # Fetch defense lookup once per engine instance (cached)
+            _defense_lookup = self._context_cache.get('_defense_lookup')
+            if _defense_lookup is None:
+                try:
+                    from app.services.ml_model import _build_defense_lookup
+                    _defense_lookup = _build_defense_lookup()
+                except Exception:
+                    _defense_lookup = {}
+                self._context_cache['_defense_lookup'] = _defense_lookup
+
+            ml_features = self._build_ml_features(
+                logs, stat_key, is_home,
+                current_matchup=_current_matchup,
+                game_total_line=game_total_line,
+                defense_lookup=_defense_lookup,
+            )
             if ml_features:
                 try:
                     from app.services.ml_model import predict_stat
@@ -389,9 +412,23 @@ class ProjectionEngine:
     def _use_ml_projections(self) -> bool:
         return os.getenv('USE_ML_PROJECTIONS', 'false').lower() == 'true'
 
-    def _build_ml_features(self, logs: list, stat_key: str, is_home: bool) -> dict:
+    def _build_ml_features(
+        self,
+        logs: list,
+        stat_key: str,
+        is_home: bool,
+        current_matchup: str = '',
+        game_total_line: float = 0.0,
+        defense_lookup: dict = None,
+    ) -> dict:
         if len(logs) < 10:
             return {}
+
+        # Infer next game date as last-log-date + 1 day (best available at inference time)
+        sorted_dates = sorted(
+            (getattr(g, 'game_date', None) for g in logs if getattr(g, 'game_date', None)),
+        )
+        next_game_date = (sorted_dates[-1] + __import__('datetime').timedelta(days=1)) if sorted_dates else None
 
         usage_features = self._compute_team_usage_features(logs)
         return build_ml_features_from_history(
@@ -400,6 +437,10 @@ class ProjectionEngine:
             stat_key=stat_key,
             team_totals=usage_features['team_totals'],
             team_counts=usage_features['team_counts'],
+            current_game_date=next_game_date,
+            current_matchup=current_matchup,
+            game_total_line=game_total_line,
+            defense_lookup=defense_lookup or {},
         )
 
     def _compute_team_usage_features(self, logs: list) -> dict:
