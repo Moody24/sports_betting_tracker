@@ -730,11 +730,16 @@ class TestNBAService(unittest.TestCase):
 
     @patch("app.services.nba_service.fetch_espn_boxscore")
     def test_resolve_player_prop_player_not_found(self, mock_boxscore):
+        """Player absent from a final boxscore (DNP) should be voided as push."""
         mock_boxscore.return_value = {"Other Player": {"player_points": 20.0}}
         with patch("app.services.nba_service.fetch_espn_scoreboard",
                    return_value=self._prop_game()):
             results = nba_service.resolve_pending_bets([self._prop_bet()])
-        self.assertEqual(results, [])
+        # DNP: player not in boxscore → voided as push (not silently skipped)
+        self.assertEqual(len(results), 1)
+        _, outcome, actual = results[0]
+        self.assertEqual(outcome, "push")
+        self.assertEqual(actual, 0.0)
 
     @patch("app.services.nba_service.fetch_espn_boxscore")
     def test_resolve_player_prop_missing_player_name_skipped(self, mock_boxscore):
