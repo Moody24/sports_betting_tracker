@@ -18,21 +18,135 @@
   // ── Tab switching ─────────────────────────────────────────────────
   const tabs   = document.querySelectorAll('[data-bb-tab]');
   const panels = document.querySelectorAll('[data-bb-panel]');
+  const TICKET_MODE_LABELS = { single: 'Game Line', prop: 'Player Prop', parlay: 'Parlay', screenshot: 'Screenshot' };
+
+  var _activeTab = 'single';
 
   function showTab(name, pushHash) {
     const validTabs = ['single', 'prop', 'parlay', 'screenshot'];
     if (!validTabs.includes(name)) return;
+    _activeTab = name;
     tabs.forEach(t => t.classList.toggle('active', t.dataset.bbTab === name));
     panels.forEach(p => p.classList.toggle('d-none', p.dataset.bbPanel !== name));
+    const modeLabel = document.getElementById('ticket-mode-label');
+    if (modeLabel) modeLabel.textContent = TICKET_MODE_LABELS[name] || 'Ticket';
     if (pushHash) {
       history.replaceState(null, '', '#' + name);
     }
+    updateTicketSummary();
   }
 
   tabs.forEach(t => t.addEventListener('click', () => showTab(t.dataset.bbTab, true)));
 
   const hash = location.hash.replace('#', '') || 'single';
   showTab(['single', 'prop', 'parlay', 'screenshot'].includes(hash) ? hash : 'single', false);
+
+  // ── Over / Under toggle buttons ───────────────────────────────────
+  const propBetTypeSelect = document.getElementById('prop-bet-type');
+  const sideOverBtn  = document.getElementById('side-over-btn');
+  const sideUnderBtn = document.getElementById('side-under-btn');
+
+  function syncSideBtns(side) {
+    if (sideOverBtn)  sideOverBtn.classList.toggle('active', side === 'over');
+    if (sideUnderBtn) sideUnderBtn.classList.toggle('active', side === 'under');
+  }
+
+  if (sideOverBtn) {
+    sideOverBtn.addEventListener('click', function () {
+      if (propBetTypeSelect) propBetTypeSelect.value = 'over';
+      syncSideBtns('over');
+      updateTicketSummary();
+    });
+  }
+
+  if (sideUnderBtn) {
+    sideUnderBtn.addEventListener('click', function () {
+      if (propBetTypeSelect) propBetTypeSelect.value = 'under';
+      syncSideBtns('under');
+      updateTicketSummary();
+    });
+  }
+
+  if (propBetTypeSelect) syncSideBtns(propBetTypeSelect.value || 'over');
+
+  // ── Ticket summary ────────────────────────────────────────────────
+  function makeTicketRow(label, val) {
+    var row = document.createElement('div');
+    row.className = 'bb-ticket-row';
+    var lbl = document.createElement('span');
+    lbl.className = 'bb-ticket-label';
+    lbl.textContent = label;
+    var v = document.createElement('span');
+    v.className = 'bb-ticket-val';
+    v.textContent = val;
+    row.appendChild(lbl);
+    row.appendChild(v);
+    return row;
+  }
+
+  function updateTicketSummary() {
+    var ticketBody = document.getElementById('ticket-body');
+    if (!ticketBody) return;
+
+    var rows = [];
+    if (_activeTab === 'single') {
+      var teamA  = (document.getElementById('single-team-a')  || {}).value || '';
+      var teamB  = (document.getElementById('single-team-b')  || {}).value || '';
+      var date   = (document.getElementById('single-match-date') || {}).value || '';
+      var btype  = document.getElementById('single-bet-type');
+      var stake  = (document.getElementById('bet_amount') || {}).value || '';
+      var odds   = (document.getElementById('single-odds') || {}).value || '';
+      if (teamA || teamB) rows.push({ label: 'Matchup', val: (teamA || '\u2014') + ' @ ' + (teamB || '\u2014') });
+      if (date)  rows.push({ label: 'Date', val: date });
+      if (btype && btype.options[btype.selectedIndex]) rows.push({ label: 'Type', val: btype.options[btype.selectedIndex].text });
+      if (stake) rows.push({ label: 'Stake', val: '$' + parseFloat(stake).toFixed(2) });
+      if (odds)  rows.push({ label: 'Odds', val: (parseInt(odds) > 0 ? '+' : '') + odds });
+    } else if (_activeTab === 'prop') {
+      var player = (document.getElementById('prop-player-name') || {}).value || '';
+      var market = document.getElementById('prop-prop-type');
+      var line   = (document.getElementById('prop-prop-line') || {}).value || '';
+      var side   = propBetTypeSelect ? propBetTypeSelect.value : '';
+      var pstake = (document.getElementById('prop-stake') || {}).value || '';
+      var podds  = (document.getElementById('prop-odds') || {}).value || '';
+      if (player) rows.push({ label: 'Player', val: player });
+      if (market && market.options[market.selectedIndex]) rows.push({ label: 'Market', val: market.options[market.selectedIndex].text });
+      if (line)   rows.push({ label: 'Line', val: line });
+      if (side)   rows.push({ label: 'Side', val: side.charAt(0).toUpperCase() + side.slice(1) });
+      if (pstake) rows.push({ label: 'Stake', val: '$' + parseFloat(pstake).toFixed(2) });
+      if (podds)  rows.push({ label: 'Odds', val: (parseInt(podds) > 0 ? '+' : '') + podds });
+    } else if (_activeTab === 'parlay') {
+      var legs = legsContainer ? legsContainer.querySelectorAll('.parlay-leg').length : 0;
+      var lstake = (document.getElementById('parlay-stake') || {}).value || '';
+      rows.push({ label: 'Legs', val: String(legs) });
+      if (lstake) rows.push({ label: 'Stake', val: '$' + parseFloat(lstake).toFixed(2) });
+    }
+
+    while (ticketBody.firstChild) ticketBody.removeChild(ticketBody.firstChild);
+
+    if (!rows.length) {
+      var emptyDiv = document.createElement('div');
+      emptyDiv.className = 'bb-ticket-empty';
+      var icon = document.createElement('i');
+      icon.className = 'bi bi-plus-circle-dotted bb-ticket-empty-icon';
+      var msg = document.createElement('p');
+      msg.className = 'mt-2 mb-0 small';
+      msg.textContent = 'Fill in the form to preview your ticket';
+      emptyDiv.appendChild(icon);
+      emptyDiv.appendChild(msg);
+      ticketBody.appendChild(emptyDiv);
+      return;
+    }
+
+    rows.forEach(function (r) { ticketBody.appendChild(makeTicketRow(r.label, r.val)); });
+  }
+
+  ['single-team-a', 'single-team-b', 'single-match-date', 'single-bet-type',
+   'bet_amount', 'single-odds',
+   'prop-player-name', 'prop-prop-type', 'prop-prop-line', 'prop-stake', 'prop-odds',
+   'parlay-stake'].forEach(function (id) {
+    var el = document.getElementById(id);
+    if (el) { el.addEventListener('input', updateTicketSummary); el.addEventListener('change', updateTicketSummary); }
+  });
 
   // ── Game picker (shared datalist) ─────────────────────────────────
   var upcomingGames = [];
@@ -327,10 +441,11 @@
   }
 
   function renumberLegs() {
-    document.querySelectorAll('.parlay-leg').forEach((el, i) => {
-      const label = el.querySelector('.small.fw-semibold');
-      if (label) label.textContent = `Leg ${i + 1}`;
+    document.querySelectorAll('.parlay-leg').forEach(function (el, i) {
+      var label = el.querySelector('.small.fw-semibold');
+      if (label) label.textContent = 'Leg ' + (i + 1);
     });
+    updateTicketSummary();
   }
 
   function syncQueueFromRenderedLegs() {
@@ -649,79 +764,146 @@
     });
   }
 
+  function applyPropBrowserSelection(data) {
+    var side      = data.side;
+    var propTypeEl= document.getElementById('prop-prop-type');
+    var playerEl  = document.getElementById('prop-player-name');
+    var lineEl    = document.getElementById('prop-prop-line');
+    var betTypeEl = document.getElementById('prop-bet-type');
+    var teamAEl   = document.getElementById('prop-team-a');
+    var teamBEl   = document.getElementById('prop-team-b');
+    var dateEl    = document.getElementById('prop-match-date');
+    var gameIdEl  = document.getElementById('prop-game-id');
+
+    if (playerEl)   playerEl.value   = data.player  || '';
+    if (propTypeEl) propTypeEl.value = data.market  || '';
+    if (lineEl)     lineEl.value     = data.line    || '';
+    if (betTypeEl)  betTypeEl.value  = side;
+    if (teamAEl)    teamAEl.value    = data.teamA   || '';
+    if (teamBEl)    teamBEl.value    = data.teamB   || '';
+    if (dateEl)     dateEl.value     = data.date    || '';
+    if (gameIdEl)   gameIdEl.value   = data.gameId  || '';
+
+    syncSideBtns(side);
+
+    // Update selected-prop indicator
+    var selCard   = document.getElementById('prop-selected-card');
+    var selPlayer = document.getElementById('prop-sel-player');
+    var selMarket = document.getElementById('prop-sel-market');
+    var selSide   = document.getElementById('prop-sel-side');
+    var selLine   = document.getElementById('prop-sel-line');
+    if (selCard) {
+      if (selPlayer) selPlayer.textContent = data.player  || '';
+      if (selMarket) selMarket.textContent = MARKET_LABELS[data.market] || (data.market || '').replace('player_', '');
+      if (selSide)   selSide.textContent   = side.charAt(0).toUpperCase() + side.slice(1);
+      if (selLine)   selLine.textContent   = data.line || '';
+      selCard.style.display = '';
+    }
+
+    var clearBtn = document.getElementById('prop-clear-selection');
+    if (clearBtn) {
+      clearBtn.onclick = function () {
+        if (selCard) selCard.style.display = 'none';
+        if (playerEl)   playerEl.value   = '';
+        if (propTypeEl) propTypeEl.value = 'player_points';
+        if (lineEl)     lineEl.value     = '';
+        if (betTypeEl)  betTypeEl.value  = 'over';
+        syncSideBtns('over');
+        updateTicketSummary();
+      };
+    }
+
+    var stakeEl = document.getElementById('prop-stake');
+    if (stakeEl) { stakeEl.scrollIntoView({ behavior: 'smooth', block: 'center' }); stakeEl.focus(); }
+
+    updateTicketSummary();
+  }
+
   function renderPropsBrowser(props) {
     if (!propsBrowser) return;
-    if (!props.length) {
-      propsBrowser.innerHTML = '<p class="small text-secondary text-center py-2">No props match your search.</p>';
+
+    while (propsBrowser.firstChild) propsBrowser.removeChild(propsBrowser.firstChild);
+
+    if (!props || !props.length) {
+      var msg = document.createElement('p');
+      msg.className = 'small text-secondary text-center py-2';
+      msg.textContent = 'No props match your search.';
+      propsBrowser.appendChild(msg);
       return;
     }
 
-    var html = '<table class="table table-sm table-dark table-hover mb-0" style="font-size:.8rem">';
-    html += '<thead><tr>'
-      + '<th>Player</th><th>Market</th><th>Line</th>'
-      + '<th class="text-success">Over</th><th class="text-danger">Under</th>'
-      + '<th></th>'
-      + '</tr></thead><tbody>';
-
     props.forEach(function (p) {
       var marketLabel = MARKET_LABELS[p.market] || p.market.replace('player_', '');
-      var overOdds  = p.over_odds  > 0 ? '+' + p.over_odds  : p.over_odds;
-      var underOdds = p.under_odds > 0 ? '+' + p.under_odds : p.under_odds;
-      html += '<tr>'
-        + '<td>' + escapeHtml(p.player) + '</td>'
-        + '<td class="text-secondary">' + escapeHtml(marketLabel) + '</td>'
-        + '<td>' + escapeHtml(p.line) + '</td>'
-        + '<td class="text-success">' + escapeHtml(overOdds) + '</td>'
-        + '<td class="text-danger">' + escapeHtml(underOdds) + '</td>'
-        + '<td>'
-        + '<button class="btn btn-xs btn-outline-success me-1 prop-browse-btn"'
-        + ' data-player="' + escapeHtml(p.player) + '" data-market="' + escapeHtml(p.market) + '"'
-        + ' data-line="' + escapeHtml(p.line) + '" data-odds="' + escapeHtml(p.over_odds) + '"'
-        + ' data-side="over"'
-        + ' data-team-a="' + escapeHtml(p.team_a) + '" data-team-b="' + escapeHtml(p.team_b) + '"'
-        + ' data-date="' + escapeHtml(p.match_date) + '" data-game-id="' + escapeHtml(p.game_id) + '">O</button>'
-        + '<button class="btn btn-xs btn-outline-danger prop-browse-btn"'
-        + ' data-player="' + escapeHtml(p.player) + '" data-market="' + escapeHtml(p.market) + '"'
-        + ' data-line="' + escapeHtml(p.line) + '" data-odds="' + escapeHtml(p.under_odds) + '"'
-        + ' data-side="under"'
-        + ' data-team-a="' + escapeHtml(p.team_a) + '" data-team-b="' + escapeHtml(p.team_b) + '"'
-        + ' data-date="' + escapeHtml(p.match_date) + '" data-game-id="' + escapeHtml(p.game_id) + '">U</button>'
-        + '</td>'
-        + '</tr>';
-    });
+      var overOdds  = p.over_odds  > 0 ? '+' + p.over_odds  : String(p.over_odds  || '');
+      var underOdds = p.under_odds > 0 ? '+' + p.under_odds : String(p.under_odds || '');
 
-    html += '</tbody></table>';
-    propsBrowser.innerHTML = html;
+      var card = document.createElement('div');
+      card.className = 'prop-card';
+
+      var playerEl = document.createElement('div');
+      playerEl.className = 'prop-card-player';
+      playerEl.textContent = p.player || '';
+      card.appendChild(playerEl);
+
+      var mktEl = document.createElement('div');
+      mktEl.className = 'prop-card-market';
+      mktEl.textContent = marketLabel;
+      card.appendChild(mktEl);
+
+      var lineEl = document.createElement('div');
+      lineEl.className = 'prop-card-line';
+      lineEl.textContent = p.line || '';
+      card.appendChild(lineEl);
+
+      var btns = document.createElement('div');
+      btns.className = 'prop-card-btns';
+
+      var overBtn = document.createElement('button');
+      overBtn.type = 'button';
+      overBtn.className = 'btn btn-xs btn-outline-success prop-browse-btn';
+      overBtn.dataset.side   = 'over';
+      overBtn.dataset.player = p.player  || '';
+      overBtn.dataset.market = p.market  || '';
+      overBtn.dataset.line   = p.line    || '';
+      overBtn.dataset.teamA  = p.team_a  || '';
+      overBtn.dataset.teamB  = p.team_b  || '';
+      overBtn.dataset.date   = p.match_date || '';
+      overBtn.dataset.gameId = p.game_id || '';
+      overBtn.textContent = 'O ' + overOdds;
+
+      var underBtn = document.createElement('button');
+      underBtn.type = 'button';
+      underBtn.className = 'btn btn-xs btn-outline-danger prop-browse-btn';
+      underBtn.dataset.side   = 'under';
+      underBtn.dataset.player = p.player  || '';
+      underBtn.dataset.market = p.market  || '';
+      underBtn.dataset.line   = p.line    || '';
+      underBtn.dataset.teamA  = p.team_a  || '';
+      underBtn.dataset.teamB  = p.team_b  || '';
+      underBtn.dataset.date   = p.match_date || '';
+      underBtn.dataset.gameId = p.game_id || '';
+      underBtn.textContent = 'U ' + underOdds;
+
+      btns.appendChild(overBtn);
+      btns.appendChild(underBtn);
+      card.appendChild(btns);
+      propsBrowser.appendChild(card);
+    });
 
     propsBrowser.querySelectorAll('.prop-browse-btn').forEach(function (btn) {
       btn.addEventListener('click', function () {
-        // Autofill the prop form
-        const side = btn.dataset.side;
-        const propTypeEl = document.getElementById('prop-prop-type');
-        const playerEl   = document.getElementById('prop-player-name');
-        const lineEl     = document.getElementById('prop-prop-line');
-        const betTypeEl  = document.getElementById('prop-bet-type');
-        const teamAEl    = document.getElementById('prop-team-a');
-        const teamBEl    = document.getElementById('prop-team-b');
-        const dateEl     = document.getElementById('prop-match-date');
-        const gameIdEl   = document.getElementById('prop-game-id');
-
-        if (playerEl)   playerEl.value   = btn.dataset.player;
-        if (propTypeEl) propTypeEl.value  = btn.dataset.market;
-        if (lineEl)     lineEl.value      = btn.dataset.line;
-        if (betTypeEl)  betTypeEl.value   = side;
-        if (teamAEl)    teamAEl.value     = btn.dataset.teamA;
-        if (teamBEl)    teamBEl.value     = btn.dataset.teamB;
-        if (dateEl)     dateEl.value      = btn.dataset.date;
-        if (gameIdEl)   gameIdEl.value    = btn.dataset.gameId;
-
-        // Scroll to form and focus stake
-        document.getElementById('prop-stake').scrollIntoView({ behavior: 'smooth', block: 'center' });
-        document.getElementById('prop-stake').focus();
-
-        // Visual feedback
+        applyPropBrowserSelection({
+          side:   btn.dataset.side,
+          player: btn.dataset.player,
+          market: btn.dataset.market,
+          line:   btn.dataset.line,
+          teamA:  btn.dataset.teamA,
+          teamB:  btn.dataset.teamB,
+          date:   btn.dataset.date,
+          gameId: btn.dataset.gameId,
+        });
         btn.classList.add('active');
-        setTimeout(() => btn.classList.remove('active'), 800);
+        setTimeout(function () { btn.classList.remove('active'); }, 800);
       });
     });
   }
@@ -1060,5 +1242,8 @@
   }
   makeLivePayoutPreview('bet_amount', 'single-odds', 'single-payout-preview');
   makeLivePayoutPreview('prop-stake', 'prop-odds',   'prop-payout-preview');
+
+  // Initial ticket render
+  updateTicketSummary();
 
 })();

@@ -2,566 +2,610 @@
 
 {% block title %}Bet Builder · Sports Betting Tracker{% endblock %}
 {% block page_title %}Bet Builder{% endblock %}
-{% block page_subtitle %}Add a single bet, player prop, build a parlay, or import from a screenshot.{% endblock %}
+{% block page_subtitle %}Build a ticket — single bet, prop, or parlay.{% endblock %}
 
 {% block content %}
-{# Shared game datalist — populated by bet_builder.js #}
 <datalist id="game-datalist"></datalist>
 
-<div class="bet-mode-grid mb-4">
-  <button class="bet-mode-card" data-bb-tab="single" type="button">
-    <div class="bet-mode-icon"><i class="bi bi-bar-chart-fill"></i></div>
-    <div class="bet-mode-title">Game Line</div>
-    <div class="bet-mode-desc">ML · Over · Under</div>
-  </button>
-  <button class="bet-mode-card" data-bb-tab="prop" type="button">
-    <div class="bet-mode-icon"><i class="bi bi-person-fill"></i></div>
-    <div class="bet-mode-title">Player Prop</div>
-    <div class="bet-mode-desc">Pts · Reb · Ast</div>
-  </button>
-  <button class="bet-mode-card" data-bb-tab="parlay" type="button">
-    <div class="bet-mode-icon"><i class="bi bi-collection-fill"></i></div>
-    <div class="bet-mode-title">Parlay</div>
-    <div class="bet-mode-desc">Multi-leg builder</div>
-  </button>
-  <button class="bet-mode-card" data-bb-tab="screenshot" type="button">
-    <div class="bet-mode-icon"><i class="bi bi-camera-fill"></i></div>
-    <div class="bet-mode-title">Screenshot</div>
-    <div class="bet-mode-desc">OCR import</div>
-  </button>
-</div>
+<div class="bb-shell">
 
-{# ══════════════════════════════════════════════════════════════════
-   TAB 1 — Single Game (Moneyline or Over/Under)
-══════════════════════════════════════════════════════════════════ #}
-<div data-bb-panel="single">
-  <div class="card-soft p-4 mx-auto" style="max-width:720px">
-    <form method="POST" novalidate>
-      {{ form.hidden_tag() }}
-      {{ form.external_game_id(id='single-game-id') }}
+  {# ─── Main column ──────────────────────────────────────────────── #}
+  <div class="bb-main">
 
-      {# Game picker #}
-      <div class="mb-3">
-        <label class="form-label">Search Game <span class="text-secondary small">(or type teams manually below)</span></label>
-        <input type="text" id="single-game-picker" class="form-control"
-          placeholder="e.g. Lakers @ Celtics" list="game-datalist" autocomplete="off">
-      </div>
-
-      <div class="row g-3">
-        <div class="col-md-6">
-          <label class="form-label">Away Team</label>
-          <div class="input-group">
-            <span class="input-group-text bg-dark border-secondary-subtle"><i class="bi bi-flag"></i></span>
-            {{ form.team_a(class='form-control' ~ (' is-invalid' if form.team_a.errors else ''),
-               id='single-team-a', placeholder='Los Angeles Lakers') }}
-          </div>
-          {% for e in form.team_a.errors %}<div class="invalid-feedback d-block">{{ e }}</div>{% endfor %}
-        </div>
-        <div class="col-md-6">
-          <label class="form-label">Home Team</label>
-          <div class="input-group">
-            <span class="input-group-text bg-dark border-secondary-subtle"><i class="bi bi-flag-fill"></i></span>
-            {{ form.team_b(class='form-control' ~ (' is-invalid' if form.team_b.errors else ''),
-               id='single-team-b', placeholder='Boston Celtics') }}
-          </div>
-          {% for e in form.team_b.errors %}<div class="invalid-feedback d-block">{{ e }}</div>{% endfor %}
-        </div>
-
-        <div class="col-md-4">
-          <label class="form-label">Date</label>
-          {{ form.match_date(class='form-control' ~ (' is-invalid' if form.match_date.errors else ''),
-             id='single-match-date') }}
-          {% for e in form.match_date.errors %}<div class="invalid-feedback d-block">{{ e }}</div>{% endfor %}
-        </div>
-
-        <div class="col-md-4">
-          <label class="form-label">Bet Type</label>
-          {{ form.bet_type(class='form-select', id='single-bet-type') }}
-        </div>
-
-        <div class="col-md-4">
-          <label class="form-label">Stake ($)</label>
-          <div class="input-group">
-            <span class="input-group-text bg-dark border-secondary-subtle">$</span>
-            {{ form.bet_amount(class='form-control' ~ (' is-invalid' if form.bet_amount.errors else ''),
-               id='bet_amount', placeholder='25.00') }}
-          </div>
-          {% for e in form.bet_amount.errors %}<div class="invalid-feedback d-block">{{ e }}</div>{% endfor %}
-          <div id="single-bankroll-warn" class="small mt-1" style="display:none"></div>
-        </div>
-        <div class="col-md-4">
-          <label class="form-label">Odds (American)</label>
-          <div class="input-group">
-            <span class="input-group-text bg-dark border-secondary-subtle"><i class="bi bi-percent"></i></span>
-            <input type="number" name="american_odds" id="single-odds" class="form-control" placeholder="-110">
-          </div>
-          <div id="single-payout-preview" class="small text-info mt-1"></div>
-        </div>
-        {% if current_user.unit_size %}
-        <div class="col-md-4">
-          <label class="form-label">Units</label>
-          <div class="input-group">
-            <span class="input-group-text bg-dark border-secondary-subtle">u</span>
-            <input type="number" name="units" id="single-units" class="form-control" min="0.1" step="0.1" placeholder="1.0">
-          </div>
-          <div class="form-text text-secondary">1u = ${{ '%.2f'|format(current_user.unit_size) }}</div>
-        </div>
-        {% endif %}
-
-        {# O/U line — shown only for over/under #}
-        <div class="col-md-4" id="single-ou-group">
-          <label class="form-label">O/U Line</label>
-          <div class="input-group">
-            <span class="input-group-text bg-dark border-secondary-subtle"><i class="bi bi-bullseye"></i></span>
-            {{ form.over_under_line(class='form-control', id='single-ou-line', placeholder='218.5', step='0.5') }}
-          </div>
-        </div>
-
-        {# Picked team — shown only for moneyline #}
-        <div class="col-md-4 d-none" id="single-picked-group">
-          <label class="form-label">Picked Winner</label>
-          <select name="picked_team" id="single-picked-team" class="form-select">
-            <option value="">Select winner</option>
-            {% if form.team_a.data %}
-              <option value="{{ form.team_a.data }}" {% if form.picked_team.data == form.team_a.data %}selected{% endif %}>{{ form.team_a.data }}</option>
-            {% endif %}
-            {% if form.team_b.data %}
-              <option value="{{ form.team_b.data }}" {% if form.picked_team.data == form.team_b.data %}selected{% endif %}>{{ form.team_b.data }}</option>
-            {% endif %}
-          </select>
-        </div>
-
-        <div class="col-md-4">
-          <label class="form-label">Status</label>
-          {{ form.outcome(class='form-select') }}
-        </div>
-
-        {# Bonus Bet section #}
-        <div class="col-12">
-          <div class="card-soft p-3 border-warning" style="border-color:rgba(255,193,7,.25)!important">
-            <div class="d-flex align-items-center gap-2 mb-2">
-              <i class="bi bi-lightning-charge text-warning"></i>
-              <span class="small fw-semibold text-warning">Bonus Bet</span>
-              <span class="small text-secondary ms-1">(optional — multiplies your estimated profit)</span>
-            </div>
-            <div class="row g-2 align-items-end">
-              <div class="col-md-4">
-                <label class="form-label small">Multiplier</label>
-                <div class="input-group input-group-sm">
-                  <span class="input-group-text bg-dark border-secondary-subtle">×</span>
-                  <input type="number" name="bonus_multiplier" id="single-bonus-mult"
-                         class="form-control" value="1.00" min="1" step="0.05" placeholder="1.00">
-                </div>
-              </div>
-              <div class="col-md-8">
-                <div id="single-bonus-preview" class="small text-secondary"></div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {# Notes / Reasoning #}
-        <div class="col-12">
-          <label class="form-label">
-            <i class="bi bi-journal-text me-1 text-secondary"></i>Notes / Reasoning
-            <span class="text-secondary small ms-1">(optional)</span>
-          </label>
-          {{ form.notes(class='form-control', id='single-notes', rows=2,
-             placeholder='Why are you making this bet? e.g. "Back-to-back road game, lean under"') }}
-        </div>
-
-        <div class="col-12 d-flex gap-2 justify-content-end mt-2">
-          <a href="{{ url_for('bet.place_bet') }}" class="btn btn-outline-light">Cancel</a>
-          <button type="submit" class="btn btn-primary">
-            <i class="bi bi-plus-lg me-1"></i>Record Bet
-          </button>
-        </div>
-      </div>
-    </form>
-  </div>
-</div>
-
-{# ══════════════════════════════════════════════════════════════════
-   TAB 2 — Player Prop (single prop bet)
-══════════════════════════════════════════════════════════════════ #}
-<div data-bb-panel="prop" class="d-none">
-  <div class="card-soft p-4 mx-auto" style="max-width:720px">
-
-    {# Props browser — load all today's props for quick selection #}
-    <div class="mb-4">
-      <div class="d-flex align-items-center justify-content-between mb-2">
-        <span class="small fw-semibold text-secondary"><i class="bi bi-search me-1"></i>Browse All Props</span>
-        <button type="button" id="load-all-props-btn" class="btn btn-sm btn-outline-info">
-          <i class="bi bi-cloud-download me-1"></i>Load Today's Props
-        </button>
-      </div>
-      <input type="text" id="props-search-input" class="form-control form-control-sm mb-2"
-             placeholder="Search player or market..." style="display:none" autocomplete="off">
-      <div id="props-browser" style="display:none; max-height:260px; overflow-y:auto"></div>
-    </div>
-
-    <hr class="border-secondary">
-
-    <form method="POST" novalidate>
-      {{ form.hidden_tag() }}
-      <input type="hidden" id="prop-game-id" name="external_game_id" value="{{ request.args.get('game_id', '') }}">
-
-      <div class="mb-3">
-        <label class="form-label">Search Game <span class="text-secondary small">(or type teams manually below)</span></label>
-        <input type="text" id="prop-game-picker" class="form-control"
-          placeholder="e.g. Lakers @ Celtics" list="game-datalist" autocomplete="off">
-      </div>
-
-      <div class="row g-3">
-        <div class="col-md-6">
-          <label class="form-label">Away Team</label>
-          <div class="input-group">
-            <span class="input-group-text bg-dark border-secondary-subtle"><i class="bi bi-flag"></i></span>
-            <input type="text" id="prop-team-a" name="team_a" class="form-control"
-              placeholder="Los Angeles Lakers" value="{{ request.args.get('team_a', '') }}" required>
-          </div>
-        </div>
-        <div class="col-md-6">
-          <label class="form-label">Home Team</label>
-          <div class="input-group">
-            <span class="input-group-text bg-dark border-secondary-subtle"><i class="bi bi-flag-fill"></i></span>
-            <input type="text" id="prop-team-b" name="team_b" class="form-control"
-              placeholder="Boston Celtics" value="{{ request.args.get('team_b', '') }}" required>
-          </div>
-        </div>
-
-        <div class="col-md-4">
-          <label class="form-label">Date</label>
-          <input type="date" id="prop-match-date" name="match_date" class="form-control"
-                 value="{{ request.args.get('match_date', '') }}" required>
-        </div>
-        <div class="col-md-4">
-          <label class="form-label">Player</label>
-          <input type="text" id="prop-player-name" name="player_name" class="form-control"
-                 value="{{ request.args.get('player_name', '') }}" placeholder="LeBron James">
-        </div>
-        <div class="col-md-4">
-          <label class="form-label">Stat</label>
-          <select id="prop-prop-type" name="prop_type" class="form-select">
-            <option value="player_points" {% if request.args.get('prop_type') == 'player_points' %}selected{% endif %}>Points</option>
-            <option value="player_rebounds" {% if request.args.get('prop_type') == 'player_rebounds' %}selected{% endif %}>Rebounds</option>
-            <option value="player_assists" {% if request.args.get('prop_type') == 'player_assists' %}selected{% endif %}>Assists</option>
-            <option value="player_points_rebounds_assists" {% if request.args.get('prop_type') == 'player_points_rebounds_assists' %}selected{% endif %}>Points + Rebounds + Assists</option>
-            <option value="player_threes" {% if request.args.get('prop_type') == 'player_threes' %}selected{% endif %}>3-Pointers Made</option>
-            <option value="player_blocks" {% if request.args.get('prop_type') == 'player_blocks' %}selected{% endif %}>Blocks</option>
-            <option value="player_steals" {% if request.args.get('prop_type') == 'player_steals' %}selected{% endif %}>Steals</option>
-          </select>
-        </div>
-
-        <div class="col-md-3">
-          <label class="form-label">Line</label>
-          <input type="number" id="prop-prop-line" name="prop_line" class="form-control"
-                 value="{{ request.args.get('prop_line', '') }}" placeholder="25.5" step="0.5">
-        </div>
-        <div class="col-md-3">
-          <label class="form-label">Over / Under</label>
-          <select id="prop-bet-type" name="bet_type" class="form-select">
-            <option value="over" {% if request.args.get('bet_type', '') == 'over' %}selected{% endif %}>Over</option>
-            <option value="under" {% if request.args.get('bet_type', '') == 'under' %}selected{% endif %}>Under</option>
-          </select>
-        </div>
-        <div class="col-md-3">
-          <label class="form-label">Stake ($)</label>
-          <div class="input-group">
-            <span class="input-group-text bg-dark border-secondary-subtle">$</span>
-            <input type="number" id="prop-stake" name="bet_amount" class="form-control" placeholder="25.00" min="1" step="0.01" required>
-          </div>
-          <div id="prop-bankroll-warn" class="small mt-1" style="display:none"></div>
-        </div>
-        {% if current_user.unit_size %}
-        <div class="col-md-3">
-          <label class="form-label">Units</label>
-          <div class="input-group">
-            <span class="input-group-text bg-dark border-secondary-subtle">u</span>
-            <input type="number" id="prop-units" name="units" class="form-control" min="0.1" step="0.1" placeholder="1.0">
-          </div>
-          <div class="form-text text-secondary">1u = ${{ '%.2f'|format(current_user.unit_size) }}</div>
-        </div>
-        {% endif %}
-        <div class="col-md-3">
-          <label class="form-label">Status</label>
-          <select name="outcome" class="form-select">
-            <option value="pending">Pending</option>
-            <option value="win">Win</option>
-            <option value="lose">Lose</option>
-          </select>
-        </div>
-        <div class="col-md-3">
-          <label class="form-label">Odds (American)</label>
-          <div class="input-group">
-            <span class="input-group-text bg-dark border-secondary-subtle"><i class="bi bi-percent"></i></span>
-            <input type="number" name="american_odds" id="prop-odds" class="form-control" placeholder="-110">
-          </div>
-          <div id="prop-payout-preview" class="small text-info mt-1"></div>
-        </div>
-
-        {# Bonus Bet section #}
-        <div class="col-12">
-          <div class="card-soft p-3" style="border-color:rgba(255,193,7,.25)!important">
-            <div class="d-flex align-items-center gap-2 mb-2">
-              <i class="bi bi-lightning-charge text-warning"></i>
-              <span class="small fw-semibold text-warning">Bonus Bet</span>
-              <span class="small text-secondary ms-1">(optional)</span>
-            </div>
-            <div class="row g-2 align-items-end">
-              <div class="col-md-4">
-                <label class="form-label small">Multiplier</label>
-                <div class="input-group input-group-sm">
-                  <span class="input-group-text bg-dark border-secondary-subtle">×</span>
-                  <input type="number" name="bonus_multiplier" id="prop-bonus-mult"
-                         class="form-control" value="1.00" min="1" step="0.05" placeholder="1.00">
-                </div>
-              </div>
-              <div class="col-md-8">
-                <div id="prop-bonus-preview" class="small text-secondary"></div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="col-12 d-flex gap-2 justify-content-end mt-2">
-          <a href="{{ url_for('bet.place_bet') }}" class="btn btn-outline-light">Cancel</a>
-          <button type="submit" class="btn btn-primary">
-            <i class="bi bi-plus-lg me-1"></i>Record Prop Bet
-          </button>
-        </div>
-      </div>
-    </form>
-  </div>
-</div>
-
-{# ══════════════════════════════════════════════════════════════════
-   TAB 3 — Parlay Builder
-══════════════════════════════════════════════════════════════════ #}
-<div data-bb-panel="parlay" class="d-none">
-  <div class="mx-auto" style="max-width:760px">
-    <div class="card-soft p-3 mb-3">
-      <div class="d-flex align-items-center justify-content-between mb-2">
-        <span class="small fw-semibold text-secondary"><i class="bi bi-search me-1"></i>Browse Props For Parlay</span>
-        <button type="button" id="load-parlay-props-btn" class="btn btn-sm btn-outline-info">
-          <i class="bi bi-cloud-download me-1"></i>Load Today's Props
-        </button>
-      </div>
-      <input type="text" id="parlay-props-search-input" class="form-control form-control-sm mb-2"
-             placeholder="Search matchup, player, or market..." style="display:none" autocomplete="off">
-      <div id="parlay-props-browser" style="display:none; max-height:320px; overflow-y:auto"></div>
-    </div>
-
-    <div id="parlay-legs" class="mb-3"></div>
-
-    <div class="d-flex gap-2 mb-4">
-      <button type="button" id="add-leg-btn" class="btn btn-outline-info btn-sm">
-        <i class="bi bi-plus-lg me-1"></i>Add Leg
+    {# ── Mode selector ── #}
+    <div class="bb-mode-bar mb-4" role="tablist">
+      <button class="bb-mode-btn" data-bb-tab="single" type="button" role="tab" aria-selected="true">
+        <i class="bi bi-bar-chart-fill bb-mode-icon"></i>
+        <span class="bb-mode-label">Game Line</span>
+        <span class="bb-mode-sub">ML · Over · Under</span>
       </button>
-      <button type="button" id="clear-parlay-draft-btn" class="btn btn-outline-secondary btn-sm">
-        <i class="bi bi-trash3 me-1"></i>Clear Draft
+      <button class="bb-mode-btn" data-bb-tab="prop" type="button" role="tab">
+        <i class="bi bi-person-fill bb-mode-icon"></i>
+        <span class="bb-mode-label">Player Prop</span>
+        <span class="bb-mode-sub">Pts · Reb · Ast</span>
+      </button>
+      <button class="bb-mode-btn" data-bb-tab="parlay" type="button" role="tab">
+        <i class="bi bi-collection-fill bb-mode-icon"></i>
+        <span class="bb-mode-label">Parlay</span>
+        <span class="bb-mode-sub">Multi-leg</span>
+      </button>
+      <button class="bb-mode-btn" data-bb-tab="screenshot" type="button" role="tab">
+        <i class="bi bi-camera-fill bb-mode-icon"></i>
+        <span class="bb-mode-label">Screenshot</span>
+        <span class="bb-mode-sub">OCR import</span>
       </button>
     </div>
 
-    <div id="parlay-feedback" class="alert d-none py-2 small"></div>
+    {# ══════════════════════════════════════════════════════════════
+       TAB 1 — Single Game (Moneyline · Over · Under)
+    ══════════════════════════════════════════════════════════════ #}
+    <div data-bb-panel="single">
+      <div class="card-soft p-4">
+        <form method="POST" novalidate>
+          {{ form.hidden_tag() }}
+          {{ form.external_game_id(id='single-game-id') }}
 
-    <form id="parlay-form" class="card-soft p-4">
-      <div class="row g-3 align-items-end">
-        <div class="col-md-4">
-          <label class="form-label">Total Stake ($)</label>
-          <div class="input-group">
-            <span class="input-group-text bg-dark border-secondary-subtle">$</span>
-            <input type="number" id="parlay-stake" class="form-control"
-              placeholder="25.00" min="1" step="0.01" required>
-          </div>
-          <div id="parlay-bankroll-warn" class="small mt-1" style="display:none"></div>
-          {% if current_user.unit_size %}
-          <div class="input-group mt-2">
-            <span class="input-group-text bg-dark border-secondary-subtle">u</span>
-            <input type="number" id="parlay-units" class="form-control" min="0.1" step="0.1" placeholder="Units">
-          </div>
-          <div class="form-text text-secondary">1u = ${{ '%.2f'|format(current_user.unit_size) }}</div>
-          {% endif %}
-        </div>
-        <div class="col-md-4">
-          <label class="form-label">Status</label>
-          <select id="parlay-outcome" class="form-select">
-            <option value="pending">Pending (game hasn't happened yet)</option>
-            <option value="win">Win (retroactive entry)</option>
-            <option value="lose">Lose (retroactive entry)</option>
-          </select>
-        </div>
+          <p class="bb-section-label">Game</p>
 
-        {# Bonus multiplier for parlay #}
-        <div class="col-md-4">
-          <label class="form-label">
-            <i class="bi bi-lightning-charge text-warning me-1"></i>Bonus Multiplier
-          </label>
-          <div class="input-group">
-            <span class="input-group-text bg-dark border-secondary-subtle">×</span>
-            <input type="number" id="parlay-bonus-mult" class="form-control"
-                   value="1.00" min="1" step="0.05" placeholder="1.00">
+          <div class="mb-3">
+            <input type="text" id="single-game-picker" class="form-control bb-game-picker"
+              placeholder="Search — e.g. Lakers @ Celtics" list="game-datalist" autocomplete="off">
           </div>
-        </div>
 
-        <div class="col-md-4 d-grid">
-          <button type="submit" class="btn btn-primary">
-            <i class="bi bi-check-lg me-1"></i>Submit Parlay
+          <div class="row g-3 mb-4">
+            <div class="col-md-6">
+              <label class="form-label small">Away Team</label>
+              <div class="input-group">
+                <span class="input-group-text bg-dark border-secondary-subtle"><i class="bi bi-flag"></i></span>
+                {{ form.team_a(class='form-control' ~ (' is-invalid' if form.team_a.errors else ''),
+                   id='single-team-a', placeholder='Los Angeles Lakers') }}
+              </div>
+              {% for e in form.team_a.errors %}<div class="invalid-feedback d-block">{{ e }}</div>{% endfor %}
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">Home Team</label>
+              <div class="input-group">
+                <span class="input-group-text bg-dark border-secondary-subtle"><i class="bi bi-flag-fill"></i></span>
+                {{ form.team_b(class='form-control' ~ (' is-invalid' if form.team_b.errors else ''),
+                   id='single-team-b', placeholder='Boston Celtics') }}
+              </div>
+              {% for e in form.team_b.errors %}<div class="invalid-feedback d-block">{{ e }}</div>{% endfor %}
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">Date</label>
+              {{ form.match_date(class='form-control' ~ (' is-invalid' if form.match_date.errors else ''),
+                 id='single-match-date') }}
+              {% for e in form.match_date.errors %}<div class="invalid-feedback d-block">{{ e }}</div>{% endfor %}
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">Bet Type</label>
+              {{ form.bet_type(class='form-select', id='single-bet-type') }}
+            </div>
+            {# O/U line — toggled by JS #}
+            <div class="col-md-4" id="single-ou-group">
+              <label class="form-label small">O/U Line</label>
+              <div class="input-group">
+                <span class="input-group-text bg-dark border-secondary-subtle"><i class="bi bi-bullseye"></i></span>
+                {{ form.over_under_line(class='form-control', id='single-ou-line', placeholder='218.5', step='0.5') }}
+              </div>
+            </div>
+            {# Picked team — toggled by JS #}
+            <div class="col-md-4 d-none" id="single-picked-group">
+              <label class="form-label small">Picked Winner</label>
+              <select name="picked_team" id="single-picked-team" class="form-select">
+                <option value="">Select winner</option>
+                {% if form.team_a.data %}
+                  <option value="{{ form.team_a.data }}" {% if form.picked_team.data == form.team_a.data %}selected{% endif %}>{{ form.team_a.data }}</option>
+                {% endif %}
+                {% if form.team_b.data %}
+                  <option value="{{ form.team_b.data }}" {% if form.picked_team.data == form.team_b.data %}selected{% endif %}>{{ form.team_b.data }}</option>
+                {% endif %}
+              </select>
+            </div>
+          </div>
+
+          <div class="bb-divider">Wager</div>
+
+          <div class="row g-3 mb-4">
+            <div class="col-md-4">
+              <label class="form-label small">Stake ($)</label>
+              <div class="input-group">
+                <span class="input-group-text bg-dark border-secondary-subtle">$</span>
+                {{ form.bet_amount(class='form-control' ~ (' is-invalid' if form.bet_amount.errors else ''),
+                   id='bet_amount', placeholder='25.00') }}
+              </div>
+              {% for e in form.bet_amount.errors %}<div class="invalid-feedback d-block">{{ e }}</div>{% endfor %}
+              <div id="single-bankroll-warn" class="small mt-1" style="display:none"></div>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">Odds (American)</label>
+              <div class="input-group">
+                <span class="input-group-text bg-dark border-secondary-subtle"><i class="bi bi-percent"></i></span>
+                <input type="number" name="american_odds" id="single-odds" class="form-control" placeholder="-110">
+              </div>
+              <div id="single-payout-preview" class="small text-info mt-1"></div>
+            </div>
+            {% if current_user.unit_size %}
+            <div class="col-md-4">
+              <label class="form-label small">Units</label>
+              <div class="input-group">
+                <span class="input-group-text bg-dark border-secondary-subtle">u</span>
+                <input type="number" name="units" id="single-units" class="form-control" min="0.1" step="0.1" placeholder="1.0">
+              </div>
+              <div class="form-text text-secondary">1u = ${{ '%.2f'|format(current_user.unit_size) }}</div>
+            </div>
+            {% endif %}
+          </div>
+
+          {# Advanced — collapsed #}
+          <details class="bb-advanced mb-4">
+            <summary class="bb-advanced-toggle">
+              <i class="bi bi-sliders me-2"></i>Advanced options
+              <i class="bi bi-chevron-down ms-auto bb-chevron"></i>
+            </summary>
+            <div class="bb-advanced-body">
+              <div class="row g-3">
+                <div class="col-md-4">
+                  <label class="form-label small">Status</label>
+                  {{ form.outcome(class='form-select') }}
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label small">
+                    <i class="bi bi-lightning-charge text-warning me-1"></i>Bonus Multiplier
+                  </label>
+                  <div class="input-group">
+                    <span class="input-group-text bg-dark border-secondary-subtle">×</span>
+                    <input type="number" name="bonus_multiplier" id="single-bonus-mult"
+                           class="form-control" value="1.00" min="1" step="0.05" placeholder="1.00">
+                  </div>
+                  <div id="single-bonus-preview" class="small mt-1"></div>
+                </div>
+                <div class="col-12">
+                  <label class="form-label small">
+                    <i class="bi bi-journal-text me-1 text-secondary"></i>Notes / Reasoning
+                  </label>
+                  {{ form.notes(class='form-control', id='single-notes', rows=2,
+                     placeholder='Why are you making this bet? e.g. "B2B road game, lean under"') }}
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <div class="d-flex gap-2 justify-content-end">
+            <a href="{{ url_for('bet.place_bet') }}" class="btn btn-outline-secondary">Cancel</a>
+            <button type="submit" class="btn btn-primary px-4">
+              <i class="bi bi-plus-lg me-1"></i>Record Bet
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    {# ══════════════════════════════════════════════════════════════
+       TAB 2 — Player Prop
+    ══════════════════════════════════════════════════════════════ #}
+    <div data-bb-panel="prop" class="d-none">
+
+      {# Props browser — load today's props as selectable cards #}
+      <div class="card-soft p-3 mb-3" id="prop-browser-wrap">
+        <div class="d-flex align-items-center gap-3 mb-3">
+          <div>
+            <p class="bb-section-label mb-0">Today's Props</p>
+            <p class="text-secondary mb-0" style="font-size:.73rem">Select a prop to fill the form instantly</p>
+          </div>
+          <button type="button" id="load-all-props-btn" class="btn btn-sm btn-outline-info ms-auto">
+            <i class="bi bi-cloud-download me-1"></i>Load Props
           </button>
         </div>
+        <input type="text" id="props-search-input" class="form-control form-control-sm mb-2"
+               placeholder="Search player, team, or market…" style="display:none" autocomplete="off">
+        <div id="props-browser" class="prop-browser-cards" style="display:none; max-height:340px; overflow-y:auto"></div>
       </div>
-    </form>
 
-    <div class="mt-3">
-      <a href="{{ url_for('bet.place_bet') }}" class="btn btn-outline-light btn-sm">Cancel</a>
-    </div>
-  </div>
-</div>
+      {# Prop entry form #}
+      <div class="card-soft p-4">
+        <form method="POST" novalidate>
+          {{ form.hidden_tag() }}
+          <input type="hidden" id="prop-game-id" name="external_game_id" value="{{ request.args.get('game_id', '') }}">
 
-{# ══════════════════════════════════════════════════════════════════
-   TAB 4 — Import Screenshot (OCR)
-══════════════════════════════════════════════════════════════════ #}
-<div data-bb-panel="screenshot" class="d-none">
-  <div class="card-soft p-4 mx-auto" style="max-width:720px">
-    <h6 class="mb-1"><i class="bi bi-camera me-2"></i>Import from Screenshot</h6>
-    <p class="small text-secondary mb-4">
-      Upload a PNG/JPG screenshot of a bet (DraftKings, FanDuel, etc.) and we'll try to
-      pre-fill the form fields for you. Review everything before submitting.
-    </p>
-
-    {# Upload zone #}
-    <div id="ocr-dropzone" class="rounded p-4 text-center mb-3"
-         style="border:2px dashed rgba(255,255,255,.2); cursor:pointer">
-      <i class="bi bi-cloud-upload" style="font-size:2rem; color:var(--text-muted)"></i>
-      <p class="mt-2 mb-1 text-secondary small">Drag &amp; drop or click to upload</p>
-      <p class="mb-0 text-secondary" style="font-size:.75rem">PNG · JPG · WEBP · max 10 MB</p>
-      <input type="file" id="ocr-file-input" accept=".png,.jpg,.jpeg,.webp" class="d-none">
-    </div>
-
-    <div id="ocr-preview" class="mb-3" style="display:none">
-      <img id="ocr-preview-img" src="" alt="Preview" class="img-fluid rounded" style="max-height:200px">
-    </div>
-
-    <div id="ocr-status" class="alert d-none py-2 small mb-3"></div>
-
-    {# Parsed fields — pre-filled by OCR, editable before submit #}
-    <div id="ocr-form-section" style="display:none">
-      <hr class="border-secondary">
-      <h6 class="mb-3 small text-secondary">Parsed Fields — review &amp; edit before saving</h6>
-
-      <form method="POST" novalidate id="ocr-submit-form">
-        {{ form.hidden_tag() }}
-        <input type="hidden" name="external_game_id" id="ocr-game-id" value="">
-
-        <div class="row g-3">
-          <div class="col-md-6">
-            <label class="form-label small">Away Team</label>
-            <input type="text" name="team_a" id="ocr-team-a" class="form-control" placeholder="Away team" required>
+          <p class="bb-section-label">Game</p>
+          <div class="mb-3">
+            <input type="text" id="prop-game-picker" class="form-control bb-game-picker"
+              placeholder="Search — e.g. Lakers @ Celtics" list="game-datalist" autocomplete="off">
           </div>
-          <div class="col-md-6">
-            <label class="form-label small">Home Team</label>
-            <input type="text" name="team_b" id="ocr-team-b" class="form-control" placeholder="Home team" required>
-          </div>
-          <div class="col-md-4">
-            <label class="form-label small">Date</label>
-            <input type="date" name="match_date" id="ocr-match-date" class="form-control" required>
-          </div>
-          <div class="col-md-4">
-            <label class="form-label small">Player (if prop)</label>
-            <input type="text" name="player_name" id="ocr-player" class="form-control" placeholder="e.g. LeBron James">
-          </div>
-          <div class="col-md-4">
-            <label class="form-label small">Stat Type</label>
-            <select name="prop_type" id="ocr-prop-type" class="form-select">
-              <option value="">— none / game bet —</option>
-              <option value="player_points">Points</option>
-              <option value="player_rebounds">Rebounds</option>
-              <option value="player_assists">Assists</option>
-              <option value="player_points_rebounds_assists">Points + Rebounds + Assists</option>
-              <option value="player_threes">3-Pointers Made</option>
-              <option value="player_blocks">Blocks</option>
-              <option value="player_steals">Steals</option>
-            </select>
-          </div>
-          <div class="col-md-3">
-            <label class="form-label small">Prop Line</label>
-            <input type="number" name="prop_line" id="ocr-prop-line" class="form-control" step="0.5" placeholder="25.5">
-          </div>
-          <div class="col-md-3">
-            <label class="form-label small">Total Line</label>
-            <input type="number" name="over_under_line" id="ocr-ou-line" class="form-control" step="0.5" placeholder="218.5">
-          </div>
-          <div class="col-md-3">
-            <label class="form-label small">Bet Type</label>
-            <select name="bet_type" id="ocr-bet-type" class="form-select">
-              <option value="over">Over</option>
-              <option value="under">Under</option>
-              <option value="moneyline">Moneyline</option>
-            </select>
-          </div>
-          <div class="col-md-3">
-            <label class="form-label small">Picked Winner (ML)</label>
-            <select name="picked_team" id="ocr-picked-team" class="form-select">
-              <option value="">Select winner</option>
-            </select>
-          </div>
-          <div class="col-md-3">
-            <label class="form-label small">Odds</label>
-            <input type="number" name="american_odds" id="ocr-odds" class="form-control" placeholder="-110">
-          </div>
-          <div class="col-md-3">
-            <label class="form-label small">Stake ($)</label>
-            <div class="input-group">
-              <span class="input-group-text bg-dark border-secondary-subtle">$</span>
-              <input type="number" name="bet_amount" id="ocr-stake" class="form-control"
-                     placeholder="25.00" min="1" step="0.01" required>
+          <div class="row g-3 mb-4">
+            <div class="col-md-6">
+              <label class="form-label small">Away Team</label>
+              <div class="input-group">
+                <span class="input-group-text bg-dark border-secondary-subtle"><i class="bi bi-flag"></i></span>
+                <input type="text" id="prop-team-a" name="team_a" class="form-control"
+                  placeholder="Los Angeles Lakers" value="{{ request.args.get('team_a', '') }}" required>
+              </div>
             </div>
-          </div>
-          <div class="col-md-4">
-            <label class="form-label small">Status</label>
-            <select name="outcome" class="form-select">
-              <option value="pending">Pending</option>
-              <option value="win">Win</option>
-              <option value="lose">Lose</option>
-            </select>
-          </div>
-
-          {# Bonus bet for OCR-imported bets #}
-          <div class="col-md-4">
-            <label class="form-label small">
-              <i class="bi bi-lightning-charge text-warning me-1"></i>Bonus Multiplier
-            </label>
-            <div class="input-group">
-              <span class="input-group-text bg-dark border-secondary-subtle">×</span>
-              <input type="number" name="bonus_multiplier" id="ocr-bonus-mult"
-                     class="form-control" value="1.00" min="1" step="0.05">
+            <div class="col-md-6">
+              <label class="form-label small">Home Team</label>
+              <div class="input-group">
+                <span class="input-group-text bg-dark border-secondary-subtle"><i class="bi bi-flag-fill"></i></span>
+                <input type="text" id="prop-team-b" name="team_b" class="form-control"
+                  placeholder="Boston Celtics" value="{{ request.args.get('team_b', '') }}" required>
+              </div>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">Date</label>
+              <input type="date" id="prop-match-date" name="match_date" class="form-control"
+                     value="{{ request.args.get('match_date', '') }}" required>
             </div>
           </div>
 
-          {# Raw OCR text (collapsed) #}
-          <div class="col-12">
-            <button type="button" class="btn btn-sm btn-link text-secondary p-0"
-                    data-bs-toggle="collapse" data-bs-target="#ocr-raw-text">
-              <i class="bi bi-chevron-down me-1"></i>Show raw OCR text
+          <div class="bb-divider">Prop Selection</div>
+
+          {# Selected-prop indicator (filled by JS when browser card is clicked) #}
+          <div id="prop-selected-card" class="bb-prop-selected mb-3" style="display:none">
+            <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+              <div class="d-flex align-items-center gap-2 min-w-0">
+                <span class="bb-prop-sel-player" id="prop-sel-player"></span>
+                <span class="bb-prop-sel-badge" id="prop-sel-market"></span>
+              </div>
+              <div class="d-flex align-items-center gap-2">
+                <span class="bb-prop-sel-side" id="prop-sel-side"></span>
+                <strong class="bb-prop-sel-line" id="prop-sel-line"></strong>
+                <button type="button" class="btn btn-sm btn-link text-secondary p-0" id="prop-clear-selection"
+                        style="font-size:.72rem">clear</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="row g-3 mb-4">
+            <div class="col-md-4">
+              <label class="form-label small">Player</label>
+              <input type="text" id="prop-player-name" name="player_name" class="form-control"
+                     value="{{ request.args.get('player_name', '') }}" placeholder="LeBron James">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">Market</label>
+              <select id="prop-prop-type" name="prop_type" class="form-select">
+                <option value="player_points" {% if request.args.get('prop_type') == 'player_points' %}selected{% endif %}>Points</option>
+                <option value="player_rebounds" {% if request.args.get('prop_type') == 'player_rebounds' %}selected{% endif %}>Rebounds</option>
+                <option value="player_assists" {% if request.args.get('prop_type') == 'player_assists' %}selected{% endif %}>Assists</option>
+                <option value="player_points_rebounds_assists" {% if request.args.get('prop_type') == 'player_points_rebounds_assists' %}selected{% endif %}>PRA</option>
+                <option value="player_threes" {% if request.args.get('prop_type') == 'player_threes' %}selected{% endif %}>3-Pointers Made</option>
+                <option value="player_blocks" {% if request.args.get('prop_type') == 'player_blocks' %}selected{% endif %}>Blocks</option>
+                <option value="player_steals" {% if request.args.get('prop_type') == 'player_steals' %}selected{% endif %}>Steals</option>
+              </select>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">Line</label>
+              <input type="number" id="prop-prop-line" name="prop_line" class="form-control"
+                     value="{{ request.args.get('prop_line', '') }}" placeholder="25.5" step="0.5">
+            </div>
+            <div class="col-12">
+              <label class="form-label small">Side</label>
+              <div class="d-flex gap-2">
+                {# Hidden select keeps original name/id for existing JS autofill #}
+                <select id="prop-bet-type" name="bet_type" class="d-none">
+                  <option value="over" {% if request.args.get('bet_type', '') == 'over' %}selected{% endif %}>Over</option>
+                  <option value="under" {% if request.args.get('bet_type', '') == 'under' %}selected{% endif %}>Under</option>
+                </select>
+                <button type="button" class="bb-side-btn" id="side-over-btn" data-side="over">
+                  <i class="bi bi-arrow-up me-1"></i>Over
+                </button>
+                <button type="button" class="bb-side-btn" id="side-under-btn" data-side="under">
+                  <i class="bi bi-arrow-down me-1"></i>Under
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="bb-divider">Wager</div>
+
+          <div class="row g-3 mb-4">
+            <div class="col-md-4">
+              <label class="form-label small">Stake ($)</label>
+              <div class="input-group">
+                <span class="input-group-text bg-dark border-secondary-subtle">$</span>
+                <input type="number" id="prop-stake" name="bet_amount" class="form-control"
+                       placeholder="25.00" min="1" step="0.01" required>
+              </div>
+              <div id="prop-bankroll-warn" class="small mt-1" style="display:none"></div>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">Odds (American)</label>
+              <div class="input-group">
+                <span class="input-group-text bg-dark border-secondary-subtle"><i class="bi bi-percent"></i></span>
+                <input type="number" name="american_odds" id="prop-odds" class="form-control" placeholder="-110">
+              </div>
+              <div id="prop-payout-preview" class="small text-info mt-1"></div>
+            </div>
+            {% if current_user.unit_size %}
+            <div class="col-md-4">
+              <label class="form-label small">Units</label>
+              <div class="input-group">
+                <span class="input-group-text bg-dark border-secondary-subtle">u</span>
+                <input type="number" id="prop-units" name="units" class="form-control" min="0.1" step="0.1" placeholder="1.0">
+              </div>
+              <div class="form-text text-secondary">1u = ${{ '%.2f'|format(current_user.unit_size) }}</div>
+            </div>
+            {% endif %}
+          </div>
+
+          {# Advanced — collapsed #}
+          <details class="bb-advanced mb-4">
+            <summary class="bb-advanced-toggle">
+              <i class="bi bi-sliders me-2"></i>Advanced options
+              <i class="bi bi-chevron-down ms-auto bb-chevron"></i>
+            </summary>
+            <div class="bb-advanced-body">
+              <div class="row g-3">
+                <div class="col-md-4">
+                  <label class="form-label small">Status</label>
+                  <select name="outcome" class="form-select">
+                    <option value="pending">Pending</option>
+                    <option value="win">Win</option>
+                    <option value="lose">Lose</option>
+                  </select>
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label small">
+                    <i class="bi bi-lightning-charge text-warning me-1"></i>Bonus Multiplier
+                  </label>
+                  <div class="input-group">
+                    <span class="input-group-text bg-dark border-secondary-subtle">×</span>
+                    <input type="number" name="bonus_multiplier" id="prop-bonus-mult"
+                           class="form-control" value="1.00" min="1" step="0.05" placeholder="1.00">
+                  </div>
+                  <div id="prop-bonus-preview" class="small mt-1"></div>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <div class="d-flex gap-2 justify-content-end">
+            <a href="{{ url_for('bet.place_bet') }}" class="btn btn-outline-secondary">Cancel</a>
+            <button type="submit" class="btn btn-primary px-4">
+              <i class="bi bi-plus-lg me-1"></i>Record Prop
             </button>
-            <div class="collapse mt-2" id="ocr-raw-text">
-              <pre id="ocr-raw-pre" class="small text-secondary p-2 rounded"
-                   style="background:rgba(255,255,255,.04); max-height:150px; overflow-y:auto; white-space:pre-wrap"></pre>
-            </div>
           </div>
+        </form>
+      </div>
+    </div>
 
-          <div class="col-12 d-flex gap-2 justify-content-end mt-2">
-            <a href="{{ url_for('bet.place_bet') }}" class="btn btn-outline-light">Cancel</a>
-            <button type="submit" class="btn btn-primary">
-              <i class="bi bi-plus-lg me-1"></i>Save Imported Bet
-            </button>
+    {# ══════════════════════════════════════════════════════════════
+       TAB 3 — Parlay Builder
+    ══════════════════════════════════════════════════════════════ #}
+    <div data-bb-panel="parlay" class="d-none">
+
+      {# Parlay prop browser #}
+      <div class="card-soft p-3 mb-3">
+        <div class="d-flex align-items-center gap-3 mb-2">
+          <div>
+            <p class="bb-section-label mb-0">Browse Props</p>
+            <p class="text-secondary mb-0" style="font-size:.73rem">Add legs directly from today's lines</p>
           </div>
+          <button type="button" id="load-parlay-props-btn" class="btn btn-sm btn-outline-info ms-auto">
+            <i class="bi bi-cloud-download me-1"></i>Load Props
+          </button>
         </div>
-      </form>
+        <input type="text" id="parlay-props-search-input" class="form-control form-control-sm mb-2"
+               placeholder="Search matchup, player, or market…" style="display:none" autocomplete="off">
+        <div id="parlay-props-browser" class="prop-browser-cards" style="display:none; max-height:300px; overflow-y:auto"></div>
+      </div>
+
+      {# Leg cards #}
+      <div id="parlay-legs" class="mb-3"></div>
+
+      <div class="d-flex gap-2 mb-3">
+        <button type="button" id="add-leg-btn" class="btn btn-outline-info btn-sm">
+          <i class="bi bi-plus-lg me-1"></i>Add Leg
+        </button>
+        <button type="button" id="clear-parlay-draft-btn" class="btn btn-outline-secondary btn-sm">
+          <i class="bi bi-trash3 me-1"></i>Clear Draft
+        </button>
+      </div>
+
+      <div id="parlay-feedback" class="alert d-none py-2 small"></div>
+
+      {# Parlay submit card #}
+      <div class="card-soft p-4">
+        <p class="bb-section-label">Parlay Wager</p>
+        <form id="parlay-form">
+          <div class="row g-3 align-items-end mb-3">
+            <div class="col-md-4">
+              <label class="form-label small">Total Stake ($)</label>
+              <div class="input-group">
+                <span class="input-group-text bg-dark border-secondary-subtle">$</span>
+                <input type="number" id="parlay-stake" class="form-control"
+                  placeholder="25.00" min="1" step="0.01" required>
+              </div>
+              <div id="parlay-bankroll-warn" class="small mt-1" style="display:none"></div>
+              {% if current_user.unit_size %}
+              <div class="input-group mt-2">
+                <span class="input-group-text bg-dark border-secondary-subtle">u</span>
+                <input type="number" id="parlay-units" class="form-control" min="0.1" step="0.1" placeholder="Units">
+              </div>
+              <div class="form-text text-secondary">1u = ${{ '%.2f'|format(current_user.unit_size) }}</div>
+              {% endif %}
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">Status</label>
+              <select id="parlay-outcome" class="form-select">
+                <option value="pending">Pending</option>
+                <option value="win">Win (retroactive)</option>
+                <option value="lose">Lose (retroactive)</option>
+              </select>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">
+                <i class="bi bi-lightning-charge text-warning me-1"></i>Bonus Multiplier
+              </label>
+              <div class="input-group">
+                <span class="input-group-text bg-dark border-secondary-subtle">×</span>
+                <input type="number" id="parlay-bonus-mult" class="form-control"
+                       value="1.00" min="1" step="0.05" placeholder="1.00">
+              </div>
+            </div>
+            <div class="col-md-4 d-grid">
+              <button type="submit" class="btn btn-primary">
+                <i class="bi bi-check-lg me-1"></i>Submit Parlay
+              </button>
+            </div>
+          </div>
+        </form>
+        <a href="{{ url_for('bet.place_bet') }}" class="btn btn-outline-secondary btn-sm mt-1">Cancel</a>
+      </div>
     </div>
 
-  </div>
-</div>
+    {# ══════════════════════════════════════════════════════════════
+       TAB 4 — Screenshot / OCR Import
+    ══════════════════════════════════════════════════════════════ #}
+    <div data-bb-panel="screenshot" class="d-none">
+      <div class="card-soft p-4">
+        <p class="bb-section-label">Import from Screenshot</p>
+        <p class="small text-secondary mb-4">
+          Upload a PNG/JPG of a bet slip (DraftKings, FanDuel, etc.) — we'll pre-fill the fields.
+          Review everything before saving.
+        </p>
+
+        <div id="ocr-dropzone" class="bb-dropzone mb-3">
+          <i class="bi bi-cloud-upload bb-dropzone-icon"></i>
+          <p class="mt-2 mb-1 small text-secondary">Drag &amp; drop or click to upload</p>
+          <p class="mb-0 text-muted" style="font-size:.72rem">PNG · JPG · WEBP · max 10 MB</p>
+          <input type="file" id="ocr-file-input" accept=".png,.jpg,.jpeg,.webp" class="d-none">
+        </div>
+
+        <div id="ocr-preview" class="mb-3" style="display:none">
+          <img id="ocr-preview-img" src="" alt="Preview" class="img-fluid rounded" style="max-height:200px">
+        </div>
+
+        <div id="ocr-status" class="alert d-none py-2 small mb-3"></div>
+
+        <div id="ocr-form-section" style="display:none">
+          <div class="bb-divider">Parsed Fields — review before saving</div>
+          <form method="POST" novalidate id="ocr-submit-form">
+            {{ form.hidden_tag() }}
+            <input type="hidden" name="external_game_id" id="ocr-game-id" value="">
+            <div class="row g-3">
+              <div class="col-md-6">
+                <label class="form-label small">Away Team</label>
+                <input type="text" name="team_a" id="ocr-team-a" class="form-control" placeholder="Away team" required>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label small">Home Team</label>
+                <input type="text" name="team_b" id="ocr-team-b" class="form-control" placeholder="Home team" required>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label small">Date</label>
+                <input type="date" name="match_date" id="ocr-match-date" class="form-control" required>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label small">Player (prop)</label>
+                <input type="text" name="player_name" id="ocr-player" class="form-control" placeholder="e.g. LeBron James">
+              </div>
+              <div class="col-md-4">
+                <label class="form-label small">Stat Type</label>
+                <select name="prop_type" id="ocr-prop-type" class="form-select">
+                  <option value="">— none / game bet —</option>
+                  <option value="player_points">Points</option>
+                  <option value="player_rebounds">Rebounds</option>
+                  <option value="player_assists">Assists</option>
+                  <option value="player_points_rebounds_assists">PRA</option>
+                  <option value="player_threes">3-Pointers Made</option>
+                  <option value="player_blocks">Blocks</option>
+                  <option value="player_steals">Steals</option>
+                </select>
+              </div>
+              <div class="col-md-3">
+                <label class="form-label small">Prop Line</label>
+                <input type="number" name="prop_line" id="ocr-prop-line" class="form-control" step="0.5" placeholder="25.5">
+              </div>
+              <div class="col-md-3">
+                <label class="form-label small">Total Line</label>
+                <input type="number" name="over_under_line" id="ocr-ou-line" class="form-control" step="0.5" placeholder="218.5">
+              </div>
+              <div class="col-md-3">
+                <label class="form-label small">Bet Type</label>
+                <select name="bet_type" id="ocr-bet-type" class="form-select">
+                  <option value="over">Over</option>
+                  <option value="under">Under</option>
+                  <option value="moneyline">Moneyline</option>
+                </select>
+              </div>
+              <div class="col-md-3">
+                <label class="form-label small">Picked Winner (ML)</label>
+                <select name="picked_team" id="ocr-picked-team" class="form-select">
+                  <option value="">Select winner</option>
+                </select>
+              </div>
+              <div class="col-md-3">
+                <label class="form-label small">Odds</label>
+                <input type="number" name="american_odds" id="ocr-odds" class="form-control" placeholder="-110">
+              </div>
+              <div class="col-md-3">
+                <label class="form-label small">Stake ($)</label>
+                <div class="input-group">
+                  <span class="input-group-text bg-dark border-secondary-subtle">$</span>
+                  <input type="number" name="bet_amount" id="ocr-stake" class="form-control"
+                         placeholder="25.00" min="1" step="0.01" required>
+                </div>
+              </div>
+              <div class="col-md-3">
+                <label class="form-label small">Status</label>
+                <select name="outcome" class="form-select">
+                  <option value="pending">Pending</option>
+                  <option value="win">Win</option>
+                  <option value="lose">Lose</option>
+                </select>
+              </div>
+              <div class="col-md-3">
+                <label class="form-label small">
+                  <i class="bi bi-lightning-charge text-warning me-1"></i>Bonus ×
+                </label>
+                <div class="input-group">
+                  <span class="input-group-text bg-dark border-secondary-subtle">×</span>
+                  <input type="number" name="bonus_multiplier" id="ocr-bonus-mult"
+                         class="form-control" value="1.00" min="1" step="0.05">
+                </div>
+              </div>
+              <div class="col-12">
+                <button type="button" class="btn btn-sm btn-link text-secondary p-0"
+                        data-bs-toggle="collapse" data-bs-target="#ocr-raw-text">
+                  <i class="bi bi-chevron-down me-1"></i>Show raw OCR text
+                </button>
+                <div class="collapse mt-2" id="ocr-raw-text">
+                  <pre id="ocr-raw-pre" class="small text-secondary p-2 rounded"
+                       style="background:rgba(255,255,255,.04); max-height:130px; overflow-y:auto; white-space:pre-wrap"></pre>
+                </div>
+              </div>
+              <div class="col-12 d-flex gap-2 justify-content-end mt-1">
+                <a href="{{ url_for('bet.place_bet') }}" class="btn btn-outline-secondary">Cancel</a>
+                <button type="submit" class="btn btn-primary px-4">
+                  <i class="bi bi-plus-lg me-1"></i>Save Imported Bet
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+  </div>{# end bb-main #}
+
+  {# ─── Ticket summary sidebar ───────────────────────────────────── #}
+  <aside class="bb-aside">
+    <div class="bb-ticket" id="ticket-summary">
+      <div class="bb-ticket-header">
+        <i class="bi bi-receipt me-2"></i>
+        <span id="ticket-mode-label">Ticket</span>
+      </div>
+      <div id="ticket-body" class="bb-ticket-body">
+        <div class="bb-ticket-empty">
+          <i class="bi bi-plus-circle-dotted bb-ticket-empty-icon"></i>
+          <p class="mt-2 mb-0 small">Fill in the form to preview your ticket</p>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+</div>{# end bb-shell #}
 {% endblock %}
 
 {% block scripts %}
