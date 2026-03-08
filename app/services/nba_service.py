@@ -177,6 +177,12 @@ def fetch_espn_boxscore(espn_id: str) -> dict:
                     except (ValueError, TypeError):
                         pass
                 if entry:
+                    # Compute PRA so player_points_rebounds_assists bets can be graded
+                    pts = entry.get('player_points')
+                    reb = entry.get('player_rebounds')
+                    ast = entry.get('player_assists')
+                    if pts is not None and reb is not None and ast is not None:
+                        entry['player_points_rebounds_assists'] = pts + reb + ast
                     player_stats[name] = entry
 
     return player_stats
@@ -726,13 +732,29 @@ def resolve_pending_bets(pending_bets: list) -> list[tuple]:
                 boxscore_cache[espn_id] = fetch_espn_boxscore(espn_id)
             boxscore = boxscore_cache[espn_id]
 
-            # Fuzzy match player name
+            # Fuzzy match player name — normalise away periods/apostrophes first
+            import re as _re
+            def _norm(n: str) -> str:
+                return _re.sub(r"[.\'\-]", "", n).lower().strip()
+
             actual_stat = None
-            bet_name_lower = bet.player_name.lower().strip()
+            bet_norm = _norm(bet.player_name)
+            matched_player = None
             for player_name, stats in boxscore.items():
-                if bet_name_lower in player_name.lower() or player_name.lower() in bet_name_lower:
+                p_norm = _norm(player_name)
+                if bet_norm in p_norm or p_norm in bet_norm:
                     actual_stat = stats.get(bet.prop_type)
+                    matched_player = player_name
                     break
+
+            if matched_player is None and boxscore:
+                # Player not in boxscore for a final game → DNP; void the bet (push)
+                logger.warning(
+                    "Player %s not in boxscore for game %s (DNP) — voiding as push",
+                    bet.player_name, espn_id,
+                )
+                results.append((bet, Outcome.PUSH.value, 0.0))
+                continue
 
             if actual_stat is None:
                 logger.warning(
