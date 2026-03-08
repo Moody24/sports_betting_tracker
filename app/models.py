@@ -182,7 +182,7 @@ class Bet(db.Model):
         combined_decimal = 1.0
         for leg in legs:
             if leg.outcome == Outcome.WIN.value:
-                combined_decimal *= _american_to_decimal(leg.american_odds or 0)
+                combined_decimal *= _american_to_decimal(leg.american_odds or -110)
 
         if combined_decimal == 1.0:
             return 0.0  # every leg pushed — stake returned
