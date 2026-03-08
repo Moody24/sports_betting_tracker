@@ -108,7 +108,7 @@
                 <strong>{{ b._parlay_legs_count or 0 }} legs</strong>
                 <span class="text-secondary small">{{ parlay_game_count.get(b.parlay_id, 1) }} game{{ '' if parlay_game_count.get(b.parlay_id, 1) == 1 else 's' }}</span>
               </div>
-              <div class="small text-secondary">Placed {{ b.match_date.strftime('%b %d, %Y') }} · ${{ '%.2f'|format(b.bet_amount) }} staked</div>
+              <div class="small text-secondary">{{ b.match_date.strftime('%b %d, %Y') }} · ${{ '%.2f'|format(b.bet_amount) }} staked</div>
             </div>
             <div class="parlay-meta">
               {{ outcome_badge(p_status) }}
@@ -132,7 +132,7 @@
           <div class="bet-main-head">
             <h4 class="bet-primary mb-0">{{ b.primary_display_name }}</h4>
             {% if b.source == 'auto_generated' %}<span class="badge text-bg-dark">Auto</span>{% endif %}
-            {% if b.is_parlay %}<span class="badge text-bg-secondary">Leg</span>{% endif %}
+            {% if b.is_parlay and b.parlay_id %}<span class="badge text-bg-secondary">Leg</span>{% endif %}
             {% if is_overdue %}<span class="badge text-bg-danger">Past</span>{% endif %}
           </div>
 
@@ -156,7 +156,10 @@
           {% endif %}
 
           {% if b.notes and not b.notes.startswith('AUTO_BOOTSTRAP_HIDDEN') %}
-            <p class="bet-note mb-0"><i class="bi bi-chat-left-text me-1 opacity-50"></i>{{ b.notes }}</p>
+            {% set _note_clean = b.notes.replace('straight · Auto', 'Auto pick').replace('3leg_parlay · Auto', 'Auto pick').replace('2leg_parlay · Auto', 'Auto pick').replace('straight', '').strip(' ·') %}
+            {% if _note_clean %}
+            <p class="bet-note mb-0"><i class="bi bi-chat-left-text me-1 opacity-50"></i>{{ _note_clean }}</p>
+            {% endif %}
           {% endif %}
 
           {% if b.outcome == 'pending' and b.live_trackable and b.match_date.date() <= now_date %}

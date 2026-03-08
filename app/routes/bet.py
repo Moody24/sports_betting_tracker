@@ -352,6 +352,29 @@ def place_bet():
         unique_matchups = {(leg.team_a, leg.team_b, leg.match_date.date()) for leg in legs}
         parlay_game_count[pid] = len(unique_matchups) or 1
 
+    # Re-order bets so all parlay legs are contiguous — the template groups them
+    # by checking adjacent rows, so scattered legs produce broken HTML.
+    def _ts(d):
+        return d.timestamp() if hasattr(d, 'timestamp') else float(d.toordinal() * 86400)
+
+    seen_pids: set = set()
+    groups: list = []
+    for b in bets:
+        if b.is_parlay and b.parlay_id:
+            if b.parlay_id not in seen_pids:
+                seen_pids.add(b.parlay_id)
+                legs = parlay_groups[b.parlay_id]
+                is_pending = any(l.outcome == 'pending' for l in legs)
+                sort_ts = _ts(legs[0].match_date)
+                groups.append((0 if is_pending else 1, -sort_ts, legs))
+            # else: already queued as part of its group — skip
+        else:
+            is_pending = b.outcome == 'pending'
+            groups.append((0 if is_pending else 1, -_ts(b.match_date), [b]))
+
+    groups.sort(key=lambda g: (g[0], g[1]))
+    bets = [leg for _, _, legs in groups for leg in legs]
+
     filters = {
         'status': status,
         'q': search_query,
