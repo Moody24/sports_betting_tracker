@@ -228,7 +228,7 @@
             <span class="badge text-bg-dark">{{ prop_label }}</span>
           </td>
           <td class="text-center">
-            {% set pos = (play.breakdown.player_position if play.breakdown else '') %}
+            {% set pos = (play.breakdown.get('player_position', '') if play.breakdown else '') %}
             {% if pos %}
               <span class="badge text-bg-secondary">{{ pos|upper }}</span>
             {% else %}
@@ -236,7 +236,7 @@
             {% endif %}
           </td>
           <td class="text-center tabular-num">
-            {% set pos_mult = (play.breakdown.position_matchup_mult if play.breakdown else none) %}
+            {% set pos_mult = (play.breakdown.get('position_matchup_mult') if play.breakdown else none) %}
             {% if pos_mult is not none %}
               {% set pos_edge_pct = (pos_mult - 1) * 100 %}
               <span class="{% if pos_edge_pct > 0 %}text-success{% elif pos_edge_pct < 0 %}text-danger{% else %}text-secondary{% endif %}">
@@ -252,7 +252,7 @@
             {{ play.projection }}
             {% if play.breakdown %}
             <div class="small text-secondary fw-normal" style="font-size:.65rem">
-              L5: {{ '%.1f'|format(play.breakdown.last_5_avg or 0) }} · Szn: {{ '%.1f'|format(play.breakdown.season_avg or 0) }}
+              L5: {{ '%.1f'|format(play.breakdown.get('last_5_avg') or 0) }} · Szn: {{ '%.1f'|format(play.breakdown.get('season_avg') or 0) }}
             </div>
             {% endif %}
           </td>
