@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import outcome_badge %}
+{% from "_macros.html" import outcome_badge, prop_badge, prop_label_short, edge_badge_bootstrap, side_text, projection_value %}
 
 {% block title %}Dashboard · Sports Betting Tracker{% endblock %}
 {% block page_title %}Dashboard{% endblock %}
@@ -124,31 +124,11 @@
         {% for play in top_plays %}
         <tr>
           <td class="fw-semibold">{{ play.player }}</td>
-          <td>
-            {% set prop_label = {'player_points': 'PTS', 'player_rebounds': 'REB', 'player_assists': 'AST', 'player_points_rebounds_assists': 'PTS+REB+AST', 'player_threes': '3PM', 'player_steals': 'STL', 'player_blocks': 'BLK'}.get(play.prop_type, play.prop_type) %}
-            <span class="badge text-bg-dark">{{ prop_label }}</span>
-          </td>
+          <td>{{ prop_badge(play.prop_type) }}</td>
           <td class="text-center tabular-num">{{ play.line }}</td>
-          <td class="text-center tabular-num fw-semibold
-            {% if play.projection > play.line %}text-success{% elif play.projection < play.line %}text-danger{% endif %}">
-            {{ play.projection }}
-          </td>
-          <td class="text-center">
-            {% if play.confidence_tier == 'strong' %}
-              <span class="badge text-bg-success">{{ '%.1f'|format(play.edge * 100) }}%</span>
-            {% elif play.confidence_tier == 'moderate' %}
-              <span class="badge text-bg-warning text-dark">{{ '%.1f'|format(play.edge * 100) }}%</span>
-            {% else %}
-              <span class="badge text-bg-secondary">{{ '%.1f'|format(play.edge * 100) }}%</span>
-            {% endif %}
-          </td>
-          <td class="text-center">
-            {% if play.recommended_side == 'over' %}
-              <span class="text-success"><i class="bi bi-arrow-up"></i> Over</span>
-            {% else %}
-              <span class="text-danger"><i class="bi bi-arrow-down"></i> Under</span>
-            {% endif %}
-          </td>
+          <td class="text-center tabular-num">{{ projection_value(play.projection, play.line) }}</td>
+          <td class="text-center">{{ edge_badge_bootstrap(play.edge, play.confidence_tier) }}</td>
+          <td class="text-center">{{ side_text(play.recommended_side) }}</td>
           <td class="text-center">
             <form method="POST" action="{{ url_for('bet.quick_add_bet') }}" class="d-flex gap-1 justify-content-center align-items-center">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -228,18 +208,9 @@
               —
             {% endif %}
           </td>
-          <td>
-            {% set prop_label = {'player_points': 'PTS', 'player_rebounds': 'REB', 'player_assists': 'AST', 'player_points_rebounds_assists': 'PTS+REB+AST', 'player_threes': '3PM', 'player_blocks': 'BLK', 'player_steals': 'STL'}.get(leg.prop_type, leg.prop_type) %}
-            <span class="badge text-bg-dark">{{ prop_label }}</span>
-          </td>
+          <td>{{ prop_badge(leg.prop_type) }}</td>
           <td class="text-center tabular-num">{{ leg.line }}</td>
-          <td class="text-center">
-            {% if leg.side == 'over' %}
-              <span class="text-success"><i class="bi bi-arrow-up"></i> Over</span>
-            {% else %}
-              <span class="text-danger"><i class="bi bi-arrow-down"></i> Under</span>
-            {% endif %}
-          </td>
+          <td class="text-center">{{ side_text(leg.side) }}</td>
           <td class="text-center tabular-num">{{ '%+d'|format(leg.odds) }}</td>
         </tr>
         {% endfor %}
