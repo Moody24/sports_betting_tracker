@@ -47,33 +47,37 @@
   </div>
 </div>
 
-<div class="card-soft p-3 mb-4 fade-up fade-up-7">
-  <div class="d-flex justify-content-between align-items-center mb-2">
-    <h3 class="h6 mb-0">Bet Settings</h3>
+<details class="card-soft mb-4 fade-up fade-up-7">
+  <summary class="p-3 d-flex justify-content-between align-items-center" style="cursor:pointer; list-style:none">
+    <span class="small text-secondary"><i class="bi bi-gear me-1"></i>Bet Settings</span>
     {% if current_user.unit_size %}
-      <span class="small text-secondary">Current: ${{ '%.2f'|format(current_user.unit_size) }} / unit</span>
+      <span class="small text-secondary">1u = ${{ '%.2f'|format(current_user.unit_size) }}</span>
+    {% else %}
+      <span class="small text-secondary opacity-50">Units not set</span>
     {% endif %}
+  </summary>
+  <div class="px-3 pb-3">
+    <form method="POST" action="{{ url_for('main.dashboard_settings') }}" class="row g-2 align-items-end">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="col-sm-6 col-md-4">
+        <label class="form-label small">Unit Size ($)</label>
+        <input
+          type="number"
+          name="unit_size"
+          class="form-control form-control-sm"
+          min="0.01"
+          step="0.01"
+          placeholder="e.g. 25.00"
+          value="{{ current_user.unit_size if current_user.unit_size is not none else '' }}"
+        >
+        <div class="form-text text-secondary">Leave blank to disable units mode.</div>
+      </div>
+      <div class="col-sm-6 col-md-2 d-grid">
+        <button type="submit" class="btn btn-primary btn-sm">Save</button>
+      </div>
+    </form>
   </div>
-  <form method="POST" action="{{ url_for('main.dashboard_settings') }}" class="row g-2 align-items-end">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <div class="col-sm-6 col-md-4">
-      <label class="form-label">Unit Size ($)</label>
-      <input
-        type="number"
-        name="unit_size"
-        class="form-control"
-        min="0.01"
-        step="0.01"
-        placeholder="e.g. 25.00"
-        value="{{ current_user.unit_size if current_user.unit_size is not none else '' }}"
-      >
-      <div class="form-text text-secondary">Leave blank to disable units mode.</div>
-    </div>
-    <div class="col-sm-6 col-md-2 d-grid">
-      <button type="submit" class="btn btn-primary">Save</button>
-    </div>
-  </form>
-</div>
+</details>
 
 <div class="row g-3 mb-4 fade-up fade-up-8">
   <div class="col-lg-6">
@@ -174,13 +178,13 @@
       <span class="input-group-text bg-dark border-secondary-subtle">$</span>
       <input type="number" name="stake" class="form-control" placeholder="Stake" min="0.01" step="0.01">
     </div>
+    {% if current_user.unit_size %}
     <span class="small text-secondary">or</span>
-    <div class="input-group input-group-sm" style="max-width:130px">
-      <input type="number" name="units" class="form-control"
-             placeholder="Units{% if current_user.unit_size %} (1u=${{ '%.2f'|format(current_user.unit_size) }}){% endif %}"
-             min="0.01" step="0.01">
+    <div class="input-group input-group-sm" style="max-width:110px">
+      <input type="number" name="units" class="form-control" placeholder="Units" min="0.01" step="0.01">
       <span class="input-group-text bg-dark border-secondary-subtle">u</span>
     </div>
+    {% endif %}
     <button type="submit" class="btn btn-sm btn-warning text-dark fw-semibold">
       <i class="bi bi-plus-lg me-1"></i>Place Parlay
     </button>
