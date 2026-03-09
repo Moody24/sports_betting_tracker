@@ -189,7 +189,7 @@
   </p>
   <form method="POST" action="{{ url_for('bet.quick_add_parlay') }}" class="d-flex flex-wrap gap-2 align-items-center mb-3">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <input type="hidden" name="legs" value="{{ best_parlay.legs | tojson | e }}">
+    <input type="hidden" name="legs" value='{{ best_parlay.legs | tojson }}'>
     <div class="input-group input-group-sm" style="max-width:140px">
       <span class="input-group-text bg-dark border-secondary-subtle">$</span>
       <input type="number" name="stake" class="form-control" placeholder="Stake" min="0.01" step="0.01">
