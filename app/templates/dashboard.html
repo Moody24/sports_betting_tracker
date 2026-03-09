@@ -190,12 +190,15 @@
   <form method="POST" action="{{ url_for('bet.quick_add_parlay') }}" class="d-flex flex-wrap gap-2 align-items-center mb-3">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <input type="hidden" name="legs" value="{{ best_parlay.legs | tojson | e }}">
-    <div class="input-group input-group-sm" style="max-width:160px">
+    <div class="input-group input-group-sm" style="max-width:140px">
       <span class="input-group-text bg-dark border-secondary-subtle">$</span>
-      <input type="number" name="stake" class="form-control" placeholder="Stake" min="0.01" step="0.01" required>
+      <input type="number" name="stake" class="form-control" placeholder="Stake" min="0.01" step="0.01">
     </div>
+    <span class="small text-secondary">or</span>
     <div class="input-group input-group-sm" style="max-width:130px">
-      <input type="number" name="units" class="form-control" placeholder="Units" min="0.01" step="0.01">
+      <input type="number" name="units" class="form-control"
+             placeholder="Units{% if current_user.unit_size %} (1u=${{ '%.2f'|format(current_user.unit_size) }}){% endif %}"
+             min="0.01" step="0.01">
       <span class="input-group-text bg-dark border-secondary-subtle">u</span>
     </div>
     <button type="submit" class="btn btn-sm btn-warning text-dark fw-semibold">

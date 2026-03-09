@@ -1601,10 +1601,19 @@ def quick_add_bet():
 def quick_add_parlay():
     """Create a parlay from the dashboard Best Play of the Day legs."""
     stake = request.form.get('stake', type=float)
+    units = request.form.get('units', type=float)
     legs_json = request.form.get('legs', '')
 
+    # Derive the missing value from unit_size when the user only provides one.
+    # Use explicit `is None` — falsy check breaks when stake=0.0 is submitted.
+    unit_size = current_user.unit_size
+    if stake is not None and units is None and unit_size:
+        units = round(stake / unit_size, 4)
+    elif units is not None and stake is None and unit_size:
+        stake = round(units * unit_size, 2)
+
     if not stake or stake <= 0:
-        flash('Enter a stake amount.', 'danger')
+        flash('Enter a stake amount, or configure your unit size and enter units.', 'danger')
         return redirect(url_for('main.dashboard'))
 
     try:
@@ -1616,8 +1625,6 @@ def quick_add_parlay():
     if len(legs_data) < 2:
         flash('A parlay needs at least 2 legs.', 'danger')
         return redirect(url_for('main.dashboard'))
-
-    units = request.form.get('units', type=float)
     parlay_id = Bet.generate_parlay_id()
     for leg in legs_data:
         player = (leg.get('player') or '')[:100]
