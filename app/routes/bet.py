@@ -1830,13 +1830,26 @@ def nba_stat_analysis():
         if len(logs_by_player[_log.player_name]) < 20:
             logs_by_player[_log.player_name].append(_log)
 
+    # Build player → team_abbr from the most recent log with team_abbr set
+    player_team_abbr_map: dict[str, str] = {}
+    for _pname, _plogs in logs_by_player.items():
+        for _plog in _plogs:
+            if _plog.team_abbr:
+                player_team_abbr_map[_pname] = _plog.team_abbr.upper()
+                break
+
+    # Stamp player_team_abbr onto each score so the template and game_ctx can use it
+    for s in scores:
+        if not s.get('player_team_abbr'):
+            s['player_team_abbr'] = player_team_abbr_map.get(s.get('player', ''), '')
+
     # ── Batch TeamDefenseSnapshot queries (1 query instead of N) ────────
     _opp_abbrs: set[str] = set()
     for s in scores:
         _game = game_lookup.get(s.get('game_id'), {})
-        _pt = s.get('player_team_abbr') or ''
-        _home = (_game.get('home') or {}).get('abbr', '')
-        _away = (_game.get('away') or {}).get('abbr', '')
+        _pt = (s.get('player_team_abbr') or '').upper()
+        _home = (_game.get('home') or {}).get('abbr', '').upper()
+        _away = (_game.get('away') or {}).get('abbr', '').upper()
         _opp = _away if _pt == _home else _home
         if _opp:
             _opp_abbrs.add(_opp)
@@ -1878,8 +1891,8 @@ def nba_stat_analysis():
         gid = s.get('game_id')
         if gid not in game_map:
             continue
-        pt = s.get('player_team_abbr') or ''
-        home_abbr = (game_map[gid]['meta'].get('home') or {}).get('abbr', '')
+        pt = (s.get('player_team_abbr') or '').upper()
+        home_abbr = (game_map[gid]['meta'].get('home') or {}).get('abbr', '').upper()
         bucket = 'home' if pt == home_abbr else 'away'
         game_map[gid][bucket].append(s)
 

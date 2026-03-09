@@ -59,7 +59,7 @@
     {% for s in strong_picks %}
     {% set pos = (s.breakdown or {}).get('player_position', '') %}
     <div class="featured-play-card sa-featured-card" style="cursor:pointer"
-         data-prop="{{ s | tojson | e }}">
+         data-prop='{{ s | tojson }}'>
       <div class="d-flex justify-content-between align-items-start mb-1">
         <span class="tier-strong">STRONG ★</span>
         <span class="featured-play-meta">{{ PROP_LABEL.get(s.prop_type, s.prop_type) }}</span>
@@ -156,38 +156,52 @@
 
   {# Two-column player grid #}
   <div class="row g-0">
+    {# Away column #}
     <div class="col-6 border-end">
+      {% if not m.away %}
+      <div class="px-3 py-2 small text-secondary fst-italic">No props</div>
+      {% else %}
+      {% set ns = namespace(last_pos='') %}
       {% for s in m.away %}
       {% set pos = (s.breakdown or {}).get('player_position', '') %}
+      {% if pos and pos != ns.last_pos %}
+      {% set ns.last_pos = pos %}
+      <div class="sa-pos-header">{{ pos }}</div>
+      {% endif %}
       <div class="sa-player-row sa-ind-{{ s.indicator }}"
-           data-prop="{{ s | tojson | e }}">
-        <span class="sa-pos-tag">{{ pos }}</span>
+           data-prop='{{ s | tojson }}'>
         <div class="sa-player-info">
           <span class="sa-player-name">{{ s.player }}</span>
           <span class="sa-prop-desc">{{ PROP_LABEL.get(s.prop_type, s.prop_type) }} {{ s.line }}</span>
         </div>
         <span class="sa-ind-badge sa-ind-badge-{{ s.indicator }}">{{ IND_LABEL.get(s.indicator, s.indicator) }}</span>
       </div>
-      {% else %}
-      <div class="px-3 py-2 small text-secondary fst-italic">No props</div>
       {% endfor %}
+      {% endif %}
     </div>
 
+    {# Home column #}
     <div class="col-6">
+      {% if not m.home %}
+      <div class="px-3 py-2 small text-secondary fst-italic">No props</div>
+      {% else %}
+      {% set ns = namespace(last_pos='') %}
       {% for s in m.home %}
       {% set pos = (s.breakdown or {}).get('player_position', '') %}
+      {% if pos and pos != ns.last_pos %}
+      {% set ns.last_pos = pos %}
+      <div class="sa-pos-header">{{ pos }}</div>
+      {% endif %}
       <div class="sa-player-row sa-ind-{{ s.indicator }}"
-           data-prop="{{ s | tojson | e }}">
-        <span class="sa-pos-tag">{{ pos }}</span>
+           data-prop='{{ s | tojson }}'>
         <div class="sa-player-info">
           <span class="sa-player-name">{{ s.player }}</span>
           <span class="sa-prop-desc">{{ PROP_LABEL.get(s.prop_type, s.prop_type) }} {{ s.line }}</span>
         </div>
         <span class="sa-ind-badge sa-ind-badge-{{ s.indicator }}">{{ IND_LABEL.get(s.indicator, s.indicator) }}</span>
       </div>
-      {% else %}
-      <div class="px-3 py-2 small text-secondary fst-italic">No props</div>
       {% endfor %}
+      {% endif %}
     </div>
   </div>
 </div>
@@ -195,6 +209,8 @@
 
 {# ── Side Panel ───────────────────────────────────────────────── #}
 <div id="stat-panel" class="stat-panel" hidden>
+
+  {# Header #}
   <div class="stat-panel-header">
     <div class="flex-fill">
       <div id="sp-player-name" class="sp-name"></div>
@@ -208,34 +224,89 @@
 
   <div class="stat-panel-body">
 
-    {# Stats row #}
-    <div class="sa-stats-row mb-3">
-      <div class="sa-stat-cell">
-        <div class="sa-stat-label">Line</div>
-        <div class="sa-stat-val" id="sp-line">—</div>
+    {# ── The Case (top-line numbers) ─── #}
+    <div class="sp-case-box mb-3">
+      <div class="sp-case-row">
+        <div class="sp-case-cell">
+          <div class="sp-case-label">Line</div>
+          <div class="sp-case-val" id="sp-line">—</div>
+        </div>
+        <div class="sp-case-cell">
+          <div class="sp-case-label">Projection</div>
+          <div class="sp-case-val sp-proj-val" id="sp-proj">—</div>
+        </div>
+        <div class="sp-case-cell">
+          <div class="sp-case-label">Edge</div>
+          <div class="sp-case-val" id="sp-edge">—</div>
+        </div>
+        <div class="sp-case-cell">
+          <div class="sp-case-label">Rec.</div>
+          <div class="sp-case-val" id="sp-rec">—</div>
+        </div>
       </div>
-      <div class="sa-stat-cell">
-        <div class="sa-stat-label">Projection</div>
-        <div class="sa-stat-val text-success" id="sp-proj">—</div>
-      </div>
-      <div class="sa-stat-cell">
-        <div class="sa-stat-label">Edge</div>
-        <div class="sa-stat-val" id="sp-edge">—</div>
-      </div>
-      <div class="sa-stat-cell">
-        <div class="sa-stat-label">Rec.</div>
-        <div class="sa-stat-val" id="sp-rec">—</div>
+      <div class="sp-case-row mt-2">
+        <div class="sp-case-cell">
+          <div class="sp-case-label">Model P(over)</div>
+          <div class="sp-case-val" id="sp-wp">—</div>
+        </div>
+        <div class="sp-case-cell">
+          <div class="sp-case-label">Book Implied</div>
+          <div class="sp-case-val" id="sp-implied">—</div>
+        </div>
+        <div class="sp-case-cell">
+          <div class="sp-case-label">Z-score</div>
+          <div class="sp-case-val" id="sp-zscore">—</div>
+        </div>
+        <div class="sp-case-cell">
+          <div class="sp-case-label">Source</div>
+          <div class="sp-case-val" id="sp-source">—</div>
+        </div>
       </div>
     </div>
 
-    {# Mini bar chart #}
-    <div class="stat-section-label">Last 5 Games vs Line</div>
-    <div id="sp-minibars" class="stat-minibars"></div>
+    {# ── Stat Toggle ─── #}
+    <div class="sp-stat-toggle mb-3" id="sp-stat-toggle">
+      <button class="sp-tog-btn active" data-stat="pts">PTS</button>
+      <button class="sp-tog-btn" data-stat="reb">REB</button>
+      <button class="sp-tog-btn" data-stat="ast">AST</button>
+      <button class="sp-tog-btn" data-stat="fg3m">3PM</button>
+      <button class="sp-tog-btn" data-stat="stl">STL</button>
+      <button class="sp-tog-btn" data-stat="blk">BLK</button>
+    </div>
 
-    {# Hit rate #}
-    <div class="stat-section-label">Hit Rate (Last 20g)</div>
+    {# ── Bar chart (last 10 games for selected stat) ─── #}
+    <div class="stat-section-label">Last 10 Games vs Line</div>
+    <div id="sp-barchart" class="sp-barchart"></div>
+
+    {# ── Last 10 games table ─── #}
+    <div class="stat-section-label mt-3">Game Log</div>
+    <div id="sp-gamelog-wrap" class="sp-gamelog-wrap">
+      <table class="sp-gamelog-table" id="sp-gamelog-table">
+        <thead>
+          <tr>
+            <th>Date</th><th>Matchup</th><th>Min</th>
+            <th id="sp-gl-col-pts" class="sp-gl-active-col">PTS</th>
+            <th id="sp-gl-col-reb">REB</th>
+            <th id="sp-gl-col-ast">AST</th>
+            <th id="sp-gl-col-fg3m">3PM</th>
+          </tr>
+        </thead>
+        <tbody id="sp-gamelog-body"></tbody>
+      </table>
+    </div>
+
+    {# ── L5 / L10 / Season avgs ─── #}
+    <div class="stat-section-label mt-3">Averages</div>
+    <div class="sp-avgs-row" id="sp-avgs-row">
+      <div class="sp-avg-cell"><div class="sp-avg-label">L5 Avg</div><div class="sp-avg-val" id="sp-l5">—</div></div>
+      <div class="sp-avg-cell"><div class="sp-avg-label">L10 Avg</div><div class="sp-avg-val" id="sp-l10">—</div></div>
+      <div class="sp-avg-cell"><div class="sp-avg-label">Season</div><div class="sp-avg-val" id="sp-season">—</div></div>
+    </div>
+
+    {# ── Hit rate ─── #}
+    <div class="stat-section-label mt-3">Hit Rate (L20)</div>
     <div class="d-flex gap-2 align-items-center mb-1">
-      <span class="small text-success" style="width:2rem">Over</span>
+      <span class="small text-success" style="width:2.5rem">Over</span>
       <div class="flex-fill">
         <div class="progress" style="height:6px;border-radius:3px">
           <div id="sp-over-bar" class="progress-bar bg-success" style="width:0%;transition:width .4s ease"></div>
@@ -244,7 +315,7 @@
       <span id="sp-over-pct" class="small fw-bold text-success" style="width:2.5rem;text-align:right">—</span>
     </div>
     <div class="d-flex gap-2 align-items-center mb-3">
-      <span class="small text-danger" style="width:2rem">Under</span>
+      <span class="small text-danger" style="width:2.5rem">Under</span>
       <div class="flex-fill">
         <div class="progress" style="height:6px;border-radius:3px">
           <div id="sp-under-bar" class="progress-bar bg-danger" style="width:0%;transition:width .4s ease"></div>
@@ -253,34 +324,26 @@
       <span id="sp-under-pct" class="small fw-bold text-danger" style="width:2.5rem;text-align:right">—</span>
     </div>
 
-    {# Model vs Book #}
-    <div class="stat-section-label">Model vs Book</div>
-    <div class="sa-stats-row mb-3">
-      <div class="sa-stat-cell">
-        <div class="sa-stat-label">Model P(over)</div>
-        <div class="sa-stat-val" id="sp-wp">—</div>
-      </div>
-      <div class="sa-stat-cell">
-        <div class="sa-stat-label">Book Implied</div>
-        <div class="sa-stat-val" id="sp-implied">—</div>
-      </div>
-    </div>
-
-    {# Defensive context #}
-    <div class="stat-section-label">Defensive Context</div>
-    <div class="small mb-1" id="sp-opp-stat">—</div>
+    {# ── Defensive context ─── #}
+    <div class="stat-section-label">Matchup Defense</div>
+    <div class="small mb-1 fw-semibold" id="sp-opp-stat">—</div>
     <div class="small text-secondary mb-3" id="sp-def-rating">—</div>
 
-    {# Game script #}
+    {# ── Game Script ─── #}
     <div class="stat-section-label">Game Script</div>
     <div class="small mb-3" id="sp-game-script">—</div>
 
-    {# Context tags #}
-    <div class="stat-section-label">Player Context</div>
+    {# ── Context tags ─── #}
+    <div class="stat-section-label">Context Flags</div>
     <div id="sp-context-tags" class="mb-4"></div>
 
-    {# Parlay buttons #}
-    <div class="d-flex gap-2">
+    {# ── Loading state for AJAX ─── #}
+    <div id="sp-loading" class="text-center text-secondary small py-2" hidden>
+      <span class="spinner-border spinner-border-sm me-1"></span>Loading game log…
+    </div>
+
+    {# ── Parlay buttons ─── #}
+    <div class="d-flex gap-2 mt-2">
       <button class="btn btn-sm btn-success flex-fill" id="sp-add-over">
         <i class="bi bi-plus-circle me-1"></i>Parlay Over
       </button>
@@ -299,22 +362,111 @@
 const SA_PROP_LABELS = {"player_points":"PTS","player_rebounds":"REB","player_assists":"AST","player_threes":"3PM","player_steals":"STL","player_blocks":"BLK","player_points_rebounds_assists":"PRA"};
 const SA_BADGE_CLASS = {strong:"tier-strong",value:"tier-moderate",slight:"tier-slight",avoid:"sa-badge-avoid"};
 const SA_BADGE_TEXT  = {strong:"STRONG \u2605",value:"VALUE \uD83D\uDCB0",slight:"SLIGHT",avoid:"AVOID \u2717"};
+// Map prop_type → game_log column key
+const SA_PROP_TO_COL = {"player_points":"pts","player_rebounds":"reb","player_assists":"ast","player_threes":"fg3m","player_steals":"stl","player_blocks":"blk"};
 </script>
 <script>
 (function () {
-  const panel   = document.getElementById('stat-panel');
+  const panel    = document.getElementById('stat-panel');
   const backdrop = document.getElementById('stat-panel-backdrop');
   const closeBtn = document.getElementById('stat-panel-close');
   let currentProp = null;
+  let currentLog  = [];      // cached AJAX game log
+  let activeCol   = 'pts';   // currently selected stat column
 
-  function setText(id, val) { document.getElementById(id).textContent = val; }
+  function setText(id, val) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = val;
+  }
 
+  // ── Bar chart ──────────────────────────────────────────────────────
+  function renderBarChart(games, col, line) {
+    const wrap = document.getElementById('sp-barchart');
+    wrap.replaceChildren();
+    if (!games.length) return;
+    const vals = games.map(g => +(g[col] || 0));
+    const maxV = Math.max(line || 0, ...vals, 1);
+    vals.forEach((v, i) => {
+      const isOver = v >= (line || 0);
+      const bar = document.createElement('div');
+      bar.className = 'sp-bar ' + (isOver ? 'sp-bar-over' : 'sp-bar-under');
+      bar.style.height = Math.max(4, Math.round(v / maxV * 100)) + '%';
+      const g = games[i];
+      bar.title = (g.date || '') + ' ' + (g.matchup || '') + ': ' + v;
+      const lbl = document.createElement('div');
+      lbl.className = 'sp-bar-label';
+      lbl.textContent = v;
+      bar.appendChild(lbl);
+      wrap.appendChild(bar);
+    });
+    // Line marker
+    const ref = document.createElement('div');
+    ref.className = 'sp-bar-line';
+    ref.style.bottom = Math.round((line || 0) / maxV * 100) + '%';
+    wrap.appendChild(ref);
+  }
+
+  // ── Game log table ────────────────────────────────────────────────
+  function renderGameLog(games, activeColKey, line) {
+    const body = document.getElementById('sp-gamelog-body');
+    body.replaceChildren();
+    const cols = ['pts','reb','ast','fg3m'];
+    // Update header highlight
+    cols.forEach(c => {
+      const th = document.getElementById('sp-gl-col-' + c);
+      if (th) th.classList.toggle('sp-gl-active-col', c === activeColKey);
+    });
+    games.forEach(g => {
+      const tr = document.createElement('tr');
+      const activeVal = +(g[activeColKey] || 0);
+      const isOver = activeVal >= (line || 0);
+      tr.className = isOver ? 'sp-gl-over' : 'sp-gl-under';
+      const cells = [g.date||'', g.matchup||'', g.minutes||0,
+                     g.pts||0, g.reb||0, g.ast||0, g.fg3m||0];
+      cells.forEach((val, idx) => {
+        const td = document.createElement('td');
+        // Highlight the active stat column
+        if (idx === 3 + cols.indexOf(activeColKey)) td.className = 'sp-gl-active-cell';
+        td.textContent = val;
+        tr.appendChild(td);
+      });
+      body.appendChild(tr);
+    });
+  }
+
+  // ── L5 / L10 averages ────────────────────────────────────────────
+  function renderAvgs(games, col) {
+    const avg = (arr) => arr.length ? (arr.reduce((a,b)=>a+b,0)/arr.length).toFixed(1) : '—';
+    const vals = games.map(g => +(g[col] || 0));
+    setText('sp-l5',  avg(vals.slice(0, 5)));
+    setText('sp-l10', avg(vals.slice(0, 10)));
+    // Season avg comes from AJAX summary
+  }
+
+  // ── Stat toggle ──────────────────────────────────────────────────
+  document.getElementById('sp-stat-toggle').addEventListener('click', e => {
+    const btn = e.target.closest('.sp-tog-btn');
+    if (!btn || !currentProp) return;
+    activeCol = btn.dataset.stat;
+    document.querySelectorAll('.sp-tog-btn').forEach(b => b.classList.toggle('active', b.dataset.stat === activeCol));
+    const line = (activeCol === SA_PROP_TO_COL[currentProp.prop_type]) ? (currentProp.line || 0) : 0;
+    renderBarChart(currentLog, activeCol, line);
+    renderGameLog(currentLog, activeCol, line);
+    renderAvgs(currentLog, activeCol);
+  });
+
+  // ── Main open panel ───────────────────────────────────────────────
   function openPanel(prop) {
     currentProp = prop;
+    currentLog  = [];
     const bd = prop.breakdown || {};
     const hr = prop.hit_rates || {};
     const gc = prop.game_ctx || {};
     const cn = prop.context_notes || [];
+
+    // Set active toggle to match the prop type
+    activeCol = SA_PROP_TO_COL[prop.prop_type] || 'pts';
+    document.querySelectorAll('.sp-tog-btn').forEach(b => b.classList.toggle('active', b.dataset.stat === activeCol));
 
     // Header
     setText('sp-player-name', prop.player || '—');
@@ -324,53 +476,40 @@ const SA_BADGE_TEXT  = {strong:"STRONG \u2605",value:"VALUE \uD83D\uDCB0",slight
 
     const badgeEl = document.getElementById('sp-badge');
     badgeEl.replaceChildren();
-    const badgeSpan = document.createElement('span');
-    badgeSpan.className = SA_BADGE_CLASS[prop.indicator] || '';
-    badgeSpan.textContent = SA_BADGE_TEXT[prop.indicator] || prop.indicator || '';
-    badgeEl.appendChild(badgeSpan);
+    const sp = document.createElement('span');
+    sp.className = SA_BADGE_CLASS[prop.indicator] || '';
+    sp.textContent = SA_BADGE_TEXT[prop.indicator] || prop.indicator || '';
+    badgeEl.appendChild(sp);
 
-    // Stats row
+    // Case numbers
     setText('sp-line', prop.line != null ? prop.line : '—');
-    setText('sp-proj', prop.projection != null ? (+prop.projection).toFixed(1) : '—');
+    const projEl = document.getElementById('sp-proj');
+    projEl.textContent = prop.projection != null ? (+prop.projection).toFixed(1) : '—';
+    projEl.style.color = (prop.projection || 0) > (prop.line || 0) ? 'var(--bs-success)' : 'var(--bs-danger)';
     const edgeEl = document.getElementById('sp-edge');
-    edgeEl.textContent = prop.edge != null ? (prop.edge * 100).toFixed(1) + '%' : '—';
-    edgeEl.style.color = (prop.edge || 0) >= 0 ? 'var(--success)' : 'var(--danger)';
+    edgeEl.textContent = prop.edge != null ? '+' + (prop.edge * 100).toFixed(1) + '%' : '—';
+    edgeEl.style.color = (prop.edge || 0) >= 0.08 ? 'var(--bs-success)' : 'var(--bs-secondary-color)';
     setText('sp-rec', prop.recommendation || (prop.indicator === 'avoid' ? 'Pass' : 'Over'));
+    setText('sp-wp', prop.win_probability != null ? (prop.win_probability * 100).toFixed(0) + '%' : '—');
+    let implied = '—';
+    if (prop.over_odds != null) {
+      const o = +prop.over_odds;
+      const pct = o > 0 ? 100 / (100 + o) : Math.abs(o) / (Math.abs(o) + 100);
+      implied = (pct * 100).toFixed(0) + '%';
+    }
+    setText('sp-implied', implied);
 
-    // Hit rate bars
+    // Z-score and source filled in after AJAX
+    setText('sp-zscore', '…');
+    setText('sp-source', '…');
+    setText('sp-season', '—');
+
+    // Hit rate bars (from pre-computed data)
     const op = hr.over_pct, up = hr.under_pct;
     document.getElementById('sp-over-bar').style.width  = (op != null ? op : 0) + '%';
     document.getElementById('sp-under-bar').style.width = (up != null ? up : 0) + '%';
     setText('sp-over-pct',  op != null ? op + '%' : '—');
     setText('sp-under-pct', up != null ? up + '%' : '—');
-
-    // Mini bar chart
-    const mini = document.getElementById('sp-minibars');
-    mini.replaceChildren();
-    const g5 = (hr.games || []).slice(0, 5);
-    const line = prop.line || 0;
-    const maxV = Math.max(line, ...g5.map(g => g.value || 0), 1);
-    g5.forEach(g => {
-      const bar = document.createElement('div');
-      bar.className = 'stat-minibar stat-minibar-' + g.result;
-      bar.style.height = Math.max(4, Math.round(g.value / maxV * 100)) + '%';
-      bar.title = g.date + ' ' + g.matchup + ': ' + g.value;
-      mini.appendChild(bar);
-    });
-    const ref = document.createElement('div');
-    ref.className = 'stat-line-ref';
-    ref.style.bottom = Math.round(line / maxV * 100) + '%';
-    mini.appendChild(ref);
-
-    // Model vs Book
-    setText('sp-wp', prop.win_probability != null ? (prop.win_probability * 100).toFixed(0) + '%' : '—');
-    let implied = '—';
-    if (prop.over_odds != null) {
-      const o = +prop.over_odds;
-      implied = (o > 0 ? 100 / (100 + o) : Math.abs(o) / (Math.abs(o) + 100)).toFixed(2)
-                  .replace(/^0\./, '') + '%';
-    }
-    setText('sp-implied', implied);
 
     // Defensive context
     const propLabel = SA_PROP_LABELS[prop.prop_type] || prop.prop_type;
@@ -381,7 +520,7 @@ const SA_BADGE_TEXT  = {strong:"STRONG \u2605",value:"VALUE \uD83D\uDCB0",slight
     const defParts = [];
     if (gc.opp_def_rating != null) defParts.push('Def Rtg: ' + (+gc.opp_def_rating).toFixed(1));
     if (gc.opp_pace != null) defParts.push('Pace: ' + (+gc.opp_pace).toFixed(1));
-    setText('sp-def-rating', defParts.join(' · '));
+    setText('sp-def-rating', defParts.join(' · ') || '—');
 
     // Game script
     const gsParts = [];
@@ -400,10 +539,42 @@ const SA_BADGE_TEXT  = {strong:"STRONG \u2605",value:"VALUE \uD83D\uDCB0",slight
       tagsEl.appendChild(tag);
     });
 
+    // Clear charts until AJAX loads
+    document.getElementById('sp-barchart').replaceChildren();
+    document.getElementById('sp-gamelog-body').replaceChildren();
+    setText('sp-l5', '—'); setText('sp-l10', '—');
+
+    // Show panel
     panel.removeAttribute('hidden');
     backdrop.removeAttribute('hidden');
     requestAnimationFrame(() => panel.classList.add('open'));
     document.body.style.overflow = 'hidden';
+
+    // AJAX: fetch full game log
+    const loadEl = document.getElementById('sp-loading');
+    loadEl.removeAttribute('hidden');
+    fetch('/nba/player-analysis/' + encodeURIComponent(prop.player) + '?prop_type=' + (prop.prop_type || 'player_points'))
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        loadEl.setAttribute('hidden', '');
+        if (!data || !data.game_log) return;
+        currentLog = data.game_log;
+
+        // Z-score and source
+        setText('sp-zscore', data.z_score != null ? (+data.z_score).toFixed(2) : '—');
+        setText('sp-source', data.projection_source || '—');
+
+        // Season avg for active stat
+        const seaKey = {'pts':'pts_avg','reb':'reb_avg','ast':'ast_avg','fg3m':'fg3m_avg'}[activeCol] || 'pts_avg';
+        const seaSummary = data.summary || {};
+        setText('sp-season', seaSummary[seaKey] != null ? (+seaSummary[seaKey]).toFixed(1) : '—');
+
+        const line = (activeCol === SA_PROP_TO_COL[prop.prop_type]) ? (prop.line || 0) : 0;
+        renderBarChart(currentLog, activeCol, line);
+        renderGameLog(currentLog, activeCol, line);
+        renderAvgs(currentLog, activeCol);
+      })
+      .catch(() => { loadEl.setAttribute('hidden', ''); });
   }
 
   function closePanel() {
@@ -419,10 +590,10 @@ const SA_BADGE_TEXT  = {strong:"STRONG \u2605",value:"VALUE \uD83D\uDCB0",slight
   backdrop.addEventListener('click', closePanel);
   document.addEventListener('keydown', e => { if (e.key === 'Escape') closePanel(); });
 
-  // Player rows — including featured cards
+  // Player rows + featured cards
   document.querySelectorAll('.sa-player-row, .sa-featured-card').forEach(row => {
     row.addEventListener('click', () => {
-      try { openPanel(JSON.parse(row.dataset.prop)); } catch(e) { console.error(e); }
+      try { openPanel(JSON.parse(row.dataset.prop)); } catch(e) { console.error('Panel parse error:', e); }
     });
   });
 
