@@ -166,7 +166,7 @@ class TestStatAnalysisRoute(BaseTestCase):
         self._login()
         resp = self.client.get('/nba/stat-analysis')
         self.assertEqual(resp.status_code, 200)
-        self.assertIn(b'stat-badge-strong', resp.data)
+        self.assertIn(b'sa-ind-badge-strong', resp.data)
 
     @patch('app.services.nba_service.get_todays_games')
     @patch('app.services.value_detector.ValueDetector.score_all_todays_props')
@@ -177,7 +177,7 @@ class TestStatAnalysisRoute(BaseTestCase):
         self._login()
         resp = self.client.get('/nba/stat-analysis')
         self.assertEqual(resp.status_code, 200)
-        self.assertIn(b'stat-badge-avoid', resp.data)
+        self.assertIn(b'sa-ind-badge-avoid', resp.data)
 
     @patch('app.services.nba_service.get_todays_games')
     @patch('app.services.value_detector.ValueDetector.score_all_todays_props')

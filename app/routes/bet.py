@@ -40,20 +40,21 @@ _STAT_COL = {
 _POSITION_ORDER = {'PG': 0, 'SG': 1, 'SF': 2, 'PF': 3, 'C': 4}
 
 
-def _compute_hit_rates(player_name: str, prop_type: str, line: float, n: int = 20) -> dict:
-    col_name = _STAT_COL.get(prop_type)
-    if not col_name:
+def _hit_rates_from_logs(logs: list, col_name: str | None, line: float) -> dict:
+    """Compute hit rates from pre-fetched PlayerGameLog rows (no DB query)."""
+    if not col_name or not logs:
         return {'over_pct': None, 'under_pct': None, 'games': [], 'sample': 0}
-    col = getattr(PlayerGameLog, col_name)
-    logs = (PlayerGameLog.query.filter_by(player_name=player_name)
-            .filter(col.isnot(None))
-            .order_by(PlayerGameLog.game_date.desc()).limit(n).all())
-    if not logs:
+    games = []
+    for g in logs:
+        val = getattr(g, col_name, None)
+        if val is None:
+            continue
+        fval = float(val)
+        games.append({'date': str(g.game_date), 'value': round(fval, 1),
+                      'matchup': g.matchup or '',
+                      'result': 'over' if fval >= line else 'under'})
+    if not games:
         return {'over_pct': None, 'under_pct': None, 'games': [], 'sample': 0}
-    games = [{'date': str(g.game_date), 'value': round(float(getattr(g, col_name)), 1),
-              'matchup': g.matchup or '',
-              'result': 'over' if float(getattr(g, col_name)) >= line else 'under'}
-             for g in logs]
     over_count = sum(1 for g in games if g['result'] == 'over')
     sample = len(games)
     return {'over_pct': round(over_count / sample * 100),
@@ -61,9 +62,31 @@ def _compute_hit_rates(player_name: str, prop_type: str, line: float, n: int = 2
             'games': games[:10], 'sample': sample}
 
 
-def _build_stat_context(score: dict, games_today: list) -> dict:
+def _compute_hit_rates(player_name: str, prop_type: str, line: float, n: int = 20) -> dict:
+    """Fetch logs for a single player and compute hit rates (use _hit_rates_from_logs for batching)."""
+    col_name = _STAT_COL.get(prop_type)
+    if not col_name:
+        return {'over_pct': None, 'under_pct': None, 'games': [], 'sample': 0}
+    col = getattr(PlayerGameLog, col_name)
+    logs = (PlayerGameLog.query.filter_by(player_name=player_name)
+            .filter(col.isnot(None))
+            .order_by(PlayerGameLog.game_date.desc()).limit(n).all())
+    return _hit_rates_from_logs(logs, col_name, line)
+
+
+def _build_stat_context(score: dict, games_today, def_snap_map: dict | None = None) -> dict:
+    """Build defensive + game context for a prop score.
+
+    ``games_today`` may be a list (legacy) or a pre-built ``{espn_id: game}`` dict.
+    ``def_snap_map`` is a pre-built ``{team_abbr: TeamDefenseSnapshot}`` dict;
+    when ``None`` a single DB query is issued (use batched form in the route).
+    """
     ctx = {}
-    game = next((g for g in games_today if g.get('espn_id') == score.get('game_id')), {})
+    if isinstance(games_today, dict):
+        game = games_today.get(score.get('game_id'), {})
+    else:
+        game = next((g for g in games_today if g.get('espn_id') == score.get('game_id')), {})
+
     ctx['over_under_line'] = game.get('over_under_line')
     ctx['moneyline_home'] = game.get('moneyline_home')
     ctx['moneyline_away'] = game.get('moneyline_away')
@@ -77,8 +100,12 @@ def _build_stat_context(score: dict, games_today: list) -> dict:
     opp_abbr = away_abbr if player_team == home_abbr else home_abbr
     ctx['opp_abbr'] = opp_abbr
 
-    def_snap = (TeamDefenseSnapshot.query.filter_by(team_abbr=opp_abbr)
-                .order_by(TeamDefenseSnapshot.fetched_at.desc()).first()) if opp_abbr else None
+    if def_snap_map is not None:
+        def_snap = def_snap_map.get(opp_abbr) if opp_abbr else None
+    else:
+        def_snap = (TeamDefenseSnapshot.query.filter_by(team_abbr=opp_abbr)
+                    .order_by(TeamDefenseSnapshot.fetched_at.desc()).first()) if opp_abbr else None
+
     if def_snap:
         ctx['opp_def_rating'] = def_snap.def_rating
         ctx['opp_pace'] = def_snap.pace
@@ -1786,10 +1813,49 @@ def nba_stat_analysis():
 
     games_today = get_todays_games()
 
+    # Pre-build O(1) game lookup — avoids O(n) linear scan per score
+    game_lookup = {g.get('espn_id'): g for g in games_today}
+
+    # ── Batch PlayerGameLog queries (1 query instead of N) ──────────────
+    from collections import defaultdict
+    all_player_names = {s.get('player', '') for s in scores if s.get('player')}
+    _all_logs = (
+        PlayerGameLog.query
+        .filter(PlayerGameLog.player_name.in_(list(all_player_names)))
+        .order_by(PlayerGameLog.game_date.desc())
+        .all()
+    )
+    logs_by_player: dict[str, list] = defaultdict(list)
+    for _log in _all_logs:
+        if len(logs_by_player[_log.player_name]) < 20:
+            logs_by_player[_log.player_name].append(_log)
+
+    # ── Batch TeamDefenseSnapshot queries (1 query instead of N) ────────
+    _opp_abbrs: set[str] = set()
+    for s in scores:
+        _game = game_lookup.get(s.get('game_id'), {})
+        _pt = s.get('player_team_abbr') or ''
+        _home = (_game.get('home') or {}).get('abbr', '')
+        _away = (_game.get('away') or {}).get('abbr', '')
+        _opp = _away if _pt == _home else _home
+        if _opp:
+            _opp_abbrs.add(_opp)
+    _def_rows = (
+        TeamDefenseSnapshot.query
+        .filter(TeamDefenseSnapshot.team_abbr.in_(list(_opp_abbrs)))
+        .order_by(TeamDefenseSnapshot.fetched_at.desc())
+        .all()
+    )
+    def_snap_map: dict[str, TeamDefenseSnapshot] = {}
+    for _snap in _def_rows:
+        if _snap.team_abbr not in def_snap_map:
+            def_snap_map[_snap.team_abbr] = _snap
+
     for s in scores:
         line = float(s.get('line') or 0)
-        s['hit_rates'] = _compute_hit_rates(s.get('player', ''), s.get('prop_type', ''), line)
-        s['game_ctx'] = _build_stat_context(s, games_today)
+        col_name = _STAT_COL.get(s.get('prop_type', ''))
+        s['hit_rates'] = _hit_rates_from_logs(logs_by_player.get(s.get('player', ''), []), col_name, line)
+        s['game_ctx'] = _build_stat_context(s, game_lookup, def_snap_map)
         tier = s.get('confidence_tier', 'no_edge')
         wp = s.get('win_probability') or 0.5
         if tier == 'strong':
