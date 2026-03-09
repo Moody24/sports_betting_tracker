@@ -25,6 +25,7 @@ from app.services.nba_service import (
     fetch_player_props_for_event,
     resolve_pending_bets,
     get_player_props,
+    backfill_game_ids,
     ESPN_SUMMARY_URL,
     APP_TIMEZONE as NBA_APP_TIMEZONE,
 )
@@ -399,6 +400,14 @@ def place_bet():
     from sqlalchemy import case as sa_case
     pending_first = sa_case((Bet.outcome == Outcome.PENDING.value, 0), else_=1)
     bets = query.order_by(pending_first, Bet.match_date.desc()).all()
+
+    # Backfill missing ESPN game IDs so prop tracker cards appear
+    pending_props = [b for b in bets if b.outcome == Outcome.PENDING.value and b.is_player_prop and not b.external_game_id]
+    if pending_props:
+        try:
+            backfill_game_ids(pending_props)
+        except Exception:
+            logger.exception("Game-id backfill failed")
 
     status = request.args.get('status', '').strip()
     search_query = request.args.get('q', '').strip()
