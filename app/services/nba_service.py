@@ -322,6 +322,58 @@ def _choose_game_for_bet(bet, scoreboards: list[dict], espn_lookup: dict) -> Opt
     return candidates[0]
 
 
+def backfill_game_ids(pending_bets: list) -> int:
+    """Backfill external_game_id for pending player-prop bets missing one.
+
+    Fetches today's ESPN scoreboard once and matches bets by team names.
+    Returns the number of bets updated.
+    """
+    from app import db
+
+    needs_backfill = [
+        b for b in pending_bets
+        if b.is_player_prop
+        and not b.external_game_id
+        and getattr(b, "team_a", None)
+        and getattr(b, "team_b", None)
+    ]
+    if not needs_backfill:
+        return 0
+
+    now_et = datetime.now(APP_TIMEZONE)
+    date_keys = set()
+    for b in needs_backfill:
+        md = _coerce_match_date(b)
+        if md:
+            date_keys.add(md.strftime("%Y%m%d"))
+    if not date_keys:
+        date_keys.add(now_et.strftime("%Y%m%d"))
+
+    scoreboards: list[dict] = []
+    for dk in sorted(date_keys):
+        scoreboards.extend(fetch_espn_scoreboard(date_str=dk))
+
+    espn_lookup = {g["espn_id"]: g for g in scoreboards}
+
+    updated = 0
+    for b in needs_backfill:
+        game = _choose_game_for_bet(b, scoreboards, espn_lookup)
+        if game:
+            b.external_game_id = game["espn_id"]
+            updated += 1
+
+    if updated:
+        try:
+            db.session.commit()
+            logger.info("Backfilled external_game_id for %d bet(s)", updated)
+        except Exception:
+            db.session.rollback()
+            logger.exception("Failed to commit game-id backfill")
+            updated = 0
+
+    return updated
+
+
 def fetch_odds_events() -> dict:
     """Return Odds API events with their IDs, mapped by matchup key."""
     api_key = _get_odds_api_key()

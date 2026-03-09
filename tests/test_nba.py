@@ -849,3 +849,109 @@ class TestNBAService(unittest.TestCase):
         _, outcome, stat = results[0]
         self.assertEqual(outcome, "win")
         self.assertEqual(stat, 30.0)
+
+
+class TestBackfillGameIds(BaseTestCase):
+    """Tests for backfill_game_ids which fills missing external_game_id."""
+
+    SCOREBOARD_GAME = {
+        "espn_id": "espn456",
+        "name": "Indiana Pacers vs New York Knicks",
+        "home": {"name": "New York Knicks", "abbr": "NYK", "score": 0, "logo": ""},
+        "away": {"name": "Indiana Pacers", "abbr": "IND", "score": 0, "logo": ""},
+        "total_score": 0,
+        "status": "STATUS_SCHEDULED",
+        "status_detail": "",
+        "clock": "",
+        "period": 0,
+        "start_time": "2025-01-15T00:00:00Z",
+    }
+
+    def _make_prop_bet(self, user_id, player_name="Bennedict Mathurin", game_id=None):
+        return make_bet(
+            user_id,
+            team_a="Indiana Pacers",
+            team_b="New York Knicks",
+            player_name=player_name,
+            prop_type="player_points",
+            prop_line=18.5,
+            bet_type="over",
+            external_game_id=game_id,
+        )
+
+    @patch("app.services.nba_service.fetch_espn_scoreboard")
+    def test_backfill_sets_game_id_from_team_match(self, mock_scoreboard):
+        mock_scoreboard.return_value = [self.SCOREBOARD_GAME]
+        with self.app.app_context():
+            from app import db as _db
+            user_id = self.register_and_login()
+            bet = self._make_prop_bet(user_id)
+            _db.session.add(bet)
+            _db.session.commit()
+            self.assertIsNone(bet.external_game_id)
+
+            updated = nba_service.backfill_game_ids([bet])
+            self.assertEqual(updated, 1)
+            self.assertEqual(bet.external_game_id, "espn456")
+
+    @patch("app.services.nba_service.fetch_espn_scoreboard")
+    def test_backfill_skips_bet_already_having_game_id(self, mock_scoreboard):
+        mock_scoreboard.return_value = [self.SCOREBOARD_GAME]
+        with self.app.app_context():
+            from app import db as _db
+            user_id = self.register_and_login()
+            bet = self._make_prop_bet(user_id, game_id="existing123")
+            _db.session.add(bet)
+            _db.session.commit()
+
+            updated = nba_service.backfill_game_ids([bet])
+            self.assertEqual(updated, 0)
+            self.assertEqual(bet.external_game_id, "existing123")
+
+    @patch("app.services.nba_service.fetch_espn_scoreboard")
+    def test_backfill_no_matching_game(self, mock_scoreboard):
+        mock_scoreboard.return_value = [{
+            "espn_id": "espn999",
+            "name": "Lakers vs Celtics",
+            "home": {"name": "Los Angeles Lakers", "abbr": "LAL", "score": 0, "logo": ""},
+            "away": {"name": "Boston Celtics", "abbr": "BOS", "score": 0, "logo": ""},
+            "total_score": 0,
+            "status": "STATUS_SCHEDULED",
+            "status_detail": "",
+            "clock": "",
+            "period": 0,
+            "start_time": "2025-01-15T00:00:00Z",
+        }]
+        with self.app.app_context():
+            from app import db as _db
+            user_id = self.register_and_login()
+            bet = self._make_prop_bet(user_id)
+            _db.session.add(bet)
+            _db.session.commit()
+
+            updated = nba_service.backfill_game_ids([bet])
+            self.assertEqual(updated, 0)
+            self.assertIsNone(bet.external_game_id)
+
+    def test_backfill_empty_list(self):
+        self.assertEqual(nba_service.backfill_game_ids([]), 0)
+
+    @patch("app.services.nba_service.fetch_espn_scoreboard")
+    def test_backfill_skips_non_player_prop(self, mock_scoreboard):
+        mock_scoreboard.return_value = [self.SCOREBOARD_GAME]
+        with self.app.app_context():
+            from app import db as _db
+            user_id = self.register_and_login()
+            bet = make_bet(
+                user_id,
+                team_a="Indiana Pacers",
+                team_b="New York Knicks",
+                bet_type="over",
+                over_under_line=215.5,
+            )
+            _db.session.add(bet)
+            _db.session.commit()
+
+            updated = nba_service.backfill_game_ids([bet])
+            self.assertEqual(updated, 0)
+            mock_scoreboard.assert_not_called()
