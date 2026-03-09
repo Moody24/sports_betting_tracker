@@ -5,17 +5,12 @@ from __future__ import annotations
 from datetime import date as date_type, timedelta
 from typing import Dict, Iterable, List, Optional, Tuple
 
+from app.config_display import STAT_KEY_TO_OPP_ALLOWED
+
 MIN_TEAM_PLAYERS_FOR_SHARE_FEATURES = 6
 
-# Maps stat_key → TeamDefenseSnapshot field for opponent-allowed stats
-_STAT_KEY_TO_OPP_ALLOWED: Dict[str, str] = {
-    'pts':  'opp_pts_pg',
-    'reb':  'opp_reb_pg',
-    'ast':  'opp_ast_pg',
-    'fg3m': 'opp_3pm_pg',
-    'stl':  'opp_stl_pg',
-    'blk':  'opp_blk_pg',
-}
+# Re-export from centralized config
+_STAT_KEY_TO_OPP_ALLOWED = STAT_KEY_TO_OPP_ALLOWED
 
 FEATURE_KEYS = [
     # Original 21 features

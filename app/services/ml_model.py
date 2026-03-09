@@ -14,6 +14,7 @@ import os
 from datetime import datetime, timezone, date as date_type
 
 from app import db
+from app.config_display import PROP_STAT_KEY
 from app.models import ModelMetadata, PlayerGameLog, TeamDefenseSnapshot, GameSnapshot
 from app.services.model_storage import materialize_model_artifact, persist_model_artifact
 from app.services.ml_feature_builder import build_ml_features_from_history, build_team_game_aggregates
@@ -24,19 +25,10 @@ logger = logging.getLogger(__name__)
 MODEL_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'ml_models')
 
 # Stat types we build models for
-STAT_TYPES = [
-    'player_points', 'player_rebounds', 'player_assists', 'player_threes',
-    'player_steals', 'player_blocks',
-]
+STAT_TYPES = list(PROP_STAT_KEY.keys())
 
-STAT_KEY_MAP = {
-    'player_points': 'pts',
-    'player_rebounds': 'reb',
-    'player_assists': 'ast',
-    'player_threes': 'fg3m',
-    'player_steals': 'stl',
-    'player_blocks': 'blk',
-}
+# Re-export from centralized config
+STAT_KEY_MAP = PROP_STAT_KEY
 
 # Minimum training samples required
 MIN_TRAIN_SAMPLES = 500

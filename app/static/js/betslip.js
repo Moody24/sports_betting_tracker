@@ -13,18 +13,7 @@
   // ── State ──────────────────────────────────────────────────────
   var slip = [];
   var propsCache = {};
-  var MARKET_LABELS = {
-    player_points: 'Points',
-    player_rebounds: 'Rebounds',
-    player_assists: 'Assists',
-    player_threes: '3-Pointers',
-    player_blocks: 'Blocks',
-    player_steals: 'Steals',
-    player_points_rebounds_assists: 'Points + Rebounds + Assists',
-    player_points_rebounds: 'PTS+REB',
-    player_points_assists: 'PTS+AST',
-    player_rebounds_assists: 'REB+AST'
-  };
+  // Uses global MARKET_LABELS from display_config.js
 
   // ── DOM refs ───────────────────────────────────────────────────
   var slipEl          = document.getElementById('bet-slip');

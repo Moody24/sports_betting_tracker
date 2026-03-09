@@ -8,6 +8,7 @@ from sqlalchemy import func, UniqueConstraint
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from . import db
+from .config_display import prop_label_short
 from .enums import BetType, Outcome
 
 
@@ -297,21 +298,7 @@ class Bet(db.Model):
 
     @staticmethod
     def _prop_stat_label(prop_type: Optional[str]) -> str:
-        if not prop_type:
-            return "Stat"
-        labels = {
-            "player_points": "PTS",
-            "player_rebounds": "REB",
-            "player_assists": "AST",
-            "player_threes": "3PM",
-            "player_blocks": "BLK",
-            "player_steals": "STL",
-            "player_points_rebounds_assists": "PTS+REB+AST",
-            "player_points_rebounds": "PTS+REB",
-            "player_points_assists": "PTS+AST",
-            "player_rebounds_assists": "REB+AST",
-        }
-        return labels.get(prop_type, prop_type.replace("player_", "").replace("_", " ").upper())
+        return prop_label_short(prop_type)
 
     @property
     def display_label(self) -> str:

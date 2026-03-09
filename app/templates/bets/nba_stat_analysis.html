@@ -359,11 +359,12 @@
 
 {% block scripts %}
 <script>
-const SA_PROP_LABELS = {"player_points":"PTS","player_rebounds":"REB","player_assists":"AST","player_threes":"3PM","player_steals":"STL","player_blocks":"BLK","player_points_rebounds_assists":"PRA"};
-const SA_BADGE_CLASS = {strong:"tier-strong",value:"tier-moderate",slight:"tier-slight",avoid:"sa-badge-avoid"};
-const SA_BADGE_TEXT  = {strong:"STRONG \u2605",value:"VALUE \uD83D\uDCB0",slight:"SLIGHT",avoid:"AVOID \u2717"};
-// Map prop_type → game_log column key
-const SA_PROP_TO_COL = {"player_points":"pts","player_rebounds":"reb","player_assists":"ast","player_threes":"fg3m","player_steals":"stl","player_blocks":"blk"};
+// Use centralized display_config.js globals
+const SA_PROP_LABELS = MARKET_LABELS_SHORT;
+SA_PROP_LABELS['player_points_rebounds_assists'] = 'PRA';
+const SA_BADGE_CLASS = INDICATOR_CLASSES;
+const SA_BADGE_TEXT  = INDICATOR_LABELS;
+const SA_PROP_TO_COL = PROP_TO_STAT_COL;
 </script>
 <script>
 (function () {

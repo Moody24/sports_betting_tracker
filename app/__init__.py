@@ -102,12 +102,16 @@ def create_app(testing=False):
             db.session.rollback()
             return None
 
+    from app.config_display import get_template_display_config
+    _display_config = get_template_display_config()
+
     @app.context_processor
     def inject_user():
         return {
             'current_user': current_user,
             'current_year': datetime.now(timezone.utc).year,
             'logout_form': LogoutForm(),
+            **_display_config,
         }
 
     @app.after_request

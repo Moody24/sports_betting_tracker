@@ -7,6 +7,7 @@ pick quality classifier (Model 2).
 import logging
 from datetime import date as date_type
 
+from app.config_display import PROP_STAT_KEY
 from app.services.stats_service import get_cached_logs, get_player_stats_summary
 from app.services.matchup_service import (
     get_team_defense,
@@ -279,15 +280,7 @@ def _compute_hit_rate_for_prop(logs: list, prop_type: str, line: float) -> float
 
 def _prop_to_stat_key(prop_type: str) -> str:
     """Map prop market key to internal stat key."""
-    mapping = {
-        'player_points': 'pts',
-        'player_rebounds': 'reb',
-        'player_assists': 'ast',
-        'player_threes': 'fg3m',
-        'player_steals': 'stl',
-        'player_blocks': 'blk',
-    }
-    return mapping.get(prop_type)
+    return PROP_STAT_KEY.get(prop_type)
 
 
 def _compute_std(logs: list, stat_key: str) -> float:

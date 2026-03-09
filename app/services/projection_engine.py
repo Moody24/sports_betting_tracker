@@ -30,17 +30,12 @@ from app.services.ml_feature_builder import (
     compute_team_usage_features_for_player,
 )
 
+from app.config_display import PROP_STAT_KEY
+
 logger = logging.getLogger(__name__)
 
-# Stat type mapping: prop market key -> internal stat key
-PROP_STAT_MAP = {
-    'player_points': 'pts',
-    'player_rebounds': 'reb',
-    'player_assists': 'ast',
-    'player_threes': 'fg3m',
-    'player_steals': 'stl',
-    'player_blocks': 'blk',
-}
+# Re-export from centralized config for backward compatibility
+PROP_STAT_MAP = PROP_STAT_KEY
 
 ML_STAT_MAP = {
     'player_points': 'player_points',

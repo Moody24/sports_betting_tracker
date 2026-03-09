@@ -1,3 +1,13 @@
+{# ───────────────────────────────────────────────────────────────
+   Shared Jinja macros for the Sports Betting Tracker.
+
+   NOTE: Macros imported via {% from %} do NOT have access to
+   context_processor globals.  All config is hardcoded here to
+   match config_display.py.  If you update config_display.py,
+   update these macros accordingly.
+   ─────────────────────────────────────────────────────────────── #}
+
+{# ── Outcome badge ─────────────────────────────────────────── #}
 {% macro outcome_badge(outcome) -%}
   {% if outcome == 'win' %}
     <span class="badge text-bg-success badge-status">Win</span>
@@ -8,4 +18,157 @@
   {% else %}
     <span class="badge text-bg-secondary badge-status">Pending</span>
   {% endif %}
+{%- endmacro %}
+
+{# ── Prop label badge (short form) ──────────────────────── #}
+{% macro prop_badge(prop_type) -%}
+  {% set _labels = {
+    'player_points': 'PTS', 'player_rebounds': 'REB', 'player_assists': 'AST',
+    'player_threes': '3PM', 'player_blocks': 'BLK', 'player_steals': 'STL',
+    'player_points_rebounds_assists': 'PTS+REB+AST',
+    'player_points_rebounds': 'PTS+REB', 'player_points_assists': 'PTS+AST',
+    'player_rebounds_assists': 'REB+AST',
+  } %}
+  <span class="badge text-bg-dark">{{ _labels.get(prop_type, prop_type|replace('player_','')|upper) }}</span>
+{%- endmacro %}
+
+{# ── Prop label text (short, no badge) ──────────────────── #}
+{% macro prop_label_short(prop_type) -%}
+  {% set _labels = {
+    'player_points': 'PTS', 'player_rebounds': 'REB', 'player_assists': 'AST',
+    'player_threes': '3PM', 'player_blocks': 'BLK', 'player_steals': 'STL',
+    'player_points_rebounds_assists': 'PTS+REB+AST',
+    'player_points_rebounds': 'PTS+REB', 'player_points_assists': 'PTS+AST',
+    'player_rebounds_assists': 'REB+AST',
+  } %}
+  {{- _labels.get(prop_type, prop_type|replace('player_','')|upper) -}}
+{%- endmacro %}
+
+{# ── Prop label text (long) ─────────────────────────────── #}
+{% macro prop_label_long(prop_type) -%}
+  {% set _labels = {
+    'player_points': 'Points', 'player_rebounds': 'Rebounds', 'player_assists': 'Assists',
+    'player_threes': '3-Pointers', 'player_blocks': 'Blocks', 'player_steals': 'Steals',
+    'player_points_rebounds_assists': 'Points + Rebounds + Assists',
+    'player_points_rebounds': 'PTS+REB', 'player_points_assists': 'PTS+AST',
+    'player_rebounds_assists': 'REB+AST',
+  } %}
+  {{- _labels.get(prop_type, prop_type|replace('player_','')|replace('_',' ')|title) -}}
+{%- endmacro %}
+
+{# ── Confidence tier pill ────────────────────────────────── #}
+{% macro confidence_pill(tier, value_text='') -%}
+  {% set _tiers = {
+    'strong': 'tier-strong', 'moderate': 'tier-moderate',
+    'slight': 'tier-slight', 'no_edge': 'tier-slight',
+  } %}
+  {% set _labels = {
+    'strong': 'STRONG', 'moderate': 'MODERATE',
+    'slight': 'SLIGHT', 'no_edge': 'NO EDGE',
+  } %}
+  <span class="{{ _tiers.get(tier, 'tier-slight') }}">{{ value_text or _labels.get(tier, tier) }}</span>
+{%- endmacro %}
+
+{# ── Edge badge using tier pill styling ──────────────────── #}
+{% macro edge_badge(edge, tier) -%}
+  {% set _tiers = {
+    'strong': 'tier-strong', 'moderate': 'tier-moderate',
+    'slight': 'tier-slight', 'no_edge': 'tier-slight',
+  } %}
+  <span class="{{ _tiers.get(tier, 'tier-slight') }}">{{ '%.1f'|format(edge * 100) }}%</span>
+{%- endmacro %}
+
+{# ── Edge badge (Bootstrap badge style for dashboard) ────── #}
+{% macro edge_badge_bootstrap(edge, tier) -%}
+  {% set _badges = {
+    'strong': 'text-bg-success', 'moderate': 'text-bg-warning text-dark',
+    'slight': 'text-bg-secondary', 'no_edge': 'text-bg-secondary',
+  } %}
+  <span class="badge {{ _badges.get(tier, 'text-bg-secondary') }}">{{ '%.1f'|format(edge * 100) }}%</span>
+{%- endmacro %}
+
+{# ── Recommended side badge ──────────────────────────────── #}
+{% macro side_badge(side, odds=None) -%}
+  {% if side == 'over' %}
+    <span class="badge text-bg-success"><i class="bi bi-arrow-up"></i> Over{% if odds %} ({{ '%+d'|format(odds) }}){% endif %}</span>
+  {% else %}
+    <span class="badge text-bg-danger"><i class="bi bi-arrow-down"></i> Under{% if odds %} ({{ '%+d'|format(odds) }}){% endif %}</span>
+  {% endif %}
+{%- endmacro %}
+
+{# ── Side text (no badge) ────────────────────────────────── #}
+{% macro side_text(side) -%}
+  {% if side == 'over' %}
+    <span class="text-success"><i class="bi bi-arrow-up"></i> Over</span>
+  {% else %}
+    <span class="text-danger"><i class="bi bi-arrow-down"></i> Under</span>
+  {% endif %}
+{%- endmacro %}
+
+{# ── Player position badge (estimated label) ────────────── #}
+{% macro position_badge(position, show_estimated=true) -%}
+  {% if position %}
+    {% if show_estimated %}
+      <span class="badge text-bg-secondary" title="Estimated from stat profile">Est. {{ position|upper }}</span>
+    {% else %}
+      <span class="badge text-bg-secondary">{{ position|upper }}</span>
+    {% endif %}
+  {% else %}
+    <span class="text-secondary small">—</span>
+  {% endif %}
+{%- endmacro %}
+
+{# ── Position edge (only for Points props) ───────────────── #}
+{% macro pos_edge_display(prop_type, pos_mult) -%}
+  {% set _pos_props = ['player_points'] %}
+  {% if prop_type in _pos_props and pos_mult is not none %}
+    {% set pos_edge_pct = (pos_mult - 1) * 100 %}
+    <span class="{% if pos_edge_pct > 0 %}text-success{% elif pos_edge_pct < 0 %}text-danger{% else %}text-secondary{% endif %}">
+      {{ '%+.1f'|format(pos_edge_pct) }}%
+    </span>
+  {% else %}
+    <span class="text-secondary small">—</span>
+  {% endif %}
+{%- endmacro %}
+
+{# ── Indicator badge (stat analysis tiers) ───────────────── #}
+{% macro indicator_badge(indicator) -%}
+  {% set _cls = {
+    'strong': 'sa-ind-badge sa-ind-badge-strong',
+    'value': 'sa-ind-badge sa-ind-badge-value',
+    'slight': 'sa-ind-badge sa-ind-badge-slight',
+    'avoid': 'sa-ind-badge sa-ind-badge-avoid',
+  } %}
+  {% set _lbl = {
+    'strong': 'STRONG', 'value': 'VALUE',
+    'slight': 'SLIGHT', 'avoid': 'AVOID',
+  } %}
+  <span class="{{ _cls.get(indicator, 'sa-ind-badge') }}">{{ _lbl.get(indicator, indicator) }}</span>
+{%- endmacro %}
+
+{# ── Projection value (colored by line comparison) ──────── #}
+{% macro projection_value(projection, line) -%}
+  <span class="fw-semibold {% if projection > line %}text-success{% elif projection < line %}text-danger{% endif %}">
+    {{ projection }}
+  </span>
+{%- endmacro %}
+
+{# ── Confidence icon (shield) ────────────────────────────── #}
+{% macro confidence_icon(confidence_level) -%}
+  {% if confidence_level == 'high' %}
+    <i class="bi bi-shield-fill-check text-success" title="High confidence"></i>
+  {% elif confidence_level == 'medium' %}
+    <i class="bi bi-shield-fill text-warning" title="Medium confidence"></i>
+  {% else %}
+    <i class="bi bi-shield text-secondary" title="Low confidence"></i>
+  {% endif %}
+{%- endmacro %}
+
+{# ── Context notes badges ────────────────────────────────── #}
+{% macro context_badges(notes, max_notes=3) -%}
+  <div class="d-flex flex-wrap gap-1">
+    {% for note in notes[:max_notes] %}
+    <span class="badge text-bg-dark" style="font-size:.65rem">{{ note }}</span>
+    {% endfor %}
+  </div>
 {%- endmacro %}
