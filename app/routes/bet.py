@@ -12,6 +12,10 @@ from flask_login import login_required, current_user
 import requests
 
 from app import db
+from app.config_display import (
+    PROP_STAT_KEY, PROP_ESPN_COLUMN, PROP_TO_OPP_ALLOWED,
+    POS_EDGE_APPLICABLE_PROPS, prop_label_short, prop_label_long,
+)
 from app.enums import BetSource, BetType, Outcome
 from app.forms import BetForm
 from app.models import Bet, GameSnapshot, OddsSnapshot, PickContext, PlayerGameLog, TeamDefenseSnapshot, compute_bets_net_pl
@@ -33,10 +37,7 @@ logger = logging.getLogger(__name__)
 
 bet = Blueprint('bet', __name__)
 
-_STAT_COL = {
-    'player_points': 'pts', 'player_rebounds': 'reb', 'player_assists': 'ast',
-    'player_threes': 'fg3m', 'player_steals': 'stl', 'player_blocks': 'blk',
-}
+_STAT_COL = PROP_STAT_KEY
 _POSITION_ORDER = {'PG': 0, 'SG': 1, 'SF': 2, 'PF': 3, 'C': 4}
 
 
@@ -109,12 +110,9 @@ def _build_stat_context(score: dict, games_today, def_snap_map: dict | None = No
     if def_snap:
         ctx['opp_def_rating'] = def_snap.def_rating
         ctx['opp_pace'] = def_snap.pace
-        allowed_map = {
-            'player_points': def_snap.opp_pts_pg, 'player_rebounds': def_snap.opp_reb_pg,
-            'player_assists': def_snap.opp_ast_pg, 'player_threes': def_snap.opp_3pm_pg,
-            'player_steals': def_snap.opp_stl_pg, 'player_blocks': def_snap.opp_blk_pg,
-        }
-        ctx['opp_stat_allowed'] = allowed_map.get(score.get('prop_type', ''))
+        # Use centralized field mapping to look up allowed stat
+        opp_field = PROP_TO_OPP_ALLOWED.get(score.get('prop_type', ''))
+        ctx['opp_stat_allowed'] = getattr(def_snap, opp_field, None) if opp_field else None
         position = (score.get('breakdown') or {}).get('player_position', '')
         pos_map = {'PG': def_snap.opp_pts_allowed_pg, 'SG': def_snap.opp_pts_allowed_sg,
                    'SF': def_snap.opp_pts_allowed_sf, 'PF': def_snap.opp_pts_allowed_pf,
@@ -233,14 +231,7 @@ def _create_pick_context_for_bet(
 
 def _extract_prop_boxscore(summary_data: dict) -> dict:
     """Extract prop-relevant player stats from ESPN summary payload."""
-    stat_column_map = {
-        "player_points": "PTS",
-        "player_rebounds": "REB",
-        "player_assists": "AST",
-        "player_threes": "3PT",
-        "player_blocks": "BLK",
-        "player_steals": "STL",
-    }
+    stat_column_map = PROP_ESPN_COLUMN
     player_stats: dict = {}
     for team_block in summary_data.get("boxscore", {}).get("players", []):
         for stat_block in team_block.get("statistics", []):

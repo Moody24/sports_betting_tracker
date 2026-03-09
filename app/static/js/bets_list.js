@@ -37,8 +37,19 @@
     const stateEl = card.querySelector('[data-live-state]');
 
     if (!data.ok) {
-      if (statusEl) statusEl.textContent = data.error || 'Unavailable';
+      if (trendEl) { trendEl.className = 'badge live-trend text-bg-secondary'; trendEl.textContent = data.error || 'Unavailable'; }
       return false;
+    }
+
+    // Reveal detail sections once real data arrives
+    card.querySelectorAll('[data-live-details],[data-live-details-bar],[data-live-details-meta]').forEach(function (el) { el.removeAttribute('hidden'); });
+
+    // Upgrade header to live style once we have data
+    var headerLabel = card.querySelector('.text-secondary .bi-clock-history');
+    if (headerLabel) {
+      var parent = headerLabel.parentElement;
+      parent.className = parent.className.replace('text-secondary', 'text-info');
+      headerLabel.className = headerLabel.className.replace('bi-clock-history', 'bi-broadcast');
     }
 
     if (currentEl) currentEl.textContent = formatNum(data.current_stat);

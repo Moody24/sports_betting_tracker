@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 
 import requests
 
+from app.config_display import PROP_ESPN_COLUMN, SUPPORTED_PROP_MARKETS
 from app.enums import BetType, Outcome
 from app.services.base import SportService, SPORT_REGISTRY
 
@@ -37,25 +38,9 @@ def _et_date_str() -> str:
     return datetime.now(APP_TIMEZONE).strftime("%Y-%m-%d")
 
 
-PLAYER_PROP_MARKETS = [
-    "player_points",
-    "player_rebounds",
-    "player_assists",
-    "player_points_rebounds_assists",
-    "player_threes",
-    "player_steals",
-    "player_blocks",
-]
-
-# Maps prop_type value → ESPN box score column header
-_PROP_STAT_COLUMN = {
-    "player_points": "PTS",
-    "player_rebounds": "REB",
-    "player_assists": "AST",
-    "player_threes": "3PT",  # "M-A" format; we take the made count
-    "player_blocks": "BLK",
-    "player_steals": "STL",
-}
+# Re-export from centralized config for backward compatibility
+PLAYER_PROP_MARKETS = SUPPORTED_PROP_MARKETS
+_PROP_STAT_COLUMN = PROP_ESPN_COLUMN
 
 
 def _get_odds_api_key() -> str:

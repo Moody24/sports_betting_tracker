@@ -166,17 +166,17 @@
             <div class="live-progress-card mt-2 check-prop-progress-btn" data-live-prop-card data-game-state="unknown"
                  data-url="{{ url_for('bet.nba_prop_progress', espn_id=b.external_game_id, player=b.player_name, prop_type=b.prop_type, line=b.prop_line, bet_type=b.bet_type) }}">
               <div class="d-flex align-items-center justify-content-between gap-2 mb-1">
-                <div class="small text-info"><i class="bi bi-broadcast me-1"></i>Live Prop Progress</div>
-                <span class="badge text-bg-secondary live-trend" data-live-trend>Loading…</span>
+                <div class="small text-secondary"><i class="bi bi-clock-history me-1"></i>Prop Tracker</div>
+                <span class="badge text-bg-secondary live-trend" data-live-trend>Checking…</span>
               </div>
-              <div class="live-topline small text-secondary">
+              <div class="live-topline small text-secondary" data-live-details hidden>
                 <span>Current: <strong class="text-light" data-live-current>—</strong> / {{ b.prop_line }}</span>
-                <span data-live-status>Waiting for update…</span>
+                <span data-live-status></span>
               </div>
-              <div class="progress mt-1" role="progressbar" aria-label="Prop progress" aria-valuemin="0" aria-valuemax="200">
+              <div class="progress mt-1" role="progressbar" aria-label="Prop progress" aria-valuemin="0" aria-valuemax="200" data-live-details-bar hidden>
                 <div class="progress-bar bg-info" data-live-bar style="width:0%"></div>
               </div>
-              <div class="live-meta small text-secondary mt-1">
+              <div class="live-meta small text-secondary mt-1" data-live-details-meta hidden>
                 <span>Proj: <strong class="text-light" data-live-proj>—</strong></span>
                 <span data-live-delta>—</span>
                 <span data-live-period>—</span>

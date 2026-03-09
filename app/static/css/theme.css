@@ -1571,3 +1571,44 @@ details[open] .bb-chevron {
 .sp-avg-cell:last-child { border-right:none; }
 .sp-avg-label { font-size:.6rem; text-transform:uppercase; letter-spacing:.06em; color:var(--text-muted); }
 .sp-avg-val { font-family:'Barlow Condensed',sans-serif; font-size:1.15rem; font-weight:700; }
+
+/* ═══════════════════════════════════════════════════════════════
+   Design System — Unified button and badge patterns
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── Action buttons (consistent across all pages) ──────────── */
+
+/* Quick-add bet: always green outline */
+.btn-add-bet {
+  color: var(--success);
+  border-color: rgba(47, 201, 143, 0.4);
+  background: transparent;
+}
+.btn-add-bet:hover, .btn-add-bet:focus {
+  color: #fff;
+  background: rgba(47, 201, 143, 0.15);
+  border-color: var(--success);
+}
+
+/* Quick-add parlay: always cyan outline */
+.btn-add-parlay {
+  color: var(--bs-info, #0dcaf0);
+  border-color: rgba(13, 202, 240, 0.4);
+  background: transparent;
+}
+.btn-add-parlay:hover, .btn-add-parlay:focus {
+  color: #fff;
+  background: rgba(13, 202, 240, 0.15);
+  border-color: var(--bs-info, #0dcaf0);
+}
+
+/* ── Estimated position badge softening ────────────────────── */
+.badge-est-pos {
+  background: rgba(155, 167, 194, 0.1);
+  color: var(--text-muted);
+  border: 1px solid rgba(155, 167, 194, 0.2);
+  font-size: .65rem;
+  font-weight: 500;
+  padding: .15rem .4rem;
+  border-radius: 2rem;
+}

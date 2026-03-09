@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_macros.html" import prop_badge, prop_label_short, edge_badge, side_badge, side_text, position_badge, pos_edge_display, confidence_icon, context_badges, projection_value %}
 
 {% block title %}NBA Prop Analysis · Sports Betting Tracker{% endblock %}
 {% block page_title %}NBA Prop Analysis{% endblock %}
@@ -91,15 +92,6 @@
   </div>
   <div class="row g-3">
     {% for play in strong_plays %}
-    {% set prop_label = {
-      'player_points':   'PTS',
-      'player_rebounds': 'REB',
-      'player_assists':  'AST',
-      'player_points_rebounds_assists': 'PTS+REB+AST',
-      'player_threes':   '3PM',
-      'player_steals':   'STL',
-      'player_blocks':   'BLK',
-    }.get(play.prop_type, play.prop_type|replace('player_','')|upper) %}
     <div class="col-sm-6 col-xl-4 analysis-row"
          data-stat="{{ play.prop_type }}"
          data-edge="{{ play.edge|abs }}"
@@ -112,14 +104,10 @@
                   data-game-id="{{ play.game_id }}">
             <div class="featured-play-player">{{ play.player }}</div>
           </button>
-          {% if play.recommended_side == 'over' %}
-            <span class="badge text-bg-success ms-2 flex-shrink-0"><i class="bi bi-arrow-up"></i> Over</span>
-          {% else %}
-            <span class="badge text-bg-danger ms-2 flex-shrink-0"><i class="bi bi-arrow-down"></i> Under</span>
-          {% endif %}
+          <span class="ms-2 flex-shrink-0">{{ side_badge(play.recommended_side) }}</span>
         </div>
         <div class="featured-play-meta">
-          <span class="badge text-bg-dark me-1">{{ prop_label }}</span>
+          {{ prop_badge(play.prop_type) }}
           {{ play.away_team }} vs {{ play.home_team }}
         </div>
         <div class="featured-play-numbers">
@@ -129,7 +117,7 @@
           </div>
           <div>
             <div class="featured-play-meta">Proj</div>
-            <div class="fw-semibold {{ 'text-success' if play.projection > play.line else 'text-danger' }}">{{ play.projection }}</div>
+            {{ projection_value(play.projection, play.line) }}
           </div>
           <div class="ms-auto text-end">
             <div class="featured-play-meta">Edge</div>
@@ -137,11 +125,7 @@
           </div>
         </div>
         {% if play.context_notes %}
-        <div class="d-flex flex-wrap gap-1">
-          {% for note in play.context_notes[:2] %}
-          <span class="badge text-bg-dark" style="font-size:.65rem">{{ note }}</span>
-          {% endfor %}
-        </div>
+          {{ context_badges(play.context_notes, 2) }}
         {% endif %}
         <div class="d-flex gap-2 mt-auto pt-1">
           <button class="btn btn-sm btn-outline-success flex-fill quick-add-prop-btn"
@@ -190,8 +174,8 @@
         <tr>
           <th>Player</th>
           <th>Prop</th>
-          <th class="text-center">Pos</th>
-          <th class="text-center">Pos Edge</th>
+          <th class="text-center" title="Estimated from stat profile">Est. Pos</th>
+          <th class="text-center" title="Position matchup edge (Points only)">Pos Edge</th>
           <th class="text-center">Line</th>
           <th class="text-center">Projection</th>
           <th class="text-center">Edge</th>
@@ -215,88 +199,31 @@
               <strong>{{ play.player }}</strong>
             </button>
           </td>
-          <td>
-            {% set prop_label = {
-              'player_points': 'Points',
-              'player_rebounds': 'Rebounds',
-              'player_assists': 'Assists',
-              'player_points_rebounds_assists': 'Points + Rebounds + Assists',
-              'player_threes': '3-Pointers',
-              'player_steals': 'Steals',
-              'player_blocks': 'Blocks',
-            }.get(play.prop_type, play.prop_type|replace('player_', '')|replace('_', ' ')|title) %}
-            <span class="badge text-bg-dark">{{ prop_label }}</span>
-          </td>
+          <td>{{ prop_badge(play.prop_type) }}</td>
           <td class="text-center">
             {% set pos = (play.breakdown.get('player_position', '') if play.breakdown else '') %}
-            {% if pos %}
-              <span class="badge text-bg-secondary">{{ pos|upper }}</span>
-            {% else %}
-              <span class="text-secondary small">—</span>
-            {% endif %}
+            {{ position_badge(pos) }}
           </td>
           <td class="text-center tabular-num">
             {% set pos_mult = (play.breakdown.get('position_matchup_mult') if play.breakdown else none) %}
-            {% if pos_mult is not none %}
-              {% set pos_edge_pct = (pos_mult - 1) * 100 %}
-              <span class="{% if pos_edge_pct > 0 %}text-success{% elif pos_edge_pct < 0 %}text-danger{% else %}text-secondary{% endif %}">
-                {{ '%+.1f'|format(pos_edge_pct) }}%
-              </span>
-            {% else %}
-              <span class="text-secondary small">—</span>
-            {% endif %}
+            {{ pos_edge_display(play.prop_type, pos_mult) }}
           </td>
           <td class="text-center tabular-num">{{ play.line }}</td>
-          <td class="text-center tabular-num fw-semibold
-            {% if play.projection > play.line %}text-success{% elif play.projection < play.line %}text-danger{% endif %}">
-            {{ play.projection }}
+          <td class="text-center tabular-num">
+            {{ projection_value(play.projection, play.line) }}
             {% if play.breakdown %}
             <div class="small text-secondary fw-normal" style="font-size:.65rem">
               L5: {{ '%.1f'|format(play.breakdown.get('last_5_avg') or 0) }} · Szn: {{ '%.1f'|format(play.breakdown.get('season_avg') or 0) }}
             </div>
             {% endif %}
           </td>
-          <td class="text-center tabular-num">
-            {% if play.confidence_tier == 'strong' %}
-              <span class="tier-strong">{{ '%.1f'|format(play.edge * 100) }}%</span>
-            {% elif play.confidence_tier == 'moderate' %}
-              <span class="tier-moderate">{{ '%.1f'|format(play.edge * 100) }}%</span>
-            {% else %}
-              <span class="tier-slight">{{ '%.1f'|format(play.edge * 100) }}%</span>
-            {% endif %}
-          </td>
-          <td class="text-center">
-            {% if play.recommended_side == 'over' %}
-              <span class="badge text-bg-success">
-                <i class="bi bi-arrow-up"></i> Over
-                {% if play.recommended_odds %}({{ '%+d'|format(play.recommended_odds) }}){% endif %}
-              </span>
-            {% else %}
-              <span class="badge text-bg-danger">
-                <i class="bi bi-arrow-down"></i> Under
-                {% if play.recommended_odds %}({{ '%+d'|format(play.recommended_odds) }}){% endif %}
-              </span>
-            {% endif %}
-          </td>
-          <td class="text-center">
-            {% if play.confidence == 'high' %}
-              <i class="bi bi-shield-fill-check text-success" title="High confidence"></i>
-            {% elif play.confidence == 'medium' %}
-              <i class="bi bi-shield-fill text-warning" title="Medium confidence"></i>
-            {% else %}
-              <i class="bi bi-shield text-secondary" title="Low confidence"></i>
-            {% endif %}
-          </td>
-          <td>
-            <div class="d-flex flex-wrap gap-1">
-              {% for note in play.context_notes[:3] %}
-              <span class="badge text-bg-dark" style="font-size:.65rem">{{ note }}</span>
-              {% endfor %}
-            </div>
-          </td>
+          <td class="text-center tabular-num">{{ edge_badge(play.edge, play.confidence_tier) }}</td>
+          <td class="text-center">{{ side_badge(play.recommended_side, play.recommended_odds) }}</td>
+          <td class="text-center">{{ confidence_icon(play.confidence) }}</td>
+          <td>{{ context_badges(play.context_notes) }}</td>
           <td class="text-center">
             <div class="btn-group btn-group-sm" role="group">
-              <button class="btn btn-outline-primary quick-add-prop-btn"
+              <button class="btn btn-outline-success quick-add-prop-btn"
                       data-player="{{ play.player }}"
                       data-prop-type="{{ play.prop_type }}"
                       data-line="{{ play.line }}"
@@ -444,13 +371,17 @@ document.addEventListener('DOMContentLoaded', function() {
 
             const pos = (data.breakdown.player_position || '').toUpperCase();
             const posMultRaw = Number(data.breakdown.position_matchup_mult);
-            const hasPosMult = Number.isFinite(posMultRaw) && posMultRaw > 0;
+            // Pos Edge is only meaningful for player_points
+            const isPosEdgeProp = POS_EDGE_APPLICABLE_PROPS.indexOf(propType) >= 0;
+            const hasPosMult = isPosEdgeProp && Number.isFinite(posMultRaw) && posMultRaw > 0;
             const posEdge = hasPosMult ? ((posMultRaw - 1) * 100).toFixed(1) : '—';
             const posEdgeColor = !hasPosMult ? 'text-secondary' : (posMultRaw > 1 ? 'text-success' : (posMultRaw < 1 ? 'text-danger' : 'text-secondary'));
             html += '<div class="row g-2 mb-3">';
-            html += `<div class="col-4"><div class="card-soft p-2 text-center"><div class="small text-secondary">Position</div><div class="fw-semibold">${esc(pos || '—')}</div></div></div>`;
-            html += `<div class="col-4"><div class="card-soft p-2 text-center"><div class="small text-secondary">Pos Matchup</div><div class="fw-semibold">${hasPosMult ? esc(posMultRaw.toFixed(3)) : '—'}</div></div></div>`;
-            html += `<div class="col-4"><div class="card-soft p-2 text-center"><div class="small text-secondary">Pos Edge</div><div class="fw-semibold ${posEdgeColor}">${hasPosMult ? esc((posMultRaw > 1 ? '+' : '') + posEdge + '%') : '—'}</div></div></div>`;
+            html += `<div class="col-4"><div class="card-soft p-2 text-center"><div class="small text-secondary">Est. Position</div><div class="fw-semibold">${esc(pos ? 'Est. ' + pos : '—')}</div></div></div>`;
+            if (isPosEdgeProp) {
+              html += `<div class="col-4"><div class="card-soft p-2 text-center"><div class="small text-secondary">Pos Matchup</div><div class="fw-semibold">${hasPosMult ? esc(posMultRaw.toFixed(3)) : '—'}</div></div></div>`;
+              html += `<div class="col-4"><div class="card-soft p-2 text-center"><div class="small text-secondary">Pos Edge</div><div class="fw-semibold ${posEdgeColor}">${hasPosMult ? esc((posMultRaw > 1 ? '+' : '') + posEdge + '%') : '—'}</div></div></div>`;
+            }
             html += '</div>';
 
             if (data.std_dev !== undefined || data.z_score !== undefined) {

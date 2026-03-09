@@ -9,6 +9,8 @@ import time
 from datetime import datetime, timezone, date as date_type
 from zoneinfo import ZoneInfo
 
+from app.config_display import STAT_KEY_TO_OPP_ALLOWED, PROP_TO_OPP_ALLOWED
+
 from app import db
 from app.models import TeamDefenseSnapshot
 
@@ -288,20 +290,8 @@ def get_matchup_adjustment(opponent_name: str, stat_type: str) -> float:
     if not defense:
         return 1.0
 
-    stat_map = {
-        'pts': 'opp_pts_pg',
-        'player_points': 'opp_pts_pg',
-        'reb': 'opp_reb_pg',
-        'player_rebounds': 'opp_reb_pg',
-        'ast': 'opp_ast_pg',
-        'player_assists': 'opp_ast_pg',
-        'fg3m': 'opp_3pm_pg',
-        'player_threes': 'opp_3pm_pg',
-        'stl': 'opp_stl_pg',
-        'blk': 'opp_blk_pg',
-    }
-
-    defense_key = stat_map.get(stat_type)
+    # Accepts both stat keys (pts, reb) and prop types (player_points, etc.)
+    defense_key = STAT_KEY_TO_OPP_ALLOWED.get(stat_type) or PROP_TO_OPP_ALLOWED.get(stat_type)
     if not defense_key:
         return 1.0
 

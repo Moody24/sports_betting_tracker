@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_macros.html" import prop_label_short, indicator_badge, position_badge %}
 
 {% block title %}Stat Analysis — Betting Tracker{% endblock %}
 {% block page_title %}Stat Analysis{% endblock %}
@@ -6,13 +7,8 @@
 
 {% block content %}
 
-{# ── Shared display maps (defined once, used throughout) ──────── #}
-{% set PROP_LABEL = {
-  'player_points': 'PTS', 'player_rebounds': 'REB', 'player_assists': 'AST',
-  'player_threes': '3PM', 'player_steals': 'STL', 'player_blocks': 'BLK',
-  'player_points_rebounds_assists': 'PRA',
-} %}
-{% set IND_LABEL = {'strong': 'STRONG ★', 'value': 'VALUE 💰', 'slight': 'SLIGHT', 'avoid': 'AVOID ✗'} %}
+{# ── Display maps from centralized config (context processor) ─── #}
+{# PROP_LABELS_SHORT and INDICATOR_TIERS available via context_processor #}
 
 {# ── KPI Row ─────────────────────────────────────────────────── #}
 <div class="row g-3 mb-4 fade-up fade-up-1">
@@ -62,10 +58,10 @@
          data-prop='{{ s | tojson }}'>
       <div class="d-flex justify-content-between align-items-start mb-1">
         <span class="tier-strong">STRONG ★</span>
-        <span class="featured-play-meta">{{ PROP_LABEL.get(s.prop_type, s.prop_type) }}</span>
+        <span class="featured-play-meta">{{ PROP_LABELS_SHORT.get(s.prop_type, s.prop_type) }}</span>
       </div>
       <p class="featured-play-player mb-0">{{ s.player }}</p>
-      <p class="featured-play-meta mb-2">{{ pos }} · {{ s.player_team_abbr or '' }}</p>
+      <p class="featured-play-meta mb-2">{% if pos %}Est. {{ pos|upper }} · {% endif %}{{ s.player_team_abbr or '' }}</p>
       <div class="featured-play-numbers">
         <div>
           <div class="featured-play-meta">Line</div>
@@ -166,15 +162,15 @@
       {% set pos = (s.breakdown or {}).get('player_position', '') %}
       {% if pos and pos != ns.last_pos %}
       {% set ns.last_pos = pos %}
-      <div class="sa-pos-header">{{ pos }}</div>
+      <div class="sa-pos-header">Est. {{ pos|upper }}</div>
       {% endif %}
       <div class="sa-player-row sa-ind-{{ s.indicator }}"
            data-prop='{{ s | tojson }}'>
         <div class="sa-player-info">
           <span class="sa-player-name">{{ s.player }}</span>
-          <span class="sa-prop-desc">{{ PROP_LABEL.get(s.prop_type, s.prop_type) }} {{ s.line }}</span>
+          <span class="sa-prop-desc">{{ PROP_LABELS_SHORT.get(s.prop_type, s.prop_type) }} {{ s.line }}</span>
         </div>
-        <span class="sa-ind-badge sa-ind-badge-{{ s.indicator }}">{{ IND_LABEL.get(s.indicator, s.indicator) }}</span>
+        {{ indicator_badge(s.indicator) }}
       </div>
       {% endfor %}
       {% endif %}
@@ -190,15 +186,15 @@
       {% set pos = (s.breakdown or {}).get('player_position', '') %}
       {% if pos and pos != ns.last_pos %}
       {% set ns.last_pos = pos %}
-      <div class="sa-pos-header">{{ pos }}</div>
+      <div class="sa-pos-header">Est. {{ pos|upper }}</div>
       {% endif %}
       <div class="sa-player-row sa-ind-{{ s.indicator }}"
            data-prop='{{ s | tojson }}'>
         <div class="sa-player-info">
           <span class="sa-player-name">{{ s.player }}</span>
-          <span class="sa-prop-desc">{{ PROP_LABEL.get(s.prop_type, s.prop_type) }} {{ s.line }}</span>
+          <span class="sa-prop-desc">{{ PROP_LABELS_SHORT.get(s.prop_type, s.prop_type) }} {{ s.line }}</span>
         </div>
-        <span class="sa-ind-badge sa-ind-badge-{{ s.indicator }}">{{ IND_LABEL.get(s.indicator, s.indicator) }}</span>
+        {{ indicator_badge(s.indicator) }}
       </div>
       {% endfor %}
       {% endif %}
@@ -246,7 +242,7 @@
       </div>
       <div class="sp-case-row mt-2">
         <div class="sp-case-cell">
-          <div class="sp-case-label">Model P(over)</div>
+          <div class="sp-case-label" id="sp-wp-label">Model P(rec.)</div>
           <div class="sp-case-val" id="sp-wp">—</div>
         </div>
         <div class="sp-case-cell">
@@ -344,11 +340,11 @@
 
     {# ── Parlay buttons ─── #}
     <div class="d-flex gap-2 mt-2">
-      <button class="btn btn-sm btn-success flex-fill" id="sp-add-over">
-        <i class="bi bi-plus-circle me-1"></i>Parlay Over
+      <button class="btn btn-sm btn-outline-success flex-fill" id="sp-add-over">
+        <i class="bi bi-arrow-up me-1"></i>Add Over
       </button>
       <button class="btn btn-sm btn-outline-danger flex-fill" id="sp-add-under">
-        Under
+        <i class="bi bi-arrow-down me-1"></i>Add Under
       </button>
     </div>
   </div>
@@ -359,11 +355,12 @@
 
 {% block scripts %}
 <script>
-const SA_PROP_LABELS = {"player_points":"PTS","player_rebounds":"REB","player_assists":"AST","player_threes":"3PM","player_steals":"STL","player_blocks":"BLK","player_points_rebounds_assists":"PRA"};
-const SA_BADGE_CLASS = {strong:"tier-strong",value:"tier-moderate",slight:"tier-slight",avoid:"sa-badge-avoid"};
-const SA_BADGE_TEXT  = {strong:"STRONG \u2605",value:"VALUE \uD83D\uDCB0",slight:"SLIGHT",avoid:"AVOID \u2717"};
-// Map prop_type → game_log column key
-const SA_PROP_TO_COL = {"player_points":"pts","player_rebounds":"reb","player_assists":"ast","player_threes":"fg3m","player_steals":"stl","player_blocks":"blk"};
+// Use centralized display_config.js globals
+const SA_PROP_LABELS = MARKET_LABELS_SHORT;
+SA_PROP_LABELS['player_points_rebounds_assists'] = 'PRA';
+const SA_BADGE_CLASS = INDICATOR_CLASSES;
+const SA_BADGE_TEXT  = INDICATOR_LABELS;
+const SA_PROP_TO_COL = PROP_TO_STAT_COL;
 </script>
 <script>
 (function () {
@@ -470,8 +467,9 @@ const SA_PROP_TO_COL = {"player_points":"pts","player_rebounds":"reb","player_as
 
     // Header
     setText('sp-player-name', prop.player || '—');
+    const posLabel = bd.player_position ? ('Est. ' + bd.player_position.toUpperCase()) : '';
     setText('sp-meta',
-      [bd.player_position, prop.player_team_abbr, SA_PROP_LABELS[prop.prop_type] || prop.prop_type]
+      [posLabel, prop.player_team_abbr, SA_PROP_LABELS[prop.prop_type] || prop.prop_type]
         .filter(Boolean).join(' · '));
 
     const badgeEl = document.getElementById('sp-badge');
@@ -489,11 +487,22 @@ const SA_PROP_TO_COL = {"player_points":"pts","player_rebounds":"reb","player_as
     const edgeEl = document.getElementById('sp-edge');
     edgeEl.textContent = prop.edge != null ? '+' + (prop.edge * 100).toFixed(1) + '%' : '—';
     edgeEl.style.color = (prop.edge || 0) >= 0.08 ? 'var(--bs-success)' : 'var(--bs-secondary-color)';
-    setText('sp-rec', prop.recommendation || (prop.indicator === 'avoid' ? 'Pass' : 'Over'));
-    setText('sp-wp', prop.win_probability != null ? (prop.win_probability * 100).toFixed(0) + '%' : '—');
+    // Recommendation: show actual recommended side
+    const recSide = prop.recommended_side || (prop.indicator === 'avoid' ? 'Pass' : 'Over');
+    setText('sp-rec', recSide.charAt(0).toUpperCase() + recSide.slice(1));
+
+    // Model P(rec.): show model probability for the recommended side
+    const isOver = (prop.recommended_side || 'over') === 'over';
+    const modelProb = isOver ? prop.model_prob_over : prop.model_prob_under;
+    const wpLabel = document.getElementById('sp-wp-label');
+    if (wpLabel) wpLabel.textContent = 'Model P(' + (isOver ? 'over' : 'under') + ')';
+    setText('sp-wp', modelProb != null ? ((modelProb * 100).toFixed(0) + '%') : '—');
+
+    // Book implied for recommended side
     let implied = '—';
-    if (prop.over_odds != null) {
-      const o = +prop.over_odds;
+    const recOdds = prop.recommended_odds;
+    if (recOdds != null) {
+      const o = +recOdds;
       const pct = o > 0 ? 100 / (100 + o) : Math.abs(o) / (Math.abs(o) + 100);
       implied = (pct * 100).toFixed(0) + '%';
     }
@@ -513,9 +522,10 @@ const SA_PROP_TO_COL = {"player_points":"pts","player_rebounds":"reb","player_as
 
     // Defensive context
     const propLabel = SA_PROP_LABELS[prop.prop_type] || prop.prop_type;
-    const pos = gc.player_position || bd.player_position || '';
+    const defPos = gc.player_position || bd.player_position || '';
+    const defPosLabel = defPos ? ('est. ' + defPos.toUpperCase()) : 'this position';
     setText('sp-opp-stat', gc.opp_stat_allowed != null
-      ? (gc.opp_abbr || 'Opp') + ' allows ' + (+gc.opp_stat_allowed).toFixed(1) + ' ' + propLabel + '/g to ' + (pos || 'this position')
+      ? (gc.opp_abbr || 'Opp') + ' allows ' + (+gc.opp_stat_allowed).toFixed(1) + ' ' + propLabel + '/g to ' + defPosLabel
       : 'Defensive data unavailable');
     const defParts = [];
     if (gc.opp_def_rating != null) defParts.push('Def Rtg: ' + (+gc.opp_def_rating).toFixed(1));
