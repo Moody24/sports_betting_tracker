@@ -207,6 +207,7 @@
       <thead>
         <tr>
           <th>Player</th>
+          <th>Game</th>
           <th>Prop</th>
           <th class="text-center">Line</th>
           <th class="text-center">Side</th>
@@ -217,6 +218,13 @@
         {% for leg in best_parlay.legs %}
         <tr>
           <td class="fw-semibold">{{ leg.player }}</td>
+          <td class="small text-secondary">
+            {% if leg.away_team and leg.home_team %}
+              {{ leg.away_team }} @ {{ leg.home_team }}
+            {% else %}
+              —
+            {% endif %}
+          </td>
           <td>
             {% set prop_label = {'player_points': 'PTS', 'player_rebounds': 'REB', 'player_assists': 'AST', 'player_points_rebounds_assists': 'PTS+REB+AST', 'player_threes': '3PM', 'player_blocks': 'BLK', 'player_steals': 'STL'}.get(leg.prop_type, leg.prop_type) %}
             <span class="badge text-bg-dark">{{ prop_label }}</span>
