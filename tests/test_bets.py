@@ -40,12 +40,12 @@ class TestBetRoutes(BaseTestCase):
         self.assertIn(b'id="ocr-picked-team"', resp.data)
         self.assertIn(b'Select winner', resp.data)
 
-    def test_new_bet_form_has_parlay_grouped_props_browser_controls(self):
+    def test_new_bet_form_has_parlay_card_grid_controls(self):
         self.register_and_login()
         resp = self.client.get("/bets/new")
         self.assertEqual(resp.status_code, 200)
-        self.assertIn(b'id="load-parlay-props-btn"', resp.data)
-        self.assertIn(b'id="parlay-props-browser"', resp.data)
+        self.assertIn(b'id="parlay-prop-grid"', resp.data)
+        self.assertIn(b'id="parlay-selected-legs"', resp.data)
 
     def test_new_bet_form_lists_blocks_and_steals_prop_options(self):
         self.register_and_login()

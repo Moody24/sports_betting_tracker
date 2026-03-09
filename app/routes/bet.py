@@ -14,7 +14,7 @@ import requests
 from app import db
 from app.enums import BetSource, BetType, Outcome
 from app.forms import BetForm
-from app.models import Bet, GameSnapshot, PickContext, PlayerGameLog, compute_bets_net_pl
+from app.models import Bet, GameSnapshot, OddsSnapshot, PickContext, PlayerGameLog, compute_bets_net_pl
 from app.services.nba_service import (
     get_todays_games,
     fetch_upcoming_games,
@@ -1115,7 +1115,13 @@ def manual_parlay():
 @bet.route('/nba/all-props')
 @login_required
 def nba_all_props():
-    """Return a flat list of all player props across today's games for the prop browser."""
+    """Return a flat list of all player props across today's games for the prop browser.
+
+    Each prop includes multi-book odds (FanDuel + DraftKings), best-book highlights,
+    and line movement delta computed from today's OddsSnapshot history.
+    """
+    today = date_type.today()
+
     games = get_todays_games()
     raw_props = []
     player_names: set[str] = set()
@@ -1137,6 +1143,9 @@ def nba_all_props():
                     'line': prop['line'],
                     'over_odds': prop['over_odds'],
                     'under_odds': prop['under_odds'],
+                    'books': prop.get('books', {}),
+                    'best_over_book': prop.get('best_over_book', ''),
+                    'best_under_book': prop.get('best_under_book', ''),
                     'game_id': game['espn_id'],
                     'team_a': game['away']['name'],
                     'team_b': game['home']['name'],
@@ -1144,6 +1153,18 @@ def nba_all_props():
                     'team_b_abbr': team_b_abbr,
                     'match_date': game['start_time'][:10] if game.get('start_time') else '',
                 })
+
+    # Build movement map from today's OddsSnapshot history
+    # {(game_id, player_name, market) -> earliest_line}
+    movement_map: dict = {}
+    try:
+        snapshots = OddsSnapshot.query.filter_by(game_date=today).order_by(OddsSnapshot.snapped_at).all()
+        for snap in snapshots:
+            key = (snap.game_id, snap.player_name, snap.market)
+            if key not in movement_map:
+                movement_map[key] = snap.line
+    except Exception as exc:
+        logger.warning("Failed to load OddsSnapshot movement data: %s", exc)
 
     player_team_map = _resolve_player_team_abbrs(player_names)
     all_props = []
@@ -1159,6 +1180,20 @@ def nba_all_props():
         enriched = dict(prop)
         enriched['player_team_abbr'] = player_team_abbr
         enriched['player_team'] = player_team_name
+
+        # Attach movement delta
+        mv_key = (prop['game_id'], prop['player'], prop['market'])
+        first_line = movement_map.get(mv_key)
+        if first_line is not None and first_line != prop['line']:
+            delta = round(prop['line'] - first_line, 2)
+            enriched['movement'] = {
+                'line_delta': delta,
+                'direction': 'up' if delta > 0 else 'down',
+                'first_line': first_line,
+            }
+        else:
+            enriched['movement'] = {'line_delta': 0, 'direction': 'flat', 'first_line': prop['line']}
+
         all_props.append(enriched)
 
     return jsonify(all_props)

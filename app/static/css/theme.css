@@ -1341,6 +1341,62 @@ details[open] .bb-chevron {
   color: var(--bs-secondary-color, #8d99a8);
 }
 
+/* ── Parlay card grid extras ─────────────────────────────────── */
+.prop-book-row {
+  display: flex;
+  gap: .4rem;
+  align-items: baseline;
+  font-size: .72rem;
+  margin-top: .15rem;
+}
+
+.prop-book-label {
+  font-weight: 700;
+  width: 1.8rem;
+  color: var(--bs-secondary-color);
+}
+
+.prop-book-best {
+  color: #ffd700;
+  font-weight: 700;
+}
+
+.prop-movement-up {
+  color: #198754;
+  font-size: .68rem;
+}
+
+.prop-movement-down {
+  color: #dc3545;
+  font-size: .68rem;
+}
+
+.parlay-selected-leg {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: .35rem .6rem;
+  border-radius: .4rem;
+  background: rgba(0, 201, 167, .08);
+  border: 1px solid rgba(0, 201, 167, .25);
+  font-size: .8rem;
+  margin-bottom: .35rem;
+}
+
+.parlay-leg-remove {
+  background: none;
+  border: none;
+  color: var(--bs-secondary-color);
+  cursor: pointer;
+  padding: 0 .2rem;
+  font-size: .9rem;
+  line-height: 1;
+}
+
+.parlay-leg-remove:hover {
+  color: var(--bs-danger);
+}
+
 /* ── Responsive ─────────────────────────────────────────────── */
 @media (max-width: 991.98px) {
   .bb-shell {

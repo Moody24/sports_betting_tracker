@@ -884,6 +884,15 @@ def check_model_drift():
             db.session.commit()
 
 
+def snapshot_props_odds():
+    """Snapshot today's player prop odds (FD+DK) for line movement tracking."""
+    app = _get_app()
+    with app.app_context():
+        from app.services.nba_service import snapshot_todays_props
+        count = snapshot_todays_props()
+        logger.info("snapshot_props_odds: inserted %d rows", count)
+
+
 def prune_cache():
     """Remove expired and espn_* unresolvable rows from PlayerGameLog."""
     app = _get_app()
@@ -990,6 +999,14 @@ def init_scheduler(app):
         lambda: _log_job('drift_check', check_model_drift),
         CronTrigger(day_of_week='mon', hour=9, minute=0, timezone=APP_TIMEZONE),
         id='drift_check',
+        replace_existing=True,
+    )
+
+    # Odds snapshot every 2 hours (8 AM – 10 PM ET) for line movement tracking
+    scheduler.add_job(
+        lambda: _log_job('snapshot_props_odds', snapshot_props_odds),
+        CronTrigger(hour='8,10,12,14,16,18,20,22', timezone=APP_TIMEZONE),
+        id='snapshot_props_odds',
         replace_existing=True,
     )
 

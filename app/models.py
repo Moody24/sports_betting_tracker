@@ -555,3 +555,33 @@ class JobLog(db.Model):
 
     def __repr__(self) -> str:
         return f"<JobLog {self.job_name} {self.status}>"
+
+
+class OddsSnapshot(db.Model):
+    """Per-book odds snapshots for line movement tracking."""
+
+    __tablename__ = 'odds_snapshots'
+
+    id          = db.Column(db.Integer, primary_key=True)
+    game_id     = db.Column(db.String(32), index=True)
+    game_date   = db.Column(db.Date, index=True)
+    player_name = db.Column(db.String(100))
+    market      = db.Column(db.String(60))
+    bookmaker   = db.Column(db.String(30))   # 'fanduel' | 'draftkings'
+    line        = db.Column(db.Float)
+    over_odds   = db.Column(db.Integer)
+    under_odds  = db.Column(db.Integer)
+    snapped_at  = db.Column(
+        db.DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        db.Index(
+            'ix_odds_snap_composite',
+            'game_date', 'game_id', 'player_name', 'market', 'bookmaker',
+        ),
+    )
+
+    def __repr__(self) -> str:
+        return f"<OddsSnapshot {self.player_name} {self.market} {self.bookmaker} {self.game_date}>"

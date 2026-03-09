@@ -306,6 +306,7 @@ class TestNBAService(unittest.TestCase):
         mock_resp.raise_for_status.return_value = None
         mock_resp.json.return_value = {
             "bookmakers": [{
+                "key": "fanduel",
                 "markets": [{
                     "key": "player_points",
                     "outcomes": [
@@ -392,12 +393,14 @@ class TestNBAService(unittest.TestCase):
         mock_resp.json.return_value = {
             "bookmakers": [
                 {
+                    "key": "fanduel",
                     "markets": [{"key": "player_points", "outcomes": [
                         {"description": "LeBron James", "name": "Over",  "price": -115, "point": 25.5},
                         {"description": "LeBron James", "name": "Under", "price": -105, "point": 25.5},
                     ]}],
                 },
                 {
+                    "key": "draftkings",
                     "markets": [{"key": "player_points", "outcomes": [
                         {"description": "LeBron James", "name": "Over",  "price": -120, "point": 25.5},
                         {"description": "LeBron James", "name": "Under", "price": -100, "point": 25.5},

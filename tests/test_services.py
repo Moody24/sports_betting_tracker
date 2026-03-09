@@ -2504,7 +2504,7 @@ class TestScheduler(BaseTestCase):
                 with patch.object(scheduler_module, '_acquire_scheduler_lock', return_value=True):
                     scheduler_module.init_scheduler(self.app)
         self.assertTrue(fake.started)
-        self.assertEqual(len(fake.jobs), 11)
+        self.assertEqual(len(fake.jobs), 12)
 
 
 # ═══════════════════════════════════════════════════════════════════════════

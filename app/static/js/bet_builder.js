@@ -33,6 +33,10 @@
     if (pushHash) {
       history.replaceState(null, '', '#' + name);
     }
+    // Auto-load props when switching to parlay tab
+    if (name === 'parlay') {
+      _maybeLoadParlayProps();
+    }
     updateTicketSummary();
   }
 
@@ -115,8 +119,7 @@
       if (pstake) rows.push({ label: 'Stake', val: '$' + parseFloat(pstake).toFixed(2) });
       if (podds)  rows.push({ label: 'Odds', val: (parseInt(podds) > 0 ? '+' : '') + podds });
     } else if (_activeTab === 'parlay') {
-      var _lc = document.getElementById('parlay-legs');
-      var legs = _lc ? _lc.querySelectorAll('.parlay-leg').length : 0;
+      var legs = typeof parlayLegs !== 'undefined' ? parlayLegs.length : 0;
       var lstake = (document.getElementById('parlay-stake') || {}).value || '';
       rows.push({ label: 'Legs', val: String(legs) });
       if (lstake) rows.push({ label: 'Stake', val: '$' + parseFloat(lstake).toFixed(2) });
@@ -327,313 +330,271 @@
   makeBonusPreview('single-bonus-mult', 'bet_amount', null, 'single-bonus-preview');
   makeBonusPreview('prop-bonus-mult',   'prop-stake', null, 'prop-bonus-preview');
 
-  // ── Parlay builder ────────────────────────────────────────────────
-  let legCount = 0;
+  // ── Parlay builder (state-based) ──────────────────────────────────
+  var parlayLegs = [];
 
-  function makeLegHTML(idx) {
-    return `
-    <div class="parlay-leg card-soft p-3 mb-2" data-leg-idx="${idx}">
-      <div class="d-flex justify-content-between align-items-center mb-2">
-        <span class="small fw-semibold text-secondary">Leg ${idx + 1}</span>
-        <button type="button" class="btn btn-sm btn-outline-danger border-0 remove-leg-btn">
-          <i class="bi bi-x-lg"></i>
-        </button>
-      </div>
-      <div class="row g-2">
-        <div class="col-12">
-          <input type="text" class="form-control form-control-sm leg-game-picker"
-            placeholder="Search game or type teams…" list="game-datalist" autocomplete="off">
-        </div>
-        <div class="col-6">
-          <input type="text" class="form-control form-control-sm leg-team-a" placeholder="Team A / Away" required>
-        </div>
-        <div class="col-6">
-          <input type="text" class="form-control form-control-sm leg-team-b" placeholder="Team B / Home" required>
-        </div>
-        <div class="col-6">
-          <input type="date" class="form-control form-control-sm leg-date" required>
-        </div>
-        <div class="col-6">
-          <select class="form-select form-select-sm leg-bet-type">
-            <option value="moneyline">Moneyline</option>
-            <option value="over">Over</option>
-            <option value="under">Under</option>
-            <option value="over" data-prop="1">Prop Over</option>
-            <option value="under" data-prop="1">Prop Under</option>
-          </select>
-        </div>
-        <div class="col-6 leg-ou-group">
-          <input type="number" class="form-control form-control-sm leg-ou-line"
-            placeholder="O/U Line e.g. 218.5" step="0.5">
-        </div>
-        <div class="col-6 leg-ml-group d-none">
-          <input type="text" class="form-control form-control-sm leg-picked-team"
-            placeholder="Picked winner">
-        </div>
-        <div class="col-12 leg-prop-group d-none">
-          <div class="row g-2">
-            <div class="col-6">
-              <input type="text" class="form-control form-control-sm leg-player"
-                placeholder="Player name">
-            </div>
-            <div class="col-6">
-              <select class="form-select form-select-sm leg-prop-type">
-                <option value="player_points">Points</option>
-                <option value="player_rebounds">Rebounds</option>
-                <option value="player_assists">Assists</option>
-                <option value="player_points_rebounds_assists">Points + Rebounds + Assists</option>
-                <option value="player_threes">3-Pointers Made</option>
-                <option value="player_blocks">Blocks</option>
-                <option value="player_steals">Steals</option>
-              </select>
-            </div>
-            <div class="col-6">
-              <input type="number" class="form-control form-control-sm leg-prop-line"
-                placeholder="Prop line e.g. 25.5" step="0.5">
-            </div>
-          </div>
-        </div>
-        <input type="hidden" class="leg-game-id" value="">
-      </div>
-    </div>`;
-  }
-
-  function bindLegEvents(legEl) {
-    const picker = legEl.querySelector('.leg-game-picker');
-    const teamA  = legEl.querySelector('.leg-team-a');
-    const teamB  = legEl.querySelector('.leg-team-b');
-    const date   = legEl.querySelector('.leg-date');
-    const gameId = legEl.querySelector('.leg-game-id');
-    const ouLine = legEl.querySelector('.leg-ou-line');
-
-    if (picker) {
-      picker.addEventListener('input', function () {
-        const match = upcomingGames.find(g => g.label === this.value);
-        if (!match) return;
-        teamA.value  = match.team_a;
-        teamB.value  = match.team_b;
-        date.value   = match.match_date;
-        gameId.value = match.game_id || '';
-        if (match.over_under_line) ouLine.value = match.over_under_line;
+  // Init from session storage on page load
+  (function () {
+    var storedLegs = typeof getParlayQueue === 'function' ? getParlayQueue() : [];
+    storedLegs.forEach(function (stored) {
+      parlayLegs.push({
+        player: stored.player_name || '',
+        player_name: stored.player_name || '',
+        prop_type: stored.prop_type || 'player_points',
+        line: parseFloat(stored.prop_line || '0') || 0,
+        prop_line: parseFloat(stored.prop_line || '0') || 0,
+        side: stored.bet_type || 'over',
+        bet_type: stored.bet_type || 'over',
+        odds: null,
+        bookmaker: '',
+        team_a: stored.team_a || '',
+        team_b: stored.team_b || '',
+        match_date: stored.match_date || '',
+        game_id: stored.game_id || '',
       });
+    });
+    if (parlayLegs.length) {
+      renderSelectedLegs();
+      updateTicketSummary();
+    }
+  })();
+
+  function renderSelectedLegs() {
+    var container = document.getElementById('parlay-selected-legs');
+    if (!container) return;
+
+    var legsCountEl = document.getElementById('parlay-legs-count');
+    if (legsCountEl) {
+      if (parlayLegs.length > 0) {
+        legsCountEl.textContent = parlayLegs.length + ' leg' + (parlayLegs.length !== 1 ? 's' : '');
+        legsCountEl.classList.remove('d-none');
+      } else {
+        legsCountEl.classList.add('d-none');
+      }
     }
 
-    const betType  = legEl.querySelector('.leg-bet-type');
-    const ouGroup  = legEl.querySelector('.leg-ou-group');
-    const mlGroup  = legEl.querySelector('.leg-ml-group');
-    const propGroup= legEl.querySelector('.leg-prop-group');
-
-    function updateLegFields() {
-      const sel = betType.options[betType.selectedIndex];
-      const isProp = sel.dataset.prop === '1';
-      const v = betType.value;
-      ouGroup.classList.toggle('d-none', isProp || v === 'moneyline');
-      mlGroup.classList.toggle('d-none', v !== 'moneyline');
-      propGroup.classList.toggle('d-none', !isProp);
+    if (!parlayLegs.length) {
+      var emptyP = document.createElement('p');
+      emptyP.className = 'small text-secondary mb-0';
+      emptyP.textContent = 'No legs added yet — click O/U buttons above.';
+      while (container.firstChild) container.removeChild(container.firstChild);
+      container.appendChild(emptyP);
+      return;
     }
-    betType.addEventListener('change', updateLegFields);
-    updateLegFields();
 
-    legEl.querySelector('.remove-leg-btn').addEventListener('click', function () {
-      legEl.remove();
-      renumberLegs();
-      syncQueueFromRenderedLegs();
+    while (container.firstChild) container.removeChild(container.firstChild);
+
+    parlayLegs.forEach(function (leg, idx) {
+      var marketLabel = MARKET_LABELS[leg.prop_type] || (leg.prop_type || '').replace('player_', '').replace(/_/g, ' ');
+      var sideLabel = leg.side === 'over' ? 'O' : 'U';
+      var oddsStr = leg.odds ? ((leg.odds > 0 ? '+' : '') + leg.odds) : '';
+      var bookLabel = leg.bookmaker ? ' · ' + leg.bookmaker.slice(0, 2).toUpperCase() : '';
+
+      var chipEl = document.createElement('div');
+      chipEl.className = 'parlay-selected-leg';
+
+      var labelSpan = document.createElement('span');
+      var playerStrong = document.createElement('strong');
+      playerStrong.textContent = leg.player || leg.player_name;
+      labelSpan.appendChild(playerStrong);
+
+      var mktSpan = document.createElement('span');
+      mktSpan.className = 'text-secondary';
+      mktSpan.textContent = ' ' + marketLabel + ' ';
+      labelSpan.appendChild(mktSpan);
+
+      var detailSpan = document.createElement('span');
+      var detailText = sideLabel + (leg.line || leg.prop_line || '');
+      if (oddsStr) detailText += ' ' + oddsStr + bookLabel;
+      detailSpan.textContent = detailText;
+      labelSpan.appendChild(detailSpan);
+
+      var removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'parlay-leg-remove';
+      removeBtn.textContent = '×';
+      removeBtn.setAttribute('data-idx', String(idx));
+      removeBtn.addEventListener('click', function () {
+        var i = parseInt(removeBtn.getAttribute('data-idx'), 10);
+        parlayLegs.splice(i, 1);
+        _syncParlayQueueFromState();
+        renderSelectedLegs();
+        updateTicketSummary();
+      });
+
+      chipEl.appendChild(labelSpan);
+      chipEl.appendChild(removeBtn);
+      container.appendChild(chipEl);
     });
   }
 
-  function renumberLegs() {
-    document.querySelectorAll('.parlay-leg').forEach(function (el, i) {
-      var label = el.querySelector('.small.fw-semibold');
-      if (label) label.textContent = 'Leg ' + (i + 1);
+  function _syncParlayQueueFromState() {
+    if (typeof setParlayQueue !== 'function') return;
+    var queue = parlayLegs.map(function (l) {
+      return {
+        team_a: l.team_a,
+        team_b: l.team_b,
+        match_date: l.match_date,
+        bet_type: l.side,
+        game_id: l.game_id,
+        player_name: l.player || l.player_name,
+        prop_type: l.prop_type,
+        prop_line: l.line || l.prop_line,
+      };
     });
+    setParlayQueue(queue);
+  }
+
+  function addParlayLegFromCard(propData, side) {
+    var odds = side === 'over' ? propData.over_odds : propData.under_odds;
+    var bookmaker = side === 'over' ? (propData.best_over_book || '') : (propData.best_under_book || '');
+
+    var leg = {
+      player: propData.player,
+      player_name: propData.player,
+      prop_type: propData.market,
+      line: propData.line,
+      prop_line: propData.line,
+      side: side,
+      bet_type: side,
+      odds: odds,
+      bookmaker: bookmaker,
+      team_a: propData.team_a,
+      team_b: propData.team_b,
+      match_date: propData.match_date,
+      game_id: propData.game_id,
+    };
+
+    // Dedup: one side per (player, market)
+    var existIdx = -1;
+    parlayLegs.forEach(function (existing, i) {
+      if ((existing.player || existing.player_name) === propData.player && existing.prop_type === propData.market) {
+        existIdx = i;
+      }
+    });
+    if (existIdx >= 0) {
+      parlayLegs[existIdx] = leg;
+    } else {
+      parlayLegs.push(leg);
+    }
+
+    _syncParlayQueueFromState();
+    renderSelectedLegs();
     updateTicketSummary();
+
+    var selectedLegsEl = document.getElementById('parlay-selected-legs');
+    if (selectedLegsEl) selectedLegsEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
-  function syncQueueFromRenderedLegs() {
-    if (!legsContainer || typeof setParlayQueue !== 'function') return;
-    const queuedLegs = [];
-    legsContainer.querySelectorAll('.parlay-leg').forEach(function (legEl) {
-      const sel = legEl.querySelector('.leg-bet-type');
-      if (!sel) return;
-      const isProp = sel.options[sel.selectedIndex] && sel.options[sel.selectedIndex].dataset.prop === '1';
-      if (!isProp) return;
-      const playerName = legEl.querySelector('.leg-player').value.trim();
-      const propType = legEl.querySelector('.leg-prop-type').value;
-      const propLine = legEl.querySelector('.leg-prop-line').value;
-      if (!playerName || !propType || !propLine) return;
-      queuedLegs.push({
-        team_a: legEl.querySelector('.leg-team-a').value.trim(),
-        team_b: legEl.querySelector('.leg-team-b').value.trim(),
-        match_date: legEl.querySelector('.leg-date').value,
-        bet_type: sel.value,
-        game_id: legEl.querySelector('.leg-game-id').value || '',
-        player_name: playerName,
-        prop_type: propType,
-        prop_line: propLine,
-      });
-    });
-    setParlayQueue(queuedLegs);
-  }
+  function maybePrefillParlayFromQuery() {
+    var qp = new URLSearchParams(window.location.search || '');
+    if (qp.get('add_to_parlay') !== '1') return;
 
-  const legsContainer = document.getElementById('parlay-legs');
-  const addLegBtn = document.getElementById('add-leg-btn');
-  const clearParlayDraftBtn = document.getElementById('clear-parlay-draft-btn');
+    var playerName = qp.get('player_name') || '';
+    if (!playerName) return;
 
-  function createParlayLeg(prefill) {
-    if (!legsContainer) return null;
-    legsContainer.insertAdjacentHTML('beforeend', makeLegHTML(legCount++));
-    const newLeg = legsContainer.lastElementChild;
-    bindLegEvents(newLeg);
-    if (prefill) fillParlayLegFromPrefill(newLeg, prefill);
-    return newLeg;
-  }
+    var leg = {
+      player: playerName,
+      player_name: playerName,
+      prop_type: qp.get('prop_type') || 'player_points',
+      line: parseFloat(qp.get('prop_line') || '0') || 0,
+      prop_line: parseFloat(qp.get('prop_line') || '0') || 0,
+      side: (qp.get('bet_type') || 'over').toLowerCase() === 'under' ? 'under' : 'over',
+      bet_type: (qp.get('bet_type') || 'over').toLowerCase() === 'under' ? 'under' : 'over',
+      odds: null,
+      bookmaker: '',
+      team_a: qp.get('team_a') || '',
+      team_b: qp.get('team_b') || '',
+      match_date: qp.get('match_date') || '',
+      game_id: qp.get('game_id') || '',
+    };
 
-  function clearRenderedParlayLegs() {
-    if (!legsContainer) return;
-    legsContainer.innerHTML = '';
-    legCount = 0;
-  }
+    parlayLegs.push(leg);
+    _syncParlayQueueFromState();
+    renderSelectedLegs();
+    updateTicketSummary();
+    showTab('parlay', true);
 
-  function prefillParlayFromQueue(options) {
-    const shouldSwitchTab = !options || options.switchTab !== false;
-    if (!legsContainer || typeof getParlayQueue !== 'function') return false;
-    const queue = getParlayQueue();
-    if (!queue.length) return false;
-
-    clearRenderedParlayLegs();
-    queue.forEach(function (queuedLeg) {
-      createParlayLeg({
-        teamA: queuedLeg.team_a || '',
-        teamB: queuedLeg.team_b || '',
-        matchDate: queuedLeg.match_date || '',
-        playerName: queuedLeg.player_name || '',
-        propType: queuedLeg.prop_type || 'player_points',
-        propLine: queuedLeg.prop_line || '',
-        betType: (queuedLeg.bet_type || 'over').toLowerCase() === 'under' ? 'under' : 'over',
-        gameId: queuedLeg.game_id || '',
-      });
-    });
-
-    if (shouldSwitchTab) showTab('parlay', true);
-    return true;
-  }
-
-  if (addLegBtn && legsContainer) {
-    addLegBtn.addEventListener('click', function () {
-      createParlayLeg();
-    });
-  }
-
-  if (clearParlayDraftBtn) {
-    clearParlayDraftBtn.addEventListener('click', function () {
-      if (typeof clearParlayQueue === 'function') clearParlayQueue();
-      clearRenderedParlayLegs();
-      createParlayLeg();
-      showFeedback('Parlay draft cleared.', 'info');
-    });
+    var stakeEl = document.getElementById('parlay-stake');
+    if (stakeEl) {
+      stakeEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      stakeEl.focus();
+    }
   }
 
   maybePrefillParlayFromQuery();
-  const shouldAutoSwitchParlayTab = window.location.hash === '#parlay';
-  if (!prefillParlayFromQueue({ switchTab: shouldAutoSwitchParlayTab })) {
-    createParlayLeg();
-  }
 
   // ── Parlay submit ─────────────────────────────────────────────────
-  const parlayForm     = document.getElementById('parlay-form');
-  const parlayFeedback = document.getElementById('parlay-feedback');
+  var parlayForm = document.getElementById('parlay-form');
 
   if (parlayForm) {
     parlayForm.addEventListener('submit', function (e) {
       e.preventDefault();
-      const stake   = parseFloat(document.getElementById('parlay-stake').value);
-      const outcome = document.getElementById('parlay-outcome').value;
-      const bonusMult = parseFloat(document.getElementById('parlay-bonus-mult').value) || 1.0;
-      const parlayUnitsEl = document.getElementById('parlay-units');
-      const parlayUnits = parlayUnitsEl ? (parseFloat(parlayUnitsEl.value) || null) : null;
+      var stake = parseFloat(document.getElementById('parlay-stake').value);
+      var outcome = document.getElementById('parlay-outcome').value;
+      var bonusMult = parseFloat(document.getElementById('parlay-bonus-mult').value) || 1.0;
+      var parlayUnitsEl = document.getElementById('parlay-units');
+      var parlayUnits = parlayUnitsEl ? (parseFloat(parlayUnitsEl.value) || null) : null;
 
       if (!stake || stake <= 0) {
-        showFeedback('Enter a stake amount.', 'danger');
+        showParlayFeedback('Enter a stake amount.', 'danger');
         return;
       }
 
-      const legEls = legsContainer.querySelectorAll('.parlay-leg');
-      if (legEls.length === 0) {
-        showFeedback('Add at least one leg.', 'danger');
+      if (parlayLegs.length === 0) {
+        showParlayFeedback('Add at least one leg from the prop browser above.', 'danger');
         return;
       }
 
-      const legs = [];
-      let valid = true;
-      legEls.forEach(function (legEl) {
-        const teamA   = legEl.querySelector('.leg-team-a').value.trim();
-        const teamB   = legEl.querySelector('.leg-team-b').value.trim();
-        const date    = legEl.querySelector('.leg-date').value;
-        const sel     = legEl.querySelector('.leg-bet-type');
-        const betType = sel.value;
-        const isProp  = sel.options[sel.selectedIndex].dataset.prop === '1';
-
-        if (!teamA || !teamB || !date) { valid = false; return; }
-
-        const leg = {
-          team_a: teamA,
-          team_b: teamB,
-          match_date: date,
-          bet_type: betType,
-          game_id: legEl.querySelector('.leg-game-id').value || '',
+      var legs = parlayLegs.map(function (leg) {
+        return {
+          team_a: leg.team_a,
+          team_b: leg.team_b,
+          match_date: leg.match_date,
+          bet_type: leg.side,
+          game_id: leg.game_id,
+          player_name: leg.player || leg.player_name,
+          prop_type: leg.prop_type,
+          prop_line: leg.line || leg.prop_line,
         };
-
-        if (isProp) {
-          leg.player_name = legEl.querySelector('.leg-player').value.trim();
-          leg.prop_type   = legEl.querySelector('.leg-prop-type').value;
-          leg.prop_line   = parseFloat(legEl.querySelector('.leg-prop-line').value) || null;
-          leg.over_under_line = null;
-        } else if (betType === 'moneyline') {
-          leg.picked_team = legEl.querySelector('.leg-picked-team').value.trim();
-          leg.over_under_line = null;
-        } else {
-          leg.over_under_line = parseFloat(legEl.querySelector('.leg-ou-line').value) || null;
-        }
-
-        legs.push(leg);
       });
 
-      if (!valid) {
-        showFeedback('Fill in team names and date for every leg.', 'danger');
-        return;
-      }
-
-      const submitBtn = parlayForm.querySelector('button[type="submit"]');
+      var submitBtn = parlayForm.querySelector('button[type="submit"]');
       submitBtn.disabled = true;
 
       fetch(PARLAY_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF_TOKEN },
-        body: JSON.stringify({ stake, units: parlayUnits, outcome, legs, bonus_multiplier: bonusMult }),
+        body: JSON.stringify({ stake: stake, units: parlayUnits, outcome: outcome, legs: legs, bonus_multiplier: bonusMult }),
       })
-        .then(r => r.json())
-        .then(data => {
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
           if (data.success) {
             if (typeof clearParlayQueue === 'function') clearParlayQueue();
+            parlayLegs = [];
             window.location.href = data.redirect || '/bets';
           } else {
-            showFeedback(data.error || 'Something went wrong.', 'danger');
+            showParlayFeedback(data.error || 'Something went wrong.', 'danger');
             submitBtn.disabled = false;
           }
         })
-        .catch(() => {
-          showFeedback('Network error. Please try again.', 'danger');
+        .catch(function () {
+          showParlayFeedback('Network error. Please try again.', 'danger');
           submitBtn.disabled = false;
         });
     });
   }
 
-  function showFeedback(msg, type) {
+  function showParlayFeedback(msg, type) {
+    var parlayFeedback = document.getElementById('parlay-feedback');
     if (!parlayFeedback) return;
-    parlayFeedback.className = `alert alert-${type} py-2 small`;
+    parlayFeedback.className = 'alert alert-' + type + ' py-2 small';
     parlayFeedback.textContent = msg;
     parlayFeedback.classList.remove('d-none');
   }
+
+  // Keep backward-compat alias used by older code paths
+  function showFeedback(msg, type) { showParlayFeedback(msg, type); }
 
   // ── Props Browser (Tab 2) ─────────────────────────────────────────
   var allPropsData = null;
@@ -642,9 +603,6 @@
   const loadPropsBtn    = document.getElementById('load-all-props-btn');
   const propsBrowser    = document.getElementById('props-browser');
   const propsSearchInp  = document.getElementById('props-search-input');
-  const loadParlayPropsBtn = document.getElementById('load-parlay-props-btn');
-  const parlayPropsBrowser = document.getElementById('parlay-props-browser');
-  const parlayPropsSearchInp = document.getElementById('parlay-props-search-input');
 
   function refreshOcrPickedWinnerOptions() {
     const pickedTeamEl = document.getElementById('ocr-picked-team');
@@ -735,33 +693,40 @@
     });
   }
 
-  if (loadParlayPropsBtn) {
-    loadParlayPropsBtn.addEventListener('click', function () {
-      if (allPropsLoaded) {
-        parlayPropsBrowser.style.display = '';
-        parlayPropsSearchInp.style.display = '';
-        renderParlayPropsBrowser(allPropsData);
-        return;
-      }
-      loadParlayPropsBtn.disabled = true;
-      loadParlayPropsBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Loading...';
-      ensureAllPropsLoaded(function (data) {
-        renderParlayPropsBrowser(data);
-        parlayPropsBrowser.style.display = '';
-        parlayPropsSearchInp.style.display = '';
-        loadParlayPropsBtn.innerHTML = '<i class="bi bi-check-lg me-1"></i>Loaded ' + data.length + ' props';
-      }, function () {
-        loadParlayPropsBtn.disabled = false;
-        loadParlayPropsBtn.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>Failed — retry';
-        showFeedback('Could not load props. Check that ODDS_API_KEY is set.', 'warning');
-      });
-    });
-  }
+  // Parlay search + game filter — live filtering of the card grid
+  var parlayPropsSearchInp = document.getElementById('parlay-props-search-input');
+  var parlayGameFilter = document.getElementById('parlay-game-filter');
 
   if (parlayPropsSearchInp) {
     parlayPropsSearchInp.addEventListener('input', function () {
       if (!allPropsData) return;
-      renderParlayPropsBrowser(filterProps(this.value));
+      renderParlayPropsBrowser(allPropsData);
+    });
+  }
+
+  if (parlayGameFilter) {
+    parlayGameFilter.addEventListener('change', function () {
+      if (!allPropsData) return;
+      renderParlayPropsBrowser(allPropsData);
+    });
+  }
+
+  function _maybeLoadParlayProps() {
+    if (allPropsLoaded && allPropsData) {
+      renderParlayPropsBrowser(allPropsData);
+      return;
+    }
+    ensureAllPropsLoaded(function (data) {
+      renderParlayPropsBrowser(data);
+    }, function () {
+      var grid = document.getElementById('parlay-prop-grid');
+      if (grid) {
+        var errP = document.createElement('p');
+        errP.className = 'small text-danger text-center py-2';
+        errP.textContent = 'Failed to load props. Check that ODDS_API_KEY is set.';
+        while (grid.firstChild) grid.removeChild(grid.firstChild);
+        grid.appendChild(errP);
+      }
     });
   }
 
@@ -909,163 +874,154 @@
     });
   }
 
-  function addParlayPropLegFromButton(btn) {
-    if (!legsContainer) return;
-
-    const leg = {
-      team_a: btn.dataset.teamA || '',
-      team_b: btn.dataset.teamB || '',
-      match_date: btn.dataset.date || '',
-      bet_type: (btn.dataset.side || 'over').toLowerCase() === 'under' ? 'under' : 'over',
-      game_id: btn.dataset.gameId || '',
-      player_name: btn.dataset.player || '',
-      prop_type: btn.dataset.market || 'player_points',
-      prop_line: btn.dataset.line || '',
-    };
-
-    if (typeof addParlayLeg === 'function') addParlayLeg(leg);
-    prefillParlayFromQueue({ switchTab: true });
-
-    const newLeg = legsContainer.lastElementChild;
-    if (newLeg) {
-      newLeg.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      const playerEl = newLeg.querySelector('.leg-player');
-      if (playerEl) playerEl.focus();
-    }
-  }
-
-  function fillParlayLegFromPrefill(legEl, prefill) {
-    if (!legEl || !prefill) return;
-
-    const teamAEl = legEl.querySelector('.leg-team-a');
-    const teamBEl = legEl.querySelector('.leg-team-b');
-    const dateEl = legEl.querySelector('.leg-date');
-    const gameIdEl = legEl.querySelector('.leg-game-id');
-    const betTypeEl = legEl.querySelector('.leg-bet-type');
-    const playerEl = legEl.querySelector('.leg-player');
-    const propTypeEl = legEl.querySelector('.leg-prop-type');
-    const propLineEl = legEl.querySelector('.leg-prop-line');
-
-    if (teamAEl) teamAEl.value = prefill.teamA || '';
-    if (teamBEl) teamBEl.value = prefill.teamB || '';
-    if (dateEl) dateEl.value = prefill.matchDate || '';
-    if (gameIdEl) gameIdEl.value = prefill.gameId || '';
-    if (playerEl) playerEl.value = prefill.playerName || '';
-    if (propTypeEl) propTypeEl.value = prefill.propType || 'player_points';
-    if (propLineEl) propLineEl.value = prefill.propLine || '';
-
-    if (betTypeEl) {
-      for (let i = 0; i < betTypeEl.options.length; i += 1) {
-        const opt = betTypeEl.options[i];
-        if (opt.value === prefill.betType && opt.dataset.prop === '1') {
-          betTypeEl.selectedIndex = i;
-          break;
-        }
-      }
-      betTypeEl.dispatchEvent(new Event('change'));
-    }
-  }
-
-  function maybePrefillParlayFromQuery() {
-    const qp = new URLSearchParams(window.location.search || '');
-    if (qp.get('add_to_parlay') !== '1' || !legsContainer) return;
-
-    const leg = {
-      team_a: qp.get('team_a') || '',
-      team_b: qp.get('team_b') || '',
-      match_date: qp.get('match_date') || '',
-      player_name: qp.get('player_name') || '',
-      prop_type: qp.get('prop_type') || 'player_points',
-      prop_line: qp.get('prop_line') || '',
-      bet_type: (qp.get('bet_type') || 'over').toLowerCase() === 'under' ? 'under' : 'over',
-      game_id: qp.get('game_id') || '',
-    };
-
-    if (typeof addParlayLeg === 'function') addParlayLeg(leg);
-    prefillParlayFromQueue({ switchTab: true });
-
-    const stakeEl = document.getElementById('parlay-stake');
-    if (stakeEl) {
-      stakeEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      stakeEl.focus();
-    }
-  }
-
   function renderParlayPropsBrowser(props) {
-    if (!parlayPropsBrowser) return;
-    if (!props || !props.length) {
-      parlayPropsBrowser.innerHTML = '<p class="small text-secondary text-center py-2">No props match your search.</p>';
+    var grid = document.getElementById('parlay-prop-grid');
+    var gameFilter = document.getElementById('parlay-game-filter');
+    if (!grid) return;
+
+    // Apply search + game filter
+    var searchVal = ((parlayPropsSearchInp || {}).value || '').toLowerCase().trim();
+    var gameFilterVal = gameFilter ? gameFilter.value : '';
+
+    var filtered = props || [];
+    if (searchVal) {
+      filtered = filtered.filter(function (p) {
+        return (p.player || '').toLowerCase().includes(searchVal) ||
+          (p.team_a || '').toLowerCase().includes(searchVal) ||
+          (p.team_b || '').toLowerCase().includes(searchVal) ||
+          (p.player_team || '').toLowerCase().includes(searchVal) ||
+          (MARKET_LABELS[p.market] || p.market || '').toLowerCase().includes(searchVal);
+      });
+    }
+    if (gameFilterVal) {
+      filtered = filtered.filter(function (p) {
+        return ((p.team_a || '') + ' @ ' + (p.team_b || '')) === gameFilterVal;
+      });
+    }
+
+    // Populate game filter options (first render only)
+    if (gameFilter && gameFilter.options.length <= 1 && props && props.length) {
+      var seenMatchups = {};
+      props.forEach(function (p) {
+        var key = (p.team_a || '') + ' @ ' + (p.team_b || '');
+        if (!seenMatchups[key]) {
+          seenMatchups[key] = true;
+          var opt = document.createElement('option');
+          opt.value = key;
+          opt.textContent = key;
+          gameFilter.appendChild(opt);
+        }
+      });
+    }
+
+    while (grid.firstChild) grid.removeChild(grid.firstChild);
+
+    if (!filtered.length) {
+      var noMatch = document.createElement('p');
+      noMatch.className = 'small text-secondary text-center py-2';
+      noMatch.textContent = !props || !props.length
+        ? 'No props available. Check that ODDS_API_KEY is set.'
+        : 'No props match your search.';
+      grid.appendChild(noMatch);
       return;
     }
 
-    const matchups = {};
-    props.forEach(function (p) {
-      const matchupKey = (p.team_a || '') + ' @ ' + (p.team_b || '');
-      if (!matchups[matchupKey]) matchups[matchupKey] = {};
-      const teamName = p.player_team || 'Unknown Team';
-      if (!matchups[matchupKey][teamName]) matchups[matchupKey][teamName] = {};
-      if (!matchups[matchupKey][teamName][p.player]) matchups[matchupKey][teamName][p.player] = [];
-      matchups[matchupKey][teamName][p.player].push(p);
+    filtered.forEach(function (p) {
+      grid.appendChild(_buildParlayPropCard(p));
+    });
+  }
+
+  function _buildParlayPropCard(p) {
+    var card = document.createElement('div');
+    card.className = 'prop-card';
+
+    var marketLabel = MARKET_LABELS[p.market] || (p.market || '').replace('player_', '').replace(/_/g, ' ');
+    var fmtOdds = function (o) { return o ? ((o > 0 ? '+' : '') + o) : '--'; };
+
+    // Player name
+    var playerEl = document.createElement('div');
+    playerEl.className = 'prop-card-player';
+    playerEl.textContent = p.player || '';
+    card.appendChild(playerEl);
+
+    // Market label
+    var mktEl = document.createElement('div');
+    mktEl.className = 'prop-card-market';
+    mktEl.textContent = marketLabel;
+    card.appendChild(mktEl);
+
+    // Line + movement badge
+    var lineEl = document.createElement('div');
+    lineEl.className = 'prop-card-line';
+    var mv = p.movement;
+    if (mv && mv.direction !== 'flat' && mv.line_delta) {
+      var badge = document.createElement('span');
+      badge.className = mv.direction === 'up' ? 'prop-movement-up me-1' : 'prop-movement-down me-1';
+      badge.textContent = (mv.direction === 'up' ? '↑' : '↓') + ' ' + Math.abs(mv.line_delta).toFixed(1);
+      lineEl.appendChild(badge);
+    }
+    var lineStrong = document.createElement('strong');
+    lineStrong.textContent = String(p.line || '');
+    lineEl.appendChild(lineStrong);
+    card.appendChild(lineEl);
+
+    // Per-book rows (FD / DK)
+    var books = p.books || {};
+    var fdBook = books.fanduel;
+    var dkBook = books.draftkings;
+    var bestOverBook = p.best_over_book || '';
+    var bestUnderBook = p.best_under_book || '';
+
+    function makeBookRow(label, bookData, bookKey) {
+      var row = document.createElement('div');
+      row.className = 'prop-book-row';
+      var lbl = document.createElement('span');
+      lbl.className = 'prop-book-label';
+      lbl.textContent = label;
+      row.appendChild(lbl);
+      var overSpan = document.createElement('span');
+      if (bestOverBook === bookKey) overSpan.className = 'prop-book-best';
+      overSpan.textContent = 'O ' + fmtOdds(bookData.over_odds);
+      row.appendChild(overSpan);
+      var underSpan = document.createElement('span');
+      if (bestUnderBook === bookKey) underSpan.className = 'prop-book-best';
+      underSpan.textContent = 'U ' + fmtOdds(bookData.under_odds);
+      row.appendChild(underSpan);
+      return row;
+    }
+
+    if (fdBook) card.appendChild(makeBookRow('FD', fdBook, 'fanduel'));
+    if (dkBook) card.appendChild(makeBookRow('DK', dkBook, 'draftkings'));
+
+    // O/U action buttons
+    var btns = document.createElement('div');
+    btns.className = 'd-flex gap-1 mt-2';
+
+    var overBtn = document.createElement('button');
+    overBtn.type = 'button';
+    overBtn.className = 'btn btn-xs btn-outline-success flex-fill';
+    overBtn.textContent = 'O ' + fmtOdds(p.over_odds);
+    overBtn.addEventListener('click', function () {
+      addParlayLegFromCard(p, 'over');
+      overBtn.classList.add('active');
+      setTimeout(function () { overBtn.classList.remove('active'); }, 600);
     });
 
-    let html = '<div class="small">';
-    Object.keys(matchups).sort().forEach(function (matchup) {
-      const teams = matchups[matchup];
-      let matchupCount = 0;
-      Object.keys(teams).forEach(function (t) {
-        Object.keys(teams[t]).forEach(function (player) {
-          matchupCount += teams[t][player].length;
-        });
-      });
-
-      html += '<details class="mb-2">';
-      html += '<summary class="fw-semibold">' + escapeHtml(matchup) + ' <span class="text-secondary">(' + matchupCount + ' props)</span></summary>';
-
-      Object.keys(teams).sort().forEach(function (teamName) {
-        html += '<details class="ms-3 mt-2">';
-        html += '<summary class="text-info">' + escapeHtml(teamName) + '</summary>';
-
-        Object.keys(teams[teamName]).sort().forEach(function (playerName) {
-          html += '<details class="ms-3 mt-1">';
-          html += '<summary>' + escapeHtml(playerName) + '</summary>';
-          html += '<div class="ms-3 mt-1">';
-
-          teams[teamName][playerName].forEach(function (p) {
-            const marketLabel = MARKET_LABELS[p.market] || p.market.replace('player_', '');
-            const overOdds = p.over_odds > 0 ? '+' + p.over_odds : p.over_odds;
-            const underOdds = p.under_odds > 0 ? '+' + p.under_odds : p.under_odds;
-            html += '<div class="d-flex align-items-center justify-content-between gap-2 border-top border-secondary-subtle py-1">';
-            html += '<div><span class="text-secondary">' + escapeHtml(marketLabel) + '</span> · <span>' + escapeHtml(p.line) + '</span></div>';
-            html += '<div>';
-            html += '<button type="button" class="btn btn-xs btn-outline-success me-1 parlay-prop-add-btn"'
-              + ' data-side="over" data-player="' + escapeHtml(p.player) + '" data-market="' + escapeHtml(p.market) + '"'
-              + ' data-line="' + escapeHtml(p.line) + '" data-team-a="' + escapeHtml(p.team_a) + '"'
-              + ' data-team-b="' + escapeHtml(p.team_b) + '" data-date="' + escapeHtml(p.match_date) + '"'
-              + ' data-game-id="' + escapeHtml(p.game_id) + '">Add Over (' + escapeHtml(overOdds) + ')</button>';
-            html += '<button type="button" class="btn btn-xs btn-outline-danger parlay-prop-add-btn"'
-              + ' data-side="under" data-player="' + escapeHtml(p.player) + '" data-market="' + escapeHtml(p.market) + '"'
-              + ' data-line="' + escapeHtml(p.line) + '" data-team-a="' + escapeHtml(p.team_a) + '"'
-              + ' data-team-b="' + escapeHtml(p.team_b) + '" data-date="' + escapeHtml(p.match_date) + '"'
-              + ' data-game-id="' + escapeHtml(p.game_id) + '">Add Under (' + escapeHtml(underOdds) + ')</button>';
-            html += '</div></div>';
-          });
-
-          html += '</div></details>';
-        });
-
-        html += '</details>';
-      });
-
-      html += '</details>';
+    var underBtn = document.createElement('button');
+    underBtn.type = 'button';
+    underBtn.className = 'btn btn-xs btn-outline-danger flex-fill';
+    underBtn.textContent = 'U ' + fmtOdds(p.under_odds);
+    underBtn.addEventListener('click', function () {
+      addParlayLegFromCard(p, 'under');
+      underBtn.classList.add('active');
+      setTimeout(function () { underBtn.classList.remove('active'); }, 600);
     });
-    html += '</div>';
-    parlayPropsBrowser.innerHTML = html;
 
-    parlayPropsBrowser.querySelectorAll('.parlay-prop-add-btn').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        addParlayPropLegFromButton(btn);
-      });
-    });
+    btns.appendChild(overBtn);
+    btns.appendChild(underBtn);
+    card.appendChild(btns);
+
+    return card;
   }
 
   // ── Screenshot OCR (Tab 4) ────────────────────────────────────────

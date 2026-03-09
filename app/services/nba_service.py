@@ -509,11 +509,44 @@ def _fetch_upcoming_games_espn(tomorrow) -> list[dict]:
     return games
 
 
+_TARGET_BOOKMAKERS = ["fanduel", "draftkings"]
+
+
+def _american_to_decimal(odds_int: int) -> float:
+    """Convert American odds to decimal odds for comparison (higher = better)."""
+    if odds_int >= 0:
+        return 1 + odds_int / 100
+    return 1 + 100 / abs(odds_int)
+
+
+def _best_odds(books_dict: dict, side: str) -> tuple:
+    """Return (best_american_odds, book_name) for a given side across all books.
+
+    Higher American odds = better (e.g. -105 beats -115, +115 beats +105).
+    """
+    best_odds_val: Optional[int] = None
+    best_book: str = ""
+    best_decimal: float = -1.0
+    for book_name, book_data in books_dict.items():
+        odds_val = book_data.get(f"{side}_odds")
+        if odds_val is None:
+            continue
+        odds_int = int(odds_val)
+        dec = _american_to_decimal(odds_int)
+        if dec > best_decimal:
+            best_odds_val = odds_int
+            best_book = book_name
+            best_decimal = dec
+
+    return best_odds_val, best_book
+
+
 def fetch_player_props_for_event(odds_event_id: str) -> dict:
     """Fetch player prop lines for a specific Odds API event.
 
     Returns a dict keyed by market name, each containing a list of
-    {player, line, over_odds, under_odds} dicts.
+    {player, line, over_odds, under_odds, books, best_over_book, best_under_book} dicts.
+    The flat over_odds/under_odds are the best available across all bookmakers.
     """
     api_key = _get_odds_api_key()
     if not api_key or not odds_event_id:
@@ -525,7 +558,7 @@ def fetch_player_props_for_event(odds_event_id: str) -> dict:
             url,
             params={
                 "apiKey": api_key,
-                "regions": "us",
+                "bookmakers": ",".join(_TARGET_BOOKMAKERS),
                 "markets": ",".join(PLAYER_PROP_MARKETS),
                 "oddsFormat": "american",
             },
@@ -537,18 +570,18 @@ def fetch_player_props_for_event(odds_event_id: str) -> dict:
         logger.error("Odds API (player props) fetch failed for event %s: %s", odds_event_id, _sanitize_api_error(exc))
         return {}
 
-    props = {}
-    seen = {}  # track best line per (market, player) to dedupe bookmakers
+    # Collect per-bookmaker data: {(market, player) -> {book -> {over_odds, under_odds, line}}}
+    per_book: dict = {}
 
     for bookmaker in data.get("bookmakers", []):
+        book_name = (bookmaker.get("key") or "").lower()
         for market in bookmaker.get("markets", []):
             market_key = market.get("key", "")
             if market_key not in PLAYER_PROP_MARKETS:
                 continue
 
             outcomes = market.get("outcomes", [])
-            # Group outcomes by player
-            player_lines = {}
+            player_lines: dict = {}
             for outcome in outcomes:
                 player = outcome.get("description", "")
                 if not player:
@@ -562,29 +595,112 @@ def fetch_player_props_for_event(odds_event_id: str) -> dict:
                 }
 
             for player, sides in player_lines.items():
-                dedup_key = (market_key, player)
-                if dedup_key in seen:
-                    continue
-                seen[dedup_key] = True
-
                 over = sides.get("over", {})
                 under = sides.get("under", {})
                 line = over.get("point") or under.get("point")
                 if line is None:
                     continue
 
-                props.setdefault(market_key, []).append({
-                    "player": player,
-                    "line": float(line),
-                    "over_odds": over.get("odds", 0),
-                    "under_odds": under.get("odds", 0),
-                })
+                combo_key = (market_key, player)
+                if combo_key not in per_book:
+                    per_book[combo_key] = {"line": float(line)}
+                per_book[combo_key][book_name] = {
+                    "over_odds": int(over.get("odds", 0)) if over.get("odds") is not None else None,
+                    "under_odds": int(under.get("odds", 0)) if under.get("odds") is not None else None,
+                }
+
+    # Build output
+    props: dict = {}
+    for (market_key, player), book_data in per_book.items():
+        line = book_data.pop("line", None)
+        if line is None:
+            continue
+
+        books = {k: v for k, v in book_data.items() if k in _TARGET_BOOKMAKERS}
+
+        best_over_odds, best_over_book = _best_odds(books, "over")
+        best_under_odds, best_under_book = _best_odds(books, "under")
+
+        props.setdefault(market_key, []).append({
+            "player": player,
+            "line": float(line),
+            "over_odds": best_over_odds if best_over_odds is not None else 0,
+            "under_odds": best_under_odds if best_under_odds is not None else 0,
+            "books": books,
+            "best_over_book": best_over_book,
+            "best_under_book": best_under_book,
+        })
 
     # Sort each market by player name
     for market_key in props:
         props[market_key].sort(key=lambda p: p["player"])
 
     return props
+
+
+def snapshot_todays_props() -> int:
+    """Snapshot today's player props odds into OddsSnapshot for line movement tracking.
+
+    Skips a (game_id, player, market, bookmaker) combo if already snapped within 90 min.
+    Returns count of rows inserted.
+    """
+    from datetime import timedelta
+    from app import db
+    from app.models import OddsSnapshot
+
+    ET_NOW = datetime.now(APP_TIMEZONE)
+    today = ET_NOW.date()
+    cutoff = ET_NOW - timedelta(minutes=90)
+
+    games = get_todays_games()
+    if not games:
+        return 0
+
+    # Pre-load all recent snapshots for today in one query to avoid N+1
+    recent_snapped: set = {
+        (row.game_id, row.player_name, row.market, row.bookmaker)
+        for row in OddsSnapshot.query
+        .filter(OddsSnapshot.game_date == today, OddsSnapshot.snapped_at >= cutoff)
+        .all()
+    }
+
+    inserted = 0
+    for game in games:
+        event_id = (game.get("odds_event_id") or "").strip()
+        if not event_id:
+            continue
+
+        props = fetch_player_props_for_event(event_id)
+        game_id = game.get("espn_id", "")
+
+        for market_key, market_props in props.items():
+            for prop in market_props:
+                books = prop.get("books", {})
+                for book_name, book_data in books.items():
+                    if book_name not in _TARGET_BOOKMAKERS:
+                        continue
+
+                    if (game_id, prop["player"], market_key, book_name) in recent_snapped:
+                        continue
+
+                    snap = OddsSnapshot(
+                        game_id=game_id,
+                        game_date=today,
+                        player_name=prop["player"],
+                        market=market_key,
+                        bookmaker=book_name,
+                        line=prop["line"],
+                        over_odds=book_data.get("over_odds"),
+                        under_odds=book_data.get("under_odds"),
+                    )
+                    db.session.add(snap)
+                    inserted += 1
+
+    if inserted:
+        db.session.commit()
+
+    logger.info("snapshot_todays_props: inserted %d rows", inserted)
+    return inserted
 
 
 def get_todays_games() -> list[dict]:
