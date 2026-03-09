@@ -105,7 +105,7 @@
       var player = (document.getElementById('prop-player-name') || {}).value || '';
       var market = document.getElementById('prop-prop-type');
       var line   = (document.getElementById('prop-prop-line') || {}).value || '';
-      var side   = propBetTypeSelect ? propBetTypeSelect.value : '';
+      var side   = (document.getElementById('prop-bet-type') || {}).value || '';
       var pstake = (document.getElementById('prop-stake') || {}).value || '';
       var podds  = (document.getElementById('prop-odds') || {}).value || '';
       if (player) rows.push({ label: 'Player', val: player });
@@ -115,7 +115,8 @@
       if (pstake) rows.push({ label: 'Stake', val: '$' + parseFloat(pstake).toFixed(2) });
       if (podds)  rows.push({ label: 'Odds', val: (parseInt(podds) > 0 ? '+' : '') + podds });
     } else if (_activeTab === 'parlay') {
-      var legs = legsContainer ? legsContainer.querySelectorAll('.parlay-leg').length : 0;
+      var _lc = document.getElementById('parlay-legs');
+      var legs = _lc ? _lc.querySelectorAll('.parlay-leg').length : 0;
       var lstake = (document.getElementById('parlay-stake') || {}).value || '';
       rows.push({ label: 'Legs', val: String(legs) });
       if (lstake) rows.push({ label: 'Stake', val: '$' + parseFloat(lstake).toFixed(2) });
