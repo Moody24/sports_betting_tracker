@@ -1,0 +1,431 @@
+{% extends "base.html" %}
+
+{% block title %}Stat Analysis — Betting Tracker{% endblock %}
+{% block page_title %}Stat Analysis{% endblock %}
+{% block page_subtitle %}Today's props grouped by matchup — click any player for full breakdown{% endblock %}
+
+{% block content %}
+
+{# ── KPI Row ────────────────────────────────────────────────── #}
+<div class="row g-3 mb-4">
+  <div class="col-6 col-md-3">
+    <div class="card text-center py-2">
+      <div class="h4 mb-0 fw-bold">{{ total }}</div>
+      <div class="small text-secondary">Total Props</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card text-center py-2" style="border-color:rgba(25,135,84,.4)">
+      <div class="h4 mb-0 fw-bold text-success">{{ strong_ct }}</div>
+      <div class="small text-secondary">Strong ★</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card text-center py-2" style="border-color:rgba(245,158,11,.4)">
+      <div class="h4 mb-0 fw-bold" style="color:#f59e0b">{{ value_ct }}</div>
+      <div class="small text-secondary">Value 💰</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card text-center py-2" style="border-color:rgba(220,53,69,.4)">
+      <div class="h4 mb-0 fw-bold text-danger">{{ avoid_ct }}</div>
+      <div class="small text-secondary">Avoid ✗</div>
+    </div>
+  </div>
+</div>
+
+{# ── Filters ─────────────────────────────────────────────────── #}
+<div class="d-flex flex-wrap gap-2 align-items-center mb-4">
+  {% set stat_options = [
+    ('all', 'All'),
+    ('player_points', 'PTS'),
+    ('player_rebounds', 'REB'),
+    ('player_assists', 'AST'),
+    ('player_threes', '3PM'),
+    ('player_blocks', 'BLK'),
+    ('player_steals', 'STL'),
+  ] %}
+  {% for val, label in stat_options %}
+  <a href="{{ url_for('bet.nba_stat_analysis', stat=val, q=search_q) }}"
+     class="btn btn-sm {% if stat_filter == val %}btn-primary{% else %}btn-outline-secondary{% endif %}">
+    {{ label }}
+  </a>
+  {% endfor %}
+
+  <form class="ms-auto d-flex gap-2" method="get" action="{{ url_for('bet.nba_stat_analysis') }}">
+    <input type="hidden" name="stat" value="{{ stat_filter }}">
+    <input class="form-control form-control-sm" style="width:160px" type="text"
+           name="q" value="{{ search_q }}" placeholder="Search player…">
+    <button class="btn btn-sm btn-outline-secondary" type="submit">Go</button>
+  </form>
+</div>
+
+{# ── Matchup Cards ────────────────────────────────────────────── #}
+{% if not matchups %}
+<div class="text-center text-secondary py-5">
+  <i class="bi bi-bar-chart-line fs-1 d-block mb-2 opacity-25"></i>
+  No props available for today.
+</div>
+{% endif %}
+
+{% for m in matchups %}
+{% set meta = m.meta %}
+{% set home_team = meta.get('home') or {} %}
+{% set away_team = meta.get('away') or {} %}
+{% set home_abbr = home_team.get('abbr', '') %}
+{% set away_abbr = away_team.get('abbr', '') %}
+{% set ou = meta.get('over_under_line') %}
+{% set ml_h = meta.get('moneyline_home') %}
+{% set ml_a = meta.get('moneyline_away') %}
+
+{% set any_blowout = namespace(val=false) %}
+{% for s in m.home + m.away %}
+  {% if s.game_ctx and s.game_ctx.get('blowout_risk') %}{% set any_blowout.val = true %}{% endif %}
+{% endfor %}
+
+<div class="matchup-card mb-4">
+  <div class="matchup-header d-flex flex-wrap justify-content-between align-items-center p-2 gap-2">
+    <span class="fw-bold">{{ away_abbr }} @ {{ home_abbr }}</span>
+    <span class="small">
+      {% if ou %}O/U {{ ou }}{% endif %}
+      {% if ml_h and ml_a %} · ML {{ ml_a }}/{{ ml_h }}{% endif %}
+    </span>
+    {% if any_blowout.val %}<span class="badge text-bg-warning">⚠ Blowout Risk</span>{% endif %}
+  </div>
+
+  <div class="row g-0">
+    {# Away column #}
+    <div class="col-6 border-end">
+      <div class="px-2 py-1 small fw-semibold text-secondary border-bottom" style="font-size:.65rem">
+        {{ away_abbr }} (Away)
+      </div>
+      {% for s in m.away %}
+      {% set pos = (s.breakdown or {}).get('player_position', '') %}
+      {% set prop_label_map = {
+        'player_points': 'PTS', 'player_rebounds': 'REB', 'player_assists': 'AST',
+        'player_threes': '3PM', 'player_steals': 'STL', 'player_blocks': 'BLK',
+        'player_points_rebounds_assists': 'PRA',
+      } %}
+      {% set ind_map = {'strong': 'STRONG ★', 'value': 'VALUE 💰', 'slight': 'SLIGHT', 'avoid': 'AVOID ✗'} %}
+      <div class="stat-player-row"
+           data-prop="{{ s | tojson | e }}"
+           data-indicator="{{ s.indicator }}">
+        <span class="stat-player-pos">{{ pos }}</span>
+        <span class="stat-player-name">{{ s.player }}</span>
+        <span class="stat-prop-label">{{ prop_label_map.get(s.prop_type, s.prop_type) }} {{ s.line }}</span>
+        <span class="stat-badge-{{ s.indicator }}">{{ ind_map.get(s.indicator, s.indicator) }}</span>
+      </div>
+      {% else %}
+      <div class="px-2 py-2 small text-secondary fst-italic">No props</div>
+      {% endfor %}
+    </div>
+
+    {# Home column #}
+    <div class="col-6">
+      <div class="px-2 py-1 small fw-semibold text-secondary border-bottom" style="font-size:.65rem">
+        {{ home_abbr }} (Home)
+      </div>
+      {% for s in m.home %}
+      {% set pos = (s.breakdown or {}).get('player_position', '') %}
+      {% set prop_label_map = {
+        'player_points': 'PTS', 'player_rebounds': 'REB', 'player_assists': 'AST',
+        'player_threes': '3PM', 'player_steals': 'STL', 'player_blocks': 'BLK',
+        'player_points_rebounds_assists': 'PRA',
+      } %}
+      {% set ind_map = {'strong': 'STRONG ★', 'value': 'VALUE 💰', 'slight': 'SLIGHT', 'avoid': 'AVOID ✗'} %}
+      <div class="stat-player-row"
+           data-prop="{{ s | tojson | e }}"
+           data-indicator="{{ s.indicator }}">
+        <span class="stat-player-pos">{{ pos }}</span>
+        <span class="stat-player-name">{{ s.player }}</span>
+        <span class="stat-prop-label">{{ prop_label_map.get(s.prop_type, s.prop_type) }} {{ s.line }}</span>
+        <span class="stat-badge-{{ s.indicator }}">{{ ind_map.get(s.indicator, s.indicator) }}</span>
+      </div>
+      {% else %}
+      <div class="px-2 py-2 small text-secondary fst-italic">No props</div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endfor %}
+
+{# ── Side Panel ───────────────────────────────────────────────── #}
+<div id="stat-panel" class="stat-panel" hidden>
+  <div class="stat-panel-header">
+    <div>
+      <div id="sp-player-name" class="fw-bold fs-6"></div>
+      <div id="sp-meta" class="small text-secondary"></div>
+    </div>
+    <div class="d-flex flex-column align-items-end gap-1">
+      <button class="stat-panel-close" id="stat-panel-close">&times;</button>
+      <div id="sp-badge"></div>
+    </div>
+  </div>
+
+  <div class="stat-panel-body">
+
+    {# Line / Projection / Edge #}
+    <div class="d-flex gap-3 mb-3">
+      <div class="text-center">
+        <div class="small text-secondary">Line</div>
+        <div class="fw-bold fs-5" id="sp-line">—</div>
+      </div>
+      <div class="text-center">
+        <div class="small text-secondary">Projection</div>
+        <div class="fw-bold fs-5" id="sp-proj">—</div>
+      </div>
+      <div class="text-center">
+        <div class="small text-secondary">Edge</div>
+        <div class="fw-bold fs-5" id="sp-edge">—</div>
+      </div>
+      <div class="text-center">
+        <div class="small text-secondary">Rec.</div>
+        <div class="fw-bold" id="sp-rec">—</div>
+      </div>
+    </div>
+
+    {# Mini bar chart #}
+    <div class="stat-section-label">Last 5 Games vs Line</div>
+    <div id="sp-minibars" class="stat-minibars"></div>
+
+    {# Hit Rate #}
+    <div class="stat-section-label">Hit Rate (Last 20g)</div>
+    <div class="d-flex gap-2 align-items-center mb-1">
+      <div class="flex-fill">
+        <div class="progress" style="height:8px">
+          <div id="sp-over-bar" class="progress-bar bg-success" style="width:0%"></div>
+        </div>
+      </div>
+      <span id="sp-over-pct" class="small text-success fw-bold" style="width:2.5rem;text-align:right">—%</span>
+    </div>
+    <div class="d-flex gap-2 align-items-center mb-2">
+      <div class="flex-fill">
+        <div class="progress" style="height:8px">
+          <div id="sp-under-bar" class="progress-bar bg-danger" style="width:0%"></div>
+        </div>
+      </div>
+      <span id="sp-under-pct" class="small text-danger fw-bold" style="width:2.5rem;text-align:right">—%</span>
+    </div>
+
+    {# Model vs Book #}
+    <div class="d-flex gap-3 mb-3">
+      <div class="text-center">
+        <div class="small text-secondary">Model P(over)</div>
+        <div class="fw-bold" id="sp-wp">—</div>
+      </div>
+      <div class="text-center">
+        <div class="small text-secondary">Book Implied</div>
+        <div class="fw-bold" id="sp-implied">—</div>
+      </div>
+    </div>
+
+    {# Defensive Context #}
+    <div class="stat-section-label">Defensive Context</div>
+    <div class="small mb-1" id="sp-opp-stat">—</div>
+    <div class="small mb-2 text-secondary" id="sp-def-rating">—</div>
+
+    {# Game Script #}
+    <div class="stat-section-label">Game Script</div>
+    <div class="small mb-2" id="sp-game-script">—</div>
+
+    {# Context Notes #}
+    <div class="stat-section-label">Player Context</div>
+    <div id="sp-context-tags" class="mb-3"></div>
+
+    {# Action Buttons #}
+    <div class="d-flex gap-2 mt-3">
+      <button class="btn btn-sm btn-success flex-fill" id="sp-add-over">+ Parlay Over</button>
+      <button class="btn btn-sm btn-danger flex-fill" id="sp-add-under">Under</button>
+    </div>
+  </div>
+</div>
+<div id="stat-panel-backdrop" class="stat-panel-backdrop" hidden></div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const panel = document.getElementById('stat-panel');
+  const backdrop = document.getElementById('stat-panel-backdrop');
+  const closeBtn = document.getElementById('stat-panel-close');
+  let currentProp = null;
+
+  const BADGE_CLASSES = {
+    strong: 'stat-badge-strong',
+    value:  'stat-badge-value',
+    slight: 'stat-badge-slight',
+    avoid:  'stat-badge-avoid',
+  };
+  const BADGE_TEXT = {
+    strong: 'STRONG \u2605',
+    value:  'VALUE \uD83D\uDCB0',
+    slight: 'SLIGHT',
+    avoid:  'AVOID \u2717',
+  };
+
+  const PROP_LABELS = {
+    player_points: 'PTS', player_rebounds: 'REB', player_assists: 'AST',
+    player_threes: '3PM', player_steals: 'STL', player_blocks: 'BLK',
+    player_points_rebounds_assists: 'PRA',
+  };
+
+  function setText(id, value) {
+    document.getElementById(id).textContent = value;
+  }
+
+  function openPanel(prop) {
+    currentProp = prop;
+    const bd = prop.breakdown || {};
+    const hr = prop.hit_rates || {};
+    const gc = prop.game_ctx || {};
+    const cn = prop.context_notes || [];
+
+    setText('sp-player-name', prop.player || '—');
+    setText('sp-meta',
+      [bd.player_position, prop.player_team_abbr, PROP_LABELS[prop.prop_type] || prop.prop_type]
+        .filter(Boolean).join(' \u00B7 '));
+
+    // Badge — use safe DOM
+    const badgeEl = document.getElementById('sp-badge');
+    badgeEl.replaceChildren();
+    const badgeSpan = document.createElement('span');
+    badgeSpan.className = BADGE_CLASSES[prop.indicator] || '';
+    badgeSpan.textContent = BADGE_TEXT[prop.indicator] || prop.indicator || '';
+    badgeEl.appendChild(badgeSpan);
+
+    setText('sp-line', prop.line != null ? prop.line : '—');
+    setText('sp-proj', prop.projection != null ? (+prop.projection).toFixed(1) : '—');
+    const edgeEl = document.getElementById('sp-edge');
+    edgeEl.textContent = prop.edge != null ? (prop.edge * 100).toFixed(1) + '%' : '—';
+    edgeEl.style.color = (prop.edge || 0) >= 0 ? '#2fc98f' : '#ff6b7a';
+    setText('sp-rec', prop.recommendation || (prop.indicator === 'avoid' ? 'Pass' : 'Over'));
+
+    // Hit rate bars
+    const overPct = hr.over_pct;
+    const underPct = hr.under_pct;
+    document.getElementById('sp-over-bar').style.width = (overPct != null ? overPct : 0) + '%';
+    document.getElementById('sp-under-bar').style.width = (underPct != null ? underPct : 0) + '%';
+    setText('sp-over-pct', overPct != null ? overPct + '%' : '—');
+    setText('sp-under-pct', underPct != null ? underPct + '%' : '—');
+
+    // Mini bar chart
+    const miniContainer = document.getElementById('sp-minibars');
+    miniContainer.replaceChildren();
+    const games5 = (hr.games || []).slice(0, 5);
+    const line = prop.line || 0;
+    const maxVal = Math.max(line, ...games5.map(g => g.value || 0), 1);
+    games5.forEach(g => {
+      const bar = document.createElement('div');
+      const pct = Math.max(4, Math.round((g.value / maxVal) * 100));
+      bar.className = 'stat-minibar stat-minibar-' + g.result;
+      bar.style.height = pct + '%';
+      bar.title = g.date + ' ' + g.matchup + ': ' + g.value;
+      miniContainer.appendChild(bar);
+    });
+    const lineRef = document.createElement('div');
+    lineRef.className = 'stat-line-ref';
+    lineRef.style.bottom = Math.round((line / maxVal) * 100) + '%';
+    miniContainer.appendChild(lineRef);
+
+    // Model vs Book
+    setText('sp-wp', prop.win_probability != null ? (prop.win_probability * 100).toFixed(0) + '%' : '—');
+    let implied = '—';
+    if (prop.over_odds != null) {
+      const o = +prop.over_odds;
+      implied = o > 0
+        ? (100 / (100 + o) * 100).toFixed(0) + '%'
+        : (Math.abs(o) / (Math.abs(o) + 100) * 100).toFixed(0) + '%';
+    }
+    setText('sp-implied', implied);
+
+    // Defensive context
+    const oppStat = gc.opp_stat_allowed;
+    const propLabel = PROP_LABELS[prop.prop_type] || prop.prop_type;
+    const pos = gc.player_position || bd.player_position || '';
+    setText('sp-opp-stat', oppStat != null
+      ? (gc.opp_abbr || 'Opp') + ' allows ' + (+oppStat).toFixed(1) + ' ' + propLabel + '/g to ' + (pos || 'this position')
+      : 'Defensive data unavailable');
+    const defParts = [];
+    if (gc.opp_def_rating != null) defParts.push('Def Rtg: ' + (+gc.opp_def_rating).toFixed(1));
+    if (gc.opp_pace != null) defParts.push('Pace: ' + (+gc.opp_pace).toFixed(1));
+    setText('sp-def-rating', defParts.join(' \u00B7 '));
+
+    // Game script
+    const gsParts = [];
+    if (gc.over_under_line) gsParts.push('O/U ' + gc.over_under_line);
+    if (gc.moneyline_home && gc.moneyline_away) gsParts.push('ML ' + gc.moneyline_away + '/' + gc.moneyline_home);
+    if (gc.blowout_risk) gsParts.push('\u26A0 Blowout Risk');
+    setText('sp-game-script', gsParts.join(' \u00B7 ') || '—');
+
+    // Context tags — safe DOM only
+    const tagsEl = document.getElementById('sp-context-tags');
+    tagsEl.replaceChildren();
+    cn.forEach(note => {
+      const tag = document.createElement('span');
+      tag.className = 'stat-ctx-tag';
+      tag.textContent = note;
+      tagsEl.appendChild(tag);
+    });
+
+    panel.removeAttribute('hidden');
+    backdrop.removeAttribute('hidden');
+    requestAnimationFrame(() => panel.classList.add('open'));
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closePanel() {
+    panel.classList.remove('open');
+    document.body.style.overflow = '';
+    setTimeout(() => {
+      panel.setAttribute('hidden', '');
+      backdrop.setAttribute('hidden', '');
+    }, 230);
+  }
+
+  closeBtn.addEventListener('click', closePanel);
+  backdrop.addEventListener('click', closePanel);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closePanel(); });
+
+  document.querySelectorAll('.stat-player-row').forEach(row => {
+    row.addEventListener('click', () => {
+      try {
+        const prop = JSON.parse(row.dataset.prop);
+        openPanel(prop);
+      } catch (e) {
+        console.error('Failed to parse prop JSON', e);
+      }
+    });
+  });
+
+  // Parlay buttons
+  document.getElementById('sp-add-over').addEventListener('click', () => {
+    if (!currentProp) return;
+    if (typeof addParlayLegToQueue === 'function') {
+      addParlayLegToQueue({
+        player: currentProp.player,
+        prop_type: currentProp.prop_type,
+        line: currentProp.line,
+        bet_type: 'over',
+        game_id: currentProp.game_id,
+      });
+    }
+    closePanel();
+  });
+
+  document.getElementById('sp-add-under').addEventListener('click', () => {
+    if (!currentProp) return;
+    if (typeof addParlayLegToQueue === 'function') {
+      addParlayLegToQueue({
+        player: currentProp.player,
+        prop_type: currentProp.prop_type,
+        line: currentProp.line,
+        bet_type: 'under',
+        game_id: currentProp.game_id,
+      });
+    }
+    closePanel();
+  });
+})();
+</script>
+{% endblock %}

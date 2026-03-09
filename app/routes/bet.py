@@ -14,7 +14,7 @@ import requests
 from app import db
 from app.enums import BetSource, BetType, Outcome
 from app.forms import BetForm
-from app.models import Bet, GameSnapshot, OddsSnapshot, PickContext, PlayerGameLog, compute_bets_net_pl
+from app.models import Bet, GameSnapshot, OddsSnapshot, PickContext, PlayerGameLog, TeamDefenseSnapshot, compute_bets_net_pl
 from app.services.nba_service import (
     get_todays_games,
     fetch_upcoming_games,
@@ -32,6 +32,72 @@ from app.services.stats_service import find_player_id, get_cached_logs, get_play
 logger = logging.getLogger(__name__)
 
 bet = Blueprint('bet', __name__)
+
+_STAT_COL = {
+    'player_points': 'pts', 'player_rebounds': 'reb', 'player_assists': 'ast',
+    'player_threes': 'fg3m', 'player_steals': 'stl', 'player_blocks': 'blk',
+}
+_POSITION_ORDER = {'PG': 0, 'SG': 1, 'SF': 2, 'PF': 3, 'C': 4}
+
+
+def _compute_hit_rates(player_name: str, prop_type: str, line: float, n: int = 20) -> dict:
+    col_name = _STAT_COL.get(prop_type)
+    if not col_name:
+        return {'over_pct': None, 'under_pct': None, 'games': [], 'sample': 0}
+    col = getattr(PlayerGameLog, col_name)
+    logs = (PlayerGameLog.query.filter_by(player_name=player_name)
+            .filter(col.isnot(None))
+            .order_by(PlayerGameLog.game_date.desc()).limit(n).all())
+    if not logs:
+        return {'over_pct': None, 'under_pct': None, 'games': [], 'sample': 0}
+    games = [{'date': str(g.game_date), 'value': round(float(getattr(g, col_name)), 1),
+              'matchup': g.matchup or '',
+              'result': 'over' if float(getattr(g, col_name)) >= line else 'under'}
+             for g in logs]
+    over_count = sum(1 for g in games if g['result'] == 'over')
+    sample = len(games)
+    return {'over_pct': round(over_count / sample * 100),
+            'under_pct': round((sample - over_count) / sample * 100),
+            'games': games[:10], 'sample': sample}
+
+
+def _build_stat_context(score: dict, games_today: list) -> dict:
+    ctx = {}
+    game = next((g for g in games_today if g.get('espn_id') == score.get('game_id')), {})
+    ctx['over_under_line'] = game.get('over_under_line')
+    ctx['moneyline_home'] = game.get('moneyline_home')
+    ctx['moneyline_away'] = game.get('moneyline_away')
+    ml_h = game.get('moneyline_home') or 0
+    ml_a = game.get('moneyline_away') or 0
+    ctx['blowout_risk'] = abs(ml_h) >= 400 or abs(ml_a) >= 400
+
+    player_team = score.get('player_team_abbr') or ''
+    home_abbr = (game.get('home') or {}).get('abbr', '')
+    away_abbr = (game.get('away') or {}).get('abbr', '')
+    opp_abbr = away_abbr if player_team == home_abbr else home_abbr
+    ctx['opp_abbr'] = opp_abbr
+
+    def_snap = (TeamDefenseSnapshot.query.filter_by(team_abbr=opp_abbr)
+                .order_by(TeamDefenseSnapshot.fetched_at.desc()).first()) if opp_abbr else None
+    if def_snap:
+        ctx['opp_def_rating'] = def_snap.def_rating
+        ctx['opp_pace'] = def_snap.pace
+        allowed_map = {
+            'player_points': def_snap.opp_pts_pg, 'player_rebounds': def_snap.opp_reb_pg,
+            'player_assists': def_snap.opp_ast_pg, 'player_threes': def_snap.opp_3pm_pg,
+            'player_steals': def_snap.opp_stl_pg, 'player_blocks': def_snap.opp_blk_pg,
+        }
+        ctx['opp_stat_allowed'] = allowed_map.get(score.get('prop_type', ''))
+        position = (score.get('breakdown') or {}).get('player_position', '')
+        pos_map = {'PG': def_snap.opp_pts_allowed_pg, 'SG': def_snap.opp_pts_allowed_sg,
+                   'SF': def_snap.opp_pts_allowed_sf, 'PF': def_snap.opp_pts_allowed_pf,
+                   'C': def_snap.opp_pts_allowed_c}
+        ctx['opp_pos_allowed'] = pos_map.get(position)
+        ctx['player_position'] = position
+    else:
+        ctx.update(opp_def_rating=None, opp_pace=None, opp_stat_allowed=None,
+                   opp_pos_allowed=None, player_position='')
+    return ctx
 _PROP_PROGRESS_CACHE: dict[tuple, dict] = {}
 _PROP_PROGRESS_TTL_SECONDS = 30
 _PROP_PROGRESS_CACHE_MAX = 2000
@@ -1698,3 +1764,84 @@ def nba_player_analysis(player_name):
         'games_played': projection.get('games_played', 0),
         'projection_source': projection.get('projection_source', 'heuristic'),
     })
+
+
+# ── NBA Stat Analysis ─────────────────────────────────────────
+
+
+@bet.route('/nba/stat-analysis')
+@login_required
+def nba_stat_analysis():
+    """Display today's props grouped by matchup with a slide-in detail panel."""
+    from app.services.projection_engine import ProjectionEngine
+    from app.services.value_detector import ValueDetector
+    from app.services.nba_service import get_todays_games
+
+    engine = ProjectionEngine()
+    try:
+        scores = ValueDetector(engine).score_all_todays_props()
+    except Exception as exc:
+        logger.error("Stat analysis engine error: %s", exc)
+        scores = []
+
+    games_today = get_todays_games()
+
+    for s in scores:
+        line = float(s.get('line') or 0)
+        s['hit_rates'] = _compute_hit_rates(s.get('player', ''), s.get('prop_type', ''), line)
+        s['game_ctx'] = _build_stat_context(s, games_today)
+        tier = s.get('confidence_tier', 'no_edge')
+        wp = s.get('win_probability') or 0.5
+        if tier == 'strong':
+            s['indicator'] = 'strong'
+        elif tier == 'moderate':
+            s['indicator'] = 'value'
+        elif tier == 'slight':
+            s['indicator'] = 'slight'
+        else:
+            s['indicator'] = 'avoid'
+        if wp < 0.40 and s['indicator'] != 'avoid':
+            s['indicator'] = 'avoid'
+
+    game_map = {}
+    for g in games_today:
+        gid = g.get('espn_id')
+        game_map[gid] = {'meta': g, 'home': [], 'away': []}
+
+    for s in scores:
+        gid = s.get('game_id')
+        if gid not in game_map:
+            continue
+        pt = s.get('player_team_abbr') or ''
+        home_abbr = (game_map[gid]['meta'].get('home') or {}).get('abbr', '')
+        bucket = 'home' if pt == home_abbr else 'away'
+        game_map[gid][bucket].append(s)
+
+    for gdata in game_map.values():
+        for bucket in ('home', 'away'):
+            gdata[bucket].sort(
+                key=lambda s: _POSITION_ORDER.get(
+                    (s.get('breakdown') or {}).get('player_position', ''), 99))
+
+    matchups = [v for v in game_map.values() if v['home'] or v['away']]
+
+    stat_filter = request.args.get('stat', 'all')
+    search_q = request.args.get('q', '').strip().lower()
+    if stat_filter != 'all' or search_q:
+        for m in matchups:
+            for bucket in ('home', 'away'):
+                m[bucket] = [s for s in m[bucket]
+                             if (stat_filter == 'all' or s.get('prop_type') == stat_filter)
+                             and (not search_q or search_q in (s.get('player') or '').lower())]
+
+    total = sum(len(m['home']) + len(m['away']) for m in matchups)
+    strong_ct = sum(1 for m in matchups for s in m['home'] + m['away'] if s.get('indicator') == 'strong')
+    value_ct = sum(1 for m in matchups for s in m['home'] + m['away'] if s.get('indicator') == 'value')
+    avoid_ct = sum(1 for m in matchups for s in m['home'] + m['away'] if s.get('indicator') == 'avoid')
+
+    return render_template('bets/nba_stat_analysis.html',
+                           matchups=matchups,
+                           stat_filter=stat_filter,
+                           search_q=search_q,
+                           total=total, strong_ct=strong_ct,
+                           value_ct=value_ct, avoid_ct=avoid_ct)

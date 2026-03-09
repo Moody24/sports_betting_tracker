@@ -1421,3 +1421,43 @@ details[open] .bb-chevron {
     grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
   }
 }
+
+/* ── Stat Analysis ──────────────────────────────────── */
+.matchup-card { background:var(--card-bg); border:1px solid var(--card-border); border-radius:.6rem; overflow:hidden; }
+.matchup-header { background:rgba(255,255,255,.03); border-bottom:1px solid var(--card-border); }
+.stat-player-row { display:flex; align-items:center; gap:.5rem; padding:.4rem .75rem;
+  cursor:pointer; transition:background .12s; border-bottom:1px solid rgba(255,255,255,.04); }
+.stat-player-row:hover { background:rgba(0,201,167,.08); }
+.stat-player-name { font-size:.8rem; font-weight:600; flex:1; }
+.stat-player-pos  { font-size:.68rem; width:1.8rem; color:var(--bs-secondary-color); }
+.stat-prop-label  { font-size:.72rem; color:var(--bs-secondary-color); }
+
+/* Indicator badges */
+.stat-badge-strong { background:rgba(25,135,84,.15); color:#198754; font-size:.65rem; font-weight:700; padding:.1rem .35rem; border-radius:.3rem; white-space:nowrap; }
+.stat-badge-value  { background:rgba(245,158,11,.15); color:#f59e0b; font-size:.65rem; font-weight:700; padding:.1rem .35rem; border-radius:.3rem; white-space:nowrap; }
+.stat-badge-slight { background:rgba(107,114,128,.15); color:#9ba7c2; font-size:.65rem; font-weight:700; padding:.1rem .35rem; border-radius:.3rem; white-space:nowrap; }
+.stat-badge-avoid  { background:rgba(220,53,69,.15);  color:#dc3545; font-size:.65rem; font-weight:700; padding:.1rem .35rem; border-radius:.3rem; white-space:nowrap; }
+
+/* Side panel */
+.stat-panel { position:fixed; top:0; right:0; bottom:0; width:min(420px,100vw);
+  background:var(--card-bg); border-left:1px solid var(--card-border);
+  z-index:1050; overflow-y:auto; transform:translateX(100%); transition:transform .22s ease;
+  padding:1rem; }
+.stat-panel.open { transform:translateX(0); }
+.stat-panel-backdrop { position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:1049; }
+.stat-panel-header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:.75rem; }
+.stat-panel-close { background:none; border:none; color:var(--bs-secondary-color); font-size:1.4rem; cursor:pointer; padding:0 .25rem; line-height:1; }
+.stat-section-label { font-size:.68rem; text-transform:uppercase; letter-spacing:.05em;
+  color:var(--bs-secondary-color); margin:.6rem 0 .2rem; padding-bottom:.2rem;
+  border-bottom:1px solid rgba(255,255,255,.07); }
+
+/* Mini bar chart */
+.stat-minibars { display:flex; align-items:flex-end; gap:3px; height:48px; position:relative; margin:.35rem 0; }
+.stat-minibar  { flex:1; border-radius:2px 2px 0 0; min-height:4px; }
+.stat-minibar-over  { background:rgba(25,135,84,.65); }
+.stat-minibar-under { background:rgba(220,53,69,.5); }
+.stat-line-ref { position:absolute; left:0; right:0; border-top:2px dashed rgba(255,255,255,.38); pointer-events:none; }
+
+/* Context tags */
+.stat-ctx-tag { display:inline-block; font-size:.65rem; padding:.1rem .3rem;
+  border-radius:.25rem; margin:.1rem .1rem 0 0; border:1px solid rgba(255,255,255,.1); }
