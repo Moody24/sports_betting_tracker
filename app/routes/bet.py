@@ -1524,6 +1524,7 @@ def quick_add_parlay():
         flash('A parlay needs at least 2 legs.', 'danger')
         return redirect(url_for('main.dashboard'))
 
+    units = request.form.get('units', type=float)
     parlay_id = Bet.generate_parlay_id()
     for leg in legs_data:
         player = (leg.get('player') or '')[:100]
@@ -1534,6 +1535,7 @@ def quick_add_parlay():
         team_a = (leg.get('away_team') or 'Away')[:80]
         team_b = (leg.get('home_team') or 'Home')[:80]
         match_date_str = leg.get('match_date') or ''
+        game_id = (leg.get('game_id') or '')[:80]
 
         try:
             match_dt = datetime.strptime(match_date_str, '%Y-%m-%d') if match_date_str else datetime.now(timezone.utc)
@@ -1546,6 +1548,7 @@ def quick_add_parlay():
             team_b=team_b,
             match_date=match_dt,
             bet_amount=stake,
+            units=units,
             outcome=Outcome.PENDING.value,
             american_odds=int(american_odds) if american_odds is not None else None,
             is_parlay=True,
@@ -1555,6 +1558,7 @@ def quick_add_parlay():
             player_name=player or None,
             prop_type=prop_type or None,
             prop_line=float(prop_line_val) if prop_line_val is not None else None,
+            external_game_id=game_id or None,
         ))
 
     db.session.commit()
