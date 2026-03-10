@@ -14,6 +14,13 @@ from tests.helpers import BaseTestCase, make_bet, make_user
 class TestBetRoutes(BaseTestCase):
     """Tests for the bet blueprint."""
 
+    def setUp(self):
+        super().setUp()
+        # Clear game-summary cache so ESPN mock call counts are predictable across tests.
+        from app.routes.bet import _GAME_SUMMARY_CACHE, _PROP_PROGRESS_CACHE
+        _GAME_SUMMARY_CACHE.clear()
+        _PROP_PROGRESS_CACHE.clear()
+
     @staticmethod
     def _et_today():
         return datetime.now(NBA_APP_TIMEZONE).date()
@@ -598,7 +605,9 @@ class TestBetRoutes(BaseTestCase):
         finally:
             self.app.testing = previous_testing
 
-        self.assertEqual(mock_get.call_count, 3)
+        # All 3 requests share the same espn_id; _GAME_SUMMARY_CACHE deduplicates
+        # ESPN API calls to 1 per game per TTL window.
+        self.assertEqual(mock_get.call_count, 1)
 
     @patch("app.routes.bet.requests.get")
     def test_nba_prop_progress_blocks_success(self, mock_get):

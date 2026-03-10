@@ -96,18 +96,69 @@
       });
   }
 
+  function buildBatchDescriptors(cards) {
+    return cards
+      .filter((c) => c.dataset.pollingStopped !== '1')
+      .map((c) => {
+        const url = c.dataset.url || '';
+        const match = url.match(/\/nba\/prop-progress\/([^?]+)/);
+        const espnId = match ? match[1] : '';
+        const params = new URLSearchParams(url.split('?')[1] || '');
+        return {
+          card_id: c.dataset.cardId || url,
+          espn_id: espnId,
+          player: params.get('player') || '',
+          prop_type: params.get('prop_type') || '',
+          line: parseFloat(params.get('line') || '0'),
+          bet_type: params.get('bet_type') || '',
+        };
+      })
+      .filter((d) => d.espn_id && d.player && d.prop_type);
+  }
+
+  function pollBatch(cards) {
+    const descriptors = buildBatchDescriptors(cards);
+    if (!descriptors.length) return;
+
+    fetch('/nba/prop-progress/batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(descriptors),
+    })
+      .then((r) => r.json())
+      .then((results) => {
+        cards.forEach((card) => {
+          if (card.dataset.pollingStopped === '1') return;
+          const key = card.dataset.cardId || card.dataset.url || '';
+          const data = results[key];
+          if (!data) return;
+          const shouldContinue = applyProgressCard(card, data);
+          if (!shouldContinue) {
+            card.dataset.pollingStopped = '1';
+          }
+        });
+      })
+      .catch(() => {
+        cards.forEach((card) => {
+          const statusEl = card.querySelector('[data-live-status]');
+          if (statusEl) statusEl.textContent = 'Live update failed';
+        });
+      });
+  }
+
   function initLiveProgress() {
     const cards = Array.from(document.querySelectorAll('[data-live-prop-card]'));
     if (!cards.length) return;
 
-    cards.forEach((card) => pollCard(card));
+    // Assign stable card IDs so the batch response can be matched back
+    cards.forEach((card, i) => {
+      if (!card.dataset.cardId) {
+        card.dataset.cardId = card.dataset.url || String(i);
+      }
+    });
 
-    setInterval(() => {
-      cards.forEach((card) => {
-        if (card.dataset.pollingStopped === '1') return;
-        pollCard(card);
-      });
-    }, 30000);
+    pollBatch(cards);
+    setInterval(() => pollBatch(cards), 30000);
   }
 
   document.querySelectorAll('.parlay-toggle-btn').forEach(function (btn) {

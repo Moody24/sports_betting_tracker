@@ -128,6 +128,12 @@ _PROP_PROGRESS_CACHE: dict[tuple, dict] = {}
 _PROP_PROGRESS_TTL_SECONDS = 30
 _PROP_PROGRESS_CACHE_MAX = 2000
 
+# Raw ESPN summary cache: espn_id → {data, expires_at}
+# Shared by the single-card and batch endpoints so one game's summary is
+# fetched only once per TTL window regardless of how many players are resolved.
+_GAME_SUMMARY_CACHE: dict[str, dict] = {}
+_GAME_SUMMARY_TTL = 30  # same as prop-progress TTL
+
 # Snapshot live-score write debounce: only commit live score updates once per
 # _SNAPSHOT_WRITE_TTL seconds per game.  New (unseen) snapshots are always written.
 _SNAPSHOT_WRITE_TS: dict[str, float] = {}   # espn_id → last commit monotonic
@@ -357,6 +363,97 @@ def _prune_prop_progress_cache(now_monotonic: float) -> None:
     keep = survivors[: _PROP_PROGRESS_CACHE_MAX // 2]
     _PROP_PROGRESS_CACHE.clear()
     _PROP_PROGRESS_CACHE.update(dict(keep))
+
+
+def _get_game_summary(espn_id: str, now_monotonic: float) -> dict:
+    """Return cached ESPN summary JSON for *espn_id*, fetching if expired/absent."""
+    cached = _GAME_SUMMARY_CACHE.get(espn_id)
+    if cached and cached.get('expires_at', 0) > now_monotonic:
+        return cached['data']
+    try:
+        resp = requests.get(ESPN_SUMMARY_URL, params={'event': espn_id}, timeout=8)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception:
+        data = {}
+    _GAME_SUMMARY_CACHE[espn_id] = {'data': data, 'expires_at': now_monotonic + _GAME_SUMMARY_TTL}
+    return data
+
+
+def _resolve_card_progress(
+    espn_id: str, player_name: str, prop_type: str, line: float,
+    bet_type: str, summary_data: dict,
+) -> dict:
+    """Derive the progress payload for one player-prop from a pre-fetched ESPN summary.
+
+    Returns a payload dict identical to the one produced by ``nba_prop_progress``.
+    Does **not** touch any cache — callers handle caching.
+    """
+    boxscore = _extract_prop_boxscore(summary_data)
+    if not boxscore:
+        return {'ok': False, 'status': 'game_not_started', 'error': 'No boxscore data available yet'}
+
+    target = _normalize_name(player_name)
+    best_name = None
+    best_stats = None
+    best_score = 0.0
+    for candidate_name, stats in boxscore.items():
+        candidate_norm = _normalize_name(candidate_name)
+        if not candidate_norm:
+            continue
+        score = SequenceMatcher(None, target, candidate_norm).ratio()
+        if target == candidate_norm:
+            score = 1.0
+        elif (
+            len(target) >= 8 and len(candidate_norm) >= 8
+            and (target in candidate_norm or candidate_norm in target)
+        ):
+            score = max(score, 0.92)
+        if score > best_score:
+            best_score = score
+            best_name = candidate_name
+            best_stats = stats
+
+    if best_name is None or best_score < 0.85:
+        return {'ok': False, 'error': f'Player not found in boxscore for {player_name}'}
+
+    stat_val = None if not best_stats else best_stats.get(prop_type)
+    if stat_val is None:
+        return {'ok': False, 'error': f'Stat {prop_type} unavailable for {best_name}', 'player': best_name}
+
+    status_meta = _derive_game_status(summary_data)
+    current_stat = _safe_float(stat_val, 0.0)
+    elapsed_ratio = status_meta['elapsed_ratio']
+    projected_final = current_stat if elapsed_ratio <= 0 else current_stat / max(elapsed_ratio, 0.01)
+    progress_pct = 0.0
+    delta_to_line = current_stat - line
+    if line > 0:
+        progress_pct = max(0.0, min(200.0, (current_stat / line) * 100.0))
+
+    on_track = None
+    if line > 0 and bet_type in (BetType.OVER.value, BetType.UNDER.value):
+        on_track = projected_final >= line if bet_type == BetType.OVER.value else projected_final <= line
+
+    return {
+        'ok': True,
+        'player': best_name,
+        'prop_type': prop_type,
+        'bet_type': bet_type,
+        'line': line,
+        'current_stat': round(current_stat, 2),
+        'stat': round(current_stat, 2),
+        'status_text': status_meta['status_text'],
+        'status': status_meta['status_text'],
+        'period': status_meta['period'],
+        'clock': status_meta['clock'],
+        'game_state': status_meta['game_state'],
+        'elapsed_ratio': round(elapsed_ratio, 4),
+        'projected_final': round(projected_final, 2),
+        'progress_pct': round(progress_pct, 1),
+        'delta_to_line': round(delta_to_line, 2),
+        'on_track': on_track,
+        'match_score': round(best_score, 3),
+    }
 
 
 def _filtered_bets_query(user_id: int, args) -> "db.Query":
@@ -847,117 +944,108 @@ def nba_prop_progress(espn_id):
     now_monotonic = time.monotonic()
     if use_cache:
         _prune_prop_progress_cache(now_monotonic)
-
         cached = _PROP_PROGRESS_CACHE.get(cache_key)
         if cached and cached.get('expires_at', 0) > now_monotonic:
             return jsonify(cached['payload'])
 
-    def _cache_payload(payload: dict) -> None:
-        if not use_cache:
-            return
-        _PROP_PROGRESS_CACHE[cache_key] = {
-            'expires_at': now_monotonic + _PROP_PROGRESS_TTL_SECONDS,
-            'created_at': now_monotonic,
-            'payload': payload,
-        }
+    summary_data = _get_game_summary(espn_id, now_monotonic) if use_cache else {}
+    if not use_cache:
+        try:
+            resp = requests.get(ESPN_SUMMARY_URL, params={'event': espn_id}, timeout=8)
+            resp.raise_for_status()
+            summary_data = resp.json()
+        except Exception:
+            summary_data = {}
 
-    try:
-        resp = requests.get(ESPN_SUMMARY_URL, params={'event': espn_id}, timeout=8)
-        resp.raise_for_status()
-        summary_data = resp.json()
-    except Exception:
+    if not summary_data:
         payload = {'ok': False, 'status': 'game_not_started', 'error': 'No boxscore data available yet'}
-        _cache_payload(payload)
+        if use_cache:
+            _PROP_PROGRESS_CACHE[cache_key] = {'expires_at': now_monotonic + _PROP_PROGRESS_TTL_SECONDS,
+                                               'created_at': now_monotonic, 'payload': payload}
         return jsonify(payload), 200
 
-    boxscore = _extract_prop_boxscore(summary_data)
-    if not boxscore:
-        payload = {'ok': False, 'status': 'game_not_started', 'error': 'No boxscore data available yet'}
-        _cache_payload(payload)
-        return jsonify(payload), 200
+    payload = _resolve_card_progress(espn_id, player_name, prop_type, line, bet_type, summary_data)
+    if use_cache:
+        _PROP_PROGRESS_CACHE[cache_key] = {'expires_at': now_monotonic + _PROP_PROGRESS_TTL_SECONDS,
+                                           'created_at': now_monotonic, 'payload': payload}
 
-    target = _normalize_name(player_name)
-    best_name = None
-    best_stats = None
-    best_score = 0.0
-    for candidate_name, stats in boxscore.items():
-        candidate_norm = _normalize_name(candidate_name)
-        if not candidate_norm:
-            continue
-        score = SequenceMatcher(None, target, candidate_norm).ratio()
-        if target == candidate_norm:
-            score = 1.0
-        elif (
-            # Only boost full-name substring matches (both tokens present),
-            # not partial overlaps that could misidentify different players.
-            len(target) >= 8 and len(candidate_norm) >= 8
-            and (target in candidate_norm or candidate_norm in target)
-        ):
-            score = max(score, 0.92)
-        if score > best_score:
-            best_score = score
-            best_name = candidate_name
-            best_stats = stats
-
-    if best_name is None or best_score < 0.85:
-        payload = {'ok': False, 'error': f'Player not found in boxscore for {player_name}'}
-        _cache_payload(payload)
-        return jsonify(payload), 404
-
-    stat_val = None if not best_stats else best_stats.get(prop_type)
-    if stat_val is None:
-        payload = {
-            'ok': False,
-            'error': f'Stat {prop_type} unavailable for {best_name}',
-            'player': best_name,
-        }
-        _cache_payload(payload)
-        return jsonify(payload), 404
-
-    status_meta = _derive_game_status(summary_data)
-
-    current_stat = _safe_float(stat_val, 0.0)
-    elapsed_ratio = status_meta['elapsed_ratio']
-
-    if elapsed_ratio <= 0:
-        projected_final = current_stat
-    else:
-        projected_final = current_stat / max(elapsed_ratio, 0.01)
-
-    progress_pct = 0.0
-    delta_to_line = current_stat - line
-    if line > 0:
-        progress_pct = max(0.0, min(200.0, (current_stat / line) * 100.0))
-
-    on_track = None
-    if line > 0 and bet_type in (BetType.OVER.value, BetType.UNDER.value):
-        if bet_type == BetType.OVER.value:
-            on_track = projected_final >= line
-        else:
-            on_track = projected_final <= line
-
-    payload = {
-        'ok': True,
-        'player': best_name,
-        'prop_type': prop_type,
-        'bet_type': bet_type,
-        'line': line,
-        'current_stat': round(current_stat, 2),
-        'stat': round(current_stat, 2),
-        'status_text': status_meta['status_text'],
-        'status': status_meta['status_text'],
-        'period': status_meta['period'],
-        'clock': status_meta['clock'],
-        'game_state': status_meta['game_state'],
-        'elapsed_ratio': round(elapsed_ratio, 4),
-        'projected_final': round(projected_final, 2),
-        'progress_pct': round(progress_pct, 1),
-        'delta_to_line': round(delta_to_line, 2),
-        'on_track': on_track,
-        'match_score': round(best_score, 3),
-    }
-    _cache_payload(payload)
+    if not payload.get('ok'):
+        status_code = 404 if 'not found' in payload.get('error', '') or 'unavailable' in payload.get('error', '') else 200
+        return jsonify(payload), status_code
     return jsonify(payload)
+
+
+@bet.route('/nba/prop-progress/batch', methods=['POST'])
+@login_required
+def nba_prop_progress_batch():
+    """Batch live-progress endpoint — resolves N cards with one ESPN call per unique game.
+
+    Request body (JSON): list of card descriptors:
+      [{card_id, espn_id, player, prop_type, line, bet_type}, ...]
+
+    Response: JSON object keyed by card_id → progress payload.
+    """
+    body = request.get_json(silent=True) or []
+    if not isinstance(body, list) or not body:
+        return jsonify({'ok': False, 'error': 'Expected non-empty JSON array'}), 400
+
+    use_cache = not current_app.testing
+    now_monotonic = time.monotonic()
+    if use_cache:
+        _prune_prop_progress_cache(now_monotonic)
+
+    # Group by espn_id to deduplicate ESPN API calls
+    by_game: dict[str, list] = {}
+    for item in body:
+        eid = str(item.get('espn_id') or '')
+        if eid:
+            by_game.setdefault(eid, []).append(item)
+
+    results: dict[str, dict] = {}
+    for espn_id, items in by_game.items():
+        summary_data = None  # fetched lazily once per game
+
+        for item in items:
+            card_id = str(item.get('card_id') or '')
+            player_name = (item.get('player') or '').strip()
+            prop_type = (item.get('prop_type') or '').strip()
+            line = _safe_float(item.get('line'), 0.0)
+            bet_type = (item.get('bet_type') or '').strip().lower()
+
+            if not card_id or not player_name or not prop_type:
+                if card_id:
+                    results[card_id] = {'ok': False, 'error': 'Missing required fields'}
+                continue
+
+            cache_key = (espn_id, _normalize_name(player_name), prop_type, bet_type, round(line, 2))
+            if use_cache:
+                cached = _PROP_PROGRESS_CACHE.get(cache_key)
+                if cached and cached.get('expires_at', 0) > now_monotonic:
+                    results[card_id] = cached['payload']
+                    continue
+
+            # Fetch summary once per game (lazy)
+            if summary_data is None:
+                summary_data = _get_game_summary(espn_id, now_monotonic) if use_cache else {}
+                if not use_cache:
+                    try:
+                        resp = requests.get(ESPN_SUMMARY_URL, params={'event': espn_id}, timeout=8)
+                        resp.raise_for_status()
+                        summary_data = resp.json()
+                    except Exception:
+                        summary_data = {}
+
+            if not summary_data:
+                payload = {'ok': False, 'status': 'game_not_started', 'error': 'No boxscore data available yet'}
+            else:
+                payload = _resolve_card_progress(espn_id, player_name, prop_type, line, bet_type, summary_data)
+
+            results[card_id] = payload
+            if use_cache:
+                _PROP_PROGRESS_CACHE[cache_key] = {'expires_at': now_monotonic + _PROP_PROGRESS_TTL_SECONDS,
+                                                   'created_at': now_monotonic, 'payload': payload}
+
+    return jsonify(results)
 
 
 @bet.route('/nba/place-bets', methods=['POST'])
