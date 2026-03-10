@@ -803,6 +803,11 @@ class TestContextService(BaseTestCase):
 class TestMatchupService(BaseTestCase):
     """Tests for matchup_service: team defense, matchup adjustment, pace."""
 
+    def setUp(self):
+        super().setUp()
+        from app.services.matchup_service import invalidate_team_defense_cache
+        invalidate_team_defense_cache()
+
     # -- fetch_team_defense_stats --
 
     def test_fetch_team_defense_stats_success(self):

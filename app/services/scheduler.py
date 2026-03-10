@@ -188,8 +188,10 @@ def clear_daily_caches():
     """
     from app.services.context_service import clear_schedule_caches
     from app.services.score_cache import invalidate_scores
+    from app.services.matchup_service import invalidate_team_defense_cache
     clear_schedule_caches()
     invalidate_scores()
+    invalidate_team_defense_cache()
     logger.info("Daily schedule caches cleared")
 
 

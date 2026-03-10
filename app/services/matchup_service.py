@@ -19,6 +19,13 @@ APP_TIMEZONE = ZoneInfo("America/New_York")
 
 _NBA_API_DELAY = 0.6
 
+# Process-level cache for team defense lookups.
+# get_team_defense() fires an ilike DB query per call; with 100-300 props
+# per scoring run and only ~15 unique opponents, caching eliminates ~280 redundant queries.
+_TEAM_DEFENSE_CACHE: dict[tuple, dict] = {}   # (name_lower, date_str) → result dict
+_TEAM_DEFENSE_CACHE_TS: dict[tuple, float] = {}
+_TEAM_DEFENSE_TTL = 3600  # 1 h; defense data changes only once per scheduler run
+
 # League-average baselines (approximate, updated each season)
 LEAGUE_AVG = {
     'pts': 114.0,
@@ -214,14 +221,33 @@ def refresh_all_team_defense() -> int:
     return count
 
 
+def invalidate_team_defense_cache() -> None:
+    """Clear the process-level team defense cache.
+
+    Call after ``refresh_team_defense()`` so the next lookup picks up fresh data.
+    """
+    _TEAM_DEFENSE_CACHE.clear()
+    _TEAM_DEFENSE_CACHE_TS.clear()
+    logger.debug("team_defense_cache: invalidated")
+
+
 def get_team_defense(team_name: str, date: date_type = None) -> dict:
     """Look up the most recent defensive snapshot for a team.
 
     Matches by substring on ``team_name`` (case-insensitive).
     Returns a dict of defensive stats or empty dict if not found.
+
+    Results are cached process-wide for 1 h to avoid an ilike DB query
+    on every call (the function is invoked once per player-prop via
+    ``get_matchup_adjustment``).
     """
     if date is None:
         date = _today_et()
+
+    cache_key = (team_name.lower().strip(), str(date))
+    now = time.monotonic()
+    if cache_key in _TEAM_DEFENSE_CACHE and now - _TEAM_DEFENSE_CACHE_TS.get(cache_key, 0) < _TEAM_DEFENSE_TTL:
+        return _TEAM_DEFENSE_CACHE[cache_key]
 
     snap = (
         TeamDefenseSnapshot.query
@@ -232,9 +258,11 @@ def get_team_defense(team_name: str, date: date_type = None) -> dict:
     )
 
     if not snap:
+        _TEAM_DEFENSE_CACHE[cache_key] = {}
+        _TEAM_DEFENSE_CACHE_TS[cache_key] = now
         return {}
 
-    return {
+    result = {
         'team_id': snap.team_id,
         'team_name': snap.team_name,
         'team_abbr': snap.team_abbr,
@@ -253,6 +281,9 @@ def get_team_defense(team_name: str, date: date_type = None) -> dict:
         'opp_pts_allowed_pf': snap.opp_pts_allowed_pf or 0,
         'opp_pts_allowed_c': snap.opp_pts_allowed_c or 0,
     }
+    _TEAM_DEFENSE_CACHE[cache_key] = result
+    _TEAM_DEFENSE_CACHE_TS[cache_key] = now
+    return result
 
 
 def get_position_matchup_adjustment(opponent_name: str, position: str) -> float:

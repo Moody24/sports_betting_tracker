@@ -32,6 +32,12 @@ _SCOREBOARD_CACHE_EXPIRES: dict[str, float] = {}
 _GAME_CONTEXT_CACHE: dict[tuple, dict] = {}
 _GAME_CONTEXT_CACHE_TTL = 600   # 10 min
 
+# Process-scoped injury status cache: player_name_lower → (result_dict, expires_at)
+# get_player_injury_status() fires an ilike DB query per call; in the scoring loop
+# that's one query per player-prop.  A 5-min TTL matches the game-context TTL.
+_INJURY_CACHE: dict[str, tuple] = {}   # name_lower → (result_dict, expires_monotonic)
+_INJURY_CACHE_TTL = 300   # 5 min
+
 ESPN_INJURIES_URL = (
     "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries"
 )
@@ -273,7 +279,18 @@ def get_player_injury_status(player_name: str) -> dict:
     """Look up the most recent injury status for a player.
 
     Returns a dict with {status, detail, date_reported} or empty dict.
+
+    Results are cached process-wide for 5 min so the scoring loop does not
+    fire an ilike DB query for every player-prop combination.
     """
+    name_lower = player_name.lower().strip()
+    now = _time.monotonic()
+    cached = _INJURY_CACHE.get(name_lower)
+    if cached is not None:
+        result, expires = cached
+        if now < expires:
+            return result
+
     report = (
         InjuryReport.query
         .filter(InjuryReport.player_name.ilike(f'%{player_name}%'))
@@ -282,14 +299,17 @@ def get_player_injury_status(player_name: str) -> dict:
     )
 
     if not report:
-        return {}
+        result = {}
+    else:
+        result = {
+            'status': report.status,
+            'detail': report.detail or '',
+            'date_reported': report.date_reported,
+            'team': report.team or '',
+        }
 
-    return {
-        'status': report.status,
-        'detail': report.detail or '',
-        'date_reported': report.date_reported,
-        'team': report.team or '',
-    }
+    _INJURY_CACHE[name_lower] = (result, now + _INJURY_CACHE_TTL)
+    return result
 
 
 def is_player_available(player_name: str) -> bool:
@@ -385,4 +405,5 @@ def clear_schedule_caches() -> None:
     _SCOREBOARD_CACHE.clear()
     _SCOREBOARD_CACHE_EXPIRES.clear()
     _GAME_CONTEXT_CACHE.clear()
+    _INJURY_CACHE.clear()
     logger.info("Schedule caches cleared")

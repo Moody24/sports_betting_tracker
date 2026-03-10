@@ -347,7 +347,7 @@ class GameSnapshot(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     espn_id = db.Column(db.String(80), nullable=False, index=True)
-    game_date = db.Column(db.Date, nullable=False)
+    game_date = db.Column(db.Date, nullable=False, index=True)
     home_team = db.Column(db.String(100), nullable=False)
     away_team = db.Column(db.String(100), nullable=False)
     home_logo = db.Column(db.String(300), nullable=True)
@@ -433,8 +433,8 @@ class TeamDefenseSnapshot(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     team_id = db.Column(db.String(20), nullable=False)
     team_name = db.Column(db.String(100), nullable=False)
-    team_abbr = db.Column(db.String(10), nullable=True)
-    snapshot_date = db.Column(db.Date, nullable=False)
+    team_abbr = db.Column(db.String(10), nullable=True, index=True)
+    snapshot_date = db.Column(db.Date, nullable=False, index=True)
     opp_pts_pg = db.Column(db.Float, nullable=True)
     opp_reb_pg = db.Column(db.Float, nullable=True)
     opp_ast_pg = db.Column(db.Float, nullable=True)
@@ -465,11 +465,11 @@ class InjuryReport(db.Model):
     """Current injury designations for NBA players."""
 
     id = db.Column(db.Integer, primary_key=True)
-    player_name = db.Column(db.String(120), nullable=False)
+    player_name = db.Column(db.String(120), nullable=False, index=True)
     team = db.Column(db.String(100), nullable=True)
     status = db.Column(db.String(20), nullable=False)
     detail = db.Column(db.String(300), nullable=True)
-    date_reported = db.Column(db.Date, nullable=False)
+    date_reported = db.Column(db.Date, nullable=False, index=True)
     fetched_at = db.Column(
         db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
     )
