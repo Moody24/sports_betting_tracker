@@ -9,7 +9,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from . import db
 from .config_display import prop_label_short
-from .enums import BetType, Outcome
+from .enums import BetType, Outcome, PostmortemReason
 
 
 def _american_to_decimal(odds: int) -> float:
@@ -572,3 +572,114 @@ class OddsSnapshot(db.Model):
 
     def __repr__(self) -> str:
         return f"<OddsSnapshot {self.player_name} {self.market} {self.bookmaker} {self.game_date}>"
+
+
+class BetPostmortem(db.Model):
+    """Per-leg postmortem analysis for settled player-prop bets.
+
+    Created automatically after settlement.  One record per settled Bet.
+    Stores structured reason codes (primary / secondary / tertiary) plus a
+    full diagnosis_json for deep inspection and future ML feature extraction.
+
+    The record is idempotent: re-running settlement upserts rather than
+    inserting a duplicate.
+    """
+
+    __tablename__ = 'bet_postmortem'
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    # ── Foreign key ──────────────────────────────────────────────────
+    bet_id = db.Column(
+        db.Integer,
+        db.ForeignKey('bet.id', ondelete='CASCADE'),
+        nullable=False,
+        unique=True,   # one postmortem per settled leg
+        index=True,
+    )
+
+    # ── Bet metadata (denormalised for fast reporting) ────────────────
+    player_name = db.Column(db.String(100), nullable=True, index=True)
+    game_date = db.Column(db.Date, nullable=True, index=True)
+    stat_type = db.Column(db.String(40), nullable=True)   # e.g. player_threes
+    bet_side = db.Column(db.String(10), nullable=True)    # over | under
+    prop_line = db.Column(db.Float, nullable=True)
+
+    # ── Pregame expectations (from PickContext) ───────────────────────
+    projected_stat = db.Column(db.Float, nullable=True)
+    expected_minutes = db.Column(db.Float, nullable=True)
+    expected_attempts = db.Column(db.Float, nullable=True)   # FGA or FG3A
+    expected_pace = db.Column(db.Float, nullable=True)
+
+    # ── Postgame reality (from PlayerGameLog + Bet.actual_total) ──────
+    actual_stat = db.Column(db.Float, nullable=True)
+    actual_minutes = db.Column(db.Float, nullable=True)
+    actual_attempts = db.Column(db.Float, nullable=True)
+
+    # ── Diagnostic deltas ─────────────────────────────────────────────
+    projection_error = db.Column(db.Float, nullable=True)  # actual_stat - projected_stat
+    miss_margin = db.Column(db.Float, nullable=True)        # signed distance from the line (+ = would win)
+    minutes_delta = db.Column(db.Float, nullable=True)      # actual - expected minutes
+    attempts_delta = db.Column(db.Float, nullable=True)     # actual - expected attempts
+
+    # ── Game-context flags ────────────────────────────────────────────
+    overtime_flag = db.Column(db.Boolean, nullable=False, default=False)
+    blowout_flag = db.Column(db.Boolean, nullable=False, default=False)
+
+    # ── Reason codes (PostmortemReason enum values) ───────────────────
+    primary_reason_code = db.Column(db.String(40), nullable=True, index=True)
+    secondary_reason_code = db.Column(db.String(40), nullable=True)
+    tertiary_reason_code = db.Column(db.String(40), nullable=True)
+    reason_confidence = db.Column(db.Float, nullable=True)  # 0.0–1.0
+
+    # ── Full diagnostic payload ───────────────────────────────────────
+    diagnosis_json = db.Column(db.Text, nullable=True)
+
+    # ── Timestamps ───────────────────────────────────────────────────
+    created_at = db.Column(
+        db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at = db.Column(
+        db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    bet = db.relationship(
+        'Bet',
+        backref=db.backref(
+            'postmortem',
+            uselist=False,
+            cascade='all, delete-orphan',
+            single_parent=True,
+        ),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<BetPostmortem bet_id={self.bet_id} "
+            f"reason={self.primary_reason_code} conf={self.reason_confidence}>"
+        )
+
+    @property
+    def diagnosis(self) -> dict:
+        """Deserialise stored diagnosis JSON; return empty dict if none."""
+        if self.diagnosis_json:
+            try:
+                return json.loads(self.diagnosis_json)
+            except (ValueError, TypeError):
+                return {}
+        return {}
+
+    @property
+    def primary_reason_label(self) -> str:
+        """Human-readable primary reason, e.g. 'Volume Spike'."""
+        code = self.primary_reason_code or PostmortemReason.UNKNOWN.value
+        return code.replace('_', ' ').title()
+
+    @property
+    def confidence_label(self) -> str:
+        conf = self.reason_confidence or 0.0
+        if conf >= 0.75:
+            return 'High'
+        if conf >= 0.55:
+            return 'Medium'
+        return 'Low'

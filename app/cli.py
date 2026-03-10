@@ -817,3 +817,130 @@ def register_cli(app):
             click.echo(f'Retrain result: {result}')
 
         click.echo('Done.')
+
+    # ──────────────────────────────────────────────────────────────────
+    # Postmortem commands
+    # ──────────────────────────────────────────────────────────────────
+
+    @app.cli.command('backfill-postmortems')
+    @click.option(
+        '--days', default=90, show_default=True,
+        help='Analyse settled bets from the last N days.',
+    )
+    @click.option(
+        '--overwrite', is_flag=True, default=False,
+        help='Re-analyse bets that already have a postmortem (update in place).',
+    )
+    @click.option(
+        '--dry-run', is_flag=True, default=False,
+        help='Show counts without writing to the database.',
+    )
+    def cli_backfill_postmortems(days, overwrite, dry_run):
+        """Backfill postmortem records for already-settled player-prop bets.
+
+        Safely skips:
+        - Non-prop bets (moneyline, over/under totals)
+        - Pushes / DNPs (no useful analysis)
+        - Pending bets
+        - Bets with insufficient data (no actual_total)
+
+        Run this after deploying the postmortem system to analyse historical data::
+
+            flask backfill-postmortems --days 60
+        """
+        from app.services.postmortem_service import backfill_postmortems
+        from app.enums import Outcome
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        settled = (
+            Bet.query
+            .filter(Bet.outcome.in_([Outcome.WIN.value, Outcome.LOSE.value]))
+            .filter(Bet.match_date >= cutoff)
+            .filter(Bet.actual_total.isnot(None))
+            .all()
+        )
+
+        click.echo(
+            f'Found {len(settled)} settled bets in last {days} days with actual results.'
+        )
+
+        if dry_run:
+            prop_count = sum(1 for b in settled if b.is_player_prop)
+            existing = sum(1 for b in settled if b.is_player_prop and b.postmortem)
+            click.echo(
+                f'Dry-run: would analyse {prop_count} player-prop bets '
+                f'({existing} already have postmortems; '
+                f'{"overwriting" if overwrite else "skipping"} those).'
+            )
+            return
+
+        summary = backfill_postmortems(settled, skip_existing=not overwrite)
+        click.echo(
+            f"Postmortem backfill complete: "
+            f"created={summary['created']} "
+            f"skipped={summary['skipped']} "
+            f"ineligible={summary['ineligible']} "
+            f"errors={summary['errors']}"
+        )
+
+    @app.cli.command('postmortem-report')
+    @click.option('--days', default=30, show_default=True,
+                  help='Report window in days.')
+    @click.option('--min-count', default=3, show_default=True,
+                  help='Minimum postmortems per reason to include in report.')
+    def cli_postmortem_report(days, min_count):
+        """Print a summary of postmortem reason-code frequency for recent bets.
+
+        Shows what loss/win patterns are most common so you can identify
+        systematic model weaknesses::
+
+            flask postmortem-report --days 60
+        """
+        from app.models import BetPostmortem
+        from collections import Counter
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        pms = (
+            BetPostmortem.query
+            .filter(BetPostmortem.created_at >= cutoff)
+            .all()
+        )
+
+        if not pms:
+            click.echo(f'No postmortems found in the last {days} days.')
+            return
+
+        joined = (
+            db.session.query(BetPostmortem, Bet)
+            .join(Bet, BetPostmortem.bet_id == Bet.id)
+            .filter(BetPostmortem.created_at >= cutoff)
+            .all()
+        )
+
+        total = len(joined)
+        losses = [(pm, b) for pm, b in joined if b.outcome == 'lose']
+        wins = [(pm, b) for pm, b in joined if b.outcome == 'win']
+
+        click.echo(f'\n=== Postmortem Report — Last {days} days ===')
+        click.echo(f'Total analysed: {total}  |  Losses: {len(losses)}  |  Wins: {len(wins)}')
+
+        # Reason distribution for losses
+        loss_reasons = Counter(
+            pm.primary_reason_code for pm, _b in losses if pm.primary_reason_code
+        )
+        click.echo('\nTop loss reasons (primary):')
+        for reason, count in loss_reasons.most_common():
+            if count >= min_count:
+                pct = count / max(len(losses), 1) * 100
+                click.echo(f'  {reason:<35} {count:>4}  ({pct:.0f}%)')
+
+        # Average projection error by reason
+        click.echo('\nAvg projection error by primary reason (losses):')
+        by_reason: dict = {}
+        for pm, _b in losses:
+            if pm.primary_reason_code and pm.projection_error is not None:
+                by_reason.setdefault(pm.primary_reason_code, []).append(pm.projection_error)
+        for reason, errs in sorted(by_reason.items(), key=lambda x: abs(sum(x[1])/len(x[1])), reverse=True):
+            if len(errs) >= min_count:
+                avg = sum(errs) / len(errs)
+                click.echo(f'  {reason:<35} avg_err={avg:+.2f}  n={len(errs)}')

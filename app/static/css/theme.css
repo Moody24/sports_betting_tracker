@@ -1612,3 +1612,101 @@ details[open] .bb-chevron {
   padding: .15rem .4rem;
   border-radius: 2rem;
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   Bet Postmortem — settled-bet analysis panel
+   ═══════════════════════════════════════════════════════════════ */
+
+.postmortem-block {
+  background: rgba(255, 255, 255, .03);
+  border: 1px solid rgba(255, 255, 255, .08);
+  border-radius: .5rem;
+  padding: .45rem .65rem;
+}
+
+.postmortem-summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .3rem;
+  color: var(--text-secondary, #9ba7c2);
+}
+.postmortem-summary::-webkit-details-marker { display: none; }
+.postmortem-summary::marker { display: none; }
+
+.postmortem-icon { font-size: .75rem; }
+
+.postmortem-pill {
+  display: inline-block;
+  font-size: .65rem;
+  font-weight: 600;
+  padding: .1rem .45rem;
+  border-radius: 2rem;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  background: rgba(155, 167, 194, .12);
+  color: #9ba7c2;
+  border: 1px solid rgba(155, 167, 194, .2);
+}
+
+/* Volume-driver pills */
+.postmortem-pill--volume_spike,
+.postmortem-pill--efficiency_spike { background: rgba(255, 193, 7, .12); color: #ffc107; border-color: rgba(255,193,7,.25); }
+.postmortem-pill--volume_drop,
+.postmortem-pill--efficiency_drop { background: rgba(255, 107, 122, .12); color: #ff6b7a; border-color: rgba(255,107,122,.25); }
+
+/* Minutes / role pills */
+.postmortem-pill--minutes_miss,
+.postmortem-pill--role_change { background: rgba(13, 202, 240, .12); color: #0dcaf0; border-color: rgba(13,202,240,.25); }
+
+/* OT / blowout */
+.postmortem-pill--ot_variance { background: rgba(111, 66, 193, .15); color: #a78bfa; border-color: rgba(111,66,193,.25); }
+.postmortem-pill--blowout_distortion { background: rgba(255, 107, 122, .10); color: #ff6b7a; border-color: rgba(255,107,122,.2); }
+
+/* Normal variance = muted */
+.postmortem-pill--normal_variance { background: rgba(47, 201, 143, .10); color: #2fc98f; border-color: rgba(47,201,143,.2); }
+
+/* Model / edge miss */
+.postmortem-pill--projection_model_miss,
+.postmortem-pill--line_value_miss,
+.postmortem-pill--insufficient_edge { background: rgba(255, 193, 7, .10); color: #ffc107; border-color: rgba(255,193,7,.2); }
+
+.postmortem-conf { font-size: .6rem; }
+
+.postmortem-detail {
+  margin-top: .4rem;
+  border-top: 1px solid rgba(255,255,255,.06);
+  padding-top: .4rem;
+}
+
+.postmortem-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .2rem .6rem;
+  font-size: .72rem;
+  margin-bottom: .25rem;
+  align-items: baseline;
+}
+
+.postmortem-label {
+  color: var(--text-muted, #6e7a99);
+  min-width: 4rem;
+}
+
+.postmortem-value {
+  font-weight: 600;
+  color: var(--text-secondary, #9ba7c2);
+  min-width: 2.5rem;
+}
+
+.postmortem-flags {
+  display: flex;
+  gap: .3rem;
+}
+
+.postmortem-reasons {
+  border-top: 1px solid rgba(255,255,255,.05);
+  padding-top: .3rem;
+}

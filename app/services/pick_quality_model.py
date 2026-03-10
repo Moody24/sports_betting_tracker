@@ -24,7 +24,10 @@ logger = logging.getLogger(__name__)
 MODEL_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'ml_models')
 MIN_RESOLVED_PICKS = 100
 
-# Feature keys extracted from PickContext.context_json for training
+# Feature keys extracted from PickContext.context_json for training.
+# Entries added later (minutes_volatility, stat_attempts_volatility) will be
+# zero for older PickContext rows — this is safe; XGBoost handles sparse
+# signals gracefully and the model degrades to the existing features.
 PICK_FEATURES = [
     'projected_stat',
     'projected_edge',
@@ -41,6 +44,10 @@ PICK_FEATURES = [
     'prop_line',
     'american_odds',
     'line_vs_season_avg',
+    # Volatility features: added via postmortem-informed feature engineering.
+    # Zero for older contexts; XGBoost treats missing signal as neutral.
+    'minutes_volatility',
+    'stat_attempts_volatility',
 ]
 
 # String features that need encoding

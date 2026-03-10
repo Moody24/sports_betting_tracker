@@ -706,6 +706,19 @@ def resolve_and_grade():
         db.session.commit()
         logger.info("Graded %d bets", len(resolved))
 
+        # Generate postmortems for newly settled player-prop legs
+        from app.services.postmortem_service import create_or_update_postmortem
+        pm_count = 0
+        for bet_obj, _outcome, _val in resolved:
+            try:
+                result = create_or_update_postmortem(bet_obj)
+                if result is not None:
+                    pm_count += 1
+            except Exception as exc:
+                logger.warning("Postmortem error for bet_id=%s: %s", bet_obj.id, exc)
+        if pm_count:
+            logger.info("Created/updated %d postmortems", pm_count)
+
         # Mark any final-game snapshots as is_final so NBA Today shows them.
         try:
             scoreboards = fetch_espn_scoreboard()
