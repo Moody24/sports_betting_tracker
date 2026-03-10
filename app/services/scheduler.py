@@ -180,12 +180,26 @@ def refresh_injury_reports():
         logger.info("Refreshed %d injury reports", count)
 
 
+def clear_daily_caches():
+    """Clear process-level schedule/context caches at the start of a new game day.
+
+    This ensures the scoreboard and rest-context caches do not carry yesterday's
+    data forward when a new day begins.
+    """
+    from app.services.context_service import clear_schedule_caches
+    clear_schedule_caches()
+    logger.info("Daily schedule caches cleared")
+
+
 def run_projections():
     """Generate projections and value scores for all available props."""
     app = _get_app()
     with app.app_context():
         from app.services.projection_engine import ProjectionEngine
         from app.services.value_detector import ValueDetector
+        # Clear stale rest-context caches before each scheduled scoring run
+        # so back-to-back / days_rest reflect today's actual slate.
+        clear_daily_caches()
 
         _capture_todays_snapshots(prefetch_props=True)
         engine = ProjectionEngine()
@@ -917,6 +931,14 @@ def init_scheduler(app):
     if not _acquire_scheduler_lock():
         logger.info("Skipping APScheduler startup in this process (lock already held)")
         return
+
+    # Midnight cache reset — clear stale schedule/rest context for the new day
+    scheduler.add_job(
+        lambda: _log_job('daily_cache_clear', clear_daily_caches),
+        CronTrigger(hour=0, minute=1, timezone=APP_TIMEZONE),
+        id='daily_cache_clear',
+        replace_existing=True,
+    )
 
     # Morning data refresh (10:00 AM ET)
     scheduler.add_job(

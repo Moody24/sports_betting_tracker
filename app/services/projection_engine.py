@@ -7,6 +7,7 @@ performance, seasonal averages, matchup context, and situational modifiers.
 import logging
 import math
 import os
+import time as _time
 from copy import deepcopy
 from typing import Optional
 
@@ -205,12 +206,19 @@ class ProjectionEngine:
         context_notes = []
         modifier = 1.0
 
-        # Game context
+        # Game context — get_game_context() now uses a process-level cache keyed
+        # by (team_name, today_date) so ESPN scoreboard fetches only happen once
+        # per unique date, regardless of how many players/props trigger this path.
         if team_name:
             ctx_key = (str(player_name).strip().lower(), str(team_name).strip().lower())
             ctx = self._context_cache.get(ctx_key)
             if ctx is None:
+                _t = _time.perf_counter()
                 ctx = get_game_context(player_name, team_name)
+                _elapsed = _time.perf_counter() - _t
+                if _elapsed > 0.05:  # only log slow calls (>50ms means cache miss)
+                    logger.debug("PERF get_game_context player=%s team=%s elapsed=%.3fs",
+                                 player_name, team_name, _elapsed)
                 self._context_cache[ctx_key] = ctx
 
             injury_status = ctx.get('injury_status', 'healthy')

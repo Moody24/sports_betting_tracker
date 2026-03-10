@@ -6,6 +6,7 @@ engine's situational adjustments.
 
 import logging
 import re
+import time as _time
 from datetime import datetime, timezone, date as date_type, timedelta
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -17,6 +18,19 @@ from app.models import InjuryReport
 
 logger = logging.getLogger(__name__)
 APP_TIMEZONE = ZoneInfo("America/New_York")
+
+# ── Module-level scoreboard cache (process-scoped) ────────────────────────
+# Past-date scoreboards never change, so we cache them indefinitely.
+# Today's date uses a 10-min TTL to pick up late score corrections.
+_SCOREBOARD_CACHE: dict[str, dict] = {}       # date_str → raw ESPN JSON
+_SCOREBOARD_CACHE_TTL_PAST = 86_400           # past dates: 24 h
+_SCOREBOARD_CACHE_TTL_TODAY = 600             # today's date: 10 min
+_SCOREBOARD_CACHE_EXPIRES: dict[str, float] = {}
+
+# Process-scoped game-context cache (team_name_lower, today_date_str) → ctx dict
+# TTL matches the scoring cache so context doesn't go stale between scoring runs.
+_GAME_CONTEXT_CACHE: dict[tuple, dict] = {}
+_GAME_CONTEXT_CACHE_TTL = 600   # 10 min
 
 ESPN_INJURIES_URL = (
     "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries"
@@ -146,6 +160,57 @@ def _today_et() -> date_type:
     return datetime.now(APP_TIMEZONE).date()
 
 
+def _fetch_scoreboard_for_date(date_str: str) -> dict:
+    """Fetch ESPN scoreboard for *date_str* (YYYYMMDD), with process-level caching.
+
+    Past dates are cached for 24 h (they never change).
+    Today's date is cached for 10 min to pick up late corrections.
+    All callers share the same cached payload so a single date is never
+    fetched more than once per TTL window, regardless of how many teams
+    or players trigger a lookup.
+    """
+    now = _time.monotonic()
+    if date_str in _SCOREBOARD_CACHE and now < _SCOREBOARD_CACHE_EXPIRES.get(date_str, 0):
+        return _SCOREBOARD_CACHE[date_str]
+
+    t0 = _time.perf_counter()
+    try:
+        resp = requests.get(
+            ESPN_SCOREBOARD_URL,
+            params={'dates': date_str},
+            timeout=10,
+            headers={"User-Agent": "sports-betting-tracker/1.0"},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except (requests.RequestException, ValueError) as exc:
+        logger.warning("ESPN scoreboard fetch failed for %s: %s", date_str, exc)
+        data = {}
+
+    elapsed = _time.perf_counter() - t0
+    logger.debug("PERF scoreboard fetch date=%s elapsed=%.2fs events=%d",
+                 date_str, elapsed, len(data.get('events', [])))
+
+    today_str = _today_et().strftime('%Y%m%d')
+    ttl = _SCOREBOARD_CACHE_TTL_TODAY if date_str == today_str else _SCOREBOARD_CACHE_TTL_PAST
+    _SCOREBOARD_CACHE[date_str] = data
+    _SCOREBOARD_CACHE_EXPIRES[date_str] = now + ttl
+    return data
+
+
+def _team_played_on_date(team_name: str, date_str: str) -> bool:
+    """Return True if *team_name* appears in the ESPN scoreboard for *date_str*."""
+    data = _fetch_scoreboard_for_date(date_str)
+    team_lower = team_name.lower().strip()
+    for event in data.get('events', []):
+        comp = event.get('competitions', [{}])[0]
+        for team in comp.get('competitors', []):
+            name = team.get('team', {}).get('displayName', '').lower()
+            if team_lower in name or name in team_lower:
+                return True
+    return False
+
+
 def refresh_injuries() -> int:
     """Refresh the injury report table with latest data.
 
@@ -238,66 +303,27 @@ def is_player_available(player_name: str) -> bool:
 def check_back_to_back(team_name: str) -> bool:
     """Check if a team played yesterday (back-to-back situation).
 
-    Uses ESPN scoreboard for yesterday's date.
+    Reads from the shared per-date scoreboard cache — never makes a
+    redundant ESPN request if the same date was already fetched.
     """
     yesterday = _today_et() - timedelta(days=1)
     date_str = yesterday.strftime('%Y%m%d')
-
-    try:
-        resp = requests.get(
-            ESPN_SCOREBOARD_URL,
-            params={'dates': date_str},
-            timeout=10,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-    except (requests.RequestException, ValueError) as exc:
-        logger.error("ESPN scoreboard fetch for B2B check failed: %s", exc)
-        return False
-
-    team_lower = team_name.lower().strip()
-    for event in data.get('events', []):
-        comp = event.get('competitions', [{}])[0]
-        for team in comp.get('competitors', []):
-            name = team.get('team', {}).get('displayName', '').lower()
-            if team_lower in name or name in team_lower:
-                return True
-
-    return False
+    return _team_played_on_date(team_name, date_str)
 
 
 def get_days_rest(team_name: str, check_days: int = 5) -> int:
     """Return the number of days since the team's last game.
 
     Checks the last ``check_days`` worth of ESPN scoreboards.
-    Returns 0 if played yesterday, 1 if day before, etc.
+    Each date's scoreboard is fetched at most once (shared cache).
     Defaults to 2 if no recent game is found.
     """
     today = _today_et()
-    team_lower = team_name.lower().strip()
-
     for days_ago in range(1, check_days + 1):
         check_date = today - timedelta(days=days_ago)
         date_str = check_date.strftime('%Y%m%d')
-
-        try:
-            resp = requests.get(
-                ESPN_SCOREBOARD_URL,
-                params={'dates': date_str},
-                timeout=10,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-        except (requests.RequestException, ValueError):
-            continue
-
-        for event in data.get('events', []):
-            comp = event.get('competitions', [{}])[0]
-            for team in comp.get('competitors', []):
-                name = team.get('team', {}).get('displayName', '').lower()
-                if team_lower in name or name in team_lower:
-                    return days_ago
-
+        if _team_played_on_date(team_name, date_str):
+            return days_ago
     return 2  # Default assumption
 
 
@@ -305,11 +331,43 @@ def get_game_context(player_name: str, team_name: str) -> dict:
     """Build a full context dict for a player's upcoming game.
 
     Returns {injury_status, back_to_back, days_rest, is_available}.
+
+    Results are cached at the process level (keyed by team + today's date)
+    so repeated calls across multiple scoring passes reuse the same result
+    without re-fetching ESPN data.
     """
-    injury = get_player_injury_status(player_name)
+    today_str = _today_et().strftime('%Y%m%d')
+    ctx_key = (team_name.lower().strip(), today_str)
+
+    now = _time.monotonic()
+    cached = _GAME_CONTEXT_CACHE.get(ctx_key)
+    # The context dict carries an '_expires' sentinel for TTL management.
+    if cached and now < cached.get('_expires', 0):
+        # Injury status is player-specific — update it from DB without re-fetching ESPN.
+        injury = get_player_injury_status(player_name)
+        result = dict(cached)
+        result['injury_status'] = injury.get('status', 'healthy')
+        result['injury_detail'] = injury.get('detail', '')
+        result['is_available'] = is_player_available(player_name)
+        result.pop('_expires', None)
+        return result
+
+    t0 = _time.perf_counter()
     b2b = check_back_to_back(team_name)
     days_rest = 0 if b2b else get_days_rest(team_name)
+    elapsed = _time.perf_counter() - t0
+    logger.debug("PERF get_game_context team=%s b2b=%s days_rest=%d elapsed=%.2fs",
+                 team_name, b2b, days_rest, elapsed)
 
+    # Store the team-level schedule context (no player-specific fields).
+    team_ctx = {
+        'back_to_back': b2b,
+        'days_rest': days_rest,
+        '_expires': now + _GAME_CONTEXT_CACHE_TTL,
+    }
+    _GAME_CONTEXT_CACHE[ctx_key] = team_ctx
+
+    injury = get_player_injury_status(player_name)
     return {
         'injury_status': injury.get('status', 'healthy'),
         'injury_detail': injury.get('detail', ''),
@@ -317,3 +375,14 @@ def get_game_context(player_name: str, team_name: str) -> dict:
         'days_rest': days_rest,
         'is_available': is_player_available(player_name),
     }
+
+
+def clear_schedule_caches() -> None:
+    """Clear all process-level schedule/context caches.
+
+    Call at the start of a new game day so stale data is not carried forward.
+    """
+    _SCOREBOARD_CACHE.clear()
+    _SCOREBOARD_CACHE_EXPIRES.clear()
+    _GAME_CONTEXT_CACHE.clear()
+    logger.info("Schedule caches cleared")

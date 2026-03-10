@@ -537,6 +537,11 @@ class TestStatsService(BaseTestCase):
 class TestContextService(BaseTestCase):
     """Tests for context_service: injuries, B2B, rest days, game context."""
 
+    def setUp(self):
+        super().setUp()
+        from app.services.context_service import clear_schedule_caches
+        clear_schedule_caches()
+
     # -- fetch_espn_injuries --
 
     @patch('app.services.context_service.requests.get')
@@ -722,7 +727,7 @@ class TestContextService(BaseTestCase):
     def test_get_days_rest_found(self, mock_get):
         from app.services.context_service import get_days_rest, _today_et
 
-        def side_effect(url, params=None, timeout=None):
+        def side_effect(url, params=None, timeout=None, **kwargs):
             resp = MagicMock()
             resp.raise_for_status.return_value = None
             date_str = params.get('dates', '') if params else ''
@@ -2504,7 +2509,7 @@ class TestScheduler(BaseTestCase):
                 with patch.object(scheduler_module, '_acquire_scheduler_lock', return_value=True):
                     scheduler_module.init_scheduler(self.app)
         self.assertTrue(fake.started)
-        self.assertEqual(len(fake.jobs), 12)
+        self.assertEqual(len(fake.jobs), 13)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
