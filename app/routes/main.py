@@ -1,5 +1,4 @@
 import logging
-import time
 from collections import defaultdict
 
 from flask import Blueprint, jsonify, render_template, request, redirect, url_for, flash
@@ -14,10 +13,6 @@ logger = logging.getLogger(__name__)
 
 main = Blueprint('main', __name__)
 
-# Simple in-memory cache for expensive ML projections (per-process).
-# Avoids blocking dashboard rendering with ~1s+ of ML computation on every load.
-_plays_cache: dict = {'key': None, 'top_plays': [], 'best_parlay': None, 'ts': 0}
-_PLAYS_CACHE_TTL = 300  # 5 minutes
 
 
 @main.route('/ready')
@@ -174,25 +169,15 @@ def _attach_parlay_leg_counts(bets: list) -> None:
 
 
 def _get_cached_plays() -> tuple:
-    """Return (top_plays, best_parlay) from a time-based cache.
-
-    The ML projection engine is expensive (~1s+). Caching its output for
-    5 minutes prevents it from blocking every dashboard page load.
-    """
-    now = time.time()
-    if _plays_cache['key'] == 'loaded' and (now - _plays_cache['ts']) < _PLAYS_CACHE_TTL:
-        return _plays_cache['top_plays'], _plays_cache['best_parlay']
-
+    """Return (top_plays, best_parlay) derived from the shared score cache."""
     top_plays = []
     best_parlay = None
     try:
-        from app.services.projection_engine import ProjectionEngine
+        from app.services.score_cache import get_todays_scores
         from app.services.value_detector import ValueDetector
-        engine = ProjectionEngine()
-        detector = ValueDetector(engine)
-        all_scores = detector.score_all_todays_props()
-        top_plays = detector.filter_plays(all_scores, min_edge=0.08)[:5]
-        best_parlay = detector.recommend_best_parlay(
+        all_scores = get_todays_scores()
+        top_plays = ValueDetector.filter_plays(all_scores, min_edge=0.08)[:5]
+        best_parlay = ValueDetector().recommend_best_parlay(
             scores=all_scores,
             min_edge=0.08,
             min_odds=100,
@@ -200,7 +185,6 @@ def _get_cached_plays() -> tuple:
             min_legs=2,
             max_legs=3,
         )
-        _plays_cache.update(key='loaded', top_plays=top_plays, best_parlay=best_parlay, ts=now)
     except Exception as exc:
         logger.debug("Top plays unavailable: %s", exc)
 

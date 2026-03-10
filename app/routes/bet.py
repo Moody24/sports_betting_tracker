@@ -1731,11 +1731,12 @@ def export_bets():
 @login_required
 def nba_analysis():
     """Display model-driven prop analysis with value detection."""
-    engine = ProjectionEngine()
-    detector = ValueDetector(engine)
+    from app.services.score_cache import get_todays_scores
+    from app.services.value_detector import ValueDetector
 
     try:
-        eligible_plays = detector.filter_plays(detector.score_all_todays_props(), min_edge=0.03)
+        all_scores = get_todays_scores()
+        eligible_plays = ValueDetector.filter_plays(all_scores, min_edge=0.03)
         value_plays = eligible_plays[:50]
     except Exception as exc:
         logger.error("Analysis engine error: %s", exc)
@@ -1807,13 +1808,11 @@ def nba_player_analysis(player_name):
 @login_required
 def nba_stat_analysis():
     """Display today's props grouped by matchup with a slide-in detail panel."""
-    from app.services.projection_engine import ProjectionEngine
-    from app.services.value_detector import ValueDetector
+    from app.services.score_cache import get_todays_scores
     from app.services.nba_service import get_todays_games
 
-    engine = ProjectionEngine()
     try:
-        scores = ValueDetector(engine).score_all_todays_props()
+        scores = get_todays_scores()
     except Exception as exc:
         logger.error("Stat analysis engine error: %s", exc)
         scores = []

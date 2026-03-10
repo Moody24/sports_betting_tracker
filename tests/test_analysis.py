@@ -379,18 +379,18 @@ class TestContextService(BaseTestCase):
 class TestAnalysisRoute(BaseTestCase):
     """Test the analysis page route."""
 
+    def setUp(self):
+        super().setUp()
+        from app.services.score_cache import invalidate_scores
+        invalidate_scores()
+
     def test_analysis_page_requires_login(self):
         resp = self.client.get('/nba/analysis')
         self.assertEqual(resp.status_code, 302)
 
     def test_analysis_page_loads(self):
         self.register_and_login()
-        with patch('app.routes.bet.ValueDetector') as mock_vd:
-            mock_instance = MagicMock()
-            mock_instance.score_all_todays_props.return_value = []
-            mock_instance.filter_plays.return_value = []
-            mock_vd.return_value = mock_instance
-
+        with patch('app.services.score_cache.get_todays_scores', return_value=[]):
             resp = self.client.get('/nba/analysis')
             self.assertEqual(resp.status_code, 200)
             self.assertIn(b'NBA Prop Analysis', resp.data)
@@ -418,12 +418,8 @@ class TestAnalysisRoute(BaseTestCase):
         full_filtered = [_play(1, 'strong'), _play(2, 'strong'), _play(2, 'moderate')]
         full_filtered.extend(_play(i, 'strong') for i in range(3, 61))
 
-        with patch('app.routes.bet.ValueDetector') as mock_vd:
-            mock_instance = MagicMock()
-            mock_instance.score_all_todays_props.return_value = ['raw']
-            mock_instance.filter_plays.return_value = full_filtered
-            mock_vd.return_value = mock_instance
-
+        with patch('app.services.score_cache.get_todays_scores', return_value=full_filtered), \
+             patch('app.services.value_detector.ValueDetector.filter_plays', return_value=full_filtered):
             resp = self.client.get('/nba/analysis')
             self.assertEqual(resp.status_code, 200)
             self.assertIn(b'Value Plays Found', resp.data)

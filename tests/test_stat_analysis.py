@@ -88,6 +88,11 @@ class TestBuildStatContext(BaseTestCase):
 
 class TestStatAnalysisRoute(BaseTestCase):
 
+    def setUp(self):
+        super().setUp()
+        from app.services.score_cache import invalidate_scores
+        invalidate_scores()
+
     def _login(self):
         return self.register_and_login()
 
@@ -124,7 +129,7 @@ class TestStatAnalysisRoute(BaseTestCase):
         }]
 
     @patch('app.services.nba_service.get_todays_games')
-    @patch('app.services.value_detector.ValueDetector.score_all_todays_props')
+    @patch('app.services.score_cache.get_todays_scores')
     def test_returns_200(self, mock_scores, mock_games):
         mock_scores.return_value = self._mock_scores()
         mock_games.return_value = self._mock_games()
@@ -133,7 +138,7 @@ class TestStatAnalysisRoute(BaseTestCase):
         self.assertEqual(resp.status_code, 200)
 
     @patch('app.services.nba_service.get_todays_games')
-    @patch('app.services.value_detector.ValueDetector.score_all_todays_props')
+    @patch('app.services.score_cache.get_todays_scores')
     def test_stat_filter_narrows_props(self, mock_scores, mock_games):
         scores = self._mock_scores() + self._mock_scores({'prop_type': 'player_rebounds', 'player': 'P2'})
         mock_scores.return_value = scores
@@ -146,7 +151,7 @@ class TestStatAnalysisRoute(BaseTestCase):
         self.assertNotIn('Test Player', body)
 
     @patch('app.services.nba_service.get_todays_games')
-    @patch('app.services.value_detector.ValueDetector.score_all_todays_props')
+    @patch('app.services.score_cache.get_todays_scores')
     def test_search_filter(self, mock_scores, mock_games):
         scores = self._mock_scores() + self._mock_scores({'player': 'Curry Test', 'game_id': 'game1'})
         mock_scores.return_value = scores
@@ -159,7 +164,7 @@ class TestStatAnalysisRoute(BaseTestCase):
         self.assertNotIn('Test Player', body)
 
     @patch('app.services.nba_service.get_todays_games')
-    @patch('app.services.value_detector.ValueDetector.score_all_todays_props')
+    @patch('app.services.score_cache.get_todays_scores')
     def test_indicator_strong(self, mock_scores, mock_games):
         mock_scores.return_value = self._mock_scores({'confidence_tier': 'strong', 'edge': 0.20})
         mock_games.return_value = self._mock_games()
@@ -169,7 +174,7 @@ class TestStatAnalysisRoute(BaseTestCase):
         self.assertIn(b'sa-ind-badge-strong', resp.data)
 
     @patch('app.services.nba_service.get_todays_games')
-    @patch('app.services.value_detector.ValueDetector.score_all_todays_props')
+    @patch('app.services.score_cache.get_todays_scores')
     def test_indicator_avoid_on_low_wp(self, mock_scores, mock_games):
         """wp=0.35 overrides moderate confidence_tier → avoid."""
         mock_scores.return_value = self._mock_scores({'confidence_tier': 'moderate', 'win_probability': 0.35})
@@ -180,7 +185,7 @@ class TestStatAnalysisRoute(BaseTestCase):
         self.assertIn(b'sa-ind-badge-avoid', resp.data)
 
     @patch('app.services.nba_service.get_todays_games')
-    @patch('app.services.value_detector.ValueDetector.score_all_todays_props')
+    @patch('app.services.score_cache.get_todays_scores')
     def test_matchup_grouping(self, mock_scores, mock_games):
         """Props with same game_id appear in the same matchup card."""
         mock_scores.return_value = self._mock_scores() + self._mock_scores({'player': 'Second Player'})

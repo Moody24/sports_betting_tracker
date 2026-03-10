@@ -187,7 +187,9 @@ def clear_daily_caches():
     data forward when a new day begins.
     """
     from app.services.context_service import clear_schedule_caches
+    from app.services.score_cache import invalidate_scores
     clear_schedule_caches()
+    invalidate_scores()
     logger.info("Daily schedule caches cleared")
 
 
@@ -210,6 +212,11 @@ def run_projections():
             "Projections complete: %d total props, %d strong value plays",
             len(plays), len(strong),
         )
+
+        # Invalidate the shared score cache so the next page request picks
+        # up freshly computed scores rather than serving stale cached data.
+        from app.services.score_cache import invalidate_scores
+        invalidate_scores()
 
 
 def _capture_todays_snapshots(prefetch_props: bool = True):
