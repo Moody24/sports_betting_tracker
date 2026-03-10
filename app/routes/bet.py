@@ -128,6 +128,17 @@ _PROP_PROGRESS_CACHE: dict[tuple, dict] = {}
 _PROP_PROGRESS_TTL_SECONDS = 30
 _PROP_PROGRESS_CACHE_MAX = 2000
 
+# Snapshot live-score write debounce: only commit live score updates once per
+# _SNAPSHOT_WRITE_TTL seconds per game.  New (unseen) snapshots are always written.
+_SNAPSHOT_WRITE_TS: dict[str, float] = {}   # espn_id → last commit monotonic
+_SNAPSHOT_WRITE_TTL = 60                    # 60 s between live-score DB writes
+
+# Backfill debounce: track which bet IDs we've already attempted to backfill
+# this process session so we don't call ESPN + commit on every /bets GET.
+# Entries expire after _BACKFILL_TTL to allow a retry once per interval.
+_BACKFILL_ATTEMPTED: dict[int, float] = {}  # bet_id → attempted_at monotonic
+_BACKFILL_TTL = 300                         # 5 min retry window
+
 
 def _escape_like(value: str) -> str:
     """Escape LIKE special characters so user input is treated as a literal string."""
@@ -401,9 +412,20 @@ def place_bet():
     pending_first = sa_case((Bet.outcome == Outcome.PENDING.value, 0), else_=1)
     bets = query.order_by(pending_first, Bet.match_date.desc()).all()
 
-    # Backfill missing ESPN game IDs so prop tracker cards appear
-    pending_props = [b for b in bets if b.outcome == Outcome.PENDING.value and b.is_player_prop and not b.external_game_id]
+    # Backfill missing ESPN game IDs so prop tracker cards appear.
+    # Debounced: skip bet IDs already attempted within _BACKFILL_TTL to avoid
+    # making an ESPN API call + DB write on every single /bets page load.
+    _now_bt = time.monotonic()
+    pending_props = [
+        b for b in bets
+        if b.outcome == Outcome.PENDING.value
+        and b.is_player_prop
+        and not b.external_game_id
+        and _now_bt - _BACKFILL_ATTEMPTED.get(b.id, 0) >= _BACKFILL_TTL
+    ]
     if pending_props:
+        for _b in pending_props:
+            _BACKFILL_ATTEMPTED[_b.id] = _now_bt
         try:
             backfill_game_ids(pending_props)
         except Exception:
@@ -644,13 +666,15 @@ def nba_today():
     ) if espn_ids else []
     snap_map = {s.espn_id: s for s in existing_snaps}
 
+    now_mono = time.monotonic()
     for game in games:
         snap = snap_map.get(game['espn_id'])
+        eid = game['espn_id']
 
         if snap is None:
-            # First view: lock in odds/moneyline now
+            # First view: always write — lock in odds/moneyline immediately
             snap = GameSnapshot(
-                espn_id=game['espn_id'],
+                espn_id=eid,
                 game_date=today,
                 home_team=game['home']['name'],
                 away_team=game['away']['name'],
@@ -665,8 +689,9 @@ def nba_today():
                 is_final=(game['status'] == 'STATUS_FINAL'),
             )
             db.session.add(snap)
-        else:
-            # Subsequent view: update live data but never overwrite locked odds
+            _SNAPSHOT_WRITE_TS[eid] = now_mono
+        elif now_mono - _SNAPSHOT_WRITE_TS.get(eid, 0) >= _SNAPSHOT_WRITE_TTL:
+            # Debounced subsequent view: only write live-score updates every 60 s
             snap.home_score = game['home']['score']
             snap.away_score = game['away']['score']
             snap.status = game['status']
@@ -677,6 +702,7 @@ def nba_today():
                 snap.home_logo = game['home'].get('logo', '')
             if not snap.away_logo:
                 snap.away_logo = game['away'].get('logo', '')
+            _SNAPSHOT_WRITE_TS[eid] = now_mono
 
         # Opportunistically lock player props while an Odds event mapping exists.
         if snap.props_json is None:
@@ -686,7 +712,8 @@ def nba_today():
                 if props:
                     snap.props_json = json.dumps(props)
 
-    db.session.commit()
+    if db.session.new or db.session.dirty:
+        db.session.commit()
 
     # Separate active (non-final) vs completed today
     active_games = [g for g in games if g['status'] != 'STATUS_FINAL']
