@@ -33,6 +33,7 @@ from app.services.projection_engine import ProjectionEngine
 from app.services.value_detector import ValueDetector, quarter_kelly
 from app.services.feature_engine import build_pick_context_features
 from app.services.stats_service import find_player_id, get_cached_logs, get_player_stats_summary
+from app.services.postmortem_service import create_or_update_postmortem
 
 logger = logging.getLogger(__name__)
 
@@ -855,6 +856,12 @@ def nba_update_results():
 
     if count:
         db.session.commit()
+        # Generate postmortems for newly settled player-prop legs
+        for bet_obj, outcome, _actual in resolved:
+            try:
+                create_or_update_postmortem(bet_obj)
+            except Exception:
+                logger.exception("Postmortem failed for bet_id=%s", bet_obj.id)
         flash(f'Updated {count} bet(s) with final results.', 'success')
     else:
         flash('No pending bets could be resolved yet.', 'info')
@@ -1792,6 +1799,11 @@ def grade_bet(bet_id):
         return redirect(request.referrer or url_for('bet.place_bet'))
     bet_obj.outcome = outcome
     db.session.commit()
+    # Attempt postmortem on manual grade (may have limited data without actual_total)
+    try:
+        create_or_update_postmortem(bet_obj)
+    except Exception:
+        logger.exception("Postmortem failed for manually graded bet_id=%s", bet_obj.id)
     flash(f'Bet graded as {outcome}.', 'success')
     return redirect(request.referrer or url_for('bet.place_bet'))
 

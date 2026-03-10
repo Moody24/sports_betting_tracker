@@ -226,6 +226,12 @@ def build_pick_context_features(
 
         # Context flags
         'context_flags': flags,
+
+        # Volatility features — help Model 2 learn which players are high-risk
+        # regardless of edge direction.  Computed here at placement time so they
+        # are available in PickContext without any postmortem join.
+        'minutes_volatility': _compute_std(logs[:20], 'minutes'),
+        'stat_attempts_volatility': _compute_attempts_volatility(logs[:20], prop_type),
     }
 
 
@@ -329,6 +335,20 @@ def _compute_hit_rate(logs: list, stat_key: str, line: float) -> float:
 
     hits = sum(1 for l in logs if (getattr(l, stat_key, 0) or 0) > line)
     return hits / len(logs)
+
+
+def _compute_attempts_volatility(logs: list, prop_type: str) -> float:
+    """Std deviation of shot attempts relevant to this prop type.
+
+    For points props: FGA std dev.
+    For threes props: FG3A std dev.
+    Returns 0.0 for props where attempts are not applicable.
+    """
+    from app.services.postmortem_service import PROP_TO_ATTEMPTS_KEY
+    attempts_key = PROP_TO_ATTEMPTS_KEY.get(prop_type)
+    if not attempts_key:
+        return 0.0
+    return _compute_std(logs, attempts_key)
 
 
 def infer_player_position(summary: dict) -> str:

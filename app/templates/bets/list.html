@@ -155,6 +155,113 @@
             </div>
           {% endif %}
 
+          {# ── Postmortem summary (settled player props only) ── #}
+          {% if b.is_player_prop and b.outcome in ('win', 'lose') and b.postmortem %}
+            {% set pm = b.postmortem %}
+            <details class="postmortem-block mt-2">
+              <summary class="postmortem-summary small">
+                <span class="postmortem-icon">🔍</span>
+                <span class="fw-semibold">Why it
+                  {% if b.outcome == 'win' %}won{% else %}lost{% endif %}:
+                </span>
+                <span class="postmortem-pill postmortem-pill--{{ pm.primary_reason_code }}">
+                  {{ pm.primary_reason_label }}
+                </span>
+                {% if pm.secondary_reason_code %}
+                  <span class="postmortem-pill postmortem-pill--secondary">
+                    {{ pm.secondary_reason_code | replace('_', ' ') | title }}
+                  </span>
+                {% endif %}
+                <span class="postmortem-conf text-secondary ms-1">({{ pm.confidence_label }})</span>
+              </summary>
+
+              <div class="postmortem-detail mt-2">
+                {# Stat comparison row #}
+                <div class="postmortem-row">
+                  <span class="postmortem-label">Projected</span>
+                  <span class="postmortem-value">
+                    {% if pm.projected_stat is not none %}
+                      {{ '%.1f'|format(pm.projected_stat) }}
+                    {% else %}—{% endif %}
+                  </span>
+                  <span class="postmortem-label">Actual</span>
+                  <span class="postmortem-value {{ 'text-success' if b.outcome == 'win' else 'text-danger' }}">
+                    {{ '%.1f'|format(pm.actual_stat) if pm.actual_stat is not none else '—' }}
+                  </span>
+                  <span class="postmortem-label">Error</span>
+                  <span class="postmortem-value">
+                    {% if pm.projection_error is not none %}
+                      {{ '+' if pm.projection_error > 0 else '' }}{{ '%.1f'|format(pm.projection_error) }}
+                    {% else %}—{% endif %}
+                  </span>
+                </div>
+
+                {# Minutes row (when data available) #}
+                {% if pm.expected_minutes is not none or pm.actual_minutes is not none %}
+                <div class="postmortem-row">
+                  <span class="postmortem-label">Min exp.</span>
+                  <span class="postmortem-value">
+                    {{ '%.0f'|format(pm.expected_minutes) if pm.expected_minutes is not none else '—' }}
+                  </span>
+                  <span class="postmortem-label">Min actual</span>
+                  <span class="postmortem-value {% if pm.minutes_delta and pm.minutes_delta | abs > 4 %}text-warning{% endif %}">
+                    {{ '%.0f'|format(pm.actual_minutes) if pm.actual_minutes is not none else '—' }}
+                  </span>
+                  {% if pm.minutes_delta is not none %}
+                  <span class="postmortem-label">Δ</span>
+                  <span class="postmortem-value {% if pm.minutes_delta > 0 %}text-success{% elif pm.minutes_delta < 0 %}text-danger{% endif %}">
+                    {{ '+' if pm.minutes_delta > 0 else '' }}{{ '%.0f'|format(pm.minutes_delta) }}
+                  </span>
+                  {% endif %}
+                </div>
+                {% endif %}
+
+                {# Attempts row (points/threes only) #}
+                {% if pm.expected_attempts is not none or pm.actual_attempts is not none %}
+                <div class="postmortem-row">
+                  <span class="postmortem-label">Att. exp.</span>
+                  <span class="postmortem-value">
+                    {{ '%.1f'|format(pm.expected_attempts) if pm.expected_attempts is not none else '—' }}
+                  </span>
+                  <span class="postmortem-label">Att. actual</span>
+                  <span class="postmortem-value {% if pm.attempts_delta and pm.attempts_delta | abs > 3 %}text-warning{% endif %}">
+                    {{ '%.0f'|format(pm.actual_attempts) if pm.actual_attempts is not none else '—' }}
+                  </span>
+                  {% if pm.attempts_delta is not none %}
+                  <span class="postmortem-label">Δ</span>
+                  <span class="postmortem-value {% if pm.attempts_delta > 0 %}text-success{% elif pm.attempts_delta < 0 %}text-danger{% endif %}">
+                    {{ '+' if pm.attempts_delta > 0 else '' }}{{ '%.0f'|format(pm.attempts_delta) }}
+                  </span>
+                  {% endif %}
+                </div>
+                {% endif %}
+
+                {# Context flags #}
+                {% if pm.overtime_flag or pm.blowout_flag %}
+                <div class="postmortem-flags mt-1">
+                  {% if pm.overtime_flag %}
+                    <span class="badge text-bg-info text-dark">OT</span>
+                  {% endif %}
+                  {% if pm.blowout_flag %}
+                    <span class="badge text-bg-warning text-dark">Blowout</span>
+                  {% endif %}
+                </div>
+                {% endif %}
+
+                {# Secondary/tertiary reasons #}
+                {% if pm.secondary_reason_code %}
+                <div class="postmortem-reasons mt-1 small text-secondary">
+                  Also:
+                  {{ pm.secondary_reason_code | replace('_', ' ') | title }}
+                  {% if pm.tertiary_reason_code %}
+                    · {{ pm.tertiary_reason_code | replace('_', ' ') | title }}
+                  {% endif %}
+                </div>
+                {% endif %}
+              </div>
+            </details>
+          {% endif %}
+
           {% if b.notes and not b.notes.startswith('AUTO_BOOTSTRAP_HIDDEN') %}
             {% set _note_clean = b.notes.replace('straight · Auto', 'Auto pick').replace('3leg_parlay · Auto', 'Auto pick').replace('2leg_parlay · Auto', 'Auto pick').replace('straight', '').strip(' ·') %}
             {% if _note_clean %}
