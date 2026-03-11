@@ -55,6 +55,28 @@ railway logs
 - Auto-deploys on every push to `main` (no manual deploy step needed)
 - Health check endpoint: `/health` → `{"status": "healthy"}`
 
+## Key Model Fields (avoid wrong-field errors)
+- `Bet`: `outcome` (not `result`), `prop_line` (not `line`/`over_under`), `source='auto_generated'` for auto picks
+- `BetPostmortem`: `projected_stat`, `actual_stat`, `stat_type`, `prop_line` — join to `Bet` for `prop_type`/`player_name`
+- `PlayerGameLog`: `win_loss` ('W'/'L'), `plus_minus` (float), `team_abbr`, `home_away` ('home'/'away')
+
+## Local DB Scripts (connect to Neon, not SQLite)
+```
+source .venv/bin/activate && export $(grep -v '^#' .env | grep -v '^\s*$' | xargs) 2>/dev/null; python << 'PYEOF'
+# script here
+PYEOF
+```
+- `set -a && source .env` fails on `.env` lines with `&` — use the `export $(xargs)` form instead
+
+## Force Model Retrain
+```
+flask retrain --force   # skips guardrails; retrains all 6 projection + pick quality models (~5-10 min)
+```
+
+## Git Workflow
+- Always `git pull --rebase origin main` before push — Railway CI pushes can cause divergence
+- Exclude `instance.bak/` and `tests/helpers.py.backup` from commits (untracked noise, not gitignored)
+
 ## Definition of Done
 - Ensure no horizontal overflow at `320px` viewport width on the bets list.
 - Ensure no overlap between status / P&L / actions at breakpoints `1200`, `992`, `768`, `576`, and `375`.

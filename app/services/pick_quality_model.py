@@ -271,7 +271,12 @@ def train_pick_quality_model(user_id: int | None = None) -> dict:
         model.save_model(filepath)
     artifact_path = persist_model_artifact(filepath, filename)
 
-    # Store metadata
+    # Store metadata — reconnect first; training can take minutes and Neon drops idle SSL connections.
+    try:
+        db.session.remove()
+        db.engine.dispose()
+    except Exception:
+        pass
     ModelMetadata.query.filter_by(
         model_name=model_name, is_active=True,
     ).update({'is_active': False})

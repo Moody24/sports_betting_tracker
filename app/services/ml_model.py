@@ -306,6 +306,13 @@ def train_model(stat_type: str) -> dict:
 
     # Store metadata
     version = f"{stat_type}_{today}"
+    # Reconnect before DB writes — training can take 5-10 min and Neon/serverless
+    # Postgres drops idle SSL connections; remove the stale connection from the pool.
+    try:
+        db.session.remove()
+        db.engine.dispose()
+    except Exception:
+        pass
     # Deactivate previous models for this stat type
     ModelMetadata.query.filter_by(
         model_name=f"projection_{stat_type}", is_active=True
