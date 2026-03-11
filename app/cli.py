@@ -1053,7 +1053,6 @@ def register_cli(app):
         - DB index coverage (key composite indexes present)
         """
         import os
-        from datetime import date as date_type
         from zoneinfo import ZoneInfo
 
         now_et = datetime.now(ZoneInfo("America/New_York"))

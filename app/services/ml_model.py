@@ -164,7 +164,6 @@ def check_defense_snapshot_staleness() -> dict:
     Returns dict with keys ``stale`` (bool), ``days_old`` (int or None),
     ``latest_date`` (date or None).
     """
-    from datetime import date as date_type
     from zoneinfo import ZoneInfo
 
     latest = (

@@ -4,11 +4,8 @@ and prod-readiness CLI command."""
 
 import json
 from datetime import datetime, timezone, timedelta, date as date_type
-from unittest.mock import patch, MagicMock
-
 from app import db
 from app.models import (
-    Bet,
     BetPostmortem,
     JobLog,
     ModelMetadata,
@@ -94,11 +91,6 @@ class TestModelAccuracyCLI(BaseTestCase):
     """Tests for the flask model_accuracy command."""
 
     def _run_model_accuracy(self, *args):
-        from click.testing import CliRunner
-        runner = CliRunner()
-        with self.app.app_context():
-            from flask.cli import FlaskGroup
-            # Use app.test_cli_runner for simplicity
         return self.app.test_cli_runner().invoke(args=list(('model_accuracy',) + args))
 
     def test_model_accuracy_no_data(self):
