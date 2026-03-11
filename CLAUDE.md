@@ -68,10 +68,25 @@ PYEOF
 ```
 - `set -a && source .env` fails on `.env` lines with `&` — use the `export $(xargs)` form instead
 
+## Local Dev Startup
+```
+source .venv/bin/activate && export $(grep -v '^#' .env | grep -v '^\s*$' | xargs) 2>/dev/null; flask run
+```
+
 ## Force Model Retrain
 ```
-flask retrain --force   # skips guardrails; retrains all 6 projection + pick quality models (~5-10 min)
+source .venv/bin/activate && export $(grep -v '^#' .env | grep -v '^\s*$' | xargs) 2>/dev/null; flask retrain --force
 ```
+- Takes ~8-10 min; Neon drops SSL after ~5 min idle — `db.session.remove(); db.engine.dispose()` before DB writes prevents this
+- `railway run flask retrain --force` will FAIL (same SSL timeout) — Railway's 10:30 AM scheduler is the correct retrain path in prod
+- Guardrail: skips retrain if active model is < 7 days old OR no new PlayerGameLog rows since last train
+- After local retrain, models are stored with LOCAL paths — reactivate the latest S3 entries in `ModelMetadata` for Railway to use
+
+## ML Models Architecture
+- Model 1 (projections): 6 XGBoost regressors per stat type — `FEATURE_KEYS` in `ml_feature_builder.py` must stay in sync between training and inference (currently 37 features)
+- Model 2 (pick quality): XGBoost classifier — `.pkl` when calibrated, `.json` fallback; `MODEL2_TIME_AWARE_SPLIT=true` env var on Railway
+- Models stored as S3 paths in `ModelMetadata.file_path`; local paths won't work on Railway
+- Reactivate S3 models after local retrain: set `is_active=False` on local entries, `is_active=True` on latest S3 entries per model name
 
 ## Git Workflow
 - Always `git pull --rebase origin main` before push — Railway CI pushes can cause divergence
