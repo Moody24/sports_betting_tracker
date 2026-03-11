@@ -24,10 +24,11 @@ logger = logging.getLogger(__name__)
 
 APP_TIMEZONE = "US/Eastern"
 AUTO_PICK_MAX_TOTAL = 50            # hard cap on total bets per day
-AUTO_PICK_MIN_EDGE_STRAIGHT = 0.08  # straight bet: ≥8% edge required
-AUTO_PICK_MIN_EDGE_2LEG = 0.05      # 2-leg parlay leg: ≥5% edge required
-AUTO_PICK_MIN_EDGE_3LEG = 0.08      # 3-leg parlay leg: ≥8% edge required
+AUTO_PICK_MIN_EDGE_STRAIGHT = 0.15  # straight bet: ≥15% edge (strong tier only)
+AUTO_PICK_MIN_EDGE_2LEG = 0.15      # 2-leg parlay leg: ≥15% edge (strong tier only)
+AUTO_PICK_MIN_EDGE_3LEG = 0.15      # 3-leg parlay leg: ≥15% edge (strong tier only)
 AUTO_PICK_MIN_GAMES = 15            # minimum game log history for any pick
+AUTO_PICK_CONFIDENCE_TIER = 'strong'  # only strong-tier picks qualify
 
 scheduler = BackgroundScheduler(timezone=APP_TIMEZONE) if BackgroundScheduler else None
 
@@ -375,13 +376,15 @@ def generate_daily_auto_picks():
         detector = ValueDetector(ProjectionEngine())
         scores = detector.score_all_todays_props()
 
-        # ── Deduplicate and filter to plays with real history and positive edge ──
+        # ── Deduplicate and filter to strong-tier plays with sufficient history ──
         seen_keys: set = set()
         scored_players: set = set()   # one bet per player max
         all_qualifying: list = []
 
         for s in sorted(scores, key=lambda x: x.get('edge', 0), reverse=True):
             if (s.get('games_played') or 0) < AUTO_PICK_MIN_GAMES:
+                continue
+            if s.get('confidence_tier') != AUTO_PICK_CONFIDENCE_TIER:
                 continue
             key = (s.get('player'), s.get('prop_type'), s.get('line'),
                    s.get('recommended_side'), s.get('game_id'))
@@ -395,7 +398,7 @@ def generate_daily_auto_picks():
             db.session.commit()
             return
 
-        # ── Straight bets: one per player, edge ≥ 8% ─────────────────────
+        # ── Straight bets: one per player, strong tier only (edge ≥ 15%) ───
         straight_plays: list = []
         for s in all_qualifying:
             if (s.get('edge') or 0) < AUTO_PICK_MIN_EDGE_STRAIGHT:
@@ -406,9 +409,9 @@ def generate_daily_auto_picks():
             scored_players.add(player)
             straight_plays.append(s)
 
-        # ── Parlay pool: remaining quality plays not already straight-bet ──
-        # Each parlay leg must have edge ≥ 5%; legs come from different games;
-        # at most one prop type per player across all parlays.
+        # ── Parlay pool: remaining strong-tier plays not already straight-bet ──
+        # Each parlay leg must be strong tier (edge ≥ 15%); legs come from
+        # different games; at most one prop type per player across all parlays.
         parlay_players: set = set(scored_players)  # don't re-use straight-bet players
         parlay_pool: list = [
             s for s in all_qualifying
