@@ -28,3 +28,6 @@ app/ml_models/*.pkl
 
 # Local Python 3.10 venv created for dev
 venv310/
+
+instance.bak/
+tests/helpers.py.backup
