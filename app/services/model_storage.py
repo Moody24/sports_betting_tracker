@@ -6,13 +6,14 @@ Supports local filesystem paths and optional S3-backed storage.
 import hashlib
 import logging
 import os
+import tempfile
 from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 MODEL_STORAGE_LOCAL = "local"
 MODEL_STORAGE_S3 = "s3"
-_CACHE_DIR = "/tmp/model_cache"
+_CACHE_DIR = os.path.join(tempfile.gettempdir(), "model_cache")
 
 
 def storage_mode() -> str:

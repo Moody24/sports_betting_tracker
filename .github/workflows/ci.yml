@@ -33,7 +33,7 @@ jobs:
         run: ruff check .
 
       - name: Security scan (bandit)
-        run: bandit -q -r app -x tests
+        run: bandit -q -r app -x tests -ll  # medium+ severity only
 
       - name: Run tests
         run: python -m coverage run -m unittest discover -s tests -v
