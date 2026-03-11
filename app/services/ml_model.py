@@ -157,7 +157,7 @@ def _build_training_rows(stat_type: str):
     rows = []
 
     for pid, logs in player_logs.items():
-        logs = sorted(logs, key=lambda l: ((l.game_date is None), l.game_date))
+        logs = sorted(logs, key=lambda lg: ((lg.game_date is None), lg.game_date))
         if len(logs) < 10:
             continue
 

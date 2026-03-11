@@ -9,14 +9,12 @@ import math
 import os
 import time as _time
 from copy import deepcopy
-from typing import Optional
 
 from app.models import PlayerGameLog
 from app.services.stats_service import (
     get_cached_logs,
     get_player_stats_summary,
     find_player_id,
-    name_resolver,
 )
 from app.services.matchup_service import (
     get_matchup_adjustment,
@@ -362,8 +360,8 @@ class ProjectionEngine:
         if len(logs) < 10:
             return 0.0
 
-        recent_vals = [getattr(l, stat_key, 0) or 0 for l in logs[:last_n]]
-        all_vals = [getattr(l, stat_key, 0) or 0 for l in logs]
+        recent_vals = [getattr(lg, stat_key, 0) or 0 for lg in logs[:last_n]]
+        all_vals = [getattr(lg, stat_key, 0) or 0 for lg in logs]
 
         if not recent_vals or not all_vals:
             return 0.0
@@ -386,7 +384,7 @@ class ProjectionEngine:
 
         for log in recent:
             # Blowout check (low minutes)
-            season_mins = sum(getattr(l, 'minutes', 0) or 0 for l in logs) / max(len(logs), 1)
+            season_mins = sum(getattr(lg, 'minutes', 0) or 0 for lg in logs) / max(len(logs), 1)
             if season_mins > 0 and (log.minutes or 0) < season_mins * 0.75:
                 reasons.append('recent blowout/low minutes')
                 break
@@ -455,7 +453,7 @@ class ProjectionEngine:
         if not team_abbr:
             return {'team_totals': {}, 'team_counts': {}}
 
-        sorted_logs = sorted(logs, key=lambda l: ((getattr(l, 'game_date', None) is None), getattr(l, 'game_date', None)))
+        sorted_logs = sorted(logs, key=lambda lg: ((getattr(lg, 'game_date', None) is None), getattr(lg, 'game_date', None)))
         dates = {getattr(g, 'game_date', None) for g in sorted_logs[-10:] if getattr(g, 'game_date', None)}
         if not dates:
             return {'team_totals': {}, 'team_counts': {}}

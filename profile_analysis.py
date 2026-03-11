@@ -7,8 +7,6 @@ Run from project root:
 Requires ODDS_API_KEY in env (or a .env file loaded by the app).
 """
 
-import os
-import sys
 import time
 
 # ── Bootstrap Flask app ──────────────────────────────────────────────
@@ -48,7 +46,7 @@ with app.app_context():
 
     from app.services.nba_service import (
         fetch_espn_scoreboard, fetch_odds_combined, fetch_odds_events,
-        fetch_player_props_for_event, get_todays_games,
+        fetch_player_props_for_event,
     )
     from app.services.projection_engine import ProjectionEngine
     from app.services.value_detector import ValueDetector
@@ -116,7 +114,7 @@ with app.app_context():
     print(f"      {'TOTAL sequential':36s}  {seq_total:5.2f}s")
 
     # ── Phase 4b: props fetch — parallel (current) ───────────────────
-    print(f"\n  [4b] Per-game props — PARALLEL (current):")
+    print("\n  [4b] Per-game props — PARALLEL (current):")
     def _fetch(game_event):
         game, event_id = game_event
         t0 = time.perf_counter()
@@ -209,7 +207,7 @@ with app.app_context():
         print(f"  [6] Projection/scoring loop  {t.elapsed:6.2f}s  — {scored} props scored")
     else:
         timers["scoring_loop"] = None
-        print(f"  [6] Projection/scoring loop  N/A   — skipped (no local DB)")
+        print("  [6] Projection/scoring loop  N/A   — skipped (no local DB)")
 
     # ── Summary ──────────────────────────────────────────────────────
     api_total = (
@@ -248,8 +246,8 @@ with app.app_context():
     print(f"  COLD LOAD TOTAL                {total_cold:6.2f}s")
     saved = timers["props_sequential"] - timers["props_parallel"]
     print(f"  Saved vs old sequential props  {saved:+6.2f}s  ({saved/timers['props_sequential']*100:.0f}% faster)")
-    print(f"  WARM LOAD (cache hit)           ~0.00s")
+    print("  WARM LOAD (cache hit)           ~0.00s")
     if not db_available:
-        print(f"\n  NOTE: DB phases not available locally (uses Neon in prod).")
-        print(f"  On production: expect +0.3-0.8s for DB lookup + scoring.")
+        print("\n  NOTE: DB phases not available locally (uses Neon in prod).")
+        print("  On production: expect +0.3-0.8s for DB lookup + scoring.")
     print("=" * 58 + "\n")

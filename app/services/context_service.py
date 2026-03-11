@@ -5,9 +5,8 @@ engine's situational adjustments.
 """
 
 import logging
-import re
 import time as _time
-from datetime import datetime, timezone, date as date_type, timedelta
+from datetime import datetime, date as date_type, timedelta
 from typing import Optional
 from zoneinfo import ZoneInfo
 

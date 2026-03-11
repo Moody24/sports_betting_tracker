@@ -1,12 +1,11 @@
 """Tests to improve coverage on low-coverage service files."""
 
 import json
-import math
 from datetime import datetime, timezone, timedelta, date as date_type
 from unittest.mock import patch, MagicMock
 
 from app import db
-from app.models import Bet, PickContext, ModelMetadata, JobLog, InjuryReport, PlayerGameLog
+from app.models import PickContext, ModelMetadata, JobLog
 from tests.helpers import BaseTestCase, make_user, make_bet
 
 

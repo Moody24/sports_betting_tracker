@@ -2,7 +2,7 @@
 
 import unittest
 from datetime import date, datetime, timezone
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from tests.helpers import BaseTestCase, make_user, make_bet
 from app import db

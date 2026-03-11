@@ -1,11 +1,10 @@
 """Tests for the /nba/stat-analysis route and helpers."""
 
-import json
 import unittest
 from datetime import date
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
-from tests.helpers import BaseTestCase, make_user
+from tests.helpers import BaseTestCase
 from app import db
 from app.models import PlayerGameLog
 from app.routes.bet import _compute_hit_rates, _build_stat_context

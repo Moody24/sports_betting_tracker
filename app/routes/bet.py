@@ -14,7 +14,6 @@ import requests
 from app import db
 from app.config_display import (
     PROP_STAT_KEY, PROP_ESPN_COLUMN, PROP_TO_OPP_ALLOWED,
-    POS_EDGE_APPLICABLE_PROPS, prop_label_short, prop_label_long,
 )
 from app.enums import BetSource, BetType, Outcome
 from app.forms import BetForm
@@ -30,7 +29,7 @@ from app.services.nba_service import (
     APP_TIMEZONE as NBA_APP_TIMEZONE,
 )
 from app.services.projection_engine import ProjectionEngine
-from app.services.value_detector import ValueDetector, quarter_kelly
+from app.services.value_detector import ValueDetector
 from app.services.feature_engine import build_pick_context_features
 from app.services.stats_service import find_player_id, get_cached_logs, get_player_stats_summary
 from app.services.postmortem_service import create_or_update_postmortem
@@ -544,7 +543,7 @@ def place_bet():
     # Compute per-parlay overall outcome for display
     parlay_status: dict = {}
     for pid, legs in parlay_groups.items():
-        outcomes = [l.outcome for l in legs]
+        outcomes = [leg.outcome for leg in legs]
         leg_count = len(legs)
         for leg in legs:
             setattr(leg, "_parlay_legs_count", leg_count)
@@ -577,7 +576,7 @@ def place_bet():
             if b.parlay_id not in seen_pids:
                 seen_pids.add(b.parlay_id)
                 legs = parlay_groups[b.parlay_id]
-                is_pending = any(l.outcome == 'pending' for l in legs)
+                is_pending = any(leg.outcome == 'pending' for leg in legs)
                 sort_ts = _ts(legs[0].match_date)
                 groups.append((0 if is_pending else 1, -sort_ts, legs))
             # else: already queued as part of its group — skip

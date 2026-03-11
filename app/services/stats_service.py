@@ -6,7 +6,6 @@ that holds only active-slate player data.
 """
 
 import logging
-import os
 import time
 from datetime import datetime, timezone, timedelta, date as date_type
 from difflib import SequenceMatcher
@@ -475,7 +474,7 @@ def get_player_stats_summary(player_id: str, logs: list = None) -> dict:
             return {}
         result = {}
         for key in stat_keys:
-            vals = [getattr(l, key, 0) or 0 for l in log_slice]
+            vals = [getattr(lg, key, 0) or 0 for lg in log_slice]
             result[key] = round(sum(vals) / len(vals), 1) if vals else 0
         return result
 
@@ -484,7 +483,7 @@ def get_player_stats_summary(player_id: str, logs: list = None) -> dict:
             return {}
         result = {}
         for key in stat_keys:
-            vals = [getattr(l, key, 0) or 0 for l in log_slice]
+            vals = [getattr(lg, key, 0) or 0 for lg in log_slice]
             mean = sum(vals) / len(vals)
             variance = sum((v - mean) ** 2 for v in vals) / len(vals)
             result[key] = round(variance ** 0.5, 2)
@@ -569,7 +568,7 @@ def _extract_logs_from_espn_summary(summary_data: dict, game: dict, game_date: d
     home = game.get('home', {}) or {}
     away = game.get('away', {}) or {}
     home_name = home.get('name', '')
-    away_name = away.get('name', '')
+    _away_name = away.get('name', '')
     home_abbr = home.get('abbr', '')
     away_abbr = away.get('abbr', '')
     home_score = int(home.get('score', 0) or 0)

@@ -13,7 +13,7 @@ from datetime import datetime, timezone, date
 
 from tests.helpers import BaseTestCase, make_bet, make_user
 from app import db
-from app.enums import Outcome, BetType, PostmortemReason
+from app.enums import BetType, PostmortemReason
 from app.models import Bet, BetPostmortem, PlayerGameLog, GameSnapshot, PickContext
 from app.services.postmortem_service import (
     _assign_reasons,
@@ -238,7 +238,6 @@ class TestCreateOrUpdatePostmortem(BaseTestCase):
 
     def _setup_player_logs(self, player_name, game_date):
         """Add 10 history logs before game_date and the game log itself."""
-        from datetime import timedelta
         for i in range(10, 0, -1):
             d = date(game_date.year, game_date.month, game_date.day - i)
             _add_game_log(player_name, d, minutes=28.0, fg3a=4.0)
@@ -311,12 +310,10 @@ class TestCreateOrUpdatePostmortem(BaseTestCase):
             bet_obj = _make_prop_bet(user.id, outcome='lose', actual_total=2.0)
             db.session.add(bet_obj)
             db.session.commit()
-            bet_id = bet_obj.id
-
             create_or_update_postmortem(bet_obj)
             create_or_update_postmortem(bet_obj)
 
-            count = BetPostmortem.query.filter_by(bet_id=bet_id).count()
+            count = BetPostmortem.query.filter_by(bet_id=bet_obj.id).count()
             self.assertEqual(count, 1, "Expected exactly one postmortem record")
 
     def test_postmortem_updates_existing(self):
@@ -328,7 +325,7 @@ class TestCreateOrUpdatePostmortem(BaseTestCase):
             bet_obj = _make_prop_bet(user.id, outcome='lose', actual_total=2.0)
             db.session.add(bet_obj)
             db.session.commit()
-            bet_id = bet_obj.id
+            _bet_id = bet_obj.id
 
             pm1 = create_or_update_postmortem(bet_obj)
             original_created_at = pm1.created_at

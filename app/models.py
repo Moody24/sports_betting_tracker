@@ -1,6 +1,6 @@
 import json
 import uuid
-from datetime import datetime, timezone, date as date_type
+from datetime import datetime, timezone
 from typing import Optional
 
 from flask_login import UserMixin
@@ -209,7 +209,7 @@ class Bet(db.Model):
 
         stake = float(legs[0].bet_amount)
         multiplier = float(legs[0].bonus_multiplier or 1.0)
-        outcomes = [l.outcome for l in legs]
+        outcomes = [leg.outcome for leg in legs]
 
         if any(o == Outcome.LOSE.value for o in outcomes):
             return -stake

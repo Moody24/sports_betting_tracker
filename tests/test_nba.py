@@ -1,6 +1,5 @@
 """Tests for the NBA service layer."""
 
-import json
 import os
 import unittest
 from datetime import datetime

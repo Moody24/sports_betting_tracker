@@ -1,7 +1,7 @@
 """Tests for the bet blueprint."""
 
 import json
-from datetime import datetime, date
+from datetime import datetime
 from unittest.mock import patch
 
 from app import db

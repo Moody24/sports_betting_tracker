@@ -5,7 +5,6 @@ pick quality classifier (Model 2).
 """
 
 import logging
-from datetime import date as date_type
 
 from app.config_display import PROP_STAT_KEY
 from app.services.stats_service import get_cached_logs, get_player_stats_summary
@@ -258,7 +257,7 @@ def _log_stat_for_prop(log, prop_type: str) -> float:
 def _compute_std_for_prop(logs: list, prop_type: str) -> float:
     if len(logs) < 2:
         return 0.0
-    vals = [_log_stat_for_prop(l, prop_type) for l in logs]
+    vals = [_log_stat_for_prop(lg, prop_type) for lg in logs]
     mean = sum(vals) / len(vals)
     variance = sum((v - mean) ** 2 for v in vals) / len(vals)
     return round(variance ** 0.5, 2)
@@ -267,8 +266,8 @@ def _compute_std_for_prop(logs: list, prop_type: str) -> float:
 def _compute_streak_zscore_for_prop(logs: list, prop_type: str, recent_n: int = 3) -> float:
     if len(logs) < 10:
         return 0.0
-    recent_vals = [_log_stat_for_prop(l, prop_type) for l in logs[:recent_n]]
-    all_vals = [_log_stat_for_prop(l, prop_type) for l in logs]
+    recent_vals = [_log_stat_for_prop(lg, prop_type) for lg in logs[:recent_n]]
+    all_vals = [_log_stat_for_prop(lg, prop_type) for lg in logs]
     recent_mean = sum(recent_vals) / len(recent_vals) if recent_vals else 0
     season_mean = sum(all_vals) / len(all_vals) if all_vals else 0
     season_std = ((sum((v - season_mean) ** 2 for v in all_vals) / len(all_vals)) ** 0.5) if all_vals else 0
@@ -280,7 +279,7 @@ def _compute_streak_zscore_for_prop(logs: list, prop_type: str, recent_n: int = 
 def _compute_hit_rate_for_prop(logs: list, prop_type: str, line: float) -> float:
     if not logs or line <= 0:
         return 0.5
-    hits = sum(1 for l in logs if _log_stat_for_prop(l, prop_type) > line)
+    hits = sum(1 for lg in logs if _log_stat_for_prop(lg, prop_type) > line)
     return hits / len(logs)
 
 
@@ -293,7 +292,7 @@ def _compute_std(logs: list, stat_key: str) -> float:
     """Compute standard deviation for a stat over a set of logs."""
     if len(logs) < 2:
         return 0.0
-    vals = [getattr(l, stat_key, 0) or 0 for l in logs]
+    vals = [getattr(lg, stat_key, 0) or 0 for lg in logs]
     mean = sum(vals) / len(vals)
     variance = sum((v - mean) ** 2 for v in vals) / len(vals)
     return round(variance ** 0.5, 2)
@@ -303,7 +302,7 @@ def _average_stat(logs: list, stat_key: str) -> float:
     """Compute average of a stat over a set of logs."""
     if not logs:
         return 0.0
-    vals = [getattr(l, stat_key, 0) or 0 for l in logs]
+    vals = [getattr(lg, stat_key, 0) or 0 for lg in logs]
     return round(sum(vals) / len(vals), 1) if vals else 0.0
 
 
@@ -312,8 +311,8 @@ def _compute_streak_zscore(logs: list, stat_key: str, recent_n: int = 3) -> floa
     if len(logs) < 10:
         return 0.0
 
-    recent_vals = [getattr(l, stat_key, 0) or 0 for l in logs[:recent_n]]
-    all_vals = [getattr(l, stat_key, 0) or 0 for l in logs]
+    recent_vals = [getattr(lg, stat_key, 0) or 0 for lg in logs[:recent_n]]
+    all_vals = [getattr(lg, stat_key, 0) or 0 for lg in logs]
 
     recent_mean = sum(recent_vals) / len(recent_vals) if recent_vals else 0
     season_mean = sum(all_vals) / len(all_vals) if all_vals else 0
@@ -333,7 +332,7 @@ def _compute_hit_rate(logs: list, stat_key: str, line: float) -> float:
     if not logs or line <= 0:
         return 0.5
 
-    hits = sum(1 for l in logs if (getattr(l, stat_key, 0) or 0) > line)
+    hits = sum(1 for lg in logs if (getattr(lg, stat_key, 0) or 0) > line)
     return hits / len(logs)
 
 
