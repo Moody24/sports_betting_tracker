@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from flask_login import UserMixin
-from sqlalchemy import func, UniqueConstraint
+from sqlalchemy import func, Index, UniqueConstraint
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from . import db
@@ -145,6 +145,10 @@ class Bet(db.Model):
     prop_line = db.Column(db.Float, nullable=True)
     parlay_id = db.Column(db.String(40), nullable=True, index=True)
     picked_team = db.Column(db.String(80), nullable=True)
+
+    __table_args__ = (
+        Index('ix_bet_user_outcome', 'user_id', 'outcome'),
+    )
     bonus_multiplier = db.Column(db.Float, nullable=False, default=1.0)
     notes = db.Column(db.Text, nullable=True)
     created_at = db.Column(
@@ -450,7 +454,6 @@ class PlayerGameLog(db.Model):
     plus_minus = db.Column(db.Float, default=0)
     home_away = db.Column(db.String(4), nullable=True)
     win_loss = db.Column(db.String(1), nullable=True)
-    context_flags = db.Column(db.Text, nullable=True)
     cache_expires = db.Column(db.DateTime, nullable=True)
     fetched_at = db.Column(
         db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
@@ -458,6 +461,7 @@ class PlayerGameLog(db.Model):
 
     __table_args__ = (
         UniqueConstraint('player_id', 'game_date', name='uq_player_game_date'),
+        Index('ix_player_game_log_player_date', 'player_name', 'game_date'),
     )
 
     def __repr__(self) -> str:

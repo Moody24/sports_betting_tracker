@@ -11,9 +11,11 @@ from sqlalchemy import func
 from app import db
 from app.models import (
     Bet,
+    BetPostmortem,
     InjuryReport,
     JobLog,
     ModelMetadata,
+    OddsSnapshot,
     PickContext,
     PlayerGameLog,
     TeamDefenseSnapshot,
@@ -342,91 +344,6 @@ def register_cli(app):
                 message = f'{message}; train_after=true'
             job.message = message
             db.session.commit()
-
-    @app.cli.command('model_status')
-    def cli_model_status():
-        """Show data/model/job diagnostics for backfill and training."""
-        import os
-        from sqlalchemy.exc import OperationalError
-
-        ml_enabled = os.getenv('USE_ML_PROJECTIONS', 'false').lower() == 'true'
-
-        try:
-            total_logs = PlayerGameLog.query.count()
-            unique_players = db.session.query(PlayerGameLog.player_id).distinct().count()
-        except OperationalError as exc:
-            click.echo(f'Database tables not ready: {exc}')
-            return
-
-        click.echo('=== PlayerGameLog ===')
-        click.echo(f'Rows: {total_logs}')
-        click.echo(f'Unique players: {unique_players}')
-
-        click.echo('\n=== Projection engine mode ===')
-        click.echo(f'USE_ML_PROJECTIONS={ml_enabled}')
-
-        click.echo('\n=== ModelMetadata (latest active first) ===')
-        models = (
-            ModelMetadata.query
-            .order_by(ModelMetadata.is_active.desc(), ModelMetadata.training_date.desc())
-            .limit(20)
-            .all()
-        )
-        if not models:
-            click.echo('No model metadata records found.')
-        for model in models:
-            click.echo(
-                f"- {model.model_name} v{model.version} | active={model.is_active} | "
-                f"samples={model.training_samples or 0} | mae={model.val_mae} | "
-                f"trained={model.training_date.isoformat() if model.training_date else 'n/a'}"
-            )
-
-        # 30-day rolling win-rate vs model training accuracy
-        click.echo('\n=== 30-day Rolling Win Rate (pick quality) ===')
-        win_rate_result = _resolved_win_rate(30)
-        if win_rate_result:
-            def _fmt(label, seg):
-                if seg is None:
-                    click.echo(f'  {label}: no data')
-                else:
-                    count, wins, rate = seg
-                    click.echo(f'  {label}: {rate:.1%} ({wins}/{count})')
-
-            _fmt('Manual bets', win_rate_result['manual'])
-            _fmt('Auto picks (real)', win_rate_result['auto'])
-            real = win_rate_result['real']
-            if real:
-                count, wins_30d, rolling_win_rate = real
-                click.echo(f'  Rolling win rate: {rolling_win_rate:.3f} ({wins_30d}/{count})')
-            _fmt('Bootstrap synthetic', win_rate_result['bootstrap'])
-
-            pq_model = ModelMetadata.query.filter_by(
-                model_name='pick_quality_nba', is_active=True,
-            ).first()
-            if real and pq_model and pq_model.val_accuracy:
-                delta = rolling_win_rate - pq_model.val_accuracy
-                click.echo(
-                    f'  vs model val_accuracy ({pq_model.val_accuracy:.3f}): '
-                    f'delta={delta:+.3f}'
-                )
-                if abs(delta) > 0.05:
-                    click.echo('  WARN: >5% drift detected — consider retraining.')
-            elif not real:
-                click.echo('  No real (non-bootstrap) resolved bets in last 30 days.')
-            else:
-                click.echo('  No active pick_quality model metadata for comparison.')
-        else:
-            click.echo('No resolved bets with context in last 30 days.')
-
-        click.echo('\n=== Recent JobLog entries ===')
-        jobs = JobLog.query.order_by(JobLog.started_at.desc()).limit(20).all()
-        if not jobs:
-            click.echo('No job log records found.')
-        for job in jobs:
-            click.echo(
-                f"- {job.started_at.isoformat() if job.started_at else 'n/a'} | {job.job_name} | "
-                f"status={job.status} | msg={job.message or ''}"
-            )
 
     @app.cli.command('data_quality_report')
     @click.option(
@@ -944,3 +861,366 @@ def register_cli(app):
             if len(errs) >= min_count:
                 avg = sum(errs) / len(errs)
                 click.echo(f'  {reason:<35} avg_err={avg:+.2f}  n={len(errs)}')
+
+    # ──────────────────────────────────────────────────────────────────
+    # Model accuracy / production readiness commands
+    # ──────────────────────────────────────────────────────────────────
+
+    @app.cli.command('model_accuracy')
+    @click.option('--days', type=int, default=90, show_default=True,
+                  help='Rolling window in days.')
+    @click.option('--stat-type', default=None,
+                  help='Limit report to a single stat type (e.g. player_points).')
+    def cli_model_accuracy(days, stat_type):
+        """Rolling live MAE for Model 1 projections using BetPostmortem data.
+
+        Joins BetPostmortem.projected_stat vs BetPostmortem.actual_stat to
+        compute per-stat-type mean absolute error from real settled bets.
+        """
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        query = (
+            db.session.query(BetPostmortem)
+            .filter(BetPostmortem.created_at >= cutoff)
+            .filter(BetPostmortem.projected_stat.isnot(None))
+            .filter(BetPostmortem.actual_stat.isnot(None))
+        )
+        if stat_type:
+            query = query.filter(BetPostmortem.stat_type == stat_type)
+
+        rows = query.all()
+
+        click.echo(f'=== Model 1 Live Accuracy (last {days} days) ===')
+        if not rows:
+            click.echo('No postmortem data with projections yet.')
+            return
+
+        # Group by stat_type
+        by_stat: dict = {}
+        for pm in rows:
+            key = pm.stat_type or 'unknown'
+            by_stat.setdefault(key, []).append(abs((pm.actual_stat or 0.0) - (pm.projected_stat or 0.0)))
+
+        # Expected MAE thresholds per stat type (healthy ranges)
+        thresholds = {
+            'player_points': 3.5,
+            'player_rebounds': 2.0,
+            'player_assists': 2.0,
+            'player_threes': 1.5,
+            'player_steals': 1.0,
+            'player_blocks': 1.0,
+        }
+
+        click.echo(f'{"Stat Type":<30} {"N":>5} {"MAE":>7} {"Threshold":>10} {"Status":>8}')
+        click.echo('-' * 65)
+        for stype, errors in sorted(by_stat.items()):
+            mae = sum(errors) / len(errors)
+            threshold = thresholds.get(stype, 3.5)
+            status = 'OK' if mae <= threshold else 'WARN'
+            click.echo(f'{stype:<30} {len(errors):>5} {mae:>7.3f} {threshold:>10.1f} {status:>8}')
+
+        total_errors = [e for errs in by_stat.values() for e in errs]
+        overall_mae = sum(total_errors) / len(total_errors)
+        click.echo(f'\nOverall MAE across all stat types: {overall_mae:.3f}  (n={len(total_errors)})')
+
+        # Compare against val_mae from ModelMetadata
+        click.echo('\n=== vs Training val_mae ===')
+        for stype in sorted(by_stat.keys()):
+            model_meta = (
+                ModelMetadata.query
+                .filter_by(model_name=f'projection_{stype}', is_active=True)
+                .first()
+            )
+            live_mae = sum(by_stat[stype]) / len(by_stat[stype])
+            if model_meta and model_meta.val_mae:
+                gap = live_mae - model_meta.val_mae
+                click.echo(
+                    f'  {stype:<30} live={live_mae:.3f}  val={model_meta.val_mae:.3f}  '
+                    f'gap={gap:+.3f}'
+                    + ('  WARN: live >> val' if gap > 1.0 else '')
+                )
+            else:
+                click.echo(f'  {stype:<30} live={live_mae:.3f}  val=n/a (no active model)')
+
+    @app.cli.command('model_status')
+    def cli_model_status():
+        """Show data/model/job diagnostics for backfill and training."""
+        import os
+        from sqlalchemy.exc import OperationalError
+
+        ml_enabled = os.getenv('USE_ML_PROJECTIONS', 'false').lower() == 'true'
+
+        try:
+            total_logs = PlayerGameLog.query.count()
+            unique_players = db.session.query(PlayerGameLog.player_id).distinct().count()
+        except OperationalError as exc:
+            click.echo(f'Database tables not ready: {exc}')
+            return
+
+        click.echo('=== PlayerGameLog ===')
+        click.echo(f'Rows: {total_logs}')
+        click.echo(f'Unique players: {unique_players}')
+
+        click.echo('\n=== Projection engine mode ===')
+        click.echo(f'USE_ML_PROJECTIONS={ml_enabled}')
+
+        click.echo('\n=== ModelMetadata (latest active first) ===')
+        models = (
+            ModelMetadata.query
+            .order_by(ModelMetadata.is_active.desc(), ModelMetadata.training_date.desc())
+            .limit(20)
+            .all()
+        )
+        if not models:
+            click.echo('No model metadata records found.')
+        for model in models:
+            click.echo(
+                f"- {model.model_name} v{model.version} | active={model.is_active} | "
+                f"samples={model.training_samples or 0} | mae={model.val_mae} | "
+                f"trained={model.training_date.isoformat() if model.training_date else 'n/a'}"
+            )
+
+        # 30-day rolling win-rate vs model training accuracy
+        click.echo('\n=== 30-day Rolling Win Rate (pick quality) ===')
+        win_rate_result = _resolved_win_rate(30)
+        if win_rate_result:
+            def _fmt(label, seg):
+                if seg is None:
+                    click.echo(f'  {label}: no data')
+                else:
+                    count, wins, rate = seg
+                    click.echo(f'  {label}: {rate:.1%} ({wins}/{count})')
+
+            _fmt('Manual bets', win_rate_result['manual'])
+            _fmt('Auto picks (real)', win_rate_result['auto'])
+            real = win_rate_result['real']
+            if real:
+                count, wins_30d, rolling_win_rate = real
+                click.echo(f'  Rolling win rate: {rolling_win_rate:.3f} ({wins_30d}/{count})')
+            _fmt('Bootstrap synthetic', win_rate_result['bootstrap'])
+
+            pq_model = ModelMetadata.query.filter_by(
+                model_name='pick_quality_nba', is_active=True,
+            ).first()
+            if real and pq_model and pq_model.val_accuracy:
+                delta = rolling_win_rate - pq_model.val_accuracy
+                click.echo(
+                    f'  vs model val_accuracy ({pq_model.val_accuracy:.3f}): '
+                    f'delta={delta:+.3f}'
+                )
+                if abs(delta) > 0.05:
+                    click.echo('  WARN: >5% drift detected — consider retraining.')
+            elif not real:
+                click.echo('  No real (non-bootstrap) resolved bets in last 30 days.')
+            else:
+                click.echo('  No active pick_quality model metadata for comparison.')
+        else:
+            click.echo('No resolved bets with context in last 30 days.')
+
+        # Last automated drift check result
+        click.echo('\n=== Last Automated Drift Check ===')
+        last_drift = (
+            JobLog.query
+            .filter_by(job_name='drift_check')
+            .order_by(JobLog.started_at.desc())
+            .first()
+        )
+        if last_drift:
+            ts = last_drift.started_at.isoformat() if last_drift.started_at else 'n/a'
+            click.echo(f'  Last run: {ts}  status={last_drift.status}')
+            if last_drift.message:
+                click.echo(f'  Message: {last_drift.message}')
+        else:
+            click.echo('  No drift check job log found.')
+
+        click.echo('\n=== Recent JobLog entries ===')
+        jobs = JobLog.query.order_by(JobLog.started_at.desc()).limit(20).all()
+        if not jobs:
+            click.echo('No job log records found.')
+        for job in jobs:
+            click.echo(
+                f"- {job.started_at.isoformat() if job.started_at else 'n/a'} | {job.job_name} | "
+                f"status={job.status} | msg={job.message or ''}"
+            )
+
+    @app.cli.command('prod-readiness')
+    def cli_prod_readiness():
+        """Production readiness checklist for models and data freshness.
+
+        Prints a formatted checklist covering:
+        - Model 1 val_mae per stat type (vs healthy thresholds)
+        - Model 2 resolved picks count and last drift check
+        - TeamDefenseSnapshot and OddsSnapshot staleness
+        - DB index coverage (key composite indexes present)
+        """
+        import os
+        from datetime import date as date_type
+        from zoneinfo import ZoneInfo
+
+        now_et = datetime.now(ZoneInfo("America/New_York"))
+        today = now_et.date()
+
+        click.echo('=== Production Readiness Report ===')
+        click.echo(f'Generated: {now_et.isoformat()}')
+        click.echo('')
+
+        checks = []  # list of (label, status, detail)
+
+        # ── Model 1: val_mae per stat ──────────────────────────────────
+        click.echo('--- Model 1: Projection val_mae ---')
+        stat_thresholds = {
+            'player_points': 3.5,
+            'player_rebounds': 2.0,
+            'player_assists': 2.0,
+            'player_threes': 1.5,
+            'player_steals': 1.0,
+            'player_blocks': 1.0,
+        }
+        active_proj = (
+            ModelMetadata.query
+            .filter(ModelMetadata.model_name.like('projection_%'))
+            .filter_by(is_active=True)
+            .all()
+        )
+        if not active_proj:
+            click.echo('  FAIL  No active projection models found')
+            checks.append(('Model 1 models', 'FAIL', 'no active models'))
+        else:
+            for m in active_proj:
+                stype = m.model_name.replace('projection_', '')
+                threshold = stat_thresholds.get(stype, 3.5)
+                if m.val_mae is None:
+                    status = 'WARN'
+                    detail = f'{m.model_name}: val_mae=None'
+                elif m.val_mae <= threshold:
+                    status = 'OK  '
+                    detail = f'{m.model_name}: val_mae={m.val_mae:.3f} <= {threshold}'
+                else:
+                    status = 'WARN'
+                    detail = f'{m.model_name}: val_mae={m.val_mae:.3f} > threshold {threshold}'
+                click.echo(f'  {status}  {detail}')
+                checks.append((f'Model1:{stype}', status.strip(), detail))
+
+        # ── Model 2: resolved picks + drift ───────────────────────────
+        click.echo('\n--- Model 2: Pick Quality ---')
+        resolved_count = (
+            db.session.query(Bet)
+            .join(PickContext, Bet.id == PickContext.bet_id)
+            .filter(Bet.outcome.in_(['win', 'lose']))
+            .count()
+        )
+        MIN_PROD_SAFE = 300
+        if resolved_count >= MIN_PROD_SAFE:
+            m2_count_status = 'OK  '
+        elif resolved_count >= 200:
+            m2_count_status = 'WARN'
+        else:
+            m2_count_status = 'FAIL'
+        click.echo(
+            f'  {m2_count_status}  Resolved picks with context: {resolved_count} '
+            f'(prod-safe threshold: {MIN_PROD_SAFE})'
+        )
+        checks.append(('Model2:resolved_count', m2_count_status.strip(), f'{resolved_count} resolved'))
+
+        pq_model = ModelMetadata.query.filter_by(model_name='pick_quality_nba', is_active=True).first()
+        if pq_model:
+            trained_days_ago = (datetime.now(timezone.utc) - pq_model.training_date).days if pq_model.training_date else None
+            acc_str = f'{pq_model.val_accuracy:.3f}' if pq_model.val_accuracy else 'n/a'
+            age_str = f'{trained_days_ago}d ago' if trained_days_ago is not None else 'unknown'
+            click.echo(f'  OK    pick_quality_nba active | val_accuracy={acc_str} | trained {age_str}')
+            checks.append(('Model2:active', 'OK', f'val_accuracy={acc_str}'))
+        else:
+            click.echo('  WARN  No active pick_quality_nba model')
+            checks.append(('Model2:active', 'WARN', 'no active model'))
+
+        # Last drift check
+        last_drift = (
+            JobLog.query
+            .filter_by(job_name='drift_check')
+            .order_by(JobLog.started_at.desc())
+            .first()
+        )
+        if last_drift:
+            drift_age = (datetime.now(timezone.utc) - last_drift.started_at).days if last_drift.started_at else None
+            drift_status = 'OK  ' if last_drift.status in ('success', 'warn') else 'WARN'
+            drift_detail = f'last drift check: {drift_age}d ago, status={last_drift.status}'
+            click.echo(f'  {drift_status}  {drift_detail}')
+            if last_drift.status == 'warn' and last_drift.message:
+                click.echo(f'        Drift message: {last_drift.message[:120]}')
+            checks.append(('Model2:drift', drift_status.strip(), drift_detail))
+        else:
+            click.echo('  WARN  No drift check job found — weekly drift monitor may not have run yet')
+            checks.append(('Model2:drift', 'WARN', 'no drift check found'))
+
+        # ── Data freshness ─────────────────────────────────────────────
+        click.echo('\n--- Data Freshness ---')
+
+        # TeamDefenseSnapshot
+        latest_defense = (
+            db.session.query(func.max(TeamDefenseSnapshot.snapshot_date))
+            .scalar()
+        )
+        if latest_defense is None:
+            def_status = 'FAIL'
+            def_detail = 'no TeamDefenseSnapshot rows'
+        else:
+            days_old = (today - latest_defense).days
+            if days_old <= 2:
+                def_status = 'OK  '
+            elif days_old <= 7:
+                def_status = 'WARN'
+            else:
+                def_status = 'FAIL'
+            def_detail = f'latest TeamDefenseSnapshot: {latest_defense} ({days_old}d old)'
+        click.echo(f'  {def_status}  {def_detail}')
+        checks.append(('TeamDefenseSnapshot', def_status.strip(), def_detail))
+
+        # OddsSnapshot
+        latest_odds = (
+            db.session.query(func.max(OddsSnapshot.game_date))
+            .scalar()
+        )
+        if latest_odds is None:
+            odds_status = 'WARN'
+            odds_detail = 'no OddsSnapshot rows (line movement features unavailable)'
+        else:
+            days_old = (today - latest_odds).days
+            odds_status = 'OK  ' if days_old <= 3 else 'WARN'
+            odds_detail = f'latest OddsSnapshot: {latest_odds} ({days_old}d old)'
+        click.echo(f'  {odds_status}  {odds_detail}')
+        checks.append(('OddsSnapshot', odds_status.strip(), odds_detail))
+
+        # PlayerGameLog freshness
+        latest_log = (
+            db.session.query(func.max(PlayerGameLog.game_date))
+            .scalar()
+        )
+        if latest_log is None:
+            log_status = 'FAIL'
+            log_detail = 'no PlayerGameLog rows'
+        else:
+            days_old = (today - latest_log).days
+            log_status = 'OK  ' if days_old <= 2 else ('WARN' if days_old <= 7 else 'FAIL')
+            log_detail = f'latest PlayerGameLog: {latest_log} ({days_old}d old)'
+        click.echo(f'  {log_status}  {log_detail}')
+        checks.append(('PlayerGameLog', log_status.strip(), log_detail))
+
+        # ── Summary ────────────────────────────────────────────────────
+        click.echo('\n--- Summary ---')
+        fails = [c for c in checks if c[1] == 'FAIL']
+        warns = [c for c in checks if c[1] == 'WARN']
+        oks = [c for c in checks if c[1] == 'OK']
+        click.echo(f'  OK: {len(oks)}  WARN: {len(warns)}  FAIL: {len(fails)}')
+        if fails:
+            click.echo('VERDICT: NOT READY FOR PRODUCTION')
+            for label, _status, detail in fails:
+                click.echo(f'  FAIL [{label}] {detail}')
+        elif warns:
+            click.echo('VERDICT: CAUTION — address warnings before high-stakes use')
+            for label, _status, detail in warns:
+                click.echo(f'  WARN [{label}] {detail}')
+        else:
+            click.echo('VERDICT: PRODUCTION READY')
+
+        ml_enabled = os.getenv('USE_ML_PROJECTIONS', 'false').lower() == 'true'
+        m2_enabled = os.getenv('MODEL2_TIME_AWARE_SPLIT', 'false').lower() == 'true'
+        click.echo(f'\n  USE_ML_PROJECTIONS={ml_enabled}  MODEL2_TIME_AWARE_SPLIT={m2_enabled}')

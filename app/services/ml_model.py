@@ -125,6 +125,68 @@ def _build_odds_snapshot_lookup(stat_type: str) -> dict:
     return lookup
 
 
+def _check_training_data_quality(all_logs: list) -> dict:
+    """Pre-training data quality gate.
+
+    Returns a dict with keys ``passed`` (bool) and ``issues`` (list of str).
+    Training should be skipped when ``passed`` is False.
+    """
+    issues = []
+    total = len(all_logs)
+
+    null_pts = sum(1 for lg in all_logs if lg.pts is None)
+    null_min = sum(1 for lg in all_logs if lg.minutes is None)
+    bad_pts = sum(1 for lg in all_logs if lg.pts is not None and (lg.pts < 0 or lg.pts > 100))
+    bad_min = sum(1 for lg in all_logs if lg.minutes is not None and (lg.minutes < 0 or lg.minutes > 60))
+
+    null_pts_pct = null_pts / max(total, 1)
+    null_min_pct = null_min / max(total, 1)
+
+    if null_pts_pct > 0.05:
+        issues.append(f"pts null rate {null_pts_pct:.1%} exceeds 5% threshold ({null_pts}/{total})")
+    if null_min_pct > 0.05:
+        issues.append(f"minutes null rate {null_min_pct:.1%} exceeds 5% threshold ({null_min}/{total})")
+    if bad_pts > 0:
+        issues.append(f"{bad_pts} rows with pts outside [0, 100]")
+    if bad_min > 0:
+        issues.append(f"{bad_min} rows with minutes outside [0, 60]")
+
+    passed = len(issues) == 0
+    if issues:
+        logger.warning("Training data quality gate failed: %s", "; ".join(issues))
+
+    return {"passed": passed, "issues": issues}
+
+
+def check_defense_snapshot_staleness() -> dict:
+    """Check if TeamDefenseSnapshot data is stale (> 7 days old).
+
+    Returns dict with keys ``stale`` (bool), ``days_old`` (int or None),
+    ``latest_date`` (date or None).
+    """
+    from datetime import date as date_type
+    from zoneinfo import ZoneInfo
+
+    latest = (
+        TeamDefenseSnapshot.query
+        .order_by(TeamDefenseSnapshot.snapshot_date.desc())
+        .with_entities(TeamDefenseSnapshot.snapshot_date)
+        .first()
+    )
+    if latest is None:
+        return {"stale": True, "days_old": None, "latest_date": None}
+
+    today = datetime.now(ZoneInfo("America/New_York")).date()
+    days_old = (today - latest.snapshot_date).days
+    stale = days_old > 7
+    if stale:
+        logger.warning(
+            "TeamDefenseSnapshot is stale: latest=%s (%d days old)",
+            latest.snapshot_date, days_old,
+        )
+    return {"stale": stale, "days_old": days_old, "latest_date": latest.snapshot_date}
+
+
 def _build_training_rows(stat_type: str):
     """Build dated training rows for walk-forward validation."""
     stat_key = STAT_KEY_MAP.get(stat_type, 'pts')
@@ -139,6 +201,14 @@ def _build_training_rows(stat_type: str):
         logger.info(
             "Insufficient data for %s model: %d rows (need %d)",
             stat_type, len(all_logs), MIN_TRAIN_SAMPLES,
+        )
+        return []
+
+    quality = _check_training_data_quality(all_logs)
+    if not quality["passed"]:
+        logger.warning(
+            "Skipping %s model training due to data quality issues: %s",
+            stat_type, quality["issues"],
         )
         return []
 
@@ -394,8 +464,23 @@ def predict_stat(stat_type: str, features: dict) -> float:
     """Predict a stat value using the trained model.
 
     Returns 0 if no model is available (caller should fall back to
-    weighted average projection).
+    weighted average projection).  Logs a warning when TeamDefenseSnapshot
+    data is stale (> 7 days) so operators are alerted before inference quality
+    degrades silently.
     """
+    staleness = check_defense_snapshot_staleness()
+    if staleness["stale"]:
+        latest = staleness.get("latest_date")
+        days_old = staleness.get("days_old")
+        if days_old is not None:
+            logger.warning(
+                "Inference with stale TeamDefenseSnapshot: %s (%d days old) — "
+                "defensive context features may be outdated",
+                latest, days_old,
+            )
+        else:
+            logger.warning("No TeamDefenseSnapshot rows found — defensive context features missing")
+
     model, feature_names = load_active_model(stat_type)
     if model is None or feature_names is None:
         return 0.0

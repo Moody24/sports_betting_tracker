@@ -256,7 +256,6 @@ def _upsert_player_logs_postgres(player_id: str, rows_dicts: list[dict], expires
             'plus_minus': log.get('plus_minus', 0),
             'home_away': log.get('home_away', ''),
             'win_loss': log.get('win_loss', ''),
-            'context_flags': log.get('context_flags'),
             'cache_expires': expires,
             'fetched_at': now_utc,
         })
@@ -285,7 +284,6 @@ def _upsert_player_logs_postgres(player_id: str, rows_dicts: list[dict], expires
             'plus_minus': excluded.plus_minus,
             'home_away': excluded.home_away,
             'win_loss': excluded.win_loss,
-            'context_flags': excluded.context_flags,
             'cache_expires': excluded.cache_expires,
             'fetched_at': excluded.fetched_at,
         },
@@ -389,7 +387,6 @@ def cache_player_logs(
                             plus_minus=log.get('plus_minus', 0),
                             home_away=log.get('home_away', ''),
                             win_loss=log.get('win_loss', ''),
-                            context_flags=log.get('context_flags'),
                             cache_expires=expires,
                         )
                         db.session.add(row)
