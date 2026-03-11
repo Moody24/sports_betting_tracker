@@ -1710,3 +1710,369 @@ details[open] .bb-chevron {
   border-top: 1px solid rgba(255,255,255,.05);
   padding-top: .3rem;
 }
+
+/* ══════════════════════════════════════════════════════════════
+   Design System Upgrade — New Tokens & Utilities
+   ══════════════════════════════════════════════════════════════ */
+
+:root {
+  /* Shadow system */
+  --shadow-xs: 0 1px 3px rgba(0,0,0,.25);
+  --shadow-sm: 0 2px 8px rgba(0,0,0,.3);
+  --shadow-md: 0 4px 20px rgba(0,0,0,.4);
+  --shadow-lg: 0 8px 40px rgba(0,0,0,.55);
+  /* Border radii */
+  --radius-xs: .4rem;
+  --radius-sm: .65rem;
+  --radius-md: 1rem;
+  --radius-lg: 1.5rem;
+  /* Accent glow */
+  --glow-accent: 0 0 24px rgba(0,201,167,.25);
+  --glow-accent-lg: 0 0 48px rgba(0,201,167,.18);
+  /* extra palette tokens */
+  --indigo: #6366f1;
+  --violet: #7c3aed;
+}
+
+/* ── Glassmorphism card ──────────────────────────────────────── */
+.card-glass {
+  background: rgba(255,255,255,.04);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+}
+
+/* ── Skeleton loader ─────────────────────────────────────────── */
+@keyframes skeleton-shimmer {
+  0%   { background-position: -600px 0; }
+  100% { background-position:  600px 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg,
+    rgba(255,255,255,.05) 25%,
+    rgba(255,255,255,.10) 50%,
+    rgba(255,255,255,.05) 75%);
+  background-size: 1200px 100%;
+  animation: skeleton-shimmer 1.5s infinite;
+  border-radius: .4rem;
+}
+.skeleton-text  { height: .85rem; margin-bottom: .5rem; }
+.skeleton-value { height: 2rem;   margin-bottom: .25rem; }
+.skeleton-bar   { height: 1rem; }
+
+/* ── Sidebar nav section labels ─────────────────────────────── */
+.nav-section-label {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: .62rem;
+  font-weight: 700;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: rgba(155,167,194,.45);
+  padding: 1rem .8rem .25rem;
+  display: block;
+  user-select: none;
+}
+
+/* ── Sidebar active link — left-border accent ───────────────── */
+.nav-link.active {
+  background: rgba(0,201,167,.13) !important;
+  color: #fff !important;
+  font-weight: 700;
+  border-left: 3px solid var(--accent);
+  padding-left: calc(.8rem - 3px);
+  box-shadow: none;
+}
+
+/* ── KPI trend indicators ────────────────────────────────────── */
+.kpi-trend {
+  display: inline-flex;
+  align-items: center;
+  gap: .15rem;
+  font-size: .72rem;
+  font-weight: 600;
+  margin-top: .2rem;
+  line-height: 1;
+}
+.kpi-trend-up      { color: var(--success); }
+.kpi-trend-down    { color: var(--danger); }
+.kpi-trend-neutral { color: var(--text-muted); }
+
+/* ── Divide-x (used in bets list filter stats) ───────────────── */
+.divide-x > .col:not(:last-child) {
+  border-right: 1px solid rgba(255,255,255,.07);
+}
+
+/* ── Auth branded card header ────────────────────────────────── */
+.auth-brand-header {
+  background: linear-gradient(135deg, rgba(0,201,167,.12), rgba(79,140,255,.06));
+  border-bottom: 1px solid rgba(0,201,167,.18);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  padding: 1.75rem 1.5rem 1.25rem;
+  text-align: center;
+}
+.auth-brand-header .brand-dot {
+  width: 18px;
+  height: 18px;
+  margin: 0 auto .75rem;
+}
+.auth-brand-title {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: .03em;
+  color: var(--accent);
+  margin-bottom: .2rem;
+}
+.auth-card-body {
+  padding: 1.5rem 1.5rem 1.75rem;
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+}
+
+/* ── Home marketing page ─────────────────────────────────────── */
+.home-hero {
+  text-align: center;
+  padding: 2.5rem 1.5rem 2rem;
+  position: relative;
+  overflow: hidden;
+}
+.home-hero::before {
+  content: '';
+  position: absolute;
+  top: -80px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 700px;
+  height: 400px;
+  background: radial-gradient(ellipse at center, rgba(0,201,167,.12) 0%, transparent 65%);
+  pointer-events: none;
+}
+.home-hero-badge {
+  display: inline-block;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid rgba(0,201,167,.3);
+  border-radius: 2rem;
+  font-size: .75rem;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  padding: .3rem .85rem;
+  margin-bottom: 1.25rem;
+}
+.home-hero-headline {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: clamp(2rem, 5vw, 3.2rem);
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: -.02em;
+  margin-bottom: .75rem;
+}
+.home-hero-sub {
+  color: var(--text-muted);
+  font-size: 1.05rem;
+  max-width: 520px;
+  margin: 0 auto 1.75rem;
+  line-height: 1.55;
+}
+.home-cta-group {
+  display: flex;
+  gap: .75rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.home-stat-strip {
+  display: flex;
+  justify-content: center;
+  gap: 0;
+  flex-wrap: wrap;
+  padding: 1.5rem 0;
+  border-top: 1px solid rgba(255,255,255,.06);
+  border-bottom: 1px solid rgba(255,255,255,.06);
+  margin: 2rem 0;
+}
+.home-stat-item {
+  text-align: center;
+  padding: .75rem 2rem;
+  border-right: 1px solid rgba(255,255,255,.06);
+}
+.home-stat-item:last-child { border-right: none; }
+.home-stat-value {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 2.2rem;
+  font-weight: 800;
+  color: var(--accent);
+  line-height: 1;
+}
+.home-stat-label {
+  font-size: .75rem;
+  color: var(--text-muted);
+  margin-top: .3rem;
+}
+
+.home-feature-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+}
+.home-feature-card {
+  background: rgba(255,255,255,.02);
+  border: 1px solid rgba(255,255,255,.07);
+  border-radius: var(--radius-md);
+  padding: 1.35rem 1.1rem;
+  transition: border-color .2s ease, transform .2s ease;
+  text-align: center;
+}
+.home-feature-card:hover {
+  border-color: rgba(0,201,167,.3);
+  transform: translateY(-2px);
+}
+.home-feature-icon {
+  font-size: 1.8rem;
+  margin-bottom: .6rem;
+  color: var(--accent);
+  display: block;
+}
+.home-feature-title {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: .02em;
+  margin-bottom: .3rem;
+}
+.home-feature-desc {
+  font-size: .78rem;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+@media (max-width: 575.98px) {
+  .home-stat-item { padding: .6rem 1.25rem; }
+  .home-stat-value { font-size: 1.75rem; }
+}
+
+/* ── Dashboard win-rate donut ────────────────────────────────── */
+.donut-wrap {
+  position: relative;
+  width: 130px;
+  height: 130px;
+  flex-shrink: 0;
+}
+.donut-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.donut-pct {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 1.55rem;
+  font-weight: 800;
+  line-height: 1;
+}
+.donut-sub {
+  font-size: .6rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  margin-top: .1rem;
+}
+
+/* ── Topbar breadcrumb ───────────────────────────────────────── */
+.topbar-breadcrumb {
+  font-size: .7rem;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: .3rem;
+  margin-bottom: .15rem;
+}
+.topbar-breadcrumb a {
+  color: var(--text-muted);
+  text-decoration: none;
+}
+.topbar-breadcrumb a:hover { color: var(--text-main); }
+
+/* ── Confidence tier cards (prop analysis / dashboard) ───────── */
+.tier-card-strong {
+  border-left: 3px solid var(--success);
+  background: rgba(47,201,143,.05);
+}
+.tier-card-moderate {
+  border-left: 3px solid var(--amber);
+  background: rgba(245,158,11,.04);
+}
+.tier-card-slight {
+  border-left: 3px solid rgba(155,167,194,.35);
+}
+
+/* ── Empty state (bets list, NBA today, etc.) ────────────────── */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 3rem 1.5rem;
+  color: var(--text-muted);
+}
+.empty-state-icon {
+  font-size: 2.5rem;
+  opacity: .35;
+  margin-bottom: .75rem;
+}
+.empty-state-title {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--text-main);
+  margin-bottom: .35rem;
+}
+.empty-state-sub {
+  font-size: .85rem;
+  max-width: 300px;
+  line-height: 1.45;
+}
+
+/* ── Improved scrollbar (global) ────────────────────────────── */
+::-webkit-scrollbar       { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,.14); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.24); }
+
+/* ── Improved focus ring ─────────────────────────────────────── */
+:focus-visible {
+  outline: 2px solid rgba(0,201,167,.6);
+  outline-offset: 2px;
+}
+
+/* ── Table header upgrade ────────────────────────────────────── */
+.table thead th {
+  background: rgba(15,23,40,.95) !important;
+  border-bottom: 1px solid rgba(0,201,167,.15) !important;
+}
+
+/* ── User dropdown polished ─────────────────────────────────── */
+.user-btn {
+  background: rgba(255,255,255,.05);
+  border: 1px solid rgba(255,255,255,.12);
+  color: var(--text-main);
+  border-radius: .65rem;
+  padding: .45rem .85rem;
+  font-size: .88rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: .45rem;
+  transition: background .15s, border-color .15s;
+  cursor: pointer;
+}
+.user-btn:hover {
+  background: rgba(255,255,255,.09);
+  border-color: rgba(255,255,255,.22);
+  color: var(--text-main);
+}

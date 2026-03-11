@@ -21,11 +21,15 @@ document.querySelectorAll('.delete-bet-form').forEach(function (form) {
   function openSidebar() {
     sidebar.classList.add('open');
     overlay.classList.add('show');
+    document.body.style.overflow = 'hidden';
+    toggle.setAttribute('aria-expanded', 'true');
   }
 
   function closeSidebar() {
     sidebar.classList.remove('open');
     overlay.classList.remove('show');
+    document.body.style.overflow = '';
+    toggle.setAttribute('aria-expanded', 'false');
   }
 
   toggle.addEventListener('click', function () {
@@ -37,4 +41,18 @@ document.querySelectorAll('.delete-bet-form').forEach(function (form) {
   });
 
   overlay.addEventListener('click', closeSidebar);
+
+  // Close on Escape
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && sidebar.classList.contains('open')) {
+      closeSidebar();
+    }
+  });
+
+  // Close sidebar when a nav link is clicked (mobile UX)
+  sidebar.querySelectorAll('.nav-link').forEach(function (link) {
+    link.addEventListener('click', function () {
+      if (window.innerWidth < 992) closeSidebar();
+    });
+  });
 })();

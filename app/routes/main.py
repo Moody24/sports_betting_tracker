@@ -125,6 +125,7 @@ def dashboard():
         'total_bets': total_bets,
         'wins': wins,
         'losses': losses,
+        'pending': total_bets - wins - losses,
         'wagered': wagered,
         'net': units_won,
         'units_won': units_won,

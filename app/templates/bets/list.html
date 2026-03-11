@@ -8,12 +8,14 @@
 {% block content %}
 {% set pending_bets = bets | selectattr('outcome', 'equalto', 'pending') | list %}
 {% if pending_bets %}
-<div class="alert d-flex flex-wrap align-items-center justify-content-between gap-2 mb-4"
-     style="background:rgba(255,193,7,.08); border:1px solid rgba(255,193,7,.25); border-radius:.75rem; padding:.75rem 1rem">
-  <div>
-    <i class="bi bi-hourglass-split text-warning me-2"></i>
-    <span class="fw-semibold text-warning">{{ pending_bets|length }} pending</span>
-    <span class="text-secondary small ms-2">— auto-grades run at 1 AM ET, or resolve manually below</span>
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-4 px-3 py-3"
+     style="background:rgba(245,158,11,.07); border:1px solid rgba(245,158,11,.22); border-radius:.85rem; border-left: 3px solid var(--amber)">
+  <div class="d-flex align-items-center gap-2">
+    <i class="bi bi-hourglass-split text-warning fs-5"></i>
+    <div>
+      <span class="fw-semibold text-warning">{{ pending_bets|length }} pending bet{{ 's' if pending_bets|length != 1 else '' }}</span>
+      <span class="text-secondary small ms-2 d-none d-sm-inline">— auto-grades run at 1 AM ET</span>
+    </div>
   </div>
   <form action="{{ url_for('bet.nba_update_results') }}" method="POST" class="d-inline">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -333,10 +335,17 @@
         </section>
       {% endif %}
     {% else %}
-      <div class="text-center py-5 text-secondary">
-        <i class="bi bi-inbox" style="font-size:1.5rem; opacity:.4"></i>
-        <p class="mt-2 mb-0">No bets found for selected filters.</p>
-        {% if filters.status or filters.type or filters.q %}<a href="{{ url_for('bet.place_bet') }}" class="btn btn-link btn-sm mt-1">Clear filters</a>{% endif %}
+      <div class="empty-state">
+        <i class="bi bi-journal-x empty-state-icon"></i>
+        {% if filters.status or filters.type or filters.q or filters.start_date or filters.end_date %}
+          <div class="empty-state-title">No matching bets</div>
+          <p class="empty-state-sub">No bets match the current filters. Try adjusting your search criteria.</p>
+          <a href="{{ url_for('bet.place_bet') }}" class="btn btn-outline-secondary btn-sm mt-2">Clear Filters</a>
+        {% else %}
+          <div class="empty-state-title">No bets yet</div>
+          <p class="empty-state-sub">Start tracking your wagers to see performance analytics and trends.</p>
+          <a href="{{ url_for('bet.new_bet') }}" class="btn btn-primary btn-sm mt-2"><i class="bi bi-plus-lg me-1"></i>Add First Bet</a>
+        {% endif %}
       </div>
     {% endfor %}
   </div>

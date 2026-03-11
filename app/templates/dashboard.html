@@ -11,6 +11,7 @@
     <div class="card-soft kpi-card kpi-card-neutral h-100">
       <p class="kpi-label mb-1">Total Bets</p>
       <p class="kpi-value mb-0">{{ stats.total_bets }}</p>
+      <div class="kpi-trend kpi-trend-neutral"><i class="bi bi-dash"></i> All time</div>
     </div>
   </div>
   <div class="col-sm-6 col-xl-2 fade-up fade-up-2">
@@ -19,30 +20,46 @@
       <p class="kpi-value mb-0 {{ 'text-success' if stats.net >= 0 else 'text-danger' }}">
         {{ '+' if stats.net >= 0 else '' }}${{ '%.2f'|format(stats.net) }}
       </p>
+      <div class="kpi-trend {{ 'kpi-trend-up' if stats.net >= 0 else 'kpi-trend-down' }}">
+        <i class="bi bi-arrow-{{ 'up' if stats.net >= 0 else 'down' }}-short"></i>
+        {{ 'Profitable' if stats.net >= 0 else 'Negative' }}
+      </div>
     </div>
   </div>
   <div class="col-sm-6 col-xl-2 fade-up fade-up-3">
     <div class="card-soft kpi-card {{ 'kpi-card-roi-pos' if stats.roi >= 0 else 'kpi-card-roi-neg' }} h-100">
       <p class="kpi-label mb-1">ROI</p>
       <p class="kpi-value mb-0 {{ 'text-success' if stats.roi >= 0 else 'text-danger' }}">{{ '%.1f'|format(stats.roi) }}%</p>
+      <div class="kpi-trend {{ 'kpi-trend-up' if stats.roi >= 0 else 'kpi-trend-down' }}">
+        <i class="bi bi-arrow-{{ 'up' if stats.roi >= 0 else 'down' }}-short"></i>
+        Return on investment
+      </div>
     </div>
   </div>
   <div class="col-sm-6 col-xl-2 fade-up fade-up-4">
     <div class="card-soft kpi-card kpi-card-wins h-100">
       <p class="kpi-label mb-1">Win %</p>
       <p class="kpi-value mb-0">{{ '%.1f'|format(stats.win_pct) }}%</p>
+      <div class="kpi-trend {{ 'kpi-trend-up' if stats.win_pct >= 50 else 'kpi-trend-down' }}">
+        <i class="bi bi-{{ 'trophy' if stats.win_pct >= 50 else 'exclamation-triangle' }}"></i>
+        {{ 'Above 50%' if stats.win_pct >= 50 else 'Below 50%' }}
+      </div>
     </div>
   </div>
   <div class="col-sm-6 col-xl-2 fade-up fade-up-5">
     <div class="card-soft kpi-card kpi-card-neutral h-100">
       <p class="kpi-label mb-1">Total Wagered</p>
       <p class="kpi-value mb-0">${{ '%.2f'|format(stats.wagered) }}</p>
+      <div class="kpi-trend kpi-trend-neutral"><i class="bi bi-wallet2"></i> Total action</div>
     </div>
   </div>
   <div class="col-sm-6 col-xl-2 fade-up fade-up-6">
     <div class="card-soft kpi-card kpi-card-neutral h-100">
       <p class="kpi-label mb-1">Current Streak</p>
       <p class="kpi-value mb-0">{{ stats.current_streak }}</p>
+      <div class="kpi-trend {{ 'kpi-trend-up' if stats.current_streak and stats.current_streak != 'No streak' else 'kpi-trend-neutral' }}">
+        <i class="bi bi-lightning-charge"></i> Active
+      </div>
     </div>
   </div>
 </div>
@@ -80,7 +97,38 @@
 </details>
 
 <div class="row g-3 mb-4 fade-up fade-up-8">
-  <div class="col-lg-6">
+  <div class="col-lg-4">
+    <div class="card-soft p-3 h-100 d-flex flex-column">
+      <h3 class="h6 mb-3">Win Rate</h3>
+      <div class="d-flex align-items-center gap-3 flex-grow-1">
+        <div class="donut-wrap">
+          <canvas id="winRateDonut" aria-label="Win rate" role="img"></canvas>
+          <div class="donut-center">
+            <span class="donut-pct" id="donutPct">{{ '%.0f'|format(stats.win_pct) }}%</span>
+            <span class="donut-sub">Win Rate</span>
+          </div>
+        </div>
+        <div class="vstack gap-2 small">
+          <div class="d-flex align-items-center gap-2">
+            <span style="width:10px;height:10px;border-radius:50%;background:var(--success);flex-shrink:0"></span>
+            <span class="text-secondary">Wins</span>
+            <span class="ms-auto fw-semibold text-success">{{ stats.wins if stats.wins is defined else '—' }}</span>
+          </div>
+          <div class="d-flex align-items-center gap-2">
+            <span style="width:10px;height:10px;border-radius:50%;background:var(--danger);flex-shrink:0"></span>
+            <span class="text-secondary">Losses</span>
+            <span class="ms-auto fw-semibold text-danger">{{ stats.losses if stats.losses is defined else '—' }}</span>
+          </div>
+          <div class="d-flex align-items-center gap-2">
+            <span style="width:10px;height:10px;border-radius:50%;background:var(--amber);flex-shrink:0"></span>
+            <span class="text-secondary">Pending</span>
+            <span class="ms-auto fw-semibold text-warning">{{ stats.pending if stats.pending is defined else '—' }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-4">
     <div class="card-soft chart-card p-3 h-100">
       <div class="d-flex justify-content-between align-items-center mb-2">
         <h3 class="h6 mb-0">P/L by Day</h3>
@@ -91,11 +139,11 @@
       </div>
     </div>
   </div>
-  <div class="col-lg-6">
+  <div class="col-lg-4">
     <div class="card-soft chart-card p-3 h-100">
       <div class="d-flex justify-content-between align-items-center mb-2">
         <h3 class="h6 mb-0">Cumulative P/L</h3>
-        <span class="text-secondary small">All-time (last 30 graded)</span>
+        <span class="text-secondary small">All-time</span>
       </div>
       <div class="chart-area">
         <canvas id="cumulativePLChart" aria-label="Cumulative profit/loss" role="img"></canvas>
@@ -107,8 +155,11 @@
 {# ── Today's Top Plays ────────────────────────────────────── #}
 {% if top_plays %}
 <div class="card-soft p-3 mb-4">
-  <div class="d-flex justify-content-between align-items-center mb-2">
-    <h3 class="h6 mb-0"><i class="bi bi-bullseye me-2 text-info"></i>Today's Top Plays</h3>
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+      <h3 class="h6 mb-0"><i class="bi bi-bullseye me-2 text-info"></i>Today's Top Plays</h3>
+      <p class="text-secondary small mb-0 mt-1">ML-ranked player props with highest edge</p>
+    </div>
     <a href="{{ url_for('bet.nba_analysis') }}" class="btn btn-sm btn-outline-info">View All</a>
   </div>
   <div class="table-wrap">
@@ -119,14 +170,14 @@
           <th>Prop</th>
           <th class="text-center">Line</th>
           <th class="text-center">Proj</th>
-          <th class="text-center">Edge</th>
+          <th class="text-center">Tier</th>
           <th class="text-center">Side</th>
           <th class="text-center">Add Bet</th>
         </tr>
       </thead>
       <tbody>
         {% for play in top_plays %}
-        <tr>
+        <tr class="tier-card-{{ play.confidence_tier or 'slight' }}">
           <td class="fw-semibold">{{ play.player }}</td>
           <td>{{ prop_badge(play.prop_type) }}</td>
           <td class="text-center tabular-num">{{ play.line }}</td>
@@ -269,6 +320,35 @@
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <script>
+  // Win-rate donut chart
+  (function() {
+    var ctx = document.getElementById('winRateDonut');
+    if (!ctx) return;
+    var wins    = {{ stats.wins if stats.wins is defined else 0 }};
+    var losses  = {{ stats.losses if stats.losses is defined else 0 }};
+    var pending = {{ stats.pending if stats.pending is defined else 0 }};
+    var total = wins + losses + pending;
+    if (total === 0) { wins = 1; total = 1; } // avoid empty chart
+    new Chart(ctx, {
+      type: 'doughnut',
+      data: {
+        datasets: [{
+          data: [wins, losses, pending || 0.001],
+          backgroundColor: ['rgba(47,201,143,.75)', 'rgba(255,107,122,.65)', 'rgba(245,158,11,.55)'],
+          borderColor: ['rgba(47,201,143,.9)', 'rgba(255,107,122,.9)', 'rgba(245,158,11,.9)'],
+          borderWidth: 1.5,
+          hoverOffset: 4,
+        }]
+      },
+      options: {
+        cutout: '72%',
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { enabled: true } },
+        animation: { animateRotate: true, duration: 600 }
+      }
+    });
+  })();
+
   const chartDefaults = {
     maintainAspectRatio: false,
     plugins: { legend: { display: false } },

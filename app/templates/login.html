@@ -7,38 +7,47 @@
 {% block content %}
 <div class="row justify-content-center">
   <div class="col-12 col-md-8 col-lg-5">
-    <div class="card-soft p-4 p-md-5">
-      <h3 class="h5 mb-3">Login</h3>
-      <form method="POST" novalidate class="vstack gap-3">
-        {{ form.hidden_tag() }}
+    <div class="card-soft overflow-hidden">
+      <div class="auth-brand-header">
+        <div class="brand-dot"></div>
+        <div class="auth-brand-title">Sports Betting Tracker</div>
+        <p class="text-secondary small mb-0" style="margin-top:.2rem">Sign in to your account</p>
+      </div>
+      <div class="auth-card-body">
+        <form method="POST" novalidate class="vstack gap-3">
+          {{ form.hidden_tag() }}
 
-        <div>
-          <label class="form-label" for="username">Username</label>
-          <div class="input-group">
-            <span class="input-group-text"><i class="bi bi-person"></i></span>
-            {{ form.username(class="form-control", id="username", placeholder="Enter username") }}
+          <div>
+            <label class="form-label small fw-semibold" for="username">Username</label>
+            <div class="input-group">
+              <span class="input-group-text"><i class="bi bi-person"></i></span>
+              {{ form.username(class="form-control", id="username", placeholder="Enter username") }}
+            </div>
           </div>
-        </div>
 
-        <div>
-          <label class="form-label" for="password">Password</label>
-          <div class="input-group">
-            <span class="input-group-text"><i class="bi bi-lock"></i></span>
-            {{ form.password(class="form-control", id="password", placeholder="Enter password") }}
+          <div>
+            <label class="form-label small fw-semibold" for="password">Password</label>
+            <div class="input-group">
+              <span class="input-group-text"><i class="bi bi-lock"></i></span>
+              {{ form.password(class="form-control", id="password", placeholder="Enter password") }}
+            </div>
           </div>
-        </div>
 
-        <div class="form-check">
-          {{ form.remember(class="form-check-input", id="remember") }}
-          <label class="form-check-label" for="remember">Remember me</label>
-        </div>
+          <div class="d-flex justify-content-between align-items-center">
+            <div class="form-check mb-0">
+              {{ form.remember(class="form-check-input", id="remember") }}
+              <label class="form-check-label small" for="remember">Remember me</label>
+            </div>
+          </div>
 
-        {{ form.submit(class="btn btn-primary btn-lg w-100") }}
-      </form>
+          {{ form.submit(class="btn btn-primary btn-lg w-100 fw-semibold") }}
+        </form>
 
-      <p class="text-secondary small mb-0 mt-3">Don’t have an account?
-        <a class="link-light" href="{{ url_for('auth.register') }}">Create one</a>
-      </p>
+        <p class="text-secondary small mb-0 mt-4 text-center">
+          Don't have an account?
+          <a class="link-light fw-semibold" href="{{ url_for('auth.register') }}">Create one</a>
+        </p>
+      </div>
     </div>
   </div>
 </div>

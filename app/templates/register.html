@@ -7,38 +7,45 @@
 {% block content %}
 <div class="row justify-content-center">
   <div class="col-12 col-md-9 col-lg-6">
-    <div class="card-soft p-4 p-md-5">
-      <h3 class="h5 mb-3">Register</h3>
-      <form method="POST" novalidate class="vstack gap-3">
-        {{ form.hidden_tag() }}
+    <div class="card-soft overflow-hidden">
+      <div class="auth-brand-header">
+        <div class="brand-dot"></div>
+        <div class="auth-brand-title">Sports Betting Tracker</div>
+        <p class="text-secondary small mb-0" style="margin-top:.2rem">Create your free account</p>
+      </div>
+      <div class="auth-card-body">
+        <form method="POST" novalidate class="vstack gap-3">
+          {{ form.hidden_tag() }}
 
-        <div>
-          <label class="form-label" for="username">Username</label>
-          {{ form.username(class="form-control", id="username", placeholder="Pick a username") }}
-        </div>
-
-        <div>
-          <label class="form-label" for="email">Email</label>
-          {{ form.email(class="form-control", id="email", placeholder="you@example.com") }}
-        </div>
-
-        <div class="row g-3">
-          <div class="col-md-6">
-            <label class="form-label" for="password">Password</label>
-            {{ form.password(class="form-control", id="password", placeholder="At least 6 characters") }}
+          <div>
+            <label class="form-label small fw-semibold" for="username">Username</label>
+            {{ form.username(class="form-control", id="username", placeholder="Pick a username") }}
           </div>
-          <div class="col-md-6">
-            <label class="form-label" for="confirm_password">Confirm Password</label>
-            {{ form.confirm_password(class="form-control", id="confirm_password", placeholder="Repeat password") }}
+
+          <div>
+            <label class="form-label small fw-semibold" for="email">Email</label>
+            {{ form.email(class="form-control", id="email", placeholder="you@example.com") }}
           </div>
-        </div>
 
-        {{ form.submit(class="btn btn-primary btn-lg mt-2") }}
-      </form>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label small fw-semibold" for="password">Password</label>
+              {{ form.password(class="form-control", id="password", placeholder="At least 6 characters") }}
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small fw-semibold" for="confirm_password">Confirm Password</label>
+              {{ form.confirm_password(class="form-control", id="confirm_password", placeholder="Repeat password") }}
+            </div>
+          </div>
 
-      <p class="text-secondary small mb-0 mt-3">Already have an account?
-        <a class="link-light" href="{{ url_for('auth.login') }}">Login</a>
-      </p>
+          {{ form.submit(class="btn btn-primary btn-lg w-100 fw-semibold mt-1") }}
+        </form>
+
+        <p class="text-secondary small mb-0 mt-4 text-center">
+          Already have an account?
+          <a class="link-light fw-semibold" href="{{ url_for('auth.login') }}">Sign in</a>
+        </p>
+      </div>
     </div>
   </div>
 </div>
