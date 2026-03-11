@@ -18,7 +18,25 @@ def _american_to_decimal(odds: int) -> float:
         return 1.0 + odds / 100.0
     if odds < 0:
         return 1.0 + 100.0 / abs(odds)
-    return 1.0  # 0 is not a valid real-world line; treat as even
+    # 0 is not a valid real-world line; treat as even money (+100) => 2.0 decimal.
+    return 2.0
+
+
+def compute_bets_wagered(bets: list) -> float:
+    """Parlay-aware wagered total across a list of Bet objects.
+
+    Parlays count stake once per parlay_id, not once per leg.
+    """
+    parlay_groups: dict = {}
+    total = 0.0
+    for b in bets:
+        if b.is_parlay and b.parlay_id:
+            parlay_groups.setdefault(b.parlay_id, []).append(b)
+        else:
+            total += float(b.bet_amount or 0.0)
+    for legs in parlay_groups.values():
+        total += float(legs[0].bet_amount or 0.0)
+    return round(total, 2)
 
 
 def compute_bets_net_pl(bets: list) -> float:
@@ -62,8 +80,27 @@ class User(UserMixin, db.Model):
         return db.session.query(Bet).filter_by(user_id=self.id).count()
 
     def total_amount_wagered(self) -> float:
-        total = db.session.query(func.sum(Bet.bet_amount)).filter_by(user_id=self.id).scalar()
-        return float(total or 0.0)
+        # Straight bets: sum directly.
+        straight_total = (
+            db.session.query(func.coalesce(func.sum(Bet.bet_amount), 0.0))
+            .filter(Bet.user_id == self.id)
+            .filter(db.or_(Bet.is_parlay.is_(False), Bet.parlay_id.is_(None)))
+            .scalar()
+        )
+        # Parlays: count stake once per parlay_id (not once per leg).
+        parlay_subq = (
+            db.session.query(
+                Bet.parlay_id.label('parlay_id'),
+                func.max(Bet.bet_amount).label('stake'),
+            )
+            .filter(Bet.user_id == self.id)
+            .filter(Bet.is_parlay.is_(True))
+            .filter(Bet.parlay_id.isnot(None))
+            .group_by(Bet.parlay_id)
+            .subquery()
+        )
+        parlay_total = db.session.query(func.coalesce(func.sum(parlay_subq.c.stake), 0.0)).scalar()
+        return round(float(straight_total or 0.0) + float(parlay_total or 0.0), 2)
 
     def net_profit_loss(self) -> float:
         """Return net P/L using parlay-aware combined-odds calculation.

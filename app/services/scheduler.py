@@ -938,6 +938,37 @@ def prune_cache():
         logger.info("Cache prune complete: %s", result)
 
 
+def _update_final_snapshots():
+    """Mark completed game snapshots as final without grading bets.
+
+    Runs at 11:15 PM ET — safe to call while West Coast games may still be
+    live.  Full bet grading (resolve_and_grade) runs at 1:00 AM once all
+    games are finished.
+    """
+    from app import db
+    from app.models import GameSnapshot
+    from app.services.nba_service import fetch_espn_scoreboard, _STATUS_FINAL
+
+    app = _get_app()
+    with app.app_context():
+        try:
+            scoreboards = fetch_espn_scoreboard()
+            updated = 0
+            for game in scoreboards:
+                if game.get('status') != _STATUS_FINAL:
+                    continue
+                snap = GameSnapshot.query.filter_by(espn_id=game['espn_id']).first()
+                if snap and not snap.is_final:
+                    snap.is_final = True
+                    snap.home_score = game['home']['score']
+                    snap.away_score = game['away']['score']
+                    updated += 1
+            db.session.commit()
+            logger.info("Snapshot final-mark: %d game(s) marked final", updated)
+        except Exception as exc:
+            logger.warning("Snapshot final-mark failed: %s", exc)
+
+
 def init_scheduler(app):
     """Register all scheduled jobs.  Called once from create_app()."""
     global _scheduler_app
@@ -1030,9 +1061,11 @@ def init_scheduler(app):
         replace_existing=True,
     )
 
-    # Late-night snapshot update — captures final scores after games end (11:15 PM ET)
+    # Late-night snapshot update — marks final scores without grading bets (11:15 PM ET).
+    # West Coast games tip at ~10:30 PM ET and run past midnight — grading mid-game
+    # would produce partial stats. Full resolve_and_grade runs at 1:00 AM instead.
     scheduler.add_job(
-        lambda: _log_job('snapshot_update', resolve_and_grade),
+        lambda: _log_job('snapshot_update', _update_final_snapshots),
         CronTrigger(hour=23, minute=15, timezone=APP_TIMEZONE),
         id='snapshot_update',
         replace_existing=True,

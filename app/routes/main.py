@@ -7,7 +7,7 @@ from sqlalchemy import func, case, text
 
 from app import db
 from app.enums import Outcome
-from app.models import Bet, compute_bets_net_pl
+from app.models import Bet, compute_bets_net_pl, compute_bets_wagered
 
 logger = logging.getLogger(__name__)
 
@@ -41,13 +41,12 @@ def dashboard():
         func.count(Bet.id).label('total'),
         func.coalesce(func.sum(case((Bet.outcome == Outcome.WIN.value, 1), else_=0)), 0).label('wins'),
         func.coalesce(func.sum(case((Bet.outcome == Outcome.LOSE.value, 1), else_=0)), 0).label('losses'),
-        func.coalesce(func.sum(Bet.bet_amount), 0.0).label('wagered'),
     ).filter_by(user_id=uid).one()
 
     total_bets = int(agg.total)
     wins = int(agg.wins)
     losses = int(agg.losses)
-    wagered = float(agg.wagered)
+    wagered = float(current_user.total_amount_wagered())
 
     # ── Recent bets (capped by SQL LIMIT) ─────────────────────────────
     recent_bets = (
@@ -71,7 +70,9 @@ def dashboard():
 
     # ── Net P/L (reuse graded_bets instead of separate query) ─────────
     units_won = compute_bets_net_pl(graded_bets)
-    roi = (units_won / wagered * 100) if wagered else 0
+    # ROI denominator: parlay-aware wagered on graded bets only.
+    wagered_graded = compute_bets_wagered(graded_bets)
+    roi = (units_won / wagered_graded * 100) if wagered_graded else 0
     graded_count = wins + losses
     win_pct = (wins / graded_count * 100) if graded_count else 0
 

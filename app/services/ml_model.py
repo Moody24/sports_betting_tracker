@@ -15,7 +15,7 @@ from datetime import datetime, timezone, date as date_type
 
 from app import db
 from app.config_display import PROP_STAT_KEY
-from app.models import ModelMetadata, PlayerGameLog, TeamDefenseSnapshot, GameSnapshot
+from app.models import ModelMetadata, PlayerGameLog, TeamDefenseSnapshot, GameSnapshot, OddsSnapshot
 from app.services.model_storage import materialize_model_artifact, persist_model_artifact
 from app.services.ml_feature_builder import build_ml_features_from_history, build_team_game_aggregates
 
@@ -94,6 +94,37 @@ def _build_game_total_lookup(defense_lookup: dict) -> dict:
     return lookup
 
 
+def _build_odds_snapshot_lookup(stat_type: str) -> dict:
+    """Build line-movement lookup from OddsSnapshot for historical training rows.
+
+    Returns {(player_name_lower, stat_type, game_date): line_delta} where
+    line_delta = last_line - first_line for that player/market/date.
+    Only dates with 2+ snapshots (i.e. a line actually moved) produce entries.
+    """
+    rows = (
+        OddsSnapshot.query
+        .filter(OddsSnapshot.market == stat_type)
+        .filter(OddsSnapshot.line.isnot(None))
+        .order_by(OddsSnapshot.game_date, OddsSnapshot.player_name, OddsSnapshot.snapped_at)
+        .all()
+    )
+    # Group by (player_name_lower, game_date) and track first/last line seen.
+    groups: dict = {}
+    for row in rows:
+        key = ((row.player_name or '').strip().lower(), row.game_date)
+        if key not in groups:
+            groups[key] = {'first': row.line, 'last': row.line}
+        else:
+            groups[key]['last'] = row.line
+
+    lookup: dict = {}
+    for (player_lower, gdate), vals in groups.items():
+        delta = float(vals['last'] or 0.0) - float(vals['first'] or 0.0)
+        if delta != 0.0:  # only store when line actually moved
+            lookup[(player_lower, stat_type, gdate)] = delta
+    return lookup
+
+
 def _build_training_rows(stat_type: str):
     """Build dated training rows for walk-forward validation."""
     stat_key = STAT_KEY_MAP.get(stat_type, 'pts')
@@ -120,6 +151,8 @@ def _build_training_rows(stat_type: str):
     # Phase 1.1: pre-build context lookups once to avoid per-row DB queries
     defense_lookup = _build_defense_lookup()
     game_total_lookup = _build_game_total_lookup(defense_lookup)
+    # Phase 2: line movement — only available for recent rows; older rows get 0.0
+    odds_snapshot_lookup = _build_odds_snapshot_lookup(stat_type)
 
     rows = []
 
@@ -137,6 +170,11 @@ def _build_training_rows(stat_type: str):
             team_abbr = (current.team_abbr or '').strip().upper()
             ou_line = game_total_lookup.get((current.game_date, team_abbr), 0.0)
 
+            player_lower = (current.player_name or '').strip().lower()
+            line_delta = odds_snapshot_lookup.get(
+                (player_lower, stat_type, current.game_date), 0.0
+            )
+
             features = build_ml_features_from_history(
                 prior_logs=prior,
                 current_is_home=(current.home_away or '').lower() == 'home',
@@ -147,6 +185,7 @@ def _build_training_rows(stat_type: str):
                 current_matchup=current.matchup or '',
                 game_total_line=ou_line,
                 defense_lookup=defense_lookup,
+                line_delta=line_delta,
             )
             rows.append((current.game_date, str(pid), features, target))
 

@@ -2542,9 +2542,10 @@ class TestPickQualityModel(BaseTestCase):
             ))
             db.session.commit()
 
-            features, targets = pick_quality_model._build_training_data()
+            features, targets, dates = pick_quality_model._build_training_data()
             self.assertIsNone(features)
             self.assertIsNone(targets)
+            self.assertIsNone(dates)
 
     def test_build_training_data_encodes_and_normalizes(self):
         from app.services import pick_quality_model
@@ -2580,10 +2581,11 @@ class TestPickQualityModel(BaseTestCase):
             db.session.commit()
 
             with patch.object(pick_quality_model, 'MIN_RESOLVED_PICKS', 2):
-                features, targets = pick_quality_model._build_training_data()
+                features, targets, dates = pick_quality_model._build_training_data()
 
             self.assertEqual(len(features), 2)
             self.assertCountEqual(targets, [1, 0])
+            self.assertEqual(len(dates), 2)
             # Find the win and lose rows by target value (order may vary)
             win_idx = targets.index(1)
             lose_idx = targets.index(0)
@@ -2716,7 +2718,7 @@ class TestPickQualityModel(BaseTestCase):
                 'sklearn.metrics': fake_metrics,
                 'sklearn.model_selection': fake_model_selection,
             }):
-                with patch.object(pick_quality_model, '_build_training_data', return_value=(features, targets)):
+                with patch.object(pick_quality_model, '_build_training_data', return_value=(features, targets, [None] * len(targets))):
                     with patch('app.services.pick_quality_model.persist_model_artifact', return_value='s3://bucket/model.json'):
                         result = pick_quality_model.train_pick_quality_model()
 
@@ -3096,7 +3098,7 @@ class TestValueDetectorModel2Integration(BaseTestCase):
         self.assertTrue(any('ML caution' in n for n in result['context_notes']))
 
     def test_score_prop_b2b_detected_from_context_notes(self):
-        """B2B flag is correctly inferred from projection context_notes."""
+        """B2B flag is correctly inferred from projection context_notes (fallback path)."""
         from app.services.value_detector import ValueDetector
         engine = self._make_engine_with_proj(
             projection=22.0, games=20, confidence='medium',
@@ -3111,11 +3113,13 @@ class TestValueDetectorModel2Integration(BaseTestCase):
             return {'win_probability': 0.55, 'recommendation': 'caution', 'red_flags': []}
 
         with self.app.app_context():
-            with patch('app.services.value_detector.predict_pick_quality',
+            # Force fallback path (no player_id) so B2B is read from context_notes.
+            with patch('app.services.value_detector.find_player_id', return_value=''), \
+                 patch('app.services.value_detector.predict_pick_quality',
                        side_effect=capture_ctx):
                 detector.score_prop('LeBron James', 'player_points', 22.5, -110, -110)
 
-        self.assertEqual(captured_ctx.get('back_to_back'), 1)
+        self.assertTrue(captured_ctx.get('back_to_back'))
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -3705,7 +3709,7 @@ class Phase1FeatureBuilderTest(BaseTestCase):
 
     def test_feature_keys_count(self):
         from app.services.ml_feature_builder import FEATURE_KEYS
-        self.assertEqual(len(FEATURE_KEYS), 30, "Expected 30 feature keys (21 original + 9 Phase 1)")
+        self.assertEqual(len(FEATURE_KEYS), 37, "Expected 37 feature keys (21 original + 9 Phase 1 + 7 Phase 2)")
 
     def test_phase1_keys_present(self):
         from app.services.ml_feature_builder import FEATURE_KEYS

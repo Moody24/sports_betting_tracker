@@ -4,7 +4,7 @@ Learns from resolved bet history to predict which picks are likely to
 win. Supports both a global model and user-specific models when enough
 per-user data exists.
 
-Requires 200+ resolved picks before training has enough signal.
+Requires 100+ resolved picks before training has enough signal (see MIN_RESOLVED_PICKS).
 """
 
 import glob
@@ -104,10 +104,11 @@ def _build_training_data(user_id: int | None = None, include_bootstrap: bool = F
             "Insufficient resolved picks for Model 2: %d (need %d)",
             len(resolved), MIN_RESOLVED_PICKS,
         )
-        return None, None
+        return None, None, None
 
     features_list = []
     targets = []
+    _dates = []
     skipped_polluted = 0
 
     for bet_obj, pick_ctx in resolved:
@@ -142,6 +143,8 @@ def _build_training_data(user_id: int | None = None, include_bootstrap: bool = F
 
         features_list.append(features)
         targets.append(1 if bet_obj.outcome == 'win' else 0)
+        # Preserve match_date for time-aware splitting — None-safe.
+        _dates.append(getattr(bet_obj, 'match_date', None))
 
     if skipped_polluted:
         logger.info(
@@ -150,9 +153,9 @@ def _build_training_data(user_id: int | None = None, include_bootstrap: bool = F
         )
 
     if not features_list:
-        return None, None
+        return None, None, None
 
-    return features_list, targets
+    return features_list, targets, _dates
 
 
 def train_pick_quality_model(user_id: int | None = None) -> dict:
@@ -168,7 +171,7 @@ def train_pick_quality_model(user_id: int | None = None) -> dict:
         logger.error("xgboost or scikit-learn not installed")
         return {'error': 'Missing ML dependencies'}
 
-    features_list, targets = _build_training_data(user_id=user_id)
+    features_list, targets, dates = _build_training_data(user_id=user_id)
     if features_list is None:
         return {
             'error': 'Insufficient training data',
@@ -180,11 +183,26 @@ def train_pick_quality_model(user_id: int | None = None) -> dict:
     X = np.array([[f[k] for k in feature_names] for f in features_list])
     y = np.array(targets)
 
-    # Stratified split (70/30)
-    from sklearn.model_selection import train_test_split
-    X_train, X_val, y_train, y_val = train_test_split(
-        X, y, test_size=0.3, stratify=y, random_state=42,
-    )
+    # Time-aware split: sort by match_date, use last 30% as validation.
+    # Enabled via MODEL2_TIME_AWARE_SPLIT=true; falls back to stratified random split.
+    use_time_split = os.getenv('MODEL2_TIME_AWARE_SPLIT', 'false').lower() == 'true'
+    split_method = 'time_ordered' if use_time_split else 'stratified_random'
+
+    if use_time_split and dates and any(d is not None for d in dates):
+        # Sort rows by date (None dates go last so they land in val set)
+        order = sorted(range(len(dates)), key=lambda i: (dates[i] is None, dates[i]))
+        X = X[order]
+        y = y[order]
+        split_idx = int(len(X) * 0.7)
+        split_idx = max(1, min(split_idx, len(X) - 1))
+        X_train, X_val = X[:split_idx], X[split_idx:]
+        y_train, y_val = y[:split_idx], y[split_idx:]
+        logger.info("Model 2 time-aware split: %d train / %d val", len(X_train), len(X_val))
+    else:
+        from sklearn.model_selection import train_test_split
+        X_train, X_val, y_train, y_val = train_test_split(
+            X, y, test_size=0.3, stratify=y, random_state=42,
+        )
 
     # Handle class imbalance
     pos_count = sum(y_train)
@@ -215,12 +233,16 @@ def train_pick_quality_model(user_id: int | None = None) -> dict:
     final_model = model
     try:
         from sklearn.calibration import CalibratedClassifierCV
-        calibrated = CalibratedClassifierCV(model, method='isotonic', cv='prefit')
+        # Isotonic regression overfits with small calibration sets (scikit-learn docs).
+        # Use sigmoid (Platt scaling) unless we have a large enough calibration set.
+        # Note: cv='prefit' is deprecated in newer scikit-learn — revisit when upgrading.
+        method = 'isotonic' if len(X_val) >= 1000 else 'sigmoid'
+        calibrated = CalibratedClassifierCV(model, method=method, cv='prefit')
         calibrated.fit(X_val, y_val)
         final_model = calibrated
-        calibration_method = 'isotonic'
+        calibration_method = method
     except Exception as exc:
-        logger.warning("Isotonic calibration failed; using uncalibrated model: %s", exc)
+        logger.warning("Calibration failed; using uncalibrated model: %s", exc)
 
     # Evaluate the final model
     y_pred = final_model.predict(X_val)
@@ -269,6 +291,7 @@ def train_pick_quality_model(user_id: int | None = None) -> dict:
             'logloss': round(logloss, 4),
             'top_features': top_features,
             'calibration_method': calibration_method,
+            'split_method': split_method,
         }),
     )
     db.session.add(meta)

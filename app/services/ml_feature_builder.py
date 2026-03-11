@@ -27,6 +27,11 @@ FEATURE_KEYS = [
     'game_total_line',
     # Phase 1.1 — defensive matchup (3)
     'opp_def_rating', 'opp_pace', 'opp_stat_allowed',
+    # Phase 2 — win/loss game-script features (5)
+    'avg_stat_in_wins', 'avg_stat_in_losses', 'win_rate_last_10',
+    'avg_plus_minus_last_5', 'blowout_rate_last_10',
+    # Phase 2 — line movement signal (2)
+    'line_delta_today', 'line_movement_available',
 ]
 
 
@@ -210,6 +215,54 @@ def compute_team_usage_features_for_player(game_list: Iterable, totals: Dict[tup
     }
 
 
+def compute_win_loss_features(logs: List, stat_key: str) -> dict:
+    """Compute game-script split features from win_loss and plus_minus fields.
+
+    Returns avg stat in wins, avg stat in losses, win rate over last 10,
+    avg plus/minus over last 5, and blowout rate over last 10.
+    """
+    sorted_logs = sort_logs_by_date(logs, ascending=True)
+    last_5 = sorted_logs[-5:]
+    last_10 = sorted_logs[-10:]
+
+    def _avg_stat_in_outcome(game_list, outcome_char: str) -> float:
+        vals = [
+            float(getattr(g, stat_key, 0.0) or 0.0)
+            for g in game_list
+            if (getattr(g, 'win_loss', '') or '').upper() == outcome_char
+        ]
+        return float(sum(vals) / len(vals)) if vals else 0.0
+
+    def _win_rate(game_list) -> float:
+        total = len(game_list)
+        if not total:
+            return 0.0
+        wins = sum(1 for g in game_list if (getattr(g, 'win_loss', '') or '').upper() == 'W')
+        return float(wins / total)
+
+    def _avg_plus_minus(game_list) -> float:
+        vals = [float(getattr(g, 'plus_minus', 0.0) or 0.0) for g in game_list]
+        return float(sum(vals) / len(vals)) if vals else 0.0
+
+    def _blowout_rate(game_list, threshold: float = 12.0) -> float:
+        total = len(game_list)
+        if not total:
+            return 0.0
+        blowouts = sum(
+            1 for g in game_list
+            if abs(float(getattr(g, 'plus_minus', 0.0) or 0.0)) >= threshold
+        )
+        return float(blowouts / total)
+
+    return {
+        'avg_stat_in_wins':    _avg_stat_in_outcome(sorted_logs, 'W'),
+        'avg_stat_in_losses':  _avg_stat_in_outcome(sorted_logs, 'L'),
+        'win_rate_last_10':    _win_rate(last_10),
+        'avg_plus_minus_last_5': _avg_plus_minus(last_5),
+        'blowout_rate_last_10':  _blowout_rate(last_10),
+    }
+
+
 def build_ml_features_from_history(
     prior_logs: Iterable,
     current_is_home: bool,
@@ -223,6 +276,8 @@ def build_ml_features_from_history(
     current_matchup: str = '',
     game_total_line: float = 0.0,
     defense_lookup: Optional[Dict[str, dict]] = None,
+    # Phase 2 — line movement signal (0.0 = no data available)
+    line_delta: float = 0.0,
 ) -> dict:
     """Canonical feature builder for model training and live inference."""
     logs = sort_logs_by_date(prior_logs, ascending=True)
@@ -321,5 +376,16 @@ def build_ml_features_from_history(
     features['opp_def_rating'] = def_rating
     features['opp_pace'] = opp_pace
     features['opp_stat_allowed'] = opp_stat_allowed
+
+    # ------------------------------------------------------------------
+    # Phase 2 — win/loss game-script features
+    # ------------------------------------------------------------------
+    features.update(compute_win_loss_features(logs, stat_key))
+
+    # ------------------------------------------------------------------
+    # Phase 2 — line movement signal
+    # ------------------------------------------------------------------
+    features['line_delta_today'] = float(line_delta)
+    features['line_movement_available'] = 1.0 if line_delta != 0.0 else 0.0
 
     return features

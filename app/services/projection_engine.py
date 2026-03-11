@@ -95,6 +95,7 @@ class ProjectionEngine:
         team_name: str = '',
         is_home: bool = True,
         game_total_line: float = 0.0,
+        line_delta: float = 0.0,
     ) -> dict:
         """Generate a projection for a single player-stat combination.
 
@@ -317,6 +318,7 @@ class ProjectionEngine:
                 current_matchup=_current_matchup,
                 game_total_line=game_total_line,
                 defense_lookup=_defense_lookup,
+                line_delta=line_delta,
             )
             if ml_features:
                 try:
@@ -423,6 +425,7 @@ class ProjectionEngine:
         current_matchup: str = '',
         game_total_line: float = 0.0,
         defense_lookup: dict = None,
+        line_delta: float = 0.0,
     ) -> dict:
         if len(logs) < 10:
             return {}
@@ -444,6 +447,7 @@ class ProjectionEngine:
             current_matchup=current_matchup,
             game_total_line=game_total_line,
             defense_lookup=defense_lookup or {},
+            line_delta=line_delta,
         )
 
     def _compute_team_usage_features(self, logs: list) -> dict:

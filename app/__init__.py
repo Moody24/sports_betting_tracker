@@ -77,6 +77,12 @@ def create_app(testing=False):
     app.config['WTF_CSRF_ENABLED'] = True
     app.config['SESSION_COOKIE_HTTPONLY'] = True
     app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+    # In production behind HTTPS (Railway), cookies must be Secure.
+    is_probably_prod = bool(os.getenv('RAILWAY_ENVIRONMENT')) or os.getenv('FLASK_ENV') == 'production'
+    secure_default = 'true' if is_probably_prod else 'false'
+    app.config['SESSION_COOKIE_SECURE'] = (
+        os.getenv('SESSION_COOKIE_SECURE', secure_default).lower() == 'true'
+    )
 
     if testing:
         app.config['TESTING'] = True

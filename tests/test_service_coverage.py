@@ -270,7 +270,7 @@ class TestPickQualityModel(BaseTestCase):
     def test_build_training_data_insufficient(self):
         from app.services.pick_quality_model import _build_training_data
         with self.app.app_context():
-            features, targets = _build_training_data()
+            features, targets, dates = _build_training_data()
             self.assertIsNone(features)
             self.assertIsNone(targets)
 
@@ -330,7 +330,7 @@ class TestPickQualityModel(BaseTestCase):
                 ))
             db.session.commit()
 
-            features, targets = _build_training_data()
+            features, targets, dates = _build_training_data()
             self.assertIsNotNone(features)
             self.assertEqual(len(features), MIN_RESOLVED_PICKS + 5)
             self.assertEqual(len(targets), MIN_RESOLVED_PICKS + 5)
@@ -357,7 +357,7 @@ class TestPickQualityModel(BaseTestCase):
                 db.session.add(PickContext(bet_id=b.id, context_json=cj))
             db.session.commit()
 
-            features, targets = _build_training_data()
+            features, targets, dates = _build_training_data()
             # Only valid JSON rows should be returned
             self.assertIsNotNone(features)
             # The valid ones should have parsed
@@ -415,7 +415,7 @@ class TestPickQualityPollutionFilter(BaseTestCase):
             db.session.commit()
 
             with patch.object(pick_quality_model, 'MIN_RESOLVED_PICKS', 2):
-                features, targets = pick_quality_model._build_training_data()
+                features, targets, dates = pick_quality_model._build_training_data()
             # Should only include the 2 real bets, not the 3 bootstrap bets
             self.assertIsNotNone(features)
             self.assertEqual(len(features), 2)
@@ -442,7 +442,7 @@ class TestPickQualityPollutionFilter(BaseTestCase):
             db.session.commit()
 
             with patch.object(pick_quality_model, 'MIN_RESOLVED_PICKS', 2):
-                features, targets = pick_quality_model._build_training_data()
+                features, targets, dates = pick_quality_model._build_training_data()
             # Only the 2 clean rows should pass
             self.assertIsNotNone(features)
             self.assertEqual(len(features), 2)

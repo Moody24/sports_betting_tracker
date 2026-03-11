@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 from app.models import PlayerGameLog
 from app.services.pick_quality_model import predict_pick_quality
 from app.services.projection_engine import ProjectionEngine
+from app.services.feature_engine import build_pick_context_features
 from app.services.context_service import is_player_available
 from app.services.stats_service import find_player_id, get_cached_logs
 
@@ -141,6 +142,7 @@ class ValueDetector:
         team_name: str = '',
         is_home: bool = True,
         game_id: str = '',
+        line_delta: float = 0.0,
     ) -> dict:
         """Score a single player prop for value.
 
@@ -160,6 +162,7 @@ class ValueDetector:
         """
         proj = self.engine.project_stat(
             player_name, prop_type, opponent_name, team_name, is_home,
+            line_delta=line_delta,
         )
 
         projection = proj['projection']
@@ -207,30 +210,33 @@ class ValueDetector:
         win_probability = None
         pick_quality_recommendation = 'no_model'
         try:
-            b2b = any('back-to-back' in note for note in context_notes)
-            z = proj.get('z_score', 0)
-            trend_str = 'hot' if z > 1.5 else ('cold' if z < -1.5 else 'neutral')
-            qctx = {
-                'projected_stat': projection,
-                'projected_edge': edge,
-                'model1_vs_line_diff': projection - line,
-                'player_variance': proj.get('std_dev', 5),
-                'player_games_this_season': proj.get('games_played', 0),
-                'player_hit_rate_vs_line': 0.5,
-                'opp_defense_rating': 110,
-                'opp_pace': 100,
-                'opp_matchup_adj': 1.0,
-                'back_to_back': int(b2b),
-                'home_game': int(is_home),
-                'days_rest': 2,
-                'prop_line': line,
-                'american_odds': recommended_odds,
-                'line_vs_season_avg': projection - proj.get('breakdown', {}).get('season_avg', projection),
-                'player_last5_trend': trend_str,
-                'minutes_trend': 'stable',
-                'confidence_tier': confidence_tier,
-                'injury_returning': 0,
-            }
+            player_id = find_player_id(player_name) or ''
+            if player_id:
+                qctx = build_pick_context_features(
+                    player_name=player_name,
+                    player_id=player_id,
+                    prop_type=prop_type,
+                    prop_line=line,
+                    american_odds=recommended_odds,
+                    projected_stat=projection,
+                    projected_edge=edge,
+                    confidence_tier=confidence_tier,
+                    opponent_name=opponent_name,
+                    team_name=team_name,
+                    is_home=is_home,
+                )
+            else:
+                # Fallback when player_id cannot be resolved — minimal context only.
+                z = proj.get('z_score', 0)
+                trend_str = 'hot' if z > 1.5 else ('cold' if z < -1.5 else 'neutral')
+                b2b = any('back-to-back' in note for note in context_notes)
+                qctx = {
+                    'projected_stat': projection,
+                    'projected_edge': edge,
+                    'prop_line': line,
+                    'player_last5_trend': trend_str,
+                    'back_to_back': int(b2b),
+                }
             quality = predict_pick_quality(qctx)
             win_prob = quality.get('win_probability', 0.5)
             win_probability = round(win_prob, 3)
@@ -348,6 +354,7 @@ class ValueDetector:
         games_with_events = [(g, g.get('odds_event_id', '')) for g in games if g.get('odds_event_id', '')]
 
         def _fetch(game_event):
+            # Workers do HTTP only — no ORM/DB access inside threads.
             game, event_id = game_event
             _t = _time.perf_counter()
             try:
@@ -355,46 +362,93 @@ class ValueDetector:
             except Exception as exc:
                 logger.error("Failed to fetch props for event %s: %s", event_id, exc)
                 props = {}
-
-            # Fallback to cached snapshot if API returned nothing (e.g. 429 rate limit)
-            if not props:
-                try:
-                    from app.models import GameSnapshot
-                    today = datetime.now(ZoneInfo("America/New_York")).date()
-                    snap = GameSnapshot.query.filter_by(
-                        espn_id=game.get('espn_id', ''), game_date=today
-                    ).first()
-                    if snap and snap.props_json:
-                        props = json.loads(snap.props_json)
-                        logger.info("PERF props_fetch event=%s using cached snapshot fallback", event_id[:8])
-                except Exception:
-                    pass
-
             elapsed = _time.perf_counter() - _t
             prop_count = sum(len(v) for v in props.values())
             logger.info("PERF props_fetch event=%s props=%d elapsed=%.2fs", event_id[:8], prop_count, elapsed)
             return game, props
 
-        game_props_payloads = []
+        raw_results: list[tuple] = []
         all_player_names: set[str] = set()
         _t_props = _time.perf_counter()
         with ThreadPoolExecutor(max_workers=min(8, len(games_with_events) or 1)) as pool:
             futures = {pool.submit(_fetch, ge): ge for ge in games_with_events}
             for future in as_completed(futures):
                 game, props = future.result()
-                if not props:
+                raw_results.append((game, props))
+
+        # Snapshot fallback in main thread — safe DB access, no thread-context issues.
+        # For any game that returned empty props (e.g. 429 rate limit), try the cached
+        # GameSnapshot.props_json written by the scheduler's prefetch job.
+        from app.models import GameSnapshot
+        today = datetime.now(ZoneInfo("America/New_York")).date()
+        empty_espn_ids = [g.get('espn_id', '') for g, p in raw_results if not p and g.get('espn_id')]
+        if empty_espn_ids:
+            snaps = {
+                s.espn_id: s
+                for s in GameSnapshot.query.filter(
+                    GameSnapshot.espn_id.in_(empty_espn_ids),
+                    GameSnapshot.game_date == today,
+                ).all()
+            }
+            filled = 0
+            for i, (game, props) in enumerate(raw_results):
+                if props:
                     continue
-                game_props_payloads.append((game, props))
-                for market_props in props.values():
-                    for prop in market_props:
-                        player = prop.get('player', '')
-                        if player:
-                            all_player_names.add(player)
+                espn_id = game.get('espn_id', '')
+                snap = snaps.get(espn_id)
+                if snap and snap.props_json:
+                    try:
+                        raw_results[i] = (game, json.loads(snap.props_json))
+                        filled += 1
+                        logger.info("PERF props_fetch espn_id=%s using cached snapshot fallback", espn_id[:8])
+                    except (ValueError, TypeError):
+                        pass
+            if filled:
+                logger.info("Snapshot fallback filled props for %d game(s)", filled)
+
+        game_props_payloads = []
+        for game, props in raw_results:
+            if not props:
+                continue
+            game_props_payloads.append((game, props))
+            for market_props in props.values():
+                for prop in market_props:
+                    player = prop.get('player', '')
+                    if player:
+                        all_player_names.add(player)
         logger.info("PERF props_fetch_parallel: games=%d wall_elapsed=%.2fs", len(game_props_payloads), _time.perf_counter() - _t_props)
 
         _t_team = _time.perf_counter()
         player_team_map = self._build_player_team_map(all_player_names)
         logger.info("PERF player_team_map: players=%d elapsed=%.2fs", len(player_team_map), _time.perf_counter() - _t_team)
+
+        # Pre-fetch today's line movement from OddsSnapshot (main thread — safe DB access).
+        # Lookup key: (player_name_lower, market) -> line_delta
+        _odds_delta: dict = {}
+        try:
+            from app.models import OddsSnapshot
+            _snap_today = datetime.now(ZoneInfo("America/New_York")).date()
+            _snap_rows = (
+                OddsSnapshot.query
+                .filter(OddsSnapshot.game_date == _snap_today)
+                .filter(OddsSnapshot.line.isnot(None))
+                .order_by(OddsSnapshot.player_name, OddsSnapshot.market, OddsSnapshot.snapped_at)
+                .all()
+            )
+            _snap_groups: dict = {}
+            for _r in _snap_rows:
+                _k = (((_r.player_name or '').strip().lower()), (_r.market or ''))
+                if _k not in _snap_groups:
+                    _snap_groups[_k] = {'first': _r.line, 'last': _r.line}
+                else:
+                    _snap_groups[_k]['last'] = _r.line
+            for _k, _v in _snap_groups.items():
+                delta = float(_v['last'] or 0.0) - float(_v['first'] or 0.0)
+                if delta != 0.0:
+                    _odds_delta[_k] = delta
+            logger.info("PERF odds_delta: %d moving lines for %s", len(_odds_delta), _snap_today)
+        except Exception as exc:
+            logger.debug("OddsSnapshot line delta pre-fetch failed: %s", exc)
 
         _t_score = _time.perf_counter()
         for game, props in game_props_payloads:
@@ -427,6 +481,7 @@ class ValueDetector:
                         player_team_map=player_team_map,
                     )
 
+                    _ld = _odds_delta.get(((player or '').strip().lower(), market_key), 0.0)
                     score = self.score_prop(
                         player_name=player,
                         prop_type=market_key,
@@ -437,6 +492,7 @@ class ValueDetector:
                         team_name=team_name,
                         is_home=is_home,
                         game_id=espn_id,
+                        line_delta=_ld,
                     )
 
                     # Add game context to score

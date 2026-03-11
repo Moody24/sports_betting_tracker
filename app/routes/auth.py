@@ -82,7 +82,7 @@ def login():
     return render_template('login.html', form=form)
 
 
-@auth.route('/logout', methods=['GET', 'POST'])
+@auth.route('/logout', methods=['POST'])
 def logout():
     form = LogoutForm()
     if current_user.is_authenticated and request.method == 'POST' and not form.validate_on_submit():
