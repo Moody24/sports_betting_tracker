@@ -175,7 +175,6 @@
       if (icon) icon.style.transform = open ? 'rotate(180deg)' : '';
     });
   });
-  });
 
   initLiveProgress();
 })();
