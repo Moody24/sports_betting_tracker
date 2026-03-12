@@ -1,7 +1,7 @@
-# Sports Betting Tracker — Claude Context
+# Edge Tracker — Claude Context
 
 ## Project
-Flask + SQLAlchemy NBA betting tracker with ML projections (XGBoost/scikit-learn), APScheduler background jobs, and Railway deployment.
+Flask + SQLAlchemy NBA betting tracker (app name: **Edge Tracker**) with ML projections (XGBoost/scikit-learn), APScheduler background jobs, and Railway deployment.
 
 ## Running Tests
 ```
@@ -11,6 +11,14 @@ python -m coverage report --include="app/*"   # CI requires ≥ 80%
 - Test runner is **unittest** (not pytest). `SECRET_KEY` env var is required or app raises.
 - `.venv/` is the active virtualenv; `venv/` and `venv310/` are stale.
 
+## Linting
+```
+source .venv/bin/activate && ruff check .
+source .venv/bin/activate && bandit -q -r app -x tests -ll
+```
+- CI runs both on every push — run locally before committing to catch issues early
+- **Gotcha**: auto-generated Alembic merge migrations (`flask db merge`) always include unused `from alembic import op` / `import sqlalchemy as sa` — delete both lines before committing or ruff will fail
+
 ## Key Conventions
 - All dates/times use **ET** (`ZoneInfo("America/New_York")` / `"US/Eastern"`) — normalization is critical for daily freshness checks and snapshot reads/writes.
 - `_is_non_server_invocation()` in `app/__init__.py` guards scheduler startup — never start APScheduler in pytest/alembic/CLI contexts.
@@ -18,7 +26,7 @@ python -m coverage report --include="app/*"   # CI requires ≥ 80%
 
 ## Project Layout
 - `app/routes/` — Flask blueprints (auth, bet, main)
-- `app/services/` — business logic: `scheduler.py`, `nba_service.py`, `ml_model.py`, `pick_quality_model.py`, etc.
+- `app/services/` — business logic: `scheduler.py`, `nba_service.py`, `ml_model.py`, `pick_quality_model.py`, `postmortem_service.py`, `stats_service.py`, `projection_engine.py`, `value_detector.py`, `ml_feature_builder.py` (canonical shared feature builder — `FEATURE_KEYS` must stay in sync between training and inference), etc.
 - `app/ml_models/` — model artifact files (gitignored JSON)
 - `app/cli.py` — Flask CLI commands (`flask refresh-stats`, calibration reports, etc.)
 - `tests/` — unittest test files; CI runs all of them
