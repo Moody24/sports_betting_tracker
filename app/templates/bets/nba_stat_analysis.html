@@ -487,7 +487,8 @@ const SA_PROP_TO_COL = PROP_TO_STAT_COL;
     projEl.textContent = prop.projection != null ? (+prop.projection).toFixed(1) : '—';
     projEl.style.color = (prop.projection || 0) > (prop.line || 0) ? 'var(--bs-success)' : 'var(--bs-danger)';
     const edgeEl = document.getElementById('sp-edge');
-    edgeEl.textContent = prop.edge != null ? '+' + (prop.edge * 100).toFixed(1) + '%' : '—';
+    const edgePct = (prop.edge * 100);
+    edgeEl.textContent = prop.edge != null ? `${edgePct >= 0 ? '+' : ''}${edgePct.toFixed(1)}%` : '—';
     edgeEl.style.color = (prop.edge || 0) >= 0.08 ? 'var(--bs-success)' : 'var(--bs-secondary-color)';
     // Recommendation: show actual recommended side
     const recSide = prop.recommended_side || (prop.indicator === 'avoid' ? 'Pass' : 'Over');
