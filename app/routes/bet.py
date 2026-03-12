@@ -10,6 +10,7 @@ from datetime import datetime, date as date_type, timezone, timedelta
 from flask import Blueprint, render_template, redirect, url_for, flash, request, jsonify, Response, current_app
 from flask_login import login_required, current_user
 import requests
+from sqlalchemy.orm import joinedload
 
 from app import db
 from app.config_display import (
@@ -461,7 +462,7 @@ def _filtered_bets_query(user_id: int, args) -> "db.Query":
 
     Shared by the bet list and CSV export endpoints to avoid duplication.
     """
-    query = Bet.query.filter_by(user_id=user_id)
+    query = Bet.query.options(joinedload(Bet.pick_context)).filter_by(user_id=user_id)
 
     status = args.get('status', '').strip()
     search_query = args.get('q', '').strip()
@@ -1191,6 +1192,12 @@ def nba_place_bets():
 
     db.session.commit()
 
+    if is_parlay and parlay_id and created:
+        leg_count = len(created)
+        for leg_obj in created:
+            leg_obj.parlay_leg_count = leg_count
+        db.session.commit()
+
     if is_parlay:
         msg = f"Parlay with {len(created)} leg(s) placed — ${stake:.2f} wagered!"
     else:
@@ -1319,6 +1326,13 @@ def manual_parlay():
         )
 
     db.session.commit()
+
+    if created_bets:
+        leg_count = len(created_bets)
+        for leg_obj in created_bets:
+            leg_obj.parlay_leg_count = leg_count
+        db.session.commit()
+
     return jsonify({
         "success": True,
         "message": f"Parlay with {len(legs)} leg(s) saved — ${stake:.2f} wagered!",
@@ -1782,6 +1796,11 @@ def quick_add_parlay():
             external_game_id=game_id or None,
         ))
 
+    db.session.flush()
+    leg_count = len(legs_data)
+    legs_added = Bet.query.filter_by(parlay_id=parlay_id).all()
+    for leg_obj in legs_added:
+        leg_obj.parlay_leg_count = leg_count
     db.session.commit()
     flash(f'Added {len(legs_data)}-leg parlay to your bets.', 'success')
     return redirect(url_for('main.dashboard'))
