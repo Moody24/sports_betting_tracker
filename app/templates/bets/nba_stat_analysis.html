@@ -84,7 +84,7 @@
 
 {# ── Filters ─────────────────────────────────────────────────── #}
 <div class="card-soft p-3 mb-4 fade-up fade-up-3">
-  <div class="d-flex flex-wrap gap-2 align-items-center">
+  <div class="d-flex flex-wrap gap-2 align-items-center sa-filter-toolbar">
     {% set stat_options = [
       ('all', 'All'), ('player_points', 'PTS'), ('player_rebounds', 'REB'),
       ('player_assists', 'AST'), ('player_threes', '3PM'),
@@ -96,13 +96,16 @@
       {{ label }}
     </a>
     {% endfor %}
-    <form class="ms-auto d-flex gap-2" method="get" action="{{ url_for('bet.nba_stat_analysis') }}">
+    <form class="ms-auto d-flex gap-2 sa-filter-form" method="get" action="{{ url_for('bet.nba_stat_analysis') }}">
       <input type="hidden" name="stat" value="{{ stat_filter }}">
       <input class="form-control form-control-sm" style="width:160px" type="text"
              name="q" value="{{ search_q }}" placeholder="Search player…">
       <button class="btn btn-sm btn-outline-secondary" type="submit" aria-label="Search players">
         <i class="bi bi-search"></i>
       </button>
+      {% if search_q %}
+      <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('bet.nba_stat_analysis', stat=stat_filter) }}">Clear</a>
+      {% endif %}
     </form>
   </div>
 </div>
@@ -153,7 +156,7 @@
   {# Two-column player grid #}
   <div class="row g-0">
     {# Away column #}
-    <div class="col-6 border-end">
+    <div class="col-12 col-lg-6 sa-team-col sa-team-col-away border-lg-end">
       {% if not m.away %}
       <div class="px-3 py-2 small text-secondary fst-italic">No props</div>
       {% else %}
@@ -176,7 +179,7 @@
     </div>
 
     {# Home column #}
-    <div class="col-6">
+    <div class="col-12 col-lg-6 sa-team-col sa-team-col-home">
       {% if not m.home %}
       <div class="px-3 py-2 small text-secondary fst-italic">No props</div>
       {% else %}
@@ -623,13 +626,26 @@ const SA_PROP_TO_COL = PROP_TO_STAT_COL;
   // Parlay buttons
   function parlayClick(betType) {
     if (!currentProp) return;
-    if (typeof addParlayLegToQueue === 'function') {
-      addParlayLegToQueue({
-        player: currentProp.player, prop_type: currentProp.prop_type,
-        line: currentProp.line, bet_type: betType, game_id: currentProp.game_id,
+    if (typeof addParlayLeg === 'function') {
+      addParlayLeg({
+        player_name: currentProp.player || '',
+        prop_type: currentProp.prop_type || 'player_points',
+        prop_line: currentProp.line,
+        bet_type: betType,
+        game_id: currentProp.game_id || '',
       });
     }
-    closePanel();
+
+    const qp = new URLSearchParams({
+      current_tab: 'parlay',
+      add_to_parlay: '1',
+      player_name: currentProp.player || '',
+      prop_type: currentProp.prop_type || 'player_points',
+      prop_line: String(currentProp.line || ''),
+      bet_type: betType,
+      game_id: currentProp.game_id || '',
+    });
+    window.location.href = '{{ url_for("bet.place_bet") }}?' + qp.toString();
   }
   document.getElementById('sp-add-over').addEventListener('click',  () => parlayClick('over'));
   document.getElementById('sp-add-under').addEventListener('click', () => parlayClick('under'));

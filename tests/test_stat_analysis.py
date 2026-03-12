@@ -199,6 +199,19 @@ class TestStatAnalysisRoute(BaseTestCase):
         # Only one matchup card since both share game1
         self.assertEqual(body.count('matchup-card'), 1)
 
+
+    @patch('app.services.nba_service.get_todays_games')
+    @patch('app.services.score_cache.get_todays_scores')
+    def test_parlay_cta_queues_and_redirects_to_parlay_tab(self, mock_scores, mock_games):
+        mock_scores.return_value = self._mock_scores()
+        mock_games.return_value = self._mock_games()
+        self._login()
+        resp = self.client.get('/nba/stat-analysis')
+        self.assertEqual(resp.status_code, 200)
+        body = resp.data.decode()
+        self.assertIn('addParlayLeg({', body)
+        self.assertIn("current_tab: 'parlay'", body)
+
     def test_requires_login(self):
         resp = self.client.get('/nba/stat-analysis')
         self.assertIn(resp.status_code, (302, 401))

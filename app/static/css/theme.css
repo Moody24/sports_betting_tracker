@@ -2333,6 +2333,43 @@ h1, h2, h3, h4, h5, h6,
   text-align: left;
 }
 
+
+.sa-filter-form {
+  min-width: 240px;
+}
+
+.sa-team-col + .sa-team-col {
+  border-top: 1px solid var(--border-subtle);
+}
+
+@media (min-width: 992px) {
+  .sa-team-col + .sa-team-col {
+    border-top: 0;
+  }
+
+  .border-lg-end {
+    border-right: 1px solid var(--border-subtle);
+  }
+}
+
+@media (max-width: 575.98px) {
+  .sa-filter-toolbar {
+    flex-direction: column;
+    align-items: stretch !important;
+  }
+
+  .sa-filter-form {
+    margin-left: 0 !important;
+    width: 100%;
+  }
+
+  .sa-filter-form input,
+  .sa-filter-form button,
+  .sa-filter-form a {
+    width: 100%;
+  }
+}
+
 .pagination .page-link {
   background: var(--bg-soft);
   border-color: var(--border-subtle);
