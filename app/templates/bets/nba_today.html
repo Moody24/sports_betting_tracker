@@ -56,7 +56,7 @@
       <div class="d-flex align-items-center justify-content-between mb-2">
         <div class="text-center" style="width:40%">
           {% if game.away.logo %}
-          <img src="{{ game.away.logo }}" alt="{{ game.away.abbr }}" class="team-logo-lg mb-1">
+          <img src="{{ game.away.logo }}" alt="{{ game.away.abbr }}" class="nba-team-logo-lg mb-1">
           {% endif %}
           <div class="small fw-semibold text-truncate">{{ game.away.name }}</div>
           <div class="score-main">{{ game.away.score }}</div>
@@ -71,7 +71,7 @@
         <div class="text-secondary fw-bold px-1">@</div>
         <div class="text-center" style="width:40%">
           {% if game.home.logo %}
-          <img src="{{ game.home.logo }}" alt="{{ game.home.abbr }}" class="team-logo-lg mb-1">
+          <img src="{{ game.home.logo }}" alt="{{ game.home.abbr }}" class="nba-team-logo-lg mb-1">
           {% endif %}
           <div class="small fw-semibold text-truncate">{{ game.home.name }}</div>
           <div class="score-main">{{ game.home.score }}</div>
@@ -153,14 +153,14 @@
 
       {# Player Props toggle #}
       <div class="mt-auto">
-        <button class="btn btn-sm btn-outline-info w-100 props-toggle"
+        <button class="btn btn-sm btn-outline-info w-100 props-toggle" aria-expanded="false"
                 data-espn-id="{{ game.espn_id }}"
                 data-away="{{ game.away.name }}"
                 data-home="{{ game.home.name }}"
                 data-date="{{ game.start_time[:10] }}">
           <i class="bi bi-person-lines-fill me-1"></i>Player Props
         </button>
-        <div class="props-container mt-2" id="props-{{ game.espn_id }}" style="display:none">
+        <div class="props-container mt-2" id="props-{{ game.espn_id }}" hidden>
           <div class="text-center py-3">
             <div class="spinner-border spinner-border-sm text-info" role="status"></div>
             <span class="small text-secondary ms-2">Loading props...</span>
@@ -202,7 +202,7 @@
       <div class="d-flex align-items-center justify-content-between mb-2">
         <div class="text-center" style="width:40%">
           {% if snap.away_logo %}
-          <img src="{{ snap.away_logo }}" alt="" width="36" height="36" class="mb-1">
+          <img src="{{ snap.away_logo }}" alt="" width="36" height="36" class="nba-team-logo mb-1">
           {% endif %}
           <div class="small fw-semibold">{{ snap.away_team }}</div>
           <div class="h5 mb-0">{{ snap.away_score or 0 }}</div>
@@ -210,7 +210,7 @@
         <div class="text-secondary fw-bold">@</div>
         <div class="text-center" style="width:40%">
           {% if snap.home_logo %}
-          <img src="{{ snap.home_logo }}" alt="" width="36" height="36" class="mb-1">
+          <img src="{{ snap.home_logo }}" alt="" width="36" height="36" class="nba-team-logo mb-1">
           {% endif %}
           <div class="small fw-semibold">{{ snap.home_team }}</div>
           <div class="h5 mb-0">{{ snap.home_score or 0 }}</div>

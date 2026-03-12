@@ -14,8 +14,8 @@
 
   /* Text */
   --text-main:  #EEF0F5;
-  --text-muted: #6B7590;
-  --text-dim:   #404C65;
+  --text-muted: #8F9AB4;
+  --text-dim:   #66748F;
 
   /* Accent — amber "edge" */
   --accent:      #F0B429;
@@ -64,6 +64,27 @@ body {
   color: var(--text-main);
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
+}
+
+
+.skip-link {
+  position: absolute;
+  top: -40px;
+  left: 0.75rem;
+  z-index: 2100;
+  background: var(--accent);
+  color: #06090f;
+  border-radius: var(--r-sm);
+  padding: 0.45rem 0.7rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+.skip-link:focus-visible {
+  top: 0.75rem;
+}
+
+.body-scroll-lock {
+  overflow: hidden;
 }
 
 /* ── Typography ────────────────────────────────────────────────── */
@@ -203,6 +224,19 @@ h1, h2, h3, h4, h5, h6,
   height: 60%;
   background: var(--accent);
   border-radius: 0 3px 3px 0;
+}
+
+
+.nav-link:focus-visible,
+.sidebar-toggle:focus-visible,
+.user-btn:focus-visible,
+.toast-close:focus-visible,
+.parlay-toggle-btn:focus-visible,
+.props-toggle:focus-visible,
+.icon-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(240, 180, 41, 0.18);
 }
 
 /* ── Main content ──────────────────────────────────────────────── */
@@ -1538,6 +1572,20 @@ h1, h2, h3, h4, h5, h6,
   .sidebar.open {
     transform: translateX(0);
   }
+  .sidebar-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(3, 6, 10, 0.55);
+    opacity: 0;
+    pointer-events: none;
+    border: 0;
+    transition: opacity 0.2s ease;
+    z-index: 999;
+  }
+  .sidebar-overlay.show {
+    opacity: 1;
+    pointer-events: auto;
+  }
   .bb-shell {
     grid-template-columns: 1fr;
   }
@@ -2220,3 +2268,41 @@ h1, h2, h3, h4, h5, h6,
   vertical-align: middle;
 }
 
+
+.nba-team-logo {
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
+  display: block;
+  flex-shrink: 0;
+}
+
+.nba-team-logo-lg {
+  width: 46px;
+  height: 46px;
+  object-fit: contain;
+  display: block;
+  margin-inline: auto;
+}
+
+.bb-dropzone {
+  width: 100%;
+}
+
+.sa-player-row {
+  width: 100%;
+  background: transparent;
+  border: 0;
+  text-align: left;
+}
+
+.pagination .page-link {
+  background: var(--bg-soft);
+  border-color: var(--border-subtle);
+  color: var(--text-main);
+}
+.pagination .page-item.active .page-link {
+  background: rgba(240,180,41,.18);
+  border-color: rgba(240,180,41,.35);
+  color: var(--accent);
+}

@@ -116,3 +116,28 @@ class TestAuthRoutes(BaseTestCase):
         self.assertEqual(resp.status_code, 200)
         resp2 = self.client.get("/dashboard", follow_redirects=True)
         self.assertIn(b"Login", resp2.data)
+
+
+    def test_login_form_autocomplete_markup(self):
+        resp = self.client.get('/auth/login')
+        self.assertIn(b'autocomplete="username"', resp.data)
+        self.assertIn(b'autocomplete="current-password"', resp.data)
+
+    def test_register_form_autocomplete_and_email_validation(self):
+        resp = self.client.get('/auth/register')
+        self.assertIn(b'autocomplete="username"', resp.data)
+        self.assertIn(b'autocomplete="email"', resp.data)
+        self.assertIn(b'autocomplete="new-password"', resp.data)
+
+        invalid = self.client.post(
+            '/auth/register',
+            data={
+                'username': 'newuser',
+                'email': 'not-an-email',
+                'password': 'password123',
+                'confirm_password': 'password123',
+            },
+            follow_redirects=True,
+        )
+        self.assertIn(b'valid email address', invalid.data)
+        self.assertIn(b'is-invalid', invalid.data)

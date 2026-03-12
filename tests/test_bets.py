@@ -1223,3 +1223,50 @@ class TestBetRoutes(BaseTestCase):
         with self.app.app_context():
             b = Bet.query.filter_by(id=bet_id).first()
             self.assertEqual(b.outcome, 'pending')
+
+
+    def test_new_bet_tab_markup_accessible(self):
+        self.register_and_login()
+        resp = self.client.get('/bets/new')
+        self.assertIn(b'role="tablist"', resp.data)
+        self.assertIn(b'aria-controls="bb-panel-single"', resp.data)
+        self.assertIn(b'role="tabpanel"', resp.data)
+
+    def test_new_bet_preserves_current_tab_on_validation_error(self):
+        self.register_and_login()
+        resp = self.client.post(
+            '/bets/new',
+            data={
+                'current_tab': 'prop',
+                'team_a': 'Lakers',
+                'team_b': 'Celtics',
+                'match_date': '2025-01-01',
+                'bet_amount': '10',
+                'bet_type': 'over',
+                'player_name': 'LeBron James',
+                'prop_type': 'player_points',
+                'outcome': 'pending',
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn(b'SERVER_CURRENT_TAB = "prop"', resp.data)
+
+    def test_bets_list_pagination_preserves_filters(self):
+        user_id = self.register_and_login()
+        with self.app.app_context():
+            for i in range(30):
+                db.session.add(make_bet(user_id, team_a=f'Lakers{i}', team_b='Celtics'))
+            db.session.commit()
+        resp = self.client.get('/bets?status=pending&q=Lakers&page=2')
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn(b'page=1&amp;status=pending&amp;q=Lakers', resp.data)
+
+    def test_bets_list_parlay_toggle_has_aria_wiring(self):
+        user_id = self.register_and_login()
+        with self.app.app_context():
+            db.session.add(make_bet(user_id, is_parlay=True, parlay_id='p123'))
+            db.session.add(make_bet(user_id, is_parlay=True, parlay_id='p123'))
+            db.session.commit()
+        resp = self.client.get('/bets')
+        self.assertIn(b'aria-controls="parlay-legs-p123"', resp.data)

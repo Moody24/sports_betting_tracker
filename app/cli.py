@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 
 import click
 from sqlalchemy import func
+from sqlalchemy.exc import OperationalError
 
 from app import db
 from app.models import (
@@ -620,11 +621,15 @@ def register_cli(app):
         click.echo('=== Data Pollution Report ===')
 
         # 1. Count bootstrap bets
-        bootstrap_total = (
-            Bet.query
-            .filter(Bet.notes.like('AUTO_BOOTSTRAP_HIDDEN%'))
-            .count()
-        )
+        try:
+            bootstrap_total = (
+                Bet.query
+                .filter(Bet.notes.like('AUTO_BOOTSTRAP_HIDDEN%'))
+                .count()
+            )
+        except OperationalError:
+            click.echo('Database tables are not initialized; run migrations first.')
+            return
         click.echo(f'\nBootstrap synthetic bets: {bootstrap_total}')
 
         # 2. Count pick contexts with polluted matchup features

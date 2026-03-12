@@ -7,29 +7,30 @@
 {% block content %}
 <datalist id="game-datalist"></datalist>
 
+<noscript><div class="alert alert-warning">Bet Builder parlay and screenshot modes require JavaScript enabled.</div></noscript>
 <div class="bb-shell">
 
   {# ─── Main column ──────────────────────────────────────────────── #}
   <div class="bb-main">
 
     {# ── Mode selector ── #}
-    <div class="bb-mode-bar mb-3" role="tablist">
-      <button class="bb-mode-btn active" data-bb-tab="single" type="button" role="tab" aria-selected="true">
+    <div class="bb-mode-bar mb-3" role="tablist" aria-label="Bet builder mode">
+      <button class="bb-mode-btn active" id="bb-tab-single" data-bb-tab="single" type="button" role="tab" aria-controls="bb-panel-single" aria-selected="{{ 'true' if current_tab == 'single' else 'false' }}" tabindex="{{ '0' if current_tab == 'single' else '-1' }}">
         <i class="bi bi-bar-chart-fill bb-mode-icon"></i>
         <span class="bb-mode-label">Game Line</span>
         <span class="bb-mode-sub">ML · O/U · Spread</span>
       </button>
-      <button class="bb-mode-btn" data-bb-tab="prop" type="button" role="tab">
+      <button class="bb-mode-btn" id="bb-tab-prop" data-bb-tab="prop" type="button" role="tab" aria-controls="bb-panel-prop" aria-selected="{{ 'true' if current_tab == 'prop' else 'false' }}" tabindex="{{ '0' if current_tab == 'prop' else '-1' }}">
         <i class="bi bi-person-fill bb-mode-icon"></i>
         <span class="bb-mode-label">Player Prop</span>
         <span class="bb-mode-sub">Pts · Reb · Ast</span>
       </button>
-      <button class="bb-mode-btn" data-bb-tab="parlay" type="button" role="tab">
+      <button class="bb-mode-btn" id="bb-tab-parlay" data-bb-tab="parlay" type="button" role="tab" aria-controls="bb-panel-parlay" aria-selected="{{ 'true' if current_tab == 'parlay' else 'false' }}" tabindex="{{ '0' if current_tab == 'parlay' else '-1' }}">
         <i class="bi bi-collection-fill bb-mode-icon"></i>
         <span class="bb-mode-label">Parlay</span>
         <span class="bb-mode-sub">Multi-leg</span>
       </button>
-      <button class="bb-mode-btn" data-bb-tab="screenshot" type="button" role="tab">
+      <button class="bb-mode-btn" id="bb-tab-screenshot" data-bb-tab="screenshot" type="button" role="tab" aria-controls="bb-panel-screenshot" aria-selected="{{ 'true' if current_tab == 'screenshot' else 'false' }}" tabindex="{{ '0' if current_tab == 'screenshot' else '-1' }}">
         <i class="bi bi-camera-fill bb-mode-icon"></i>
         <span class="bb-mode-label">Screenshot</span>
         <span class="bb-mode-sub">OCR import</span>
@@ -39,11 +40,12 @@
     {# ══════════════════════════════════════════════════════════════
        TAB 1 — Single Game
     ══════════════════════════════════════════════════════════════ #}
-    <div data-bb-panel="single">
+    <div id="bb-panel-single" data-bb-panel="single" role="tabpanel" aria-labelledby="bb-tab-single" {{ '' if current_tab == 'single' else 'hidden' }}>
       <div class="card-soft">
         <form method="POST" novalidate>
           {{ form.hidden_tag() }}
           {{ form.external_game_id(id='single-game-id') }}
+          <input type="hidden" name="current_tab" value="single" data-current-tab-input>
 
           {# — Game section — #}
           <div class="bb-form-section">
@@ -197,7 +199,7 @@
     {# ══════════════════════════════════════════════════════════════
        TAB 2 — Player Prop
     ══════════════════════════════════════════════════════════════ #}
-    <div data-bb-panel="prop" class="d-none">
+    <div id="bb-panel-prop" data-bb-panel="prop" role="tabpanel" aria-labelledby="bb-tab-prop" {{ '' if current_tab == 'prop' else 'hidden' }}>
 
       {# Props browser — compact list #}
       <div class="card-soft mb-3" id="prop-browser-wrap">
@@ -390,7 +392,7 @@
        TAB 3 — Parlay Builder
        Split panel: browse props (left) · legs + wager (right)
     ══════════════════════════════════════════════════════════════ #}
-    <div data-bb-panel="parlay" class="d-none">
+    <div id="bb-panel-parlay" data-bb-panel="parlay" role="tabpanel" aria-labelledby="bb-tab-parlay" {{ '' if current_tab == 'parlay' else 'hidden' }}>
       <div class="bb-parlay-shell">
 
         {# — Left: Prop Browser — #}
@@ -468,7 +470,7 @@
                     </div>
                   </div>
                   <div class="col-12 d-grid">
-                    <button type="submit" class="btn btn-primary">
+                    <button id="parlay-submit-btn" type="submit" class="btn btn-primary">
                       <i class="bi bi-check-lg me-1"></i>Submit Parlay
                     </button>
                   </div>
@@ -485,7 +487,7 @@
     {# ══════════════════════════════════════════════════════════════
        TAB 4 — Screenshot / OCR
     ══════════════════════════════════════════════════════════════ #}
-    <div data-bb-panel="screenshot" class="d-none">
+    <div id="bb-panel-screenshot" data-bb-panel="screenshot" role="tabpanel" aria-labelledby="bb-tab-screenshot" {{ '' if current_tab == 'screenshot' else 'hidden' }}>
       <div class="card-soft">
 
         <div class="bb-form-section">
@@ -494,12 +496,12 @@
             Upload a PNG/JPG of a bet slip — DraftKings, FanDuel, etc. We'll pre-fill the fields for you.
           </p>
 
-          <div id="ocr-dropzone" class="bb-dropzone">
+          <button id="ocr-dropzone" class="bb-dropzone" type="button" aria-label="Upload bet screenshot">
             <i class="bi bi-cloud-upload bb-dropzone-icon"></i>
             <p class="mt-2 mb-1 small" style="color:var(--text-muted)">Drag &amp; drop or click to upload</p>
             <p class="mb-0" style="font-size:.72rem;color:var(--text-dim)">PNG · JPG · WEBP · max 10 MB</p>
-            <input type="file" id="ocr-file-input" accept=".png,.jpg,.jpeg,.webp" class="d-none">
-          </div>
+          </button>
+          <input type="file" id="ocr-file-input" accept=".png,.jpg,.jpeg,.webp" class="d-none">
         </div>
 
         <div id="ocr-preview" class="bb-form-section" style="display:none">
@@ -646,6 +648,7 @@
   var OCR_URL            = '{{ url_for("bet.ocr_screenshot") }}';
   var USER_UNIT_SIZE     = {{ current_user.unit_size|tojson }};
   var USER_BANKROLL      = {{ remaining_bankroll|default(none)|tojson }};
+  var SERVER_CURRENT_TAB = {{ current_tab|tojson }};
 </script>
 <script src="{{ url_for('static', filename='js/bet_builder.js') }}"></script>
 {% endblock %}

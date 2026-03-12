@@ -505,14 +505,15 @@ def _filtered_bets_query(user_id: int, args) -> "db.Query":
 @login_required
 def place_bet():
     query = _filtered_bets_query(current_user.id, request.args)
-    # Pending bets first, then most-recent
     from sqlalchemy import case as sa_case
     pending_first = sa_case((Bet.outcome == Outcome.PENDING.value, 0), else_=1)
-    bets = query.order_by(pending_first, Bet.match_date.desc()).all()
+    ordered_query = query.order_by(pending_first, Bet.match_date.desc())
 
-    # Backfill missing ESPN game IDs so prop tracker cards appear.
-    # Debounced: skip bet IDs already attempted within _BACKFILL_TTL to avoid
-    # making an ESPN API call + DB write on every single /bets page load.
+    page = request.args.get('page', default=1, type=int) or 1
+    per_page = 25
+    pagination = ordered_query.paginate(page=page, per_page=per_page, error_out=False)
+    bets = list(pagination.items)
+
     _now_bt = time.monotonic()
     pending_props = [
         b for b in bets
@@ -535,15 +536,21 @@ def place_bet():
     end_date = request.args.get('end_date', '').strip()
     bet_type_filter = request.args.get('type', '').strip()
 
-    # Group parlay legs so the template can render them together
+    # page-local groups for rendering contiguous rows
     parlay_groups: dict = {}
     for b in bets:
         if b.is_parlay and b.parlay_id:
             parlay_groups.setdefault(b.parlay_id, []).append(b)
 
-    # Compute per-parlay overall outcome for display
+    # filter-wide parlay outcome maps
+    all_filtered_bets = ordered_query.all()
+    all_parlay_groups: dict = {}
+    for b in all_filtered_bets:
+        if b.is_parlay and b.parlay_id:
+            all_parlay_groups.setdefault(b.parlay_id, []).append(b)
+
     parlay_status: dict = {}
-    for pid, legs in parlay_groups.items():
+    for pid, legs in all_parlay_groups.items():
         outcomes = [leg.outcome for leg in legs]
         leg_count = len(legs)
         for leg in legs:
@@ -553,40 +560,16 @@ def place_bet():
         elif all(o == Outcome.WIN.value for o in outcomes):
             parlay_status[pid] = 'win'
         elif all(o in (Outcome.WIN.value, Outcome.PUSH.value) for o in outcomes):
-            # All legs settled but at least one pushed — reduced payout, not a loss
             parlay_status[pid] = 'push'
         else:
             parlay_status[pid] = 'pending'
 
     parlay_pl_map: dict = {}
     parlay_game_count: dict = {}
-    for pid, legs in parlay_groups.items():
+    for pid, legs in all_parlay_groups.items():
         parlay_pl_map[pid] = Bet.parlay_profit_loss(legs)
         unique_matchups = {(leg.team_a, leg.team_b, leg.match_date.date()) for leg in legs}
         parlay_game_count[pid] = len(unique_matchups) or 1
-
-    # Re-order bets so all parlay legs are contiguous — the template groups them
-    # by checking adjacent rows, so scattered legs produce broken HTML.
-    def _ts(d):
-        return d.timestamp() if hasattr(d, 'timestamp') else float(d.toordinal() * 86400)
-
-    seen_pids: set = set()
-    groups: list = []
-    for b in bets:
-        if b.is_parlay and b.parlay_id:
-            if b.parlay_id not in seen_pids:
-                seen_pids.add(b.parlay_id)
-                legs = parlay_groups[b.parlay_id]
-                is_pending = any(leg.outcome == 'pending' for leg in legs)
-                sort_ts = _ts(legs[0].match_date)
-                groups.append((0 if is_pending else 1, -sort_ts, legs))
-            # else: already queued as part of its group — skip
-        else:
-            is_pending = b.outcome == 'pending'
-            groups.append((0 if is_pending else 1, -_ts(b.match_date), [b]))
-
-    groups.sort(key=lambda g: (g[0], g[1]))
-    bets = [leg for _, _, legs in groups for leg in legs]
 
     filters = {
         'status': status,
@@ -596,14 +579,13 @@ def place_bet():
         'type': bet_type_filter,
     }
 
-    # Summary stats for the current filtered view
     filter_stats = {
-        'count': len(bets),
-        'wins': sum(1 for b in bets if b.outcome == 'win'),
-        'losses': sum(1 for b in bets if b.outcome == 'lose'),
-        'pending': sum(1 for b in bets if b.outcome == 'pending'),
-        'wagered': sum(b.bet_amount for b in bets),
-        'net': compute_bets_net_pl(bets),
+        'count': len(all_filtered_bets),
+        'wins': sum(1 for b in all_filtered_bets if b.outcome == 'win'),
+        'losses': sum(1 for b in all_filtered_bets if b.outcome == 'lose'),
+        'pending': sum(1 for b in all_filtered_bets if b.outcome == 'pending'),
+        'wagered': sum(b.bet_amount for b in all_filtered_bets),
+        'net': compute_bets_net_pl(all_filtered_bets),
     }
 
     return render_template(
@@ -615,6 +597,7 @@ def place_bet():
         parlay_game_count=parlay_game_count,
         filter_stats=filter_stats,
         now_date=date_type.today(),
+        pagination=pagination,
     )
 
 
@@ -622,6 +605,9 @@ def place_bet():
 @login_required
 def new_bet():
     form = BetForm()
+    current_tab = request.values.get('current_tab', 'single').strip()
+    if current_tab not in {'single', 'prop', 'parlay', 'screenshot'}:
+        current_tab = 'single'
 
     # Pre-populate from query params (used by NBA Today quick-add)
     if request.method == 'GET':
@@ -700,14 +686,14 @@ def new_bet():
 
             if normalized_over_under_line is None:
                 flash('A line is required for totals (Over/Under).', 'danger')
-                return render_template('bets/form.html', form=form, bet=None), 400
+                return render_template('bets/form.html', form=form, bet=None, current_tab=current_tab), 400
 
         if is_total_side and prop_type:
             normalized_prop_line = prop_line_val
             normalized_over_under_line = None
             if normalized_prop_line is None:
                 flash('A prop line is required for player props.', 'danger')
-                return render_template('bets/form.html', form=form, bet=None), 400
+                return render_template('bets/form.html', form=form, bet=None, current_tab=current_tab), 400
 
         bet_obj = Bet(
             user_id=current_user.id,
@@ -742,7 +728,7 @@ def new_bet():
     remaining_bankroll = None
     if current_user.starting_bankroll:
         remaining_bankroll = round(current_user.starting_bankroll + current_user.net_profit_loss(), 2)
-    return render_template('bets/form.html', form=form, bet=None, remaining_bankroll=remaining_bankroll)
+    return render_template('bets/form.html', form=form, bet=None, remaining_bankroll=remaining_bankroll, current_tab=current_tab)
 
 
 # ── NBA Today ────────────────────────────────────────────────────────

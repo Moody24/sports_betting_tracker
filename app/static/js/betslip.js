@@ -33,12 +33,16 @@
 
   // ── Bet Slip: toggle collapse ──────────────────────────────────
   var slipCollapsed = false;
-  slipToggle.addEventListener('click', function () {
-    slipCollapsed = !slipCollapsed;
-    slipBody.style.display = slipCollapsed ? 'none' : '';
-    slipToggle.querySelector('i').className = slipCollapsed
-      ? 'bi bi-chevron-up' : 'bi bi-chevron-down';
-  });
+  if (slipToggle && slipBody) {
+    slipToggle.addEventListener('click', function () {
+      slipCollapsed = !slipCollapsed;
+      slipBody.style.display = slipCollapsed ? 'none' : '';
+      slipToggle.setAttribute('aria-expanded', slipCollapsed ? 'false' : 'true');
+      slipToggle.setAttribute('aria-label', slipCollapsed ? 'Expand bet slip' : 'Collapse bet slip');
+      slipToggle.querySelector('i').className = slipCollapsed
+        ? 'bi bi-chevron-up' : 'bi bi-chevron-down';
+    });
+  }
 
   // ── Props: load on click ───────────────────────────────────────
   document.querySelectorAll('.props-toggle').forEach(function (btn) {
@@ -46,13 +50,16 @@
       var espnId = btn.dataset.espnId;
       var container = document.getElementById('props-' + espnId);
 
-      if (container.style.display !== 'none') {
-        container.style.display = 'none';
+      var isOpen = !container.hasAttribute('hidden');
+      if (isOpen) {
+        container.setAttribute('hidden', 'hidden');
         btn.classList.remove('active');
+        btn.setAttribute('aria-expanded', 'false');
         return;
       }
-      container.style.display = '';
+      container.removeAttribute('hidden');
       btn.classList.add('active');
+      btn.setAttribute('aria-expanded', 'true');
 
       if (propsCache[espnId]) {
         renderProps(espnId, propsCache[espnId], btn);
