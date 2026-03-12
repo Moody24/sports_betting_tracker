@@ -68,15 +68,18 @@
         <option value="slight">Slight</option>
       </select>
     </div>
-    <div class="ms-auto d-flex align-items-end gap-2">
+    <div class="ms-auto d-flex align-items-end gap-2 flex-wrap justify-content-end">
       <a href="/bets/new#parlay" class="btn btn-sm btn-outline-warning" id="parlay-queue-btn">
         <i class="bi bi-collection me-1"></i>Parlay (<span id="parlay-queue-count">0</span>)
       </a>
       <button class="btn btn-sm btn-outline-info" id="btn-refresh">
         <i class="bi bi-arrow-repeat me-1"></i>Refresh
       </button>
+      <button class="btn btn-sm btn-outline-secondary" id="analysis-save-view" type="button">Save current view</button>
+      <button class="btn btn-sm btn-outline-secondary" id="analysis-reset-view" type="button">Reset view</button>
     </div>
   </div>
+  <div class="filter-chip-list mt-3" id="analysis-active-filters" aria-live="polite" aria-label="Active analysis filters"></div>
 </div>
 
 {# ── Split plays by tier ──────────────────────────────────── #}
@@ -311,6 +314,94 @@ document.addEventListener('DOMContentLoaded', function() {
   const filterEdge = document.getElementById('filter-edge');
   const filterConf = document.getElementById('filter-confidence');
   const rows = document.querySelectorAll('.analysis-row');
+  const activeFiltersEl = document.getElementById('analysis-active-filters');
+  const saveViewBtn = document.getElementById('analysis-save-view');
+  const resetViewBtn = document.getElementById('analysis-reset-view');
+
+  const filterState = typeof createFilterStateManager === 'function'
+    ? createFilterStateManager({
+      storage: 'local',
+      storageKey: 'sbt_nba_analysis_filters_v1',
+      keys: ['stat', 'edge', 'confidence'],
+    })
+    : null;
+
+  function getViewState() {
+    return {
+      stat: filterStat ? filterStat.value : '',
+      edge: filterEdge ? filterEdge.value : '0',
+      confidence: filterConf ? filterConf.value : '',
+    };
+  }
+
+  function applyViewState(state) {
+    if (!state) return;
+    if (filterStat) filterStat.value = state.stat || '';
+    if (filterEdge) filterEdge.value = state.edge || '0';
+    if (filterConf) filterConf.value = state.confidence || '';
+  }
+
+  function stateToQuery(state) {
+    const params = new URLSearchParams();
+    if (state.stat) params.set('stat', state.stat);
+    if (state.edge && state.edge !== '0') params.set('edge', state.edge);
+    if (state.confidence) params.set('confidence', state.confidence);
+    return params;
+  }
+
+  function getChipLabel(key, value) {
+    const map = {
+      stat: { label: 'Stat Type', el: filterStat },
+      edge: { label: 'Min Edge', el: filterEdge },
+      confidence: { label: 'Confidence', el: filterConf },
+    };
+    const item = map[key];
+    if (!item || !value) return '';
+    let text = value;
+    if (item.el && item.el.selectedIndex >= 0) {
+      text = item.el.options[item.el.selectedIndex].textContent.trim();
+    }
+    return item.label + ': ' + text;
+  }
+
+  function renderFilterChips(state) {
+    if (!activeFiltersEl) return;
+    activeFiltersEl.replaceChildren();
+    const active = [
+      ['stat', state.stat],
+      ['edge', state.edge && state.edge !== '0' ? state.edge : ''],
+      ['confidence', state.confidence],
+    ].filter(([, v]) => !!v);
+
+    if (!active.length) {
+      const empty = document.createElement('span');
+      empty.className = 'filter-chip-empty';
+      empty.textContent = 'No active filters';
+      activeFiltersEl.appendChild(empty);
+      return;
+    }
+
+    active.forEach(([key, value]) => {
+      const chip = document.createElement('span');
+      chip.className = 'filter-chip';
+
+      const text = document.createElement('span');
+      text.className = 'filter-chip-label';
+      text.textContent = getChipLabel(key, value);
+      chip.appendChild(text);
+
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'filter-chip-remove';
+      button.dataset.key = key;
+      button.setAttribute('aria-label', 'Remove ' + key + ' filter');
+      button.title = 'Remove filter';
+      button.innerHTML = '<span aria-hidden="true">×</span>';
+      chip.appendChild(button);
+
+      activeFiltersEl.appendChild(chip);
+    });
+  }
 
   function applyFilters() {
     const stat = filterStat.value;
@@ -324,14 +415,58 @@ document.addEventListener('DOMContentLoaded', function() {
       if (conf && row.dataset.tier !== conf) show = false;
       row.style.display = show ? '' : 'none';
     });
+
+    renderFilterChips(getViewState());
+  }
+
+  function refreshFromState(sourceState) {
+    applyViewState(sourceState);
+    applyFilters();
+  }
+
+  if (filterState) {
+    const urlState = filterState.getUrlState();
+    if (Object.keys(urlState).length) {
+      refreshFromState(urlState);
+      filterState.saveState(getViewState());
+    } else {
+      const savedState = filterState.readSavedState();
+      refreshFromState(savedState);
+    }
+  } else {
+    applyFilters();
   }
 
   if (filterStat) filterStat.addEventListener('change', applyFilters);
   if (filterEdge) filterEdge.addEventListener('change', applyFilters);
   if (filterConf) filterConf.addEventListener('change', applyFilters);
 
-  // Apply initial filter
-  applyFilters();
+  if (saveViewBtn && filterState) {
+    saveViewBtn.addEventListener('click', function () {
+      filterState.saveState(getViewState());
+      renderFilterChips(getViewState());
+    });
+  }
+
+  if (resetViewBtn) {
+    resetViewBtn.addEventListener('click', function () {
+      if (filterState) filterState.clearState();
+      window.location.assign(window.location.pathname);
+    });
+  }
+
+  if (activeFiltersEl) {
+    activeFiltersEl.addEventListener('click', function (event) {
+      const removeBtn = event.target.closest('.filter-chip-remove');
+      if (!removeBtn) return;
+      const key = removeBtn.dataset.key;
+      if (key === 'stat' && filterStat) filterStat.value = '';
+      if (key === 'edge' && filterEdge) filterEdge.value = '0';
+      if (key === 'confidence' && filterConf) filterConf.value = '';
+      applyFilters();
+      if (filterState) filterState.saveState(getViewState());
+    });
+  }
 
   // Refresh button
   const btnRefresh = document.getElementById('btn-refresh');

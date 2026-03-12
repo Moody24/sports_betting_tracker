@@ -96,18 +96,21 @@
       {{ label }}
     </a>
     {% endfor %}
-    <form class="ms-auto d-flex gap-2 sa-filter-form" method="get" action="{{ url_for('bet.nba_stat_analysis') }}">
-      <input type="hidden" name="stat" value="{{ stat_filter }}">
+    <form class="ms-auto d-flex gap-2 sa-filter-form" method="get" action="{{ url_for('bet.nba_stat_analysis') }}" id="stat-analysis-filter-form">
+      <input type="hidden" name="stat" value="{{ stat_filter }}" id="stat-analysis-stat-input">
       <input class="form-control form-control-sm" style="width:160px" type="text"
-             name="q" value="{{ search_q }}" placeholder="Search player…">
+             name="q" value="{{ search_q }}" placeholder="Search player…" id="stat-analysis-q-input">
       <button class="btn btn-sm btn-outline-secondary" type="submit" aria-label="Search players">
         <i class="bi bi-search"></i>
       </button>
       {% if search_q %}
       <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('bet.nba_stat_analysis', stat=stat_filter) }}">Clear</a>
       {% endif %}
+      <button class="btn btn-sm btn-outline-secondary" type="button" id="stat-analysis-save-view">Save current view</button>
+      <button class="btn btn-sm btn-outline-secondary" type="button" id="stat-analysis-reset-view">Reset view</button>
     </form>
   </div>
+  <div class="filter-chip-list mt-3" id="stat-analysis-active-filters" aria-live="polite" aria-label="Active stat analysis filters"></div>
 </div>
 
 {# ── Matchup Cards ────────────────────────────────────────────── #}
@@ -366,6 +369,116 @@ const SA_PROP_TO_COL = PROP_TO_STAT_COL;
 </script>
 <script>
 (function () {
+  function initStatAnalysisFilterState() {
+    if (typeof createFilterStateManager !== 'function') return;
+    const form = document.getElementById('stat-analysis-filter-form');
+    const statInput = document.getElementById('stat-analysis-stat-input');
+    const qInput = document.getElementById('stat-analysis-q-input');
+    const saveBtn = document.getElementById('stat-analysis-save-view');
+    const resetBtn = document.getElementById('stat-analysis-reset-view');
+    const chipsEl = document.getElementById('stat-analysis-active-filters');
+    if (!form || !statInput || !qInput || !chipsEl) return;
+
+    const manager = createFilterStateManager({
+      storage: 'local',
+      storageKey: 'sbt_nba_stat_analysis_filters_v1',
+      keys: ['stat', 'q'],
+    });
+
+    function getState() {
+      return {
+        stat: (statInput.value || '').trim(),
+        q: (qInput.value || '').trim(),
+      };
+    }
+
+    function toQuery(state) {
+      const params = new URLSearchParams();
+      if (state.stat && state.stat !== 'all') params.set('stat', state.stat);
+      if (state.q) params.set('q', state.q);
+      return params;
+    }
+
+    function renderChips(state) {
+      chipsEl.replaceChildren();
+      const active = [];
+      if (state.stat && state.stat !== 'all') {
+        const activeStatBtn = document.querySelector('.sa-filter-toolbar a.btn-primary');
+        active.push({ key: 'stat', label: 'Stat: ' + (activeStatBtn ? activeStatBtn.textContent.trim() : state.stat) });
+      }
+      if (state.q) active.push({ key: 'q', label: 'Search: ' + state.q });
+
+      if (!active.length) {
+        const empty = document.createElement('span');
+        empty.className = 'filter-chip-empty';
+        empty.textContent = 'No active filters';
+        chipsEl.appendChild(empty);
+        return;
+      }
+
+      active.forEach(item => {
+        const chip = document.createElement('span');
+        chip.className = 'filter-chip';
+        const text = document.createElement('span');
+        text.className = 'filter-chip-label';
+        text.textContent = item.label;
+        chip.appendChild(text);
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'filter-chip-remove';
+        button.dataset.key = item.key;
+        button.setAttribute('aria-label', 'Remove ' + item.key + ' filter');
+        button.innerHTML = '<span aria-hidden="true">×</span>';
+        chip.appendChild(button);
+        chipsEl.appendChild(chip);
+      });
+    }
+
+    const urlState = manager.getUrlState();
+    if (Object.keys(urlState).length) {
+      manager.saveState({
+        stat: urlState.stat || 'all',
+        q: urlState.q || '',
+      });
+    } else {
+      const saved = manager.readSavedState();
+      const params = toQuery({ stat: saved.stat || '', q: saved.q || '' });
+      if (params.toString()) {
+        window.location.assign(window.location.pathname + '?' + params.toString());
+        return;
+      }
+    }
+
+    renderChips(getState());
+
+    if (saveBtn) {
+      saveBtn.addEventListener('click', function () {
+        manager.saveState(getState());
+        renderChips(getState());
+      });
+    }
+
+    if (resetBtn) {
+      resetBtn.addEventListener('click', function () {
+        manager.clearState();
+        window.location.assign(window.location.pathname);
+      });
+    }
+
+    chipsEl.addEventListener('click', function (event) {
+      const btn = event.target.closest('.filter-chip-remove');
+      if (!btn) return;
+      const state = getState();
+      if (btn.dataset.key === 'stat') state.stat = 'all';
+      if (btn.dataset.key === 'q') state.q = '';
+      manager.saveState(state);
+      const params = toQuery(state);
+      window.location.assign(window.location.pathname + (params.toString() ? '?' + params.toString() : ''));
+    });
+  }
+
+  initStatAnalysisFilterState();
+
   const panel    = document.getElementById('stat-panel');
   const backdrop = document.getElementById('stat-panel-backdrop');
   const closeBtn = document.getElementById('stat-panel-close');

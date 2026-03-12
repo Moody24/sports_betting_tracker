@@ -82,3 +82,78 @@ function clearParlayQueue() {
     sessionStorage.removeItem(PARLAY_QUEUE_STORAGE_KEY);
   } catch (_) {}
 }
+
+function createFilterStateManager(options) {
+  var config = options || {};
+  var storageType = config.storage === 'session' ? 'session' : 'local';
+  var storageKey = String(config.storageKey || '').trim();
+  var keys = Array.isArray(config.keys) ? config.keys : [];
+
+  function getStorage() {
+    try {
+      return storageType === 'session' ? window.sessionStorage : window.localStorage;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function readSavedState() {
+    if (!storageKey) return {};
+    var storage = getStorage();
+    if (!storage) return {};
+    try {
+      var raw = storage.getItem(storageKey);
+      if (!raw) return {};
+      var parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (_) {
+      return {};
+    }
+  }
+
+  function saveState(state) {
+    if (!storageKey) return;
+    var storage = getStorage();
+    if (!storage) return;
+    var cleanState = {};
+    keys.forEach(function (key) {
+      var value = state && state[key] != null ? String(state[key]).trim() : '';
+      if (value) cleanState[key] = value;
+    });
+    try {
+      storage.setItem(storageKey, JSON.stringify(cleanState));
+    } catch (_) {}
+  }
+
+  function clearState() {
+    if (!storageKey) return;
+    var storage = getStorage();
+    if (!storage) return;
+    try {
+      storage.removeItem(storageKey);
+    } catch (_) {}
+  }
+
+  function getUrlState() {
+    var query = new URLSearchParams(window.location.search || '');
+    var result = {};
+    keys.forEach(function (key) {
+      var val = (query.get(key) || '').trim();
+      if (val) result[key] = val;
+    });
+    return result;
+  }
+
+  function hasUrlState() {
+    return Object.keys(getUrlState()).length > 0;
+  }
+
+  return {
+    keys: keys,
+    readSavedState: readSavedState,
+    saveState: saveState,
+    clearState: clearState,
+    getUrlState: getUrlState,
+    hasUrlState: hasUrlState,
+  };
+}
