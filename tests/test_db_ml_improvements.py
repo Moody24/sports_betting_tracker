@@ -4,6 +4,7 @@ and prod-readiness CLI command."""
 
 import json
 from datetime import datetime, timezone, timedelta, date as date_type
+from zoneinfo import ZoneInfo
 from app import db
 from app.models import (
     BetPostmortem,
@@ -245,11 +246,12 @@ class TestDataQualityGates(BaseTestCase):
 
     def test_defense_staleness_fresh(self):
         with self.app.app_context():
+            today_et = datetime.now(ZoneInfo("America/New_York")).date()
             snap = TeamDefenseSnapshot(
                 team_id='t1',
                 team_name='Lakers',
                 team_abbr='LAL',
-                snapshot_date=date_type.today(),
+                snapshot_date=today_et,
             )
             db.session.add(snap)
             db.session.commit()
@@ -261,7 +263,7 @@ class TestDataQualityGates(BaseTestCase):
 
     def test_defense_staleness_stale(self):
         with self.app.app_context():
-            old_date = date_type.today() - timedelta(days=10)
+            old_date = datetime.now(ZoneInfo("America/New_York")).date() - timedelta(days=10)
             snap = TeamDefenseSnapshot(
                 team_id='t1',
                 team_name='Lakers',
@@ -345,7 +347,7 @@ class TestProdReadinessCLI(BaseTestCase):
                 team_id='t1',
                 team_name='Lakers',
                 team_abbr='LAL',
-                snapshot_date=date_type.today(),
+                snapshot_date=datetime.now(ZoneInfo("America/New_York")).date(),
             )
             db.session.add(snap)
             db.session.commit()
@@ -403,7 +405,7 @@ class TestProdReadinessCLI(BaseTestCase):
     def test_prod_readiness_odds_snapshot_warn(self):
         """Stale OddsSnapshot shows WARN."""
         with self.app.app_context():
-            old = date_type.today() - timedelta(days=10)
+            old = datetime.now(ZoneInfo("America/New_York")).date() - timedelta(days=10)
             snap = OddsSnapshot(
                 game_id='g1',
                 game_date=old,
