@@ -10,7 +10,7 @@
     const line = Number(data.line || 0);
     const diff = projected - line;
 
-    if (!line) return 'Tracking';
+    if (!line) return { text: 'Tracking', cls: 'text-bg-secondary' };
 
     if (isOver) {
       if (diff >= 2.5) return { text: 'On pace to clear', cls: 'text-bg-success' };
