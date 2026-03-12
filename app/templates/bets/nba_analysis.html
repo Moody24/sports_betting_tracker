@@ -72,6 +72,7 @@
       <a href="/bets/new#parlay" class="btn btn-sm btn-outline-warning" id="parlay-queue-btn">
         <i class="bi bi-collection me-1"></i>Parlay (<span id="parlay-queue-count">0</span>)
       </a>
+      <span id="analysis-last-updated" class="small text-secondary">Last updated at --:--</span>
       <button class="btn btn-sm btn-outline-info" id="btn-refresh">
         <i class="bi bi-arrow-repeat me-1"></i>Refresh
       </button>
@@ -162,13 +163,26 @@
 
 {# ── Value Plays Table ───────────────────────────────────── #}
 {% if value_plays %}
-<div class="card-soft p-3 mb-4 fade-up fade-up-3">
+<div class="card-soft p-3 mb-4 fade-up fade-up-3" id="analysis-table-shell" style="min-height:460px; position:relative;">
   <div class="d-flex justify-content-between align-items-center mb-3">
     <h3 class="h6 mb-0"><i class="bi bi-bullseye me-2"></i>{% if strong_plays %}All Plays{% else %}Value Plays{% endif %}</h3>
     <span class="text-secondary small">Sorted by edge (highest first, top 50 shown)</span>
   </div>
 
-  <div class="table-wrap">
+  <div id="analysis-table-loading" class="py-4" hidden>
+    <div class="placeholder-glow">
+      <p class="placeholder col-12 mb-2"></p>
+      <p class="placeholder col-12 mb-2"></p>
+      <p class="placeholder col-12 mb-2"></p>
+      <p class="placeholder col-10 mb-0"></p>
+    </div>
+  </div>
+  <div id="analysis-table-error" class="text-center text-danger py-4" hidden>
+    <p class="mb-2"><i class="bi bi-exclamation-triangle me-1"></i>Could not refresh analysis table.</p>
+    <button class="btn btn-sm btn-outline-danger" type="button" id="analysis-refresh-retry">Retry</button>
+  </div>
+
+  <div class="table-wrap" id="analysis-table-wrap">
     <table class="table table-dark table-hover align-middle mb-0" id="analysis-table">
       <thead>
         <tr>
@@ -333,13 +347,50 @@ document.addEventListener('DOMContentLoaded', function() {
   // Apply initial filter
   applyFilters();
 
-  // Refresh button
+  const lastUpdatedEl = document.getElementById('analysis-last-updated');
   const btnRefresh = document.getElementById('btn-refresh');
-  if (btnRefresh) {
-    btnRefresh.addEventListener('click', function() {
-      window.location.reload();
-    });
+  const retryRefresh = document.getElementById('analysis-refresh-retry');
+  const tableWrap = document.getElementById('analysis-table-wrap');
+  const tableLoading = document.getElementById('analysis-table-loading');
+  const tableError = document.getElementById('analysis-table-error');
+
+  function stampUpdated() {
+    if (!lastUpdatedEl) return;
+    lastUpdatedEl.textContent = 'Last updated at ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   }
+
+  function setTableLoading(isLoading) {
+    if (tableLoading) tableLoading.hidden = !isLoading;
+    if (tableWrap) tableWrap.style.visibility = isLoading ? 'hidden' : 'visible';
+    if (!isLoading && tableError) tableError.hidden = true;
+    if (btnRefresh) {
+      btnRefresh.disabled = isLoading;
+      btnRefresh.innerHTML = isLoading
+        ? '<span class="spinner-border spinner-border-sm me-1"></span>Refreshing...'
+        : '<i class="bi bi-arrow-repeat me-1"></i>Refresh';
+    }
+  }
+
+  function refreshAnalysisTable() {
+    setTableLoading(true);
+    fetch(window.location.pathname + window.location.search, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+      .then(r => {
+        if (!r.ok) throw new Error('refresh failed');
+        return r.text();
+      })
+      .then(() => {
+        stampUpdated();
+        window.location.reload();
+      })
+      .catch(() => {
+        if (tableError) tableError.hidden = false;
+      })
+      .finally(() => setTableLoading(false));
+  }
+
+  if (btnRefresh) btnRefresh.addEventListener('click', refreshAnalysisTable);
+  if (retryRefresh) retryRefresh.addEventListener('click', refreshAnalysisTable);
+  stampUpdated();
 
   // Player detail modal
   document.querySelectorAll('.player-detail-btn').forEach(btn => {

@@ -44,11 +44,62 @@
     });
   }
 
-  // ── Props: load on click ───────────────────────────────────────
-  document.querySelectorAll('.props-toggle').forEach(function (btn) {
+  function nowTimeLabel() {
+    return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+
+  function setPropsLoading(container, isLoading) {
+    if (!container) return;
+    if (isLoading) {
+      container.innerHTML =
+        '<div class="text-center py-3">' +
+        '<div class="spinner-border spinner-border-sm text-info" role="status"></div>' +
+        '<span class="small text-secondary ms-2">Loading props...</span>' +
+        '</div>';
+      return;
+    }
+  }
+
+  function renderPropsError(container, retryFn) {
+    if (!container) return;
+    container.innerHTML =
+      '<div class="small text-danger py-2 text-center">' +
+      '<i class="bi bi-exclamation-triangle me-1"></i>Failed to load props.' +
+      '<button type="button" class="btn btn-xs btn-outline-danger ms-2 props-retry-btn">Retry</button>' +
+      '</div>';
+    var retryBtn = container.querySelector('.props-retry-btn');
+    if (retryBtn) retryBtn.addEventListener('click', retryFn);
+  }
+
+  function bindPropsToggle(btn) {
+    if (!btn || btn.dataset.boundPropsToggle === '1') return;
+    btn.dataset.boundPropsToggle = '1';
     btn.addEventListener('click', function () {
       var espnId = btn.dataset.espnId;
       var container = document.getElementById('props-' + espnId);
+
+      function loadProps() {
+        if (propsCache[espnId]) {
+          renderProps(espnId, propsCache[espnId], btn);
+          return;
+        }
+
+        setPropsLoading(container, true);
+        var url = PROPS_URL.replace('__ESPN_ID__', espnId);
+        fetch(url)
+          .then(function (r) {
+            if (!r.ok) throw new Error('props fetch failed');
+            return r.json();
+          })
+          .then(function (data) {
+            propsCache[espnId] = data;
+            renderProps(espnId, data, btn);
+            btn.dataset.lastUpdated = nowTimeLabel();
+          })
+          .catch(function () {
+            renderPropsError(container, loadProps);
+          });
+      }
 
       var isOpen = !container.hasAttribute('hidden');
       if (isOpen) {
@@ -57,30 +108,22 @@
         btn.setAttribute('aria-expanded', 'false');
         return;
       }
+
       container.removeAttribute('hidden');
       btn.classList.add('active');
       btn.setAttribute('aria-expanded', 'true');
-
-      if (propsCache[espnId]) {
-        renderProps(espnId, propsCache[espnId], btn);
-        return;
-      }
-
-      var url = PROPS_URL.replace('__ESPN_ID__', espnId);
-      fetch(url)
-        .then(function (r) { return r.json(); })
-        .then(function (data) {
-          propsCache[espnId] = data;
-          renderProps(espnId, data, btn);
-        })
-        .catch(function () {
-          container.innerHTML =
-            '<div class="small text-danger py-2 text-center">' +
-            '<i class="bi bi-exclamation-triangle me-1"></i>Failed to load props. ' +
-            'Make sure <code>ODDS_API_KEY</code> is set.</div>';
-        });
+      loadProps();
     });
-  });
+  }
+
+  function initPropsToggleHandlers() {
+    document.querySelectorAll('.props-toggle').forEach(function (btn) {
+      bindPropsToggle(btn);
+    });
+  }
+
+  window.__initBetSlipUI = initPropsToggleHandlers;
+  initPropsToggleHandlers();
 
   function renderProps(espnId, data, btn) {
     var container = document.getElementById('props-' + espnId);

@@ -107,10 +107,29 @@
       <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('bet.nba_stat_analysis', stat=stat_filter) }}">Clear</a>
       {% endif %}
     </form>
+    <div class="d-flex align-items-center gap-2">
+      <span id="stat-analysis-last-updated" class="small text-secondary">Last updated at --:--</span>
+      <button class="btn btn-sm btn-outline-info" type="button" id="stat-analysis-refresh">
+        <i class="bi bi-arrow-repeat me-1"></i>Refresh
+      </button>
+    </div>
   </div>
 </div>
 
 {# ── Matchup Cards ────────────────────────────────────────────── #}
+<div id="stat-analysis-results-shell" style="min-height: 520px; position: relative;">
+<div id="stat-analysis-loading" class="card-soft p-3 mb-4" hidden>
+  <div class="placeholder-glow">
+    <p class="placeholder col-12 mb-2"></p>
+    <p class="placeholder col-12 mb-2"></p>
+    <p class="placeholder col-10 mb-0"></p>
+  </div>
+</div>
+<div id="stat-analysis-error" class="card-soft p-3 mb-4 text-danger text-center" hidden>
+  <p class="mb-2"><i class="bi bi-exclamation-triangle me-1"></i>Unable to refresh stat analysis.</p>
+  <button class="btn btn-sm btn-outline-danger" type="button" id="stat-analysis-refresh-retry">Retry</button>
+</div>
+<div id="stat-analysis-results">
 {% if not matchups %}
 <div class="text-center text-secondary py-5 fade-up fade-up-4">
   <i class="bi bi-bar-chart-line fs-1 d-block mb-2 opacity-25"></i>
@@ -203,6 +222,8 @@
   </div>
 </div>
 {% endfor %}
+</div>
+</div>
 
 {# ── Side Panel ───────────────────────────────────────────────── #}
 <div id="stat-panel" class="stat-panel" role="dialog" aria-modal="true" aria-labelledby="sp-player-name" hidden>
@@ -372,6 +393,60 @@ const SA_PROP_TO_COL = PROP_TO_STAT_COL;
   let currentProp = null;
   let currentLog  = [];      // cached AJAX game log
   let activeCol   = 'pts';   // currently selected stat column
+
+  const refreshBtn = document.getElementById('stat-analysis-refresh');
+  const refreshRetryBtn = document.getElementById('stat-analysis-refresh-retry');
+  const resultsWrap = document.getElementById('stat-analysis-results');
+  const resultsLoading = document.getElementById('stat-analysis-loading');
+  const resultsError = document.getElementById('stat-analysis-error');
+  const updatedEl = document.getElementById('stat-analysis-last-updated');
+
+  function stampUpdated() {
+    if (updatedEl) {
+      updatedEl.textContent = 'Last updated at ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+  }
+
+  function setResultsLoading(isLoading) {
+    if (resultsLoading) resultsLoading.hidden = !isLoading;
+    if (resultsWrap) resultsWrap.style.visibility = isLoading ? 'hidden' : 'visible';
+    if (!isLoading && resultsError) resultsError.hidden = true;
+    if (refreshBtn) {
+      refreshBtn.disabled = isLoading;
+      refreshBtn.innerHTML = isLoading
+        ? '<span class="spinner-border spinner-border-sm me-1"></span>Refreshing...'
+        : '<i class="bi bi-arrow-repeat me-1"></i>Refresh';
+    }
+  }
+
+  function rebindResultRows() {
+    document.querySelectorAll('.sa-player-row, .sa-featured-card').forEach(row => {
+      row.addEventListener('click', () => {
+        try { openPanel(JSON.parse(row.dataset.prop)); } catch(e) { console.error('Panel parse error:', e); }
+      });
+    });
+  }
+
+  function refreshStatAnalysis() {
+    setResultsLoading(true);
+    fetch(window.location.pathname + window.location.search, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+      .then(r => {
+        if (!r.ok) throw new Error('refresh failed');
+        return r.text();
+      })
+      .then(html => {
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        const incoming = doc.getElementById('stat-analysis-results');
+        if (!incoming || !resultsWrap) throw new Error('missing results');
+        resultsWrap.innerHTML = incoming.innerHTML;
+        rebindResultRows();
+        stampUpdated();
+      })
+      .catch(() => {
+        if (resultsError) resultsError.hidden = false;
+      })
+      .finally(() => setResultsLoading(false));
+  }
 
   function setText(id, val) {
     const el = document.getElementById(id);
@@ -617,11 +692,10 @@ const SA_PROP_TO_COL = PROP_TO_STAT_COL;
   });
 
   // Player rows + featured cards
-  document.querySelectorAll('.sa-player-row, .sa-featured-card').forEach(row => {
-    row.addEventListener('click', () => {
-      try { openPanel(JSON.parse(row.dataset.prop)); } catch(e) { console.error('Panel parse error:', e); }
-    });
-  });
+  rebindResultRows();
+  if (refreshBtn) refreshBtn.addEventListener('click', refreshStatAnalysis);
+  if (refreshRetryBtn) refreshRetryBtn.addEventListener('click', refreshStatAnalysis);
+  stampUpdated();
 
   // Parlay buttons
   function parlayClick(betType) {
