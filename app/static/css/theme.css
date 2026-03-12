@@ -2012,3 +2012,211 @@ h1, h2, h3, h4, h5, h6,
   .bb-ticket { margin-bottom: 0.75rem; }
 }
 
+/* ══════════════════════════════════════════════════════════════════
+   HOME PAGE — home.html
+══════════════════════════════════════════════════════════════════ */
+
+.home-hero {
+  padding: 3rem 2rem 2rem;
+  text-align: center;
+}
+
+.home-hero-badge {
+  display: inline-block;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: rgba(240,180,41,.08);
+  border: 1px solid rgba(240,180,41,.2);
+  border-radius: 100px;
+  padding: 0.3em 0.9em;
+  margin-bottom: 1.25rem;
+}
+
+.home-hero-headline {
+  font-family: 'Syne', sans-serif;
+  font-size: clamp(1.75rem, 4vw, 2.75rem);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+  margin-bottom: 1rem;
+}
+
+.home-hero-sub {
+  font-size: 1rem;
+  color: var(--text-muted);
+  max-width: 520px;
+  margin: 0 auto 2rem;
+  line-height: 1.6;
+}
+
+.home-cta-group {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-bottom: 2rem;
+}
+
+.home-stat-strip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0;
+  border-top: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+  background: rgba(255,255,255,.01);
+  margin-bottom: 2rem;
+}
+
+.home-stat-item {
+  padding: 1.25rem 1rem;
+  text-align: center;
+  border-right: 1px solid var(--border-subtle);
+}
+.home-stat-item:last-child { border-right: none; }
+
+.home-stat-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: -0.02em;
+  line-height: 1;
+  margin-bottom: 0.25rem;
+}
+
+.home-stat-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.home-feature-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  background: var(--border-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+
+.home-feature-card {
+  background: var(--bg-elev);
+  padding: 1.25rem;
+  transition: background 0.15s;
+}
+.home-feature-card:hover { background: var(--bg-soft); }
+
+.home-feature-icon {
+  font-size: 1.35rem;
+  color: var(--accent);
+  margin-bottom: 0.625rem;
+  display: block;
+}
+
+.home-feature-title {
+  font-family: 'Syne', sans-serif;
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--text-main);
+  margin-bottom: 0.375rem;
+}
+
+.home-feature-desc {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+@media (max-width: 767.98px) {
+  .home-feature-grid { grid-template-columns: repeat(2, 1fr); }
+  .home-stat-strip { grid-template-columns: repeat(2, 1fr); }
+  .home-stat-item:nth-child(2) { border-right: none; }
+  .home-stat-item:nth-child(3) { border-top: 1px solid var(--border-subtle); }
+}
+@media (max-width: 575.98px) {
+  .home-hero { padding: 2rem 1rem 1.5rem; }
+  .home-feature-grid { grid-template-columns: 1fr; }
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   AUTH PAGES — login.html / register.html
+══════════════════════════════════════════════════════════════════ */
+
+.auth-brand-header {
+  background: rgba(240,180,41,.06);
+  border-bottom: 1px solid rgba(240,180,41,.12);
+  padding: 1.25rem 1.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+}
+
+.brand-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+  box-shadow: 0 0 8px rgba(240,180,41,.5);
+}
+
+.auth-brand-title {
+  font-family: 'Syne', sans-serif;
+  font-size: 1rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--text-main);
+}
+
+.auth-card-body {
+  padding: 1.5rem;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   KPI TREND — dashboard.html
+══════════════════════════════════════════════════════════════════ */
+
+.kpi-trend {
+  font-size: 0.7rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  margin-top: 2px;
+}
+
+.kpi-trend-up    { color: var(--win); }
+.kpi-trend-down  { color: var(--loss); }
+.kpi-trend-neutral { color: var(--text-muted); }
+
+/* ══════════════════════════════════════════════════════════════════
+   BB TICKET LABEL alias (JS uses .bb-ticket-label)
+══════════════════════════════════════════════════════════════════ */
+
+.bb-ticket-label { color: var(--text-muted); }
+
+/* ══════════════════════════════════════════════════════════════════
+   LIVE PULSE — nba_today.html
+══════════════════════════════════════════════════════════════════ */
+
+@keyframes live-pulse-anim {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.35; }
+}
+
+.live-pulse {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  background: var(--win);
+  border-radius: 50%;
+  animation: live-pulse-anim 1.2s ease-in-out infinite;
+  vertical-align: middle;
+}
+

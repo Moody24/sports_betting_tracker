@@ -5,7 +5,7 @@ Adds:
   - CHECK constraints on bet: outcome, bet_type, american_odds, parlay/parlay_id, bonus_multiplier
   - Drop redundant single-col OddsSnapshot indexes superseded by composite
 
-Revision ID: a1b2c3d4e5f6
+Revision ID: c3d4e5f6a7b8
 Revises: f1a2b3c4d5e6
 Create Date: 2026-03-11 00:00:00.000000
 """
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.engine.reflection import Inspector
 
-revision = 'a1b2c3d4e5f6'
+revision = 'c3d4e5f6a7b8'
 down_revision = 'f1a2b3c4d5e6'
 branch_labels = None
 depends_on = None
@@ -51,11 +51,12 @@ def upgrade():
 
     # Drop redundant single-column OddsSnapshot indexes (superseded by composite)
     inspector = Inspector.from_engine(bind)
-    existing = {idx['name'] for idx in inspector.get_indexes('odds_snapshot')}
-    if 'ix_odds_snapshot_game_date' in existing:
-        op.drop_index('ix_odds_snapshot_game_date', table_name='odds_snapshot')
-    if 'ix_odds_snapshot_game_id' in existing:
-        op.drop_index('ix_odds_snapshot_game_id', table_name='odds_snapshot')
+    if 'odds_snapshot' in inspector.get_table_names():
+        existing = {idx['name'] for idx in inspector.get_indexes('odds_snapshot')}
+        if 'ix_odds_snapshot_game_date' in existing:
+            op.drop_index('ix_odds_snapshot_game_date', table_name='odds_snapshot')
+        if 'ix_odds_snapshot_game_id' in existing:
+            op.drop_index('ix_odds_snapshot_game_id', table_name='odds_snapshot')
 
 
 def downgrade():
