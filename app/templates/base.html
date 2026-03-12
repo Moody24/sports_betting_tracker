@@ -33,7 +33,7 @@
         </div>
 
         <nav class="nav nav-pills flex-column gap-1">
-          <a class="nav-link {% if request.endpoint == 'main.home' and not current_user.is_authenticated %}active{% endif %}" href="{{ url_for('main.home') }}">
+          <a class="nav-link {% if request.endpoint == 'main.home' %}active{% endif %}" href="{{ url_for('main.home') }}">
             <i class="bi bi-house"></i><span>Home</span>
           </a>
           {% if current_user.is_authenticated %}
