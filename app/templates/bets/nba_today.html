@@ -5,17 +5,34 @@
 {% block page_subtitle %}Live dashboard — active games auto-archive when final with odds &amp; props locked at snapshot time.{% endblock %}
 
 {% block content %}
+<style>
+  .loading-shell { min-height: 520px; }
+  .skeleton-card { min-height: 260px; }
+  .skeleton-block {
+    border-radius: .4rem;
+    background: linear-gradient(90deg, rgba(255,255,255,.05) 25%, rgba(255,255,255,.12) 37%, rgba(255,255,255,.05) 63%);
+    background-size: 400% 100%;
+    animation: loadingShimmer 1.2s ease-in-out infinite;
+  }
+  @keyframes loadingShimmer { 0% { background-position: 100% 0; } 100% { background-position: 0 0; } }
+</style>
 <div class="d-flex justify-content-between align-items-center mb-4">
   <p class="text-secondary mb-0">
     {{ games|length }} active game{{ 's' if games|length != 1 }} &middot;
     {{ completed_snaps|length }} completed
   </p>
-  <form action="{{ url_for('bet.nba_update_results') }}" method="POST" class="d-inline">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <button type="submit" class="btn btn-sm btn-outline-light">
-      <i class="bi bi-arrow-repeat me-1"></i>Update Results
+  <div class="d-flex align-items-center gap-2">
+    <span id="today-last-updated" class="small text-secondary">Last updated at --:--</span>
+    <button type="button" class="btn btn-sm btn-outline-info" id="refresh-active-games">
+      <i class="bi bi-arrow-repeat me-1"></i>Refresh Live Games
     </button>
-  </form>
+    <form action="{{ url_for('bet.nba_update_results') }}" method="POST" class="d-inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-sm btn-outline-light">
+        <i class="bi bi-arrow-repeat me-1"></i>Update Results
+      </button>
+    </form>
+  </div>
 </div>
 
 {# ══════════════════════════════════════════════════════════════
@@ -28,12 +45,13 @@
 </div>
 {% endif %}
 
+<div id="active-games-section" class="loading-shell">
 {% if games %}
 <h2 class="h5 mb-3">
   <i class="bi bi-broadcast me-2 text-success"></i>Active Games
   <span class="badge text-bg-success ms-2" style="font-size:.75rem">{{ games|length }}</span>
 </h2>
-<div class="row g-3 mb-5 align-items-start">
+<div class="row g-3 mb-5 align-items-start" id="active-games-content">
   {% for game in games %}
   <div class="col-md-6 col-xl-4">
     <div class="card-soft p-3 h-100 d-flex flex-column{% if game.status == 'STATUS_IN_PROGRESS' %} game-card-live{% endif %}">
@@ -172,6 +190,28 @@
   {% endfor %}
 </div>
 {% endif %}
+
+<div class="row g-3 mb-5 align-items-start" id="active-games-loading" hidden>
+  {% for _ in range(3) %}
+  <div class="col-md-6 col-xl-4">
+    <div class="card-soft p-3 h-100 d-flex flex-column skeleton-card placeholder-glow">
+      <div class="d-flex justify-content-between mb-3">
+        <span class="placeholder col-4"></span>
+        <span class="placeholder col-3"></span>
+      </div>
+      <div class="skeleton-block" style="height:54px; margin-bottom:.75rem;"></div>
+      <div class="skeleton-block" style="height:38px; margin-bottom:.75rem;"></div>
+      <div class="skeleton-block mt-auto" style="height:30px;"></div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<div id="active-games-error" class="card-soft p-3 text-center text-danger mb-4" hidden>
+  <div class="mb-2"><i class="bi bi-exclamation-triangle me-1"></i>Unable to refresh live games.</div>
+  <button class="btn btn-sm btn-outline-danger" type="button" id="retry-active-games">Retry</button>
+</div>
+</div>
 
 {# ══════════════════════════════════════════════════════════════
    COMPLETED GAMES (archived snapshots)
@@ -453,6 +493,60 @@
 var CSRF_TOKEN = '{{ csrf_token() }}';
 var PROPS_URL  = '{{ url_for("bet.nba_props", espn_id="__ESPN_ID__") }}';
 var PLACE_URL  = '{{ url_for("bet.nba_place_bets") }}';
+
+document.addEventListener('DOMContentLoaded', function () {
+  var refreshBtn = document.getElementById('refresh-active-games');
+  var retryBtn = document.getElementById('retry-active-games');
+  var loadingEl = document.getElementById('active-games-loading');
+  var contentEl = document.getElementById('active-games-content');
+  var errorEl = document.getElementById('active-games-error');
+  var updatedEl = document.getElementById('today-last-updated');
+
+  function stampUpdated() {
+    if (updatedEl) {
+      updatedEl.textContent = 'Last updated at ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+  }
+
+  function setLoading(isLoading) {
+    if (loadingEl) loadingEl.hidden = !isLoading;
+    if (contentEl) contentEl.style.visibility = isLoading ? 'hidden' : 'visible';
+    if (refreshBtn) {
+      refreshBtn.disabled = isLoading;
+      refreshBtn.innerHTML = isLoading
+        ? '<span class="spinner-border spinner-border-sm me-1"></span>Refreshing...'
+        : '<i class="bi bi-arrow-repeat me-1"></i>Refresh Live Games';
+    }
+    if (!isLoading && errorEl) errorEl.hidden = true;
+  }
+
+  function refreshActiveGames() {
+    setLoading(true);
+    fetch(window.location.pathname, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+      .then(function (res) {
+        if (!res.ok) throw new Error('refresh failed');
+        return res.text();
+      })
+      .then(function (html) {
+        var doc = new DOMParser().parseFromString(html, 'text/html');
+        var nextContent = doc.getElementById('active-games-content');
+        if (!nextContent || !contentEl) throw new Error('missing refreshed content');
+        contentEl.innerHTML = nextContent.innerHTML;
+        if (window.__initBetSlipUI) window.__initBetSlipUI();
+        stampUpdated();
+      })
+      .catch(function () {
+        if (errorEl) errorEl.hidden = false;
+      })
+      .finally(function () {
+        setLoading(false);
+      });
+  }
+
+  if (refreshBtn) refreshBtn.addEventListener('click', refreshActiveGames);
+  if (retryBtn) retryBtn.addEventListener('click', refreshActiveGames);
+  stampUpdated();
+});
 </script>
 <script src="{{ url_for('static', filename='js/betslip.js') }}"></script>
 {% endblock %}
