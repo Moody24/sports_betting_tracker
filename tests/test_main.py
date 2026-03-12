@@ -121,3 +121,9 @@ class TestMainRoutes(BaseTestCase):
         with self.app.app_context():
             user = db.session.get(User, user_id)
             self.assertIsNone(user.unit_size)
+
+
+    def test_home_has_skip_link_and_main_target(self):
+        resp = self.client.get('/')
+        self.assertIn(b'Skip to main content', resp.data)
+        self.assertIn(b'id="main-content"', resp.data)

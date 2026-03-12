@@ -12,10 +12,11 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/theme.css') }}">
 </head>
 <body>
+  <a class="skip-link" href="#main-content">Skip to main content</a>
   <div class="app-shell">
 
     {# ── Sidebar ────────────────────────────────────────────────── #}
-    <aside class="sidebar" id="sidebar">
+    <aside class="sidebar" id="sidebar" aria-label="Primary">
       <div>
 
         {# Brand #}
@@ -86,10 +87,10 @@
     </aside>
 
     {# ── Main content ───────────────────────────────────────────── #}
-    <main class="main-content">
+    <main class="main-content" id="main-content" tabindex="-1">
       <header class="topbar d-flex justify-content-between align-items-center">
         <div class="d-flex align-items-center gap-3">
-          <button class="sidebar-toggle d-lg-none" id="sidebar-toggle" type="button" aria-label="Toggle navigation">
+          <button class="sidebar-toggle d-lg-none" id="sidebar-toggle" type="button" aria-label="Toggle navigation" aria-controls="sidebar" aria-expanded="false">
             <i class="bi bi-list"></i>
           </button>
           <div>
@@ -135,7 +136,8 @@
                 'warning': 'bi-exclamation-triangle-fill',
                 'info':    'bi-info-circle-fill'
               }.get(cat, 'bi-info-circle-fill') %}
-              <div class="toast-item toast-{{ cat }}" role="alert" aria-live="assertive">
+              {% set assertive = cat in ['danger', 'warning'] %}
+              <div class="toast-item toast-{{ cat }}" role="{{ 'alert' if assertive else 'status' }}" aria-live="{{ 'assertive' if assertive else 'polite' }}" aria-atomic="true">
                 <i class="bi {{ icon }} toast-icon"></i>
                 <div class="toast-msg">{{ message }}</div>
                 <button class="toast-close" aria-label="Close"><i class="bi bi-x"></i></button>
@@ -159,10 +161,37 @@
     // Toast auto-dismiss
     document.querySelectorAll('.toast-item').forEach(function(toast) {
       var DURATION = 4000;
-      var timer = setTimeout(function() { dismissToast(toast); }, DURATION);
+      var timer = null;
+      var remaining = DURATION;
+      var startedAt = Date.now();
+
+      function startTimer(delay) {
+        startedAt = Date.now();
+        timer = setTimeout(function() { dismissToast(toast); }, delay);
+      }
+
+      function pauseTimer() {
+        if (!timer) return;
+        clearTimeout(timer);
+        timer = null;
+        remaining -= (Date.now() - startedAt);
+      }
+
+      function resumeTimer() {
+        if (timer || remaining <= 0) return;
+        startTimer(remaining);
+      }
+
+      startTimer(remaining);
       toast.querySelector('.toast-close').addEventListener('click', function() {
         clearTimeout(timer);
         dismissToast(toast);
+      });
+      toast.addEventListener('mouseenter', pauseTimer);
+      toast.addEventListener('mouseleave', resumeTimer);
+      toast.addEventListener('focusin', pauseTimer);
+      toast.addEventListener('focusout', function (e) {
+        if (!toast.contains(e.relatedTarget)) resumeTimer();
       });
     });
     function dismissToast(toast) {

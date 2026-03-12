@@ -15,24 +15,45 @@
     const validTabs = ['single', 'prop', 'parlay', 'screenshot'];
     if (!validTabs.includes(name)) return;
     _activeTab = name;
-    tabs.forEach(t => t.classList.toggle('active', t.dataset.bbTab === name));
-    panels.forEach(p => p.classList.toggle('d-none', p.dataset.bbPanel !== name));
+    tabs.forEach(function (t) {
+      var active = t.dataset.bbTab === name;
+      t.classList.toggle('active', active);
+      t.setAttribute('aria-selected', active ? 'true' : 'false');
+      t.setAttribute('tabindex', active ? '0' : '-1');
+    });
+    panels.forEach(function (p) {
+      p.hidden = p.dataset.bbPanel !== name;
+    });
+    document.querySelectorAll('[data-current-tab-input]').forEach(function (input) {
+      input.value = name;
+    });
     const modeLabel = document.getElementById('ticket-mode-label');
     if (modeLabel) modeLabel.textContent = TICKET_MODE_LABELS[name] || 'Ticket';
-    if (pushHash) {
-      history.replaceState(null, '', '#' + name);
-    }
-    // Auto-load props when switching to parlay tab
-    if (name === 'parlay') {
-      _maybeLoadParlayProps();
-    }
+    if (pushHash) history.replaceState(null, '', '#' + name);
+    if (name === 'parlay') _maybeLoadParlayProps();
     updateTicketSummary();
   }
 
-  tabs.forEach(t => t.addEventListener('click', () => showTab(t.dataset.bbTab, true)));
+  tabs.forEach(function (t, idx) {
+    t.addEventListener('click', function () { showTab(t.dataset.bbTab, true); });
+    t.addEventListener('keydown', function (e) {
+      if (!['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(e.key)) return;
+      e.preventDefault();
+      var next = idx;
+      if (e.key === 'ArrowRight') next = (idx + 1) % tabs.length;
+      if (e.key === 'ArrowLeft') next = (idx - 1 + tabs.length) % tabs.length;
+      if (e.key === 'Home') next = 0;
+      if (e.key === 'End') next = tabs.length - 1;
+      tabs[next].focus();
+      showTab(tabs[next].dataset.bbTab, true);
+    });
+  });
 
-  const hash = location.hash.replace('#', '') || 'single';
-  showTab(['single', 'prop', 'parlay', 'screenshot'].includes(hash) ? hash : 'single', false);
+  const hash = location.hash.replace('#', '');
+  const initialTab = ['single', 'prop', 'parlay', 'screenshot'].includes(SERVER_CURRENT_TAB)
+    ? SERVER_CURRENT_TAB
+    : (['single', 'prop', 'parlay', 'screenshot'].includes(hash) ? hash : 'single');
+  showTab(initialTab, false);
 
   // ── Over / Under toggle buttons ───────────────────────────────────
   const propBetTypeSelect = document.getElementById('prop-bet-type');
@@ -1121,7 +1142,8 @@
         // Set today's date as default if missing
         const ocrDate = document.getElementById('ocr-match-date');
         if (ocrDate && !ocrDate.value) {
-          ocrDate.value = new Date().toISOString().slice(0, 10);
+          const today = new Date();
+          ocrDate.value = [today.getFullYear(), String(today.getMonth() + 1).padStart(2, '0'), String(today.getDate()).padStart(2, '0')].join('-');
         }
 
         if (ocrSection) ocrSection.style.display = '';
@@ -1188,6 +1210,17 @@
   }
   makeLivePayoutPreview('bet_amount', 'single-odds', 'single-payout-preview');
   makeLivePayoutPreview('prop-stake', 'prop-odds',   'prop-payout-preview');
+
+
+  var parlaySubmitBtn = document.getElementById('parlay-submit-btn');
+  if (parlaySubmitBtn) {
+    parlaySubmitBtn.addEventListener('click', function (e) {
+      if (!Array.isArray(parlayLegs) || parlayLegs.length < 2) {
+        e.preventDefault();
+        alert('Select at least 2 legs before submitting the parlay.');
+      }
+    });
+  }
 
   // Initial ticket render
   updateTicketSummary();

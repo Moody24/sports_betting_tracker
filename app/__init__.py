@@ -14,6 +14,9 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_wtf.csrf import CSRFProtect
 from sqlalchemy.exc import DBAPIError, OperationalError
 
+if 'unittest' in ' '.join(str(a).lower() for a in (sys.argv or [])):
+    os.environ.setdefault('SECRET_KEY', 'test-only-insecure-key')
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s %(levelname)s %(name)s: %(message)s',

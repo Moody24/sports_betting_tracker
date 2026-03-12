@@ -19,22 +19,26 @@
 
           <div>
             <label class="form-label small fw-semibold" for="username">Username</label>
-            {{ form.username(class="form-control", id="username", placeholder="Pick a username") }}
+            {{ form.username(class='form-control' ~ (' is-invalid' if form.username.errors else ''), id='username', placeholder='Pick a username', autocomplete='username', **({'aria-invalid': 'true'} if form.username.errors else {})) }}
+            {% for e in form.username.errors %}<div class="invalid-feedback d-block">{{ e }}</div>{% endfor %}
           </div>
 
           <div>
             <label class="form-label small fw-semibold" for="email">Email</label>
-            {{ form.email(class="form-control", id="email", placeholder="you@example.com") }}
+            {{ form.email(class='form-control' ~ (' is-invalid' if form.email.errors else ''), id='email', placeholder='you@example.com', autocomplete='email', **({'aria-invalid': 'true'} if form.email.errors else {})) }}
+            {% for e in form.email.errors %}<div class="invalid-feedback d-block">{{ e }}</div>{% endfor %}
           </div>
 
           <div class="row g-3">
             <div class="col-md-6">
               <label class="form-label small fw-semibold" for="password">Password</label>
-              {{ form.password(class="form-control", id="password", placeholder="At least 6 characters") }}
+              {{ form.password(class='form-control' ~ (' is-invalid' if form.password.errors else ''), id='password', placeholder='At least 6 characters', autocomplete='new-password', **({'aria-invalid': 'true'} if form.password.errors else {})) }}
+              {% for e in form.password.errors %}<div class="invalid-feedback d-block">{{ e }}</div>{% endfor %}
             </div>
             <div class="col-md-6">
               <label class="form-label small fw-semibold" for="confirm_password">Confirm Password</label>
-              {{ form.confirm_password(class="form-control", id="confirm_password", placeholder="Repeat password") }}
+              {{ form.confirm_password(class='form-control' ~ (' is-invalid' if form.confirm_password.errors else ''), id='confirm_password', placeholder='Repeat password', autocomplete='new-password', **({'aria-invalid': 'true'} if form.confirm_password.errors else {})) }}
+              {% for e in form.confirm_password.errors %}<div class="invalid-feedback d-block">{{ e }}</div>{% endfor %}
             </div>
           </div>
 

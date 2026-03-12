@@ -21,16 +21,18 @@
             <label class="form-label small fw-semibold" for="username">Username</label>
             <div class="input-group">
               <span class="input-group-text"><i class="bi bi-person"></i></span>
-              {{ form.username(class="form-control", id="username", placeholder="Enter username") }}
+              {{ form.username(class='form-control' ~ (' is-invalid' if form.username.errors else ''), id='username', placeholder='Enter username', autocomplete='username', **({'aria-invalid': 'true'} if form.username.errors else {})) }}
             </div>
+            {% for e in form.username.errors %}<div class="invalid-feedback d-block">{{ e }}</div>{% endfor %}
           </div>
 
           <div>
             <label class="form-label small fw-semibold" for="password">Password</label>
             <div class="input-group">
               <span class="input-group-text"><i class="bi bi-lock"></i></span>
-              {{ form.password(class="form-control", id="password", placeholder="Enter password") }}
+              {{ form.password(class='form-control' ~ (' is-invalid' if form.password.errors else ''), id='password', placeholder='Enter password', autocomplete='current-password', **({'aria-invalid': 'true'} if form.password.errors else {})) }}
             </div>
+            {% for e in form.password.errors %}<div class="invalid-feedback d-block">{{ e }}</div>{% endfor %}
           </div>
 
           <div class="d-flex justify-content-between align-items-center">

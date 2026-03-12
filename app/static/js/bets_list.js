@@ -66,7 +66,8 @@
     if (barEl) {
       const pct = Math.max(0, Math.min(100, Number(data.progress_pct || 0)));
       barEl.style.width = `${pct}%`;
-      barEl.setAttribute('aria-valuenow', String(Math.round(pct)));
+      const progressEl = card.querySelector('[data-live-progress]');
+      if (progressEl) progressEl.setAttribute('aria-valuenow', String(Math.round(pct)));
     }
 
     if (trendEl) {
@@ -166,17 +167,14 @@
       const pid = this.dataset.parlayId;
       const legs = document.querySelector('[data-parlay-legs="' + pid + '"]');
       const open = this.getAttribute('aria-expanded') === 'true';
-      if (legs) legs.style.display = open ? 'none' : '';
-      this.setAttribute('aria-expanded', open ? 'false' : 'true');
+      if (legs) legs.hidden = open;
+      const nextExpanded = open ? 'false' : 'true';
+      this.setAttribute('aria-expanded', nextExpanded);
+      this.setAttribute('aria-label', (open ? 'Expand' : 'Collapse') + ' parlay legs');
       const icon = this.querySelector('.toggle-icon');
       if (icon) icon.style.transform = open ? 'rotate(180deg)' : '';
     });
   });
-
-  document.querySelectorAll('.delete-bet-form').forEach(function (form) {
-    form.addEventListener('submit', function (e) {
-      if (!confirm('Delete this bet?')) e.preventDefault();
-    });
   });
 
   initLiveProgress();

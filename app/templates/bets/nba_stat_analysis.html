@@ -100,7 +100,7 @@
       <input type="hidden" name="stat" value="{{ stat_filter }}">
       <input class="form-control form-control-sm" style="width:160px" type="text"
              name="q" value="{{ search_q }}" placeholder="Search player…">
-      <button class="btn btn-sm btn-outline-secondary" type="submit">
+      <button class="btn btn-sm btn-outline-secondary" type="submit" aria-label="Search players">
         <i class="bi bi-search"></i>
       </button>
     </form>
@@ -164,14 +164,13 @@
       {% set ns.last_pos = pos %}
       <div class="sa-pos-header">Est. {{ pos|upper }}</div>
       {% endif %}
-      <div class="sa-player-row sa-ind-{{ s.indicator }}"
-           data-prop='{{ s | tojson }}'>
+      <button type="button" class="sa-player-row sa-ind-{{ s.indicator }}" data-prop='{{ s | tojson }}'>
         <div class="sa-player-info">
           <span class="sa-player-name">{{ s.player }}</span>
           <span class="sa-prop-desc">{{ PROP_LABELS_SHORT.get(s.prop_type, s.prop_type) }} {{ s.line }}</span>
         </div>
         {{ indicator_badge(s.indicator) }}
-      </div>
+      </button>
       {% endfor %}
       {% endif %}
     </div>
@@ -188,14 +187,13 @@
       {% set ns.last_pos = pos %}
       <div class="sa-pos-header">Est. {{ pos|upper }}</div>
       {% endif %}
-      <div class="sa-player-row sa-ind-{{ s.indicator }}"
-           data-prop='{{ s | tojson }}'>
+      <button type="button" class="sa-player-row sa-ind-{{ s.indicator }}" data-prop='{{ s | tojson }}'>
         <div class="sa-player-info">
           <span class="sa-player-name">{{ s.player }}</span>
           <span class="sa-prop-desc">{{ PROP_LABELS_SHORT.get(s.prop_type, s.prop_type) }} {{ s.line }}</span>
         </div>
         {{ indicator_badge(s.indicator) }}
-      </div>
+      </button>
       {% endfor %}
       {% endif %}
     </div>
@@ -204,7 +202,7 @@
 {% endfor %}
 
 {# ── Side Panel ───────────────────────────────────────────────── #}
-<div id="stat-panel" class="stat-panel" hidden>
+<div id="stat-panel" class="stat-panel" role="dialog" aria-modal="true" aria-labelledby="sp-player-name" hidden>
 
   {# Header #}
   <div class="stat-panel-header">
@@ -213,7 +211,7 @@
       <div id="sp-meta" class="sp-meta-line"></div>
     </div>
     <div class="d-flex flex-column align-items-end gap-2 ms-2">
-      <button class="stat-panel-close" id="stat-panel-close">&times;</button>
+      <button class="stat-panel-close" id="stat-panel-close" aria-label="Close details">&times;</button>
       <div id="sp-badge"></div>
     </div>
   </div>
@@ -278,6 +276,7 @@
     <div class="stat-section-label mt-3">Game Log</div>
     <div id="sp-gamelog-wrap" class="sp-gamelog-wrap">
       <table class="sp-gamelog-table" id="sp-gamelog-table">
+        <caption class="visually-hidden">Selected player game log</caption>
         <thead>
           <tr>
             <th>Date</th><th>Matchup</th><th>Min</th>
@@ -555,10 +554,12 @@ const SA_PROP_TO_COL = PROP_TO_STAT_COL;
     setText('sp-l5', '—'); setText('sp-l10', '—');
 
     // Show panel
+    lastFocusedEl = document.activeElement;
     panel.removeAttribute('hidden');
     backdrop.removeAttribute('hidden');
     requestAnimationFrame(() => panel.classList.add('open'));
     document.body.style.overflow = 'hidden';
+    closeBtn.focus();
 
     // AJAX: fetch full game log
     const loadEl = document.getElementById('sp-loading');
@@ -587,18 +588,30 @@ const SA_PROP_TO_COL = PROP_TO_STAT_COL;
       .catch(() => { loadEl.setAttribute('hidden', ''); });
   }
 
+  let lastFocusedEl = null;
   function closePanel() {
     panel.classList.remove('open');
     document.body.style.overflow = '';
     setTimeout(() => {
       panel.setAttribute('hidden', '');
       backdrop.setAttribute('hidden', '');
+      if (lastFocusedEl) lastFocusedEl.focus();
     }, 230);
   }
 
   closeBtn.addEventListener('click', closePanel);
   backdrop.addEventListener('click', closePanel);
-  document.addEventListener('keydown', e => { if (e.key === 'Escape') closePanel(); });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && !panel.hasAttribute('hidden')) closePanel();
+    if (e.key === 'Tab' && !panel.hasAttribute('hidden')) {
+      const focusables = panel.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+      if (!focusables.length) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+  });
 
   // Player rows + featured cards
   document.querySelectorAll('.sa-player-row, .sa-featured-card').forEach(row => {
