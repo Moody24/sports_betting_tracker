@@ -650,9 +650,12 @@
     fetch(ALL_PROPS_URL)
       .then(r => r.json())
       .then(data => {
-        allPropsData = data;
+        var normalized = Array.isArray(data)
+          ? data
+          : (Array.isArray(data && data.props) ? data.props : []);
+        allPropsData = normalized;
         allPropsLoaded = true;
-        onSuccess(data);
+        onSuccess(normalized);
       })
       .catch(function () {
         if (typeof onFail === 'function') onFail();
