@@ -41,11 +41,13 @@ def dashboard():
         func.count(Bet.id).label('total'),
         func.coalesce(func.sum(case((Bet.outcome == Outcome.WIN.value, 1), else_=0)), 0).label('wins'),
         func.coalesce(func.sum(case((Bet.outcome == Outcome.LOSE.value, 1), else_=0)), 0).label('losses'),
+        func.coalesce(func.sum(case((Bet.outcome == Outcome.PUSH.value, 1), else_=0)), 0).label('pushes'),
     ).filter_by(user_id=uid).one()
 
     total_bets = int(agg.total)
     wins = int(agg.wins)
     losses = int(agg.losses)
+    pushes = int(agg.pushes)
     wagered = float(current_user.total_amount_wagered())
 
     # ── Recent bets (capped by SQL LIMIT) ─────────────────────────────
@@ -125,7 +127,8 @@ def dashboard():
         'total_bets': total_bets,
         'wins': wins,
         'losses': losses,
-        'pending': total_bets - wins - losses,
+        'pushes': pushes,
+        'pending': max(total_bets - wins - losses - pushes, 0),
         'wagered': wagered,
         'net': units_won,
         'units_won': units_won,

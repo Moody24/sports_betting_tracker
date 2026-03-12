@@ -1535,6 +1535,43 @@ h1, h2, h3, h4, h5, h6,
   min-height: 0;
 }
 
+.donut-wrap {
+  position: relative;
+  width: 150px;
+  height: 150px;
+  flex-shrink: 0;
+}
+
+.donut-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  pointer-events: none;
+}
+
+.donut-pct {
+  font-size: 1.45rem;
+  line-height: 1;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.donut-sub {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin-top: 0.2rem;
+}
+
+.donut-meta {
+  margin-top: 0.25rem;
+  font-size: 0.72rem;
+}
+
 /* ══════════════════════════════════════════════════════════════════
    Pending alert banner
 ══════════════════════════════════════════════════════════════════ */
