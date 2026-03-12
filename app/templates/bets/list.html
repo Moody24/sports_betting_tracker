@@ -1,20 +1,19 @@
 {% extends "base.html" %}
 {% from "_macros.html" import outcome_badge %}
 
-{% block title %}Bets · Sports Betting Tracker{% endblock %}
-{% block page_title %}Bets{% endblock %}
-{% block page_subtitle %}Filter and review all your wagers.{% endblock %}
+{% block title %}My Bets · Edge Tracker{% endblock %}
+{% block page_title %}My Bets{% endblock %}
+{% block page_subtitle %}Review and manage your wagers.{% endblock %}
 
 {% block content %}
 {% set pending_bets = bets | selectattr('outcome', 'equalto', 'pending') | list %}
 {% if pending_bets %}
-<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-4 px-3 py-3"
-     style="background:rgba(245,158,11,.07); border:1px solid rgba(245,158,11,.22); border-radius:.85rem; border-left: 3px solid var(--amber)">
+<div class="pending-alert-bar">
   <div class="d-flex align-items-center gap-2">
-    <i class="bi bi-hourglass-split text-warning fs-5"></i>
+    <i class="bi bi-hourglass-split fs-5" style="color:var(--amber)"></i>
     <div>
-      <span class="fw-semibold text-warning">{{ pending_bets|length }} pending bet{{ 's' if pending_bets|length != 1 else '' }}</span>
-      <span class="text-secondary small ms-2 d-none d-sm-inline">— auto-grades run at 1 AM ET</span>
+      <span class="fw-semibold" style="color:var(--amber)">{{ pending_bets|length }} pending bet{{ 's' if pending_bets|length != 1 else '' }}</span>
+      <span class="d-none d-sm-inline ms-2" style="font-size:.8rem;color:var(--text-muted)">— auto-grades run at 1 AM ET</span>
     </div>
   </div>
   <form action="{{ url_for('bet.nba_update_results') }}" method="POST" class="d-inline">
@@ -26,10 +25,10 @@
 </div>
 {% endif %}
 
-<div class="card-soft p-3 mb-4">
+<div class="card-soft p-3 mb-3">
   <form method="GET" class="row g-2 align-items-end">
     <div class="col-6 col-sm-4 col-lg-2">
-      <label class="form-label small text-secondary mb-1">Status</label>
+      <label class="form-label small mb-1">Status</label>
       <select class="form-select form-select-sm" name="status">
         <option value="" {% if not filters.status %}selected{% endif %}>All</option>
         <option value="pending" {% if filters.status == 'pending' %}selected{% endif %}>Pending</option>
@@ -39,7 +38,7 @@
       </select>
     </div>
     <div class="col-6 col-sm-4 col-lg-2">
-      <label class="form-label small text-secondary mb-1">Type</label>
+      <label class="form-label small mb-1">Type</label>
       <select class="form-select form-select-sm" name="type">
         <option value="" {% if not filters.type %}selected{% endif %}>All Types</option>
         <option value="player_prop" {% if filters.type == 'player_prop' %}selected{% endif %}>Player Props</option>
@@ -48,15 +47,15 @@
       </select>
     </div>
     <div class="col-6 col-sm-4 col-lg-2">
-      <label class="form-label small text-secondary mb-1">From</label>
+      <label class="form-label small mb-1">From</label>
       <input type="date" class="form-control form-control-sm" name="start_date" value="{{ filters.start_date }}">
     </div>
     <div class="col-6 col-sm-4 col-lg-2">
-      <label class="form-label small text-secondary mb-1">To</label>
+      <label class="form-label small mb-1">To</label>
       <input type="date" class="form-control form-control-sm" name="end_date" value="{{ filters.end_date }}">
     </div>
     <div class="col-sm-8 col-lg-3">
-      <label class="form-label small text-secondary mb-1">Search</label>
+      <label class="form-label small mb-1">Search</label>
       <input type="search" class="form-control form-control-sm" name="q" value="{{ filters.q }}" placeholder="Player, team…">
     </div>
     <div class="col-sm-4 col-lg-1 d-grid">
@@ -66,17 +65,30 @@
 </div>
 
 {% if filter_stats.count > 0 %}
-<div class="card-soft p-3 mb-4">
-  <div class="row g-0 text-center divide-x">
-    <div class="col"><p class="kpi-label mb-1">Bets</p><p class="kpi-value mb-0">{{ filter_stats.count }}</p></div>
-    <div class="col"><p class="kpi-label mb-1">Wins</p><p class="kpi-value mb-0 text-success">{{ filter_stats.wins }}</p></div>
-    <div class="col"><p class="kpi-label mb-1">Losses</p><p class="kpi-value mb-0 text-danger">{{ filter_stats.losses }}</p></div>
-    <div class="col"><p class="kpi-label mb-1">Pending</p><p class="kpi-value mb-0 text-warning">{{ filter_stats.pending }}</p></div>
-    <div class="col d-none d-sm-block"><p class="kpi-label mb-1">Wagered</p><p class="kpi-value mb-0">${{ '%.2f'|format(filter_stats.wagered) }}</p></div>
-    <div class="col">
-      <p class="kpi-label mb-1">Net P/L</p>
-      <p class="kpi-value mb-0 {{ 'text-success' if filter_stats.net >= 0 else 'text-danger' }}">{{ '+' if filter_stats.net >= 0 else '' }}${{ '%.2f'|format(filter_stats.net) }}</p>
-    </div>
+<div class="kpi-strip mb-3 fade-up fade-up-1">
+  <div class="kpi-cell">
+    <span class="kpi-label">Bets</span>
+    <span class="kpi-value">{{ filter_stats.count }}</span>
+  </div>
+  <div class="kpi-cell">
+    <span class="kpi-label">Wins</span>
+    <span class="kpi-value" style="color:var(--win)">{{ filter_stats.wins }}</span>
+  </div>
+  <div class="kpi-cell">
+    <span class="kpi-label">Losses</span>
+    <span class="kpi-value" style="color:var(--loss)">{{ filter_stats.losses }}</span>
+  </div>
+  <div class="kpi-cell">
+    <span class="kpi-label">Pending</span>
+    <span class="kpi-value" style="color:var(--amber)">{{ filter_stats.pending }}</span>
+  </div>
+  <div class="kpi-cell d-none d-sm-flex">
+    <span class="kpi-label">Wagered</span>
+    <span class="kpi-value">${{ '%.2f'|format(filter_stats.wagered) }}</span>
+  </div>
+  <div class="kpi-cell">
+    <span class="kpi-label">Net P/L</span>
+    <span class="kpi-value" style="color:{{ 'var(--win)' if filter_stats.net >= 0 else 'var(--loss)' }}">{{ '+' if filter_stats.net >= 0 else '' }}${{ '%.2f'|format(filter_stats.net) }}</span>
   </div>
 </div>
 {% endif %}
@@ -129,7 +141,7 @@
       {% endif %}
 
       {% set is_overdue = (b.outcome == 'pending' and b.match_date.date() < now_date) %}
-      <article class="bet-row-card {{ 'is-parlay-leg' if b.is_parlay else '' }} {{ 'is-overdue' if is_overdue else '' }} {{ 'is-pending' if b.outcome == 'pending' else '' }}">
+      <article class="bet-row-card outcome-{{ b.outcome }} {{ 'is-parlay-leg' if b.is_parlay else '' }} {{ 'is-overdue' if is_overdue else '' }} {{ 'is-pending' if b.outcome == 'pending' else '' }}">
         <div class="bet-main">
           <div class="bet-main-head">
             <h4 class="bet-primary mb-0">{{ b.primary_display_name }}</h4>
@@ -275,18 +287,18 @@
             <div class="live-progress-card mt-2 check-prop-progress-btn" data-live-prop-card data-game-state="unknown"
                  data-url="{{ url_for('bet.nba_prop_progress', espn_id=b.external_game_id, player=b.player_name, prop_type=b.prop_type, line=b.prop_line, bet_type=b.bet_type) }}">
               <div class="d-flex align-items-center justify-content-between gap-2 mb-1">
-                <div class="small text-secondary"><i class="bi bi-clock-history me-1"></i>Prop Tracker</div>
-                <span class="badge text-bg-secondary live-trend" data-live-trend>Checking…</span>
+                <div class="small" style="color:var(--live);font-weight:600"><span class="live-dot"></span>Live Tracker</div>
+                <span class="badge text-bg-secondary live-trend" data-live-trend style="font-family:'JetBrains Mono',monospace;font-size:.7rem">Checking…</span>
               </div>
-              <div class="live-topline small text-secondary" data-live-details hidden>
-                <span>Current: <strong class="text-light" data-live-current>—</strong> / {{ b.prop_line }}</span>
+              <div class="live-topline small" style="color:var(--text-muted)" data-live-details hidden>
+                <span>Current: <strong style="color:var(--text-main)" data-live-current>—</strong> / <span class="mono">{{ b.prop_line }}</span></span>
                 <span data-live-status></span>
               </div>
-              <div class="progress mt-1" role="progressbar" aria-label="Prop progress" aria-valuemin="0" aria-valuemax="200" data-live-details-bar hidden>
-                <div class="progress-bar bg-info" data-live-bar style="width:0%"></div>
+              <div class="progress mt-1" style="height:4px;background:rgba(255,255,255,.08);border-radius:2px" role="progressbar" aria-label="Prop progress" aria-valuemin="0" aria-valuemax="200" data-live-details-bar hidden>
+                <div class="progress-bar" data-live-bar style="width:0%;background:var(--live);border-radius:2px"></div>
               </div>
-              <div class="live-meta small text-secondary mt-1" data-live-details-meta hidden>
-                <span>Proj: <strong class="text-light" data-live-proj>—</strong></span>
+              <div class="live-meta small mt-1" style="color:var(--text-muted);display:flex;gap:.75rem;flex-wrap:wrap" data-live-details-meta hidden>
+                <span>Proj: <strong class="mono" style="color:var(--text-main)" data-live-proj>—</strong></span>
                 <span data-live-delta>—</span>
                 <span data-live-period>—</span>
                 <span data-live-clock>—</span>

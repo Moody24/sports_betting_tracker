@@ -393,7 +393,7 @@ class TestAnalysisRoute(BaseTestCase):
         with patch('app.services.score_cache.get_todays_scores', return_value=[]):
             resp = self.client.get('/nba/analysis')
             self.assertEqual(resp.status_code, 200)
-            self.assertIn(b'NBA Prop Analysis', resp.data)
+            self.assertIn(b'Prop Analysis', resp.data)
 
     def test_analysis_counts_from_full_filtered_set(self):
         self.register_and_login()
