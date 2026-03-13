@@ -33,6 +33,16 @@ STAT_KEY_MAP = PROP_STAT_KEY
 # Minimum training samples required
 MIN_TRAIN_SAMPLES = 500
 
+# Per-stat training strategy tuned to target behavior.
+STAT_TRAINING_CONFIG = {
+    "player_points": {"objective": "reg:pseudohubererror", "recency_boost": 0.75},
+    "player_rebounds": {"recency_boost": 0.35},
+    "player_assists": {"recency_boost": 0.35},
+    "player_threes": {"objective": "count:poisson", "recency_boost": 0.45},
+    "player_steals": {"objective": "count:poisson", "recency_boost": 0.50},
+    "player_blocks": {"objective": "count:poisson", "recency_boost": 0.50},
+}
+
 
 def _ensure_model_dir():
     """Create the ml_models directory if it doesn't exist."""
@@ -272,8 +282,10 @@ def _build_training_data(stat_type: str):
     return features_list, targets
 
 
-def _points_sample_weights(training_rows: list[tuple]) -> list[float] | None:
-    """Return recency weights for points model rows (or None if unavailable)."""
+def _sample_weights_by_recency(training_rows: list[tuple], max_boost: float = 0.0) -> list[float] | None:
+    """Return recency weights (or None) for chronologically ordered rows."""
+    if max_boost <= 0:
+        return None
     dates = [row[0] for row in training_rows if row and row[0] is not None]
     if len(dates) < 2:
         return None
@@ -289,8 +301,8 @@ def _points_sample_weights(training_rows: list[tuple]) -> list[float] | None:
             weights.append(1.0)
             continue
         recency = (row_date - min_date).days / span_days
-        # Newer rows get up to +75% weight while preserving older signal.
-        weights.append(1.0 + (0.75 * recency))
+        # Newer rows get extra weight while preserving historical signal.
+        weights.append(1.0 + (max_boost * recency))
     return weights
 
 
@@ -328,11 +340,13 @@ def train_model(stat_type: str) -> dict:
         random_state=42,
         early_stopping_rounds=25,
     )
-    if stat_type == 'player_points':
-        # Points are high-variance; robust loss dampens outlier impact.
-        xgb_params['objective'] = 'reg:pseudohubererror'
+    cfg = STAT_TRAINING_CONFIG.get(stat_type, {})
+    objective = cfg.get("objective")
+    if objective:
+        xgb_params["objective"] = objective
 
-    weights = _points_sample_weights(training_rows) if stat_type == 'player_points' else None
+    recency_boost = float(cfg.get("recency_boost", 0.0) or 0.0)
+    weights = _sample_weights_by_recency(training_rows, max_boost=recency_boost)
     weights_np = np.array(weights) if weights else None
 
     # TimeSeriesSplit CV to estimate MAE variance across time folds
@@ -446,6 +460,7 @@ def train_model(stat_type: str) -> dict:
             'cv_std_mae': round(cv_std_mae, 3),
             'training_objective': xgb_params.get('objective', 'reg:squarederror'),
             'recency_weighted': bool(weights_np is not None),
+            'recency_boost': recency_boost,
         }),
     )
     db.session.add(meta)

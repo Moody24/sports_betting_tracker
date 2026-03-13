@@ -159,7 +159,11 @@ def build_pick_context_features(
 
     # B2B
     b2b = check_back_to_back(team_name) if team_name else False
-    days_rest = 0 if b2b else (get_days_rest(team_name) if team_name else 2)
+    raw_days_rest = get_days_rest(team_name) if team_name else 2
+    # Fallback: when schedule service misses B2B, infer from <=1 day rest.
+    if not b2b and raw_days_rest <= 1:
+        b2b = True
+    days_rest = 0 if b2b else raw_days_rest
 
     # Context flags
     flags = []
@@ -187,6 +191,12 @@ def build_pick_context_features(
         flags.append('pace_boost')
     if b2b:
         flags.append('back_to_back')
+    if min_trend == 'decreasing':
+        flags.append('minutes_down')
+    elif min_trend == 'increasing':
+        flags.append('minutes_up')
+    if injury_returning:
+        flags.append('injury_returning')
 
     return {
         # Model 1 outputs
