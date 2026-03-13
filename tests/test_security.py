@@ -78,5 +78,5 @@ class TestSecurity(BaseTestCase):
         resp = self.client.post(f"/delete_bet/{bet_id}", follow_redirects=True)
         self.assertIn(b"permission to delete", resp.data)
         with self.app.app_context():
-            still_there = Bet.query.get(bet_id)
+            still_there = db.session.get(Bet, bet_id)
             self.assertIsNotNone(still_there)

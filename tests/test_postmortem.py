@@ -570,31 +570,31 @@ class TestBetPostmortemModel(BaseTestCase):
     def test_primary_reason_label(self):
         with self.app.app_context():
             pm_id = self._make_pm('volume_spike')
-            pm = BetPostmortem.query.get(pm_id)
+            pm = db.session.get(BetPostmortem, pm_id)
             self.assertEqual(pm.primary_reason_label, 'Volume Spike')
 
     def test_confidence_label_high(self):
         with self.app.app_context():
             pm_id = self._make_pm(confidence=0.80)
-            pm = BetPostmortem.query.get(pm_id)
+            pm = db.session.get(BetPostmortem, pm_id)
             self.assertEqual(pm.confidence_label, 'High')
 
     def test_confidence_label_medium(self):
         with self.app.app_context():
             pm_id = self._make_pm(confidence=0.60)
-            pm = BetPostmortem.query.get(pm_id)
+            pm = db.session.get(BetPostmortem, pm_id)
             self.assertEqual(pm.confidence_label, 'Medium')
 
     def test_confidence_label_low(self):
         with self.app.app_context():
             pm_id = self._make_pm(confidence=0.40)
-            pm = BetPostmortem.query.get(pm_id)
+            pm = db.session.get(BetPostmortem, pm_id)
             self.assertEqual(pm.confidence_label, 'Low')
 
     def test_diagnosis_property_parses_json(self):
         with self.app.app_context():
             pm_id = self._make_pm()
-            pm = BetPostmortem.query.get(pm_id)
+            pm = db.session.get(BetPostmortem, pm_id)
             d = pm.diagnosis
             self.assertIsInstance(d, dict)
             self.assertTrue(d.get('test'))
@@ -603,10 +603,10 @@ class TestBetPostmortemModel(BaseTestCase):
         """Deleting a Bet should cascade-delete its BetPostmortem."""
         with self.app.app_context():
             pm_id = self._make_pm()
-            pm = BetPostmortem.query.get(pm_id)
+            pm = db.session.get(BetPostmortem, pm_id)
             bet_id = pm.bet_id
 
-            bet_obj = Bet.query.get(bet_id)
+            bet_obj = db.session.get(Bet, bet_id)
             db.session.delete(bet_obj)
             db.session.commit()
 

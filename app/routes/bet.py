@@ -7,7 +7,7 @@ import time
 from difflib import SequenceMatcher
 from datetime import datetime, date as date_type, timezone, timedelta
 
-from flask import Blueprint, render_template, redirect, url_for, flash, request, jsonify, Response, current_app
+from flask import Blueprint, render_template, redirect, url_for, flash, request, jsonify, Response, current_app, abort
 from flask_login import login_required, current_user
 import requests
 from sqlalchemy.orm import joinedload
@@ -1545,7 +1545,9 @@ def edit_bet(bet_id):
 
     Returns JSON {success, message} or {error}.
     """
-    found_bet = Bet.query.get_or_404(bet_id)
+    found_bet = db.session.get(Bet, bet_id)
+    if found_bet is None:
+        abort(404)
     if found_bet.user_id != current_user.id:
         return jsonify({'error': 'Permission denied'}), 403
 
@@ -1631,7 +1633,9 @@ def edit_bet(bet_id):
 @bet.route('/delete_bet/<int:bet_id>', methods=['POST'])
 @login_required
 def delete_bet(bet_id):
-    found_bet = Bet.query.get_or_404(bet_id)
+    found_bet = db.session.get(Bet, bet_id)
+    if found_bet is None:
+        abort(404)
 
     if found_bet.user_id != current_user.id:
         flash("You don't have permission to delete this bet.", 'danger')
