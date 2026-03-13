@@ -720,6 +720,7 @@
   // Parlay search + game filter — live filtering of the card grid
   var parlayPropsSearchInp = document.getElementById('parlay-props-search-input');
   var parlayGameFilter = document.getElementById('parlay-game-filter');
+  var loadParlayPropsBtn = document.getElementById('load-parlay-props-btn');
 
   if (parlayPropsSearchInp) {
     parlayPropsSearchInp.addEventListener('input', function () {
@@ -735,22 +736,39 @@
     });
   }
 
+  function setParlayGridStatus(msg, isError) {
+    var grid = document.getElementById('parlay-prop-grid');
+    if (!grid) return;
+    while (grid.firstChild) grid.removeChild(grid.firstChild);
+    var p = document.createElement('p');
+    p.className = 'small text-center py-2 ' + (isError ? 'text-danger' : 'text-secondary');
+    p.textContent = msg;
+    grid.appendChild(p);
+  }
+
   function _maybeLoadParlayProps() {
     if (allPropsLoaded && allPropsData) {
       renderParlayPropsBrowser(allPropsData);
       return;
     }
+    setParlayGridStatus('Loading props...', false);
     ensureAllPropsLoaded(function (data) {
       renderParlayPropsBrowser(data);
-    }, function () {
-      var grid = document.getElementById('parlay-prop-grid');
-      if (grid) {
-        var errP = document.createElement('p');
-        errP.className = 'small text-danger text-center py-2';
-        errP.textContent = 'Failed to load props. Check that ODDS_API_KEY is set.';
-        while (grid.firstChild) grid.removeChild(grid.firstChild);
-        grid.appendChild(errP);
+      if (loadParlayPropsBtn) {
+        loadParlayPropsBtn.innerHTML = '<i class="bi bi-check-lg me-1"></i>Loaded';
       }
+    }, function () {
+      setParlayGridStatus('Failed to load props. You can retry or add a leg manually.', true);
+      if (loadParlayPropsBtn) {
+        loadParlayPropsBtn.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>Retry';
+      }
+    });
+  }
+
+  if (loadParlayPropsBtn) {
+    loadParlayPropsBtn.addEventListener('click', function () {
+      loadParlayPropsBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Loading...';
+      _maybeLoadParlayProps();
     });
   }
 
@@ -1046,6 +1064,50 @@
     card.appendChild(btns);
 
     return card;
+  }
+
+  var manualLegAddBtn = document.getElementById('manual-leg-add-btn');
+  if (manualLegAddBtn) {
+    manualLegAddBtn.addEventListener('click', function () {
+      var player = (document.getElementById('manual-leg-player') || {}).value || '';
+      var market = (document.getElementById('manual-leg-market') || {}).value || 'player_points';
+      var line = parseFloat((document.getElementById('manual-leg-line') || {}).value || '');
+      var side = (document.getElementById('manual-leg-side') || {}).value || 'over';
+      var oddsRaw = (document.getElementById('manual-leg-odds') || {}).value || '';
+      var odds = oddsRaw === '' ? null : parseInt(oddsRaw, 10);
+      var teamA = ((document.getElementById('manual-leg-team-a') || {}).value || '').trim();
+      var teamB = ((document.getElementById('manual-leg-team-b') || {}).value || '').trim();
+      var matchDate = (document.getElementById('manual-leg-date') || {}).value || '';
+
+      if (!player.trim()) {
+        showParlayFeedback('Enter a player name for the manual leg.', 'danger');
+        return;
+      }
+      if (!Number.isFinite(line)) {
+        showParlayFeedback('Enter a valid line for the manual leg.', 'danger');
+        return;
+      }
+
+      addParlayLegFromCard({
+        player: player.trim(),
+        market: market,
+        line: line,
+        over_odds: side === 'over' ? odds : null,
+        under_odds: side === 'under' ? odds : null,
+        best_over_book: '',
+        best_under_book: '',
+        team_a: teamA,
+        team_b: teamB,
+        match_date: matchDate,
+        game_id: '',
+      }, side);
+
+      ['manual-leg-player', 'manual-leg-line', 'manual-leg-odds'].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (el) el.value = '';
+      });
+      showParlayFeedback('Manual leg added.', 'success');
+    });
   }
 
   // ── Screenshot OCR (Tab 4) ────────────────────────────────────────

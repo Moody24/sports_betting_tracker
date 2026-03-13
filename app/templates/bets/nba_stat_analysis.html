@@ -435,8 +435,21 @@ const SA_PROP_TO_COL = PROP_TO_STAT_COL;
 
   function rebindResultRows() {
     document.querySelectorAll('.sa-player-row, .sa-featured-card').forEach(row => {
-      row.addEventListener('click', () => {
-        try { openPanel(JSON.parse(row.dataset.prop)); } catch(e) { console.error('Panel parse error:', e); }
+      const openFromRow = () => {
+        try {
+          const raw = row.dataset.prop || row.getAttribute('data-prop') || '';
+          if (!raw) return;
+          openPanel(JSON.parse(raw));
+        } catch (e) {
+          console.error('Panel parse error:', e, row.dataset.prop);
+        }
+      };
+      row.addEventListener('click', openFromRow);
+      row.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          openFromRow();
+        }
       });
     });
   }

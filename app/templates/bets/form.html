@@ -412,8 +412,13 @@
         {# — Left: Prop Browser — #}
         <div class="bb-parlay-browser card-soft">
           <div class="bb-browser-head">
-            <span class="bb-browser-title">Props</span>
-            <span id="parlay-legs-count" class="badge d-none bb-count-badge">0 legs</span>
+            <div class="d-flex align-items-center gap-2">
+              <span class="bb-browser-title">Props</span>
+              <span id="parlay-legs-count" class="badge d-none bb-count-badge">0 legs</span>
+            </div>
+            <button type="button" id="load-parlay-props-btn" class="btn btn-sm btn-outline-secondary">
+              <i class="bi bi-arrow-repeat me-1"></i>Load / Retry
+            </button>
           </div>
           <div class="bb-browser-filters">
             <input type="text" id="parlay-props-search-input" class="bb-browser-search"
@@ -431,6 +436,49 @@
 
         {# — Right: Legs + Wager — #}
         <div class="bb-parlay-right">
+          <div class="card-soft">
+            <div class="bb-form-section">
+              <div class="bb-form-section-label"><i class="bi bi-plus-square"></i> Add Leg Manually</div>
+              <div class="row g-2">
+                <div class="col-12">
+                  <input type="text" id="manual-leg-player" class="form-control form-control-sm" placeholder="Player name">
+                </div>
+                <div class="col-6">
+                  <select id="manual-leg-market" class="form-select form-select-sm">
+                    {% for mkt in SUPPORTED_PROP_MARKETS %}
+                    <option value="{{ mkt }}">{{ PROP_LABELS_LONG[mkt] }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+                <div class="col-6">
+                  <input type="number" id="manual-leg-line" class="form-control form-control-sm" placeholder="Line" step="0.5">
+                </div>
+                <div class="col-4">
+                  <select id="manual-leg-side" class="form-select form-select-sm">
+                    <option value="over">Over</option>
+                    <option value="under">Under</option>
+                  </select>
+                </div>
+                <div class="col-4">
+                  <input type="number" id="manual-leg-odds" class="form-control form-control-sm" placeholder="Odds">
+                </div>
+                <div class="col-4">
+                  <input type="date" id="manual-leg-date" class="form-control form-control-sm">
+                </div>
+                <div class="col-6">
+                  <input type="text" id="manual-leg-team-a" class="form-control form-control-sm" placeholder="Away team">
+                </div>
+                <div class="col-6">
+                  <input type="text" id="manual-leg-team-b" class="form-control form-control-sm" placeholder="Home team">
+                </div>
+                <div class="col-12 d-grid">
+                  <button type="button" id="manual-leg-add-btn" class="btn btn-sm btn-outline-info">
+                    <i class="bi bi-plus-lg me-1"></i>Add Leg
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
 
           {# Selected legs #}
           <div class="card-soft bb-legs-panel">
