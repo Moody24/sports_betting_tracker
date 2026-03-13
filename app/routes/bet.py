@@ -1368,6 +1368,66 @@ def nba_all_props():
                     'match_date': game['start_time'][:10] if game.get('start_time') else '',
                 })
 
+    # Fallback: when live odds fetch is unavailable, use today's cached snapshots.
+    if not raw_props:
+        try:
+            game_rows = GameSnapshot.query.filter_by(game_date=today).all()
+            game_map = {g.game_id: g for g in game_rows}
+
+            latest_by_key: dict = {}
+            snap_rows = (
+                OddsSnapshot.query
+                .filter_by(game_date=today)
+                .order_by(OddsSnapshot.snapped_at.desc())
+                .all()
+            )
+            for snap in snap_rows:
+                key = (snap.game_id, snap.player_name, snap.market)
+                slot = latest_by_key.setdefault(key, {'books': {}})
+                if snap.bookmaker and snap.bookmaker not in slot['books']:
+                    slot['books'][snap.bookmaker] = {
+                        'line': snap.line,
+                        'over_odds': snap.over_odds,
+                        'under_odds': snap.under_odds,
+                    }
+
+            for (game_id, player_name, market), slot in latest_by_key.items():
+                books = slot.get('books', {})
+                if not books:
+                    continue
+                preferred_book = 'fanduel' if 'fanduel' in books else next(iter(books.keys()))
+                preferred = books.get(preferred_book) or {}
+                over_choice = max(
+                    ((bk, data.get('over_odds')) for bk, data in books.items() if data.get('over_odds') is not None),
+                    key=lambda x: x[1],
+                    default=('', None),
+                )
+                under_choice = max(
+                    ((bk, data.get('under_odds')) for bk, data in books.items() if data.get('under_odds') is not None),
+                    key=lambda x: x[1],
+                    default=('', None),
+                )
+                game_row = game_map.get(game_id)
+                raw_props.append({
+                    'player': player_name,
+                    'market': market,
+                    'line': preferred.get('line'),
+                    'over_odds': preferred.get('over_odds'),
+                    'under_odds': preferred.get('under_odds'),
+                    'books': books,
+                    'best_over_book': over_choice[0] or '',
+                    'best_under_book': under_choice[0] or '',
+                    'game_id': game_id or '',
+                    'team_a': (game_row.away_team if game_row else '') or '',
+                    'team_b': (game_row.home_team if game_row else '') or '',
+                    'team_a_abbr': (game_row.away_abbr if game_row else '') or '',
+                    'team_b_abbr': (game_row.home_abbr if game_row else '') or '',
+                    'match_date': today.isoformat(),
+                })
+                player_names.add(player_name)
+        except Exception as exc:
+            logger.warning("nba_all_props snapshot fallback failed: %s", exc)
+
     # Build movement map from today's OddsSnapshot history
     # {(game_id, player_name, market) -> earliest_line}
     movement_map: dict = {}
