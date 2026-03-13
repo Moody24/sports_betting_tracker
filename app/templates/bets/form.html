@@ -131,7 +131,7 @@
                      id='bet_amount', placeholder='25.00') }}
                 </div>
                 {% for e in form.bet_amount.errors %}<div class="invalid-feedback d-block">{{ e }}</div>{% endfor %}
-                <div id="single-bankroll-warn" class="form-text" style="display:none"></div>
+                <div id="single-bankroll-warn" class="form-text d-none"></div>
               </div>
               <div class="col-sm-4">
                 <label class="form-label small mb-1">Odds (American)</label>
@@ -168,7 +168,7 @@
                     {{ form.outcome(class='form-select') }}
                   </div>
                   <div class="col-sm-4">
-                    <label class="form-label small mb-1"><i class="bi bi-lightning-charge me-1" style="color:var(--amber)"></i>Bonus ×</label>
+                    <label class="form-label small mb-1"><i class="bi bi-lightning-charge me-1 bb-icon-amber"></i>Bonus ×</label>
                     <div class="input-group">
                       <span class="input-group-text">×</span>
                       <input type="number" name="bonus_multiplier" id="single-bonus-mult"
@@ -212,9 +212,9 @@
             <i class="bi bi-cloud-download me-1"></i>Load
           </button>
         </div>
-        <input type="text" id="props-search-input" class="bb-browser-search"
-               placeholder="Search player, team, market…" style="display:none" autocomplete="off">
-        <div id="props-browser" class="bb-prop-list" style="display:none"></div>
+        <input type="text" id="props-search-input" class="bb-browser-search d-none"
+               placeholder="Search player, team, market…" autocomplete="off">
+        <div id="props-browser" class="bb-prop-list d-none"></div>
       </div>
 
       {# Prop entry form #}
@@ -251,8 +251,8 @@
             </div>
             <div class="mt-3">
               <label class="form-label small mb-1">Date</label>
-              <input type="date" id="prop-match-date" name="match_date" class="form-control"
-                     value="{{ request.args.get('match_date', '') }}" required style="max-width:180px">
+              <input type="date" id="prop-match-date" name="match_date" class="form-control bb-date-input"
+                     value="{{ request.args.get('match_date', '') }}" required>
             </div>
           </div>
 
@@ -261,17 +261,16 @@
             <div class="bb-form-section-label"><i class="bi bi-person-fill"></i> Prop</div>
 
             {# Selected prop indicator #}
-            <div id="prop-selected-card" class="bb-selected-prop mb-3" style="display:none">
+            <div id="prop-selected-card" class="bb-selected-prop mb-3 d-none">
               <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
                 <div class="d-flex align-items-center gap-2 min-w-0">
-                  <span class="bb-prop-sel-player fw-semibold" id="prop-sel-player" style="font-family:'Syne',sans-serif"></span>
-                  <span class="bb-prop-sel-badge badge" id="prop-sel-market" style="background:rgba(240,180,41,.12);color:var(--accent);border:1px solid rgba(240,180,41,.25)"></span>
+                  <span class="bb-prop-sel-player fw-semibold" id="prop-sel-player"></span>
+                  <span class="bb-prop-sel-badge badge" id="prop-sel-market"></span>
                 </div>
                 <div class="d-flex align-items-center gap-2">
                   <span class="bb-prop-sel-side" id="prop-sel-side"></span>
-                  <strong class="bb-prop-sel-line mono" id="prop-sel-line" style="font-size:1.1rem"></strong>
-                  <button type="button" class="btn btn-link btn-sm p-0 text-secondary" id="prop-clear-selection"
-                          style="font-size:.72rem;text-decoration:none">✕ clear</button>
+                  <strong class="bb-prop-sel-line mono" id="prop-sel-line"></strong>
+                  <button type="button" class="btn btn-link btn-sm p-0 text-secondary bb-clear-link" id="prop-clear-selection">✕ clear</button>
                 </div>
               </div>
             </div>
@@ -324,7 +323,7 @@
                   <input type="number" id="prop-stake" name="bet_amount" class="form-control"
                          placeholder="25.00" min="1" step="0.01" required>
                 </div>
-                <div id="prop-bankroll-warn" class="form-text" style="display:none"></div>
+                <div id="prop-bankroll-warn" class="form-text d-none"></div>
               </div>
               <div class="col-sm-4">
                 <label class="form-label small mb-1">Odds (American)</label>
@@ -365,7 +364,7 @@
                     </select>
                   </div>
                   <div class="col-sm-4">
-                    <label class="form-label small mb-1"><i class="bi bi-lightning-charge me-1" style="color:var(--amber)"></i>Bonus ×</label>
+                    <label class="form-label small mb-1"><i class="bi bi-lightning-charge me-1 bb-icon-amber"></i>Bonus ×</label>
                     <div class="input-group">
                       <span class="input-group-text">×</span>
                       <input type="number" name="bonus_multiplier" id="prop-bonus-mult"
@@ -399,7 +398,7 @@
         <div class="bb-parlay-browser card-soft">
           <div class="bb-browser-head">
             <span class="bb-browser-title">Props</span>
-            <span id="parlay-legs-count" class="badge d-none" style="background:rgba(240,180,41,.15);color:var(--accent);border:1px solid rgba(240,180,41,.25)">0 legs</span>
+            <span id="parlay-legs-count" class="badge d-none bb-count-badge">0 legs</span>
           </div>
           <div class="bb-browser-filters">
             <input type="text" id="parlay-props-search-input" class="bb-browser-search"
@@ -420,13 +419,13 @@
 
           {# Selected legs #}
           <div class="card-soft bb-legs-panel">
-            <div class="bb-form-section-label" style="padding:0.75rem 1rem 0">
+            <div class="bb-form-section-label bb-legs-label">
               <i class="bi bi-collection"></i> Selected Legs
             </div>
             <div id="parlay-selected-legs" class="bb-legs-list">
               <div class="bb-legs-empty">
-                <i class="bi bi-collection" style="font-size:1.5rem;color:var(--text-dim)"></i>
-                <p class="mb-0 small mt-2" style="color:var(--text-muted)">No legs added yet.<br>Click O/U on a prop.</p>
+                <i class="bi bi-collection bb-legs-empty-icon"></i>
+                <p class="mb-0 small mt-2 bb-legs-empty-text">No legs added yet.<br>Click O/U on a prop.</p>
               </div>
             </div>
           </div>
@@ -446,7 +445,7 @@
                       <input type="number" id="parlay-stake" class="form-control"
                         placeholder="25.00" min="1" step="0.01" required>
                     </div>
-                    <div id="parlay-bankroll-warn" class="form-text" style="display:none"></div>
+                    <div id="parlay-bankroll-warn" class="form-text d-none"></div>
                     {% if current_user.unit_size %}
                     <div class="input-group mt-2">
                       <span class="input-group-text">u</span>
@@ -462,7 +461,7 @@
                       <option value="win">Win (retroactive)</option>
                       <option value="lose">Lose (retroactive)</option>
                     </select>
-                    <label class="form-label small mb-1 mt-2"><i class="bi bi-lightning-charge me-1" style="color:var(--amber)"></i>Bonus ×</label>
+                    <label class="form-label small mb-1 mt-2"><i class="bi bi-lightning-charge me-1 bb-icon-amber"></i>Bonus ×</label>
                     <div class="input-group">
                       <span class="input-group-text">×</span>
                       <input type="number" id="parlay-bonus-mult" class="form-control"
@@ -492,27 +491,27 @@
 
         <div class="bb-form-section">
           <div class="bb-form-section-label"><i class="bi bi-camera"></i> Import from Screenshot</div>
-          <p class="small mb-3" style="color:var(--text-muted)">
+          <p class="small mb-3 bb-muted-copy">
             Upload a PNG/JPG of a bet slip — DraftKings, FanDuel, etc. We'll pre-fill the fields for you.
           </p>
 
           <button id="ocr-dropzone" class="bb-dropzone" type="button" aria-label="Upload bet screenshot">
             <i class="bi bi-cloud-upload bb-dropzone-icon"></i>
-            <p class="mt-2 mb-1 small" style="color:var(--text-muted)">Drag &amp; drop or click to upload</p>
-            <p class="mb-0" style="font-size:.72rem;color:var(--text-dim)">PNG · JPG · WEBP · max 10 MB</p>
+            <p class="mt-2 mb-1 small bb-muted-copy">Drag &amp; drop or click to upload</p>
+            <p class="mb-0 bb-dropzone-caption">PNG · JPG · WEBP · max 10 MB</p>
           </button>
           <input type="file" id="ocr-file-input" accept=".png,.jpg,.jpeg,.webp" class="d-none">
         </div>
 
-        <div id="ocr-preview" class="bb-form-section" style="display:none">
-          <img id="ocr-preview-img" src="" alt="Preview" class="img-fluid rounded" style="max-height:180px">
+        <div id="ocr-preview" class="bb-form-section d-none">
+          <img id="ocr-preview-img" src="" alt="Preview" class="img-fluid rounded bb-preview-img">
         </div>
 
         <div id="ocr-status" class="alert d-none py-2 small mx-3 mb-3"></div>
 
-        <div id="ocr-form-section" style="display:none">
+        <div id="ocr-form-section" class="d-none">
           <div class="bb-form-section">
-            <div class="bb-form-section-label" style="margin-bottom:.75rem">
+            <div class="bb-form-section-label bb-form-section-label-tight">
               <i class="bi bi-check-circle"></i> Parsed Fields — review before saving
             </div>
             <form method="POST" novalidate id="ocr-submit-form">
@@ -587,7 +586,7 @@
                   </select>
                 </div>
                 <div class="col-sm-3">
-                  <label class="form-label small mb-1"><i class="bi bi-lightning-charge me-1" style="color:var(--amber)"></i>Bonus ×</label>
+                  <label class="form-label small mb-1"><i class="bi bi-lightning-charge me-1 bb-icon-amber"></i>Bonus ×</label>
                   <div class="input-group">
                     <span class="input-group-text">×</span>
                     <input type="number" name="bonus_multiplier" id="ocr-bonus-mult"
@@ -600,8 +599,7 @@
                     <i class="bi bi-chevron-down me-1"></i>Show raw OCR text
                   </button>
                   <div class="collapse mt-2" id="ocr-raw-text">
-                    <pre id="ocr-raw-pre" class="small p-2 rounded"
-                         style="background:rgba(255,255,255,.04);color:var(--text-muted);max-height:130px;overflow-y:auto;white-space:pre-wrap;border:1px solid var(--border-subtle)"></pre>
+                    <pre id="ocr-raw-pre" class="small p-2 rounded bb-ocr-raw"></pre>
                   </div>
                 </div>
               </div>
@@ -624,7 +622,7 @@
   <aside class="bb-aside">
     <div class="bb-ticket" id="ticket-summary">
       <div class="bb-ticket-head">
-        <i class="bi bi-receipt me-2" style="color:var(--accent)"></i>
+        <i class="bi bi-receipt me-2 bb-icon-accent"></i>
         <span class="bb-ticket-head-title" id="ticket-mode-label">Ticket</span>
       </div>
       <div id="ticket-body" class="bb-ticket-body">

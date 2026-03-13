@@ -110,8 +110,11 @@ If `MODEL_STORAGE` is not `s3`, the app falls back to local filesystem paths for
 
 ## Deployment Notes
 
+- Railway deploys should run only after CI tests pass.
 - Railway is enough to deploy and run this app.
 - Vercel is optional and can be used as a proxy/edge layer in front of Railway.
+- Detailed Railway + Neon runbook: `docs/deploy.md`.
+- UI visual QA baseline checklist: `docs/ui_v1_baseline.md`.
 
 ## Common Git/Codespaces Checks
 

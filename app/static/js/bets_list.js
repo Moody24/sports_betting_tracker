@@ -171,8 +171,6 @@
       const nextExpanded = open ? 'false' : 'true';
       this.setAttribute('aria-expanded', nextExpanded);
       this.setAttribute('aria-label', (open ? 'Expand' : 'Collapse') + ' parlay legs');
-      const icon = this.querySelector('.toggle-icon');
-      if (icon) icon.style.transform = open ? 'rotate(180deg)' : '';
     });
   });
 

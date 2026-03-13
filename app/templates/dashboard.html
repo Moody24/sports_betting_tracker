@@ -65,7 +65,7 @@
 </div>
 
 <details class="card-soft mb-4 fade-up fade-up-7">
-  <summary class="p-3 d-flex justify-content-between align-items-center" style="cursor:pointer; list-style:none">
+  <summary class="p-3 d-flex justify-content-between align-items-center dash-settings-summary">
     <span class="small text-secondary"><i class="bi bi-gear me-1"></i>Bet Settings</span>
     {% if current_user.unit_size %}
       <span class="small text-secondary">1u = ${{ '%.2f'|format(current_user.unit_size) }}</span>
@@ -110,22 +110,22 @@
         </div>
         <div class="vstack gap-2 small">
           <div class="d-flex align-items-center gap-2">
-            <span style="width:10px;height:10px;border-radius:50%;background:var(--win);flex-shrink:0"></span>
+            <span class="stat-dot stat-dot-win"></span>
             <span class="text-secondary">Wins</span>
             <span class="ms-auto fw-semibold text-success">{{ stats.wins if stats.wins is defined else '—' }}</span>
           </div>
           <div class="d-flex align-items-center gap-2">
-            <span style="width:10px;height:10px;border-radius:50%;background:var(--loss);flex-shrink:0"></span>
+            <span class="stat-dot stat-dot-loss"></span>
             <span class="text-secondary">Losses</span>
             <span class="ms-auto fw-semibold text-danger">{{ stats.losses if stats.losses is defined else '—' }}</span>
           </div>
           <div class="d-flex align-items-center gap-2">
-            <span style="width:10px;height:10px;border-radius:50%;background:var(--amber);flex-shrink:0"></span>
+            <span class="stat-dot stat-dot-push"></span>
             <span class="text-secondary">Pushes</span>
             <span class="ms-auto fw-semibold text-warning-emphasis">{{ stats.pushes if stats.pushes is defined else '—' }}</span>
           </div>
           <div class="d-flex align-items-center gap-2">
-            <span style="width:10px;height:10px;border-radius:50%;background:var(--info);flex-shrink:0"></span>
+            <span class="stat-dot stat-dot-pending"></span>
             <span class="text-secondary">Pending</span>
             <span class="ms-auto fw-semibold text-info">{{ stats.pending if stats.pending is defined else '—' }}</span>
           </div>
@@ -161,12 +161,12 @@
 {# ── Today's Top Plays ────────────────────────────────────── #}
 {% if top_plays %}
 <div class="card-soft p-3 mb-4">
-  <div class="d-flex justify-content-between align-items-center mb-3">
+  <div class="section-title-row mb-3">
     <div>
       <h3 class="h6 mb-0"><i class="bi bi-bullseye me-2 text-info"></i>Today's Top Plays</h3>
       <p class="text-secondary small mb-0 mt-1">ML-ranked player props with highest edge</p>
     </div>
-    <a href="{{ url_for('bet.nba_analysis') }}" class="btn btn-sm btn-outline-info">View All</a>
+    <a href="{{ url_for('bet.nba_analysis') }}" class="btn btn-sm btn-outline-info btn-toolbar-primary">View All</a>
   </div>
   <div class="table-wrap">
     <table class="table table-dark table-sm table-hover align-middle mb-0">
@@ -206,7 +206,7 @@
               <input type="hidden" name="edge" value="{{ play.edge or 0 }}">
               <input type="hidden" name="confidence_tier" value="{{ play.confidence_tier or 'slight' }}">
               <label class="visually-hidden" for="quick-stake-{{ loop.index }}">Stake amount</label>
-              <input id="quick-stake-{{ loop.index }}" type="number" name="stake" placeholder="$25" aria-label="Stake amount" class="form-control form-control-sm tabular-num" style="width:72px" min="1" step="0.01" required>
+              <input id="quick-stake-{{ loop.index }}" type="number" name="stake" placeholder="$25" aria-label="Stake amount" class="form-control form-control-sm tabular-num quick-stake-input" min="1" step="0.01" required>
               <button type="submit" class="btn btn-sm btn-success px-2" title="Add as bet" aria-label="Add play as bet"><i class="bi bi-plus-lg"></i></button>
             </form>
           </td>
@@ -220,7 +220,7 @@
 
 {% if best_parlay %}
 <div class="card-soft p-3 mb-4">
-  <div class="d-flex justify-content-between align-items-center mb-2">
+  <div class="section-title-row mb-2">
     <h3 class="h6 mb-0"><i class="bi bi-stars me-2 text-warning"></i>Best Play Of The Day</h3>
     <span class="badge text-bg-warning text-dark">High Confidence</span>
   </div>
@@ -232,13 +232,13 @@
   <form method="POST" action="{{ url_for('bet.quick_add_parlay') }}" class="d-flex flex-wrap gap-2 align-items-center mb-3">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <input type="hidden" name="legs" value='{{ best_parlay.legs | tojson }}'>
-    <div class="input-group input-group-sm" style="max-width:140px">
+    <div class="input-group input-group-sm best-parlay-stake-group">
       <span class="input-group-text bg-dark border-secondary-subtle">$</span>
       <input type="number" name="stake" class="form-control" placeholder="Stake" min="0.01" step="0.01">
     </div>
     {% if current_user.unit_size %}
     <span class="small text-secondary">or</span>
-    <div class="input-group input-group-sm" style="max-width:110px">
+    <div class="input-group input-group-sm best-parlay-units-group">
       <input type="number" name="units" class="form-control" placeholder="Units" min="0.01" step="0.01">
       <span class="input-group-text bg-dark border-secondary-subtle">u</span>
     </div>
@@ -284,9 +284,9 @@
 {% endif %}
 
 <div class="card-soft p-3">
-  <div class="d-flex justify-content-between align-items-center mb-2">
+  <div class="section-title-row mb-2">
     <h3 class="h6 mb-0">Recent Bets</h3>
-    <a href="{{ url_for('bet.place_bet') }}" class="btn btn-sm btn-outline-light">View All</a>
+    <a href="{{ url_for('bet.place_bet') }}" class="btn btn-sm btn-outline-light btn-toolbar-secondary">View All</a>
   </div>
 
   <div class="table-wrap">

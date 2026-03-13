@@ -83,7 +83,7 @@
         {% endif %}
       </div>
 
-      <div class="small px-2" style="color:var(--text-dim)">&copy; {{ current_year }} Edge Tracker</div>
+      <div class="small px-2 sidebar-copyright">&copy; {{ current_year }} Edge Tracker</div>
     </aside>
 
     {# ── Main content ───────────────────────────────────────────── #}
@@ -96,7 +96,7 @@
           <div>
             {% block topbar_breadcrumb %}{% endblock %}
             <h2 class="h4 mb-0">{% block page_title %}Overview{% endblock %}</h2>
-            <p class="mb-0" style="font-size:.8rem;color:var(--text-muted)">{% block page_subtitle %}Track your edge.{% endblock %}</p>
+            <p class="mb-0 topbar-subtitle">{% block page_subtitle %}Track your edge.{% endblock %}</p>
           </div>
         </div>
         {% if current_user.is_authenticated %}
@@ -106,9 +106,9 @@
             <span class="d-none d-sm-inline">{{ current_user.username }}</span>
           </button>
           <ul class="dropdown-menu dropdown-menu-end">
-            <li class="px-3 py-2 border-bottom" style="border-color:var(--border-subtle)!important">
-              <div style="font-size:.72rem;color:var(--text-muted)">Signed in as</div>
-              <div class="fw-semibold" style="font-size:.875rem">{{ current_user.username }}</div>
+            <li class="px-3 py-2 border-bottom user-menu-header">
+              <div class="user-menu-label">Signed in as</div>
+              <div class="fw-semibold user-menu-name">{{ current_user.username }}</div>
             </li>
             <li><a class="dropdown-item" href="{{ url_for('main.dashboard') }}"><i class="bi bi-grid-1x2 me-2 opacity-50"></i>Dashboard</a></li>
             <li><a class="dropdown-item" href="{{ url_for('bet.place_bet') }}"><i class="bi bi-journal-text me-2 opacity-50"></i>My Bets</a></li>

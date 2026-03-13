@@ -5,30 +5,19 @@
 {% block page_subtitle %}Live dashboard — active games auto-archive when final with odds &amp; props locked at snapshot time.{% endblock %}
 
 {% block content %}
-<style>
-  .loading-shell { min-height: 520px; }
-  .skeleton-card { min-height: 260px; }
-  .skeleton-block {
-    border-radius: .4rem;
-    background: linear-gradient(90deg, rgba(255,255,255,.05) 25%, rgba(255,255,255,.12) 37%, rgba(255,255,255,.05) 63%);
-    background-size: 400% 100%;
-    animation: loadingShimmer 1.2s ease-in-out infinite;
-  }
-  @keyframes loadingShimmer { 0% { background-position: 100% 0; } 100% { background-position: 0 0; } }
-</style>
-<div class="d-flex justify-content-between align-items-center mb-4">
-  <p class="text-secondary mb-0">
+<div class="today-toolbar">
+  <p class="today-toolbar-stats">
     {{ games|length }} active game{{ 's' if games|length != 1 }} &middot;
     {{ completed_snaps|length }} completed
   </p>
-  <div class="d-flex align-items-center gap-2">
+  <div class="today-toolbar-actions section-action-row">
     <span id="today-last-updated" class="small text-secondary">Last updated at --:--</span>
-    <button type="button" class="btn btn-sm btn-outline-info" id="refresh-active-games">
+    <button type="button" class="btn btn-sm btn-outline-info btn-toolbar-primary" id="refresh-active-games">
       <i class="bi bi-arrow-repeat me-1"></i>Refresh Live Games
     </button>
     <form action="{{ url_for('bet.nba_update_results') }}" method="POST" class="d-inline">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <button type="submit" class="btn btn-sm btn-outline-light">
+      <button type="submit" class="btn btn-sm btn-outline-light btn-toolbar-secondary">
         <i class="bi bi-arrow-repeat me-1"></i>Update Results
       </button>
     </form>
@@ -40,7 +29,7 @@
 ══════════════════════════════════════════════════════════════ #}
 {% if not games and not completed_snaps %}
 <div class="card-soft p-4 text-center text-secondary mb-4">
-  <i class="bi bi-calendar-x" style="font-size:2rem"></i>
+  <i class="bi bi-calendar-x today-empty-icon"></i>
   <p class="mt-2 mb-0">No NBA games scheduled today.</p>
 </div>
 {% endif %}
@@ -49,9 +38,9 @@
 {% if games %}
 <h2 class="h5 mb-3">
   <i class="bi bi-broadcast me-2 text-success"></i>Active Games
-  <span class="badge text-bg-success ms-2" style="font-size:.75rem">{{ games|length }}</span>
+  <span class="badge text-bg-success ms-2 today-count-badge">{{ games|length }}</span>
 </h2>
-<div class="row g-3 mb-5 align-items-start" id="active-games-content">
+<div class="row g-3 mb-5 align-items-start refresh-content" id="active-games-content">
   {% for game in games %}
   <div class="col-md-6 col-xl-4">
     <div class="card-soft p-3 h-100 d-flex flex-column{% if game.status == 'STATUS_IN_PROGRESS' %} game-card-live{% endif %}">
@@ -72,14 +61,14 @@
 
       {# Matchup #}
       <div class="d-flex align-items-center justify-content-between mb-2">
-        <div class="text-center" style="width:40%">
+        <div class="text-center today-team-col">
           {% if game.away.logo %}
           <img src="{{ game.away.logo }}" alt="{{ game.away.abbr }}" class="nba-team-logo-lg mb-1">
           {% endif %}
           <div class="small fw-semibold text-truncate">{{ game.away.name }}</div>
           <div class="score-main">{{ game.away.score }}</div>
           {% if game.moneyline_away %}
-            <div class="small mt-1" style="color:var(--text-muted)">
+            <div class="small mt-1 today-muted-meta">
               ML <span class="{{ 'text-success' if game.moneyline_away > 0 else 'text-danger' }}">
                 {{ '%+d'|format(game.moneyline_away) }}
               </span>
@@ -87,14 +76,14 @@
           {% endif %}
         </div>
         <div class="text-secondary fw-bold px-1">@</div>
-        <div class="text-center" style="width:40%">
+        <div class="text-center today-team-col">
           {% if game.home.logo %}
           <img src="{{ game.home.logo }}" alt="{{ game.home.abbr }}" class="nba-team-logo-lg mb-1">
           {% endif %}
           <div class="small fw-semibold text-truncate">{{ game.home.name }}</div>
           <div class="score-main">{{ game.home.score }}</div>
           {% if game.moneyline_home %}
-            <div class="small mt-1" style="color:var(--text-muted)">
+            <div class="small mt-1 today-muted-meta">
               ML <span class="{{ 'text-success' if game.moneyline_home > 0 else 'text-danger' }}">
                 {{ '%+d'|format(game.moneyline_home) }}
               </span>
@@ -124,7 +113,7 @@
       {# Tracked bet indicator #}
       {% if tracked.get(game.espn_id) %}
         {% set tb = tracked[game.espn_id] %}
-        <div class="small text-center py-1 px-2 rounded mb-2" style="background:var(--accent-soft)">
+        <div class="small text-center py-1 px-2 rounded mb-2 today-tracked-pill">
           <i class="bi bi-eye"></i>
           Tracking <strong>{{ tb.bet_type|capitalize }}</strong>
           {% if tb.over_under_line %} {{ tb.over_under_line }}{% endif %}
@@ -199,9 +188,9 @@
         <span class="placeholder col-4"></span>
         <span class="placeholder col-3"></span>
       </div>
-      <div class="skeleton-block" style="height:54px; margin-bottom:.75rem;"></div>
-      <div class="skeleton-block" style="height:38px; margin-bottom:.75rem;"></div>
-      <div class="skeleton-block mt-auto" style="height:30px;"></div>
+      <div class="skeleton-block today-skeleton-lg"></div>
+      <div class="skeleton-block today-skeleton-md"></div>
+      <div class="skeleton-block mt-auto today-skeleton-sm"></div>
     </div>
   </div>
   {% endfor %}
@@ -219,15 +208,15 @@
 {% if completed_snaps %}
 <h2 class="h5 mb-3 text-secondary">
   <i class="bi bi-archive me-2"></i>Completed Games
-  <span class="badge text-bg-dark ms-2" style="font-size:.75rem">{{ completed_snaps|length }}</span>
-  <span class="small fw-normal ms-2" style="font-size:.75rem; color:var(--text-muted)">
+  <span class="badge text-bg-dark ms-2 today-count-badge">{{ completed_snaps|length }}</span>
+  <span class="small fw-normal ms-2 today-muted-note">
     &mdash; odds &amp; props locked at snapshot time
   </span>
 </h2>
 <div class="row g-3 mb-5 align-items-start">
   {% for snap in completed_snaps %}
   <div class="col-md-6 col-xl-4">
-    <div class="card-soft p-3 h-100 d-flex flex-column" style="border-color:rgba(255,255,255,.05); opacity:.92">
+    <div class="card-soft p-3 h-100 d-flex flex-column today-completed-card">
 
       {# Header #}
       <div class="d-flex justify-content-between align-items-center mb-2">
@@ -240,7 +229,7 @@
 
       {# Matchup + final score #}
       <div class="d-flex align-items-center justify-content-between mb-2">
-        <div class="text-center" style="width:40%">
+        <div class="text-center today-team-col">
           {% if snap.away_logo %}
           <img src="{{ snap.away_logo }}" alt="" width="36" height="36" class="nba-team-logo mb-1">
           {% endif %}
@@ -248,7 +237,7 @@
           <div class="h5 mb-0">{{ snap.away_score or 0 }}</div>
         </div>
         <div class="text-secondary fw-bold">@</div>
-        <div class="text-center" style="width:40%">
+        <div class="text-center today-team-col">
           {% if snap.home_logo %}
           <img src="{{ snap.home_logo }}" alt="" width="36" height="36" class="nba-team-logo mb-1">
           {% endif %}
@@ -277,14 +266,14 @@
       {# Snapshot odds row #}
       <div class="d-flex justify-content-center gap-3 mb-2 small">
         <div class="text-center">
-          <div class="text-secondary" style="font-size:.7rem">O/U LINE</div>
+          <div class="text-secondary today-mini-label">O/U LINE</div>
           <div class="text-light fw-semibold">
             {{ snap.over_under_line if snap.over_under_line else '—' }}
           </div>
         </div>
         {% if snap.moneyline_away %}
         <div class="text-center">
-          <div class="text-secondary" style="font-size:.7rem">{{ snap.away_team | truncate(10, True, '') }} ML</div>
+          <div class="text-secondary today-mini-label">{{ snap.away_team | truncate(10, True, '') }} ML</div>
           <div class="{{ 'text-success' if snap.moneyline_away > 0 else 'text-danger' }} fw-semibold">
             {{ '%+d'|format(snap.moneyline_away) }}
           </div>
@@ -292,7 +281,7 @@
         {% endif %}
         {% if snap.moneyline_home %}
         <div class="text-center">
-          <div class="text-secondary" style="font-size:.7rem">{{ snap.home_team | truncate(10, True, '') }} ML</div>
+          <div class="text-secondary today-mini-label">{{ snap.home_team | truncate(10, True, '') }} ML</div>
           <div class="{{ 'text-success' if snap.moneyline_home > 0 else 'text-danger' }} fw-semibold">
             {{ '%+d'|format(snap.moneyline_home) }}
           </div>
@@ -309,7 +298,7 @@
                 data-bs-toggle="collapse"
                 data-bs-target="#snap-props-{{ snap.id }}">
           <i class="bi bi-lock me-1"></i>Snapshot Props
-          <i class="bi bi-chevron-down ms-1" style="font-size:.7rem"></i>
+          <i class="bi bi-chevron-down ms-1 today-mini-chevron"></i>
         </button>
         <div class="collapse mt-2" id="snap-props-{{ snap.id }}">
           <div class="snap-props-scroll">
@@ -359,12 +348,12 @@
 {% if upcoming_games %}
 <h2 class="h5 mb-3 text-secondary">
   <i class="bi bi-calendar-event me-2"></i>Coming Up Tomorrow
-  <span class="badge text-bg-dark ms-2" style="font-size:.75rem">{{ upcoming_games|length }} game{{ 's' if upcoming_games|length != 1 }}</span>
+  <span class="badge text-bg-dark ms-2 today-count-badge">{{ upcoming_games|length }} game{{ 's' if upcoming_games|length != 1 }}</span>
 </h2>
 <div class="row g-3 align-items-start">
   {% for game in upcoming_games %}
   <div class="col-md-6 col-xl-4">
-    <div class="card-soft p-3 h-100 d-flex flex-column" style="border-color: rgba(255,255,255,.06)">
+    <div class="card-soft p-3 h-100 d-flex flex-column today-upcoming-card">
       <div class="d-flex justify-content-between align-items-center mb-2">
         <span class="badge text-bg-dark">Tomorrow</span>
         {% if game.over_under_line %}
@@ -375,11 +364,11 @@
       </div>
 
       <div class="d-flex align-items-center justify-content-between mb-3">
-        <div class="text-center" style="width:44%">
+        <div class="text-center today-team-col-wide">
           <div class="small fw-semibold">{{ game.away.name }}</div>
         </div>
         <div class="text-secondary fw-bold small">@</div>
-        <div class="text-center" style="width:44%">
+        <div class="text-center today-team-col-wide">
           <div class="small fw-semibold">{{ game.home.name }}</div>
         </div>
       </div>
@@ -426,7 +415,7 @@
 {# ══════════════════════════════════════════════════════════════
    Bet Slip (floating panel)
 ══════════════════════════════════════════════════════════════ #}
-<div id="bet-slip" class="bet-slip" style="display:none">
+<div id="bet-slip" class="bet-slip d-none">
   <div class="bet-slip-header d-flex justify-content-between align-items-center">
     <h6 class="mb-0"><i class="bi bi-receipt me-1"></i>Bet Slip <span id="slip-count" class="badge text-bg-info ms-1">0</span></h6>
     <button class="btn btn-sm btn-outline-secondary border-0" id="slip-toggle-btn">
@@ -436,11 +425,11 @@
   <div class="bet-slip-body" id="slip-body">
     <div id="slip-legs"></div>
     <div id="slip-empty" class="text-center text-secondary small py-3">
-      <i class="bi bi-hand-index-thumb" style="font-size:1.2rem"></i>
+      <i class="bi bi-hand-index-thumb today-slip-empty-icon"></i>
       <p class="mb-0 mt-1">Click props above to add them here</p>
     </div>
 
-    <div id="slip-controls" style="display:none">
+    <div id="slip-controls" class="d-none">
       <hr class="border-secondary my-2">
 
       {# Parlay toggle #}
@@ -449,7 +438,7 @@
           <input class="form-check-input" type="checkbox" id="parlay-toggle">
           <label class="form-check-label small" for="parlay-toggle">Parlay</label>
         </div>
-        <div id="parlay-odds-display" class="small text-info ms-auto" style="display:none"></div>
+        <div id="parlay-odds-display" class="small text-info ms-auto d-none"></div>
       </div>
 
       {# Bonus bet multiplier #}
@@ -463,7 +452,7 @@
           <input type="number" class="form-control" id="slip-bonus-multiplier"
                  placeholder="1.00" value="1.00" min="1" step="0.05">
         </div>
-        <div id="slip-bonus-payout" class="small text-warning mt-1" style="display:none"></div>
+        <div id="slip-bonus-payout" class="small text-warning mt-1 d-none"></div>
       </div>
 
       {# Stake #}
@@ -473,7 +462,7 @@
       </div>
 
       {# Estimated payout #}
-      <div id="slip-payout-info" class="small text-secondary mb-2" style="display:none"></div>
+      <div id="slip-payout-info" class="small text-secondary mb-2 d-none"></div>
 
       <div class="d-flex gap-2">
         <button class="btn btn-sm btn-outline-danger flex-fill" id="slip-clear">
@@ -510,7 +499,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
   function setLoading(isLoading) {
     if (loadingEl) loadingEl.hidden = !isLoading;
-    if (contentEl) contentEl.style.visibility = isLoading ? 'hidden' : 'visible';
+    if (contentEl) contentEl.classList.toggle('is-loading', isLoading);
     if (refreshBtn) {
       refreshBtn.disabled = isLoading;
       refreshBtn.innerHTML = isLoading

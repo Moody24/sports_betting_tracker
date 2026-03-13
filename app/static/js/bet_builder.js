@@ -1,6 +1,17 @@
 /* bet_builder.js — powers the 3-tab + screenshot bet builder at /bets/new */
 (function () {
   'use strict';
+  function showElement(el) {
+    if (!el) return;
+    el.classList.remove('d-none');
+    el.style.display = '';
+  }
+
+  function hideElement(el) {
+    if (!el) return;
+    el.classList.add('d-none');
+    el.style.display = 'none';
+  }
 
   // Uses global MARKET_LABELS from display_config.js
 
@@ -678,8 +689,8 @@
   if (loadPropsBtn) {
     loadPropsBtn.addEventListener('click', function () {
       if (allPropsLoaded) {
-        propsBrowser.style.display = '';
-        propsSearchInp.style.display = '';
+        showElement(propsBrowser);
+        showElement(propsSearchInp);
         renderPropsBrowser(allPropsData);
         return;
       }
@@ -688,8 +699,8 @@
       loadPropsBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Loading...';
       ensureAllPropsLoaded(function (data) {
         renderPropsBrowser(data);
-        propsBrowser.style.display = '';
-        propsSearchInp.style.display = '';
+        showElement(propsBrowser);
+        showElement(propsSearchInp);
         loadPropsBtn.innerHTML = '<i class="bi bi-check-lg me-1"></i>Loaded ' + data.length + ' props';
       }, function () {
         loadPropsBtn.disabled = false;
@@ -776,13 +787,13 @@
       if (selMarket) selMarket.textContent = MARKET_LABELS[data.market] || (data.market || '').replace('player_', '');
       if (selSide)   selSide.textContent   = side.charAt(0).toUpperCase() + side.slice(1);
       if (selLine)   selLine.textContent   = data.line || '';
-      selCard.style.display = '';
+      showElement(selCard);
     }
 
     var clearBtn = document.getElementById('prop-clear-selection');
     if (clearBtn) {
       clearBtn.onclick = function () {
-        if (selCard) selCard.style.display = 'none';
+        hideElement(selCard);
         if (playerEl)   playerEl.value   = '';
         if (propTypeEl) propTypeEl.value = 'player_points';
         if (lineEl)     lineEl.value     = '';
@@ -1090,12 +1101,12 @@
     const reader = new FileReader();
     reader.onload = e => {
       if (ocrPreviewImg) ocrPreviewImg.src = e.target.result;
-      if (ocrPreview)    ocrPreview.style.display = '';
+      showElement(ocrPreview);
     };
     reader.readAsDataURL(file);
 
     showOcrStatus('Processing image with OCR…', 'info');
-    if (ocrSection) ocrSection.style.display = 'none';
+    hideElement(ocrSection);
 
     const fd = new FormData();
     fd.append('screenshot', file);
@@ -1149,7 +1160,7 @@
           ocrDate.value = [today.getFullYear(), String(today.getMonth() + 1).padStart(2, '0'), String(today.getDate()).padStart(2, '0')].join('-');
         }
 
-        if (ocrSection) ocrSection.style.display = '';
+        showElement(ocrSection);
         showOcrStatus(
           'OCR complete — review the fields below and adjust before saving.',
           'success'
@@ -1182,9 +1193,9 @@
       if (stake > USER_BANKROLL) {
         warnEl.textContent = 'Warning: stake ($' + stake.toFixed(2) + ') exceeds remaining bankroll ($' + USER_BANKROLL.toFixed(2) + ')';
         warnEl.className = 'small mt-1 text-warning';
-        warnEl.style.display = '';
+        showElement(warnEl);
       } else {
-        warnEl.style.display = 'none';
+        hideElement(warnEl);
       }
     });
   }

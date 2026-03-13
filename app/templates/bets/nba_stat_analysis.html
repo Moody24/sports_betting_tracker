@@ -25,9 +25,9 @@
     </div>
   </div>
   <div class="col-6 col-xl-3">
-    <div class="card-soft kpi-card h-100" style="border-color:rgba(245,158,11,.25)">
+    <div class="card-soft kpi-card h-100 kpi-card-value">
       <p class="kpi-label mb-1">Value 💰</p>
-      <p class="kpi-value mb-0" style="color:var(--amber)">{{ value_ct }}</p>
+      <p class="kpi-value mb-0 text-amber">{{ value_ct }}</p>
     </div>
   </div>
   <div class="col-6 col-xl-3">
@@ -54,7 +54,7 @@
   <div class="sa-featured-row">
     {% for s in strong_picks %}
     {% set pos = (s.breakdown or {}).get('player_position', '') %}
-    <div class="featured-play-card sa-featured-card" style="cursor:pointer"
+    <div class="featured-play-card sa-featured-card sa-clickable"
          data-prop='{{ s | tojson }}'>
       <div class="d-flex justify-content-between align-items-start mb-1">
         <span class="tier-strong">STRONG ★</span>
@@ -98,7 +98,7 @@
     {% endfor %}
     <form class="ms-auto d-flex gap-2 sa-filter-form" method="get" action="{{ url_for('bet.nba_stat_analysis') }}">
       <input type="hidden" name="stat" value="{{ stat_filter }}">
-      <input class="form-control form-control-sm" style="width:160px" type="text"
+      <input class="form-control form-control-sm sa-search-input" type="text"
              name="q" value="{{ search_q }}" placeholder="Search player…">
       <button class="btn btn-sm btn-outline-secondary" type="submit" aria-label="Search players">
         <i class="bi bi-search"></i>
@@ -109,7 +109,7 @@
     </form>
     <div class="d-flex align-items-center gap-2">
       <span id="stat-analysis-last-updated" class="small text-secondary">Last updated at --:--</span>
-      <button class="btn btn-sm btn-outline-info" type="button" id="stat-analysis-refresh">
+      <button class="btn btn-sm btn-outline-info btn-toolbar-primary" type="button" id="stat-analysis-refresh">
         <i class="bi bi-arrow-repeat me-1"></i>Refresh
       </button>
     </div>
@@ -117,7 +117,7 @@
 </div>
 
 {# ── Matchup Cards ────────────────────────────────────────────── #}
-<div id="stat-analysis-results-shell" style="min-height: 520px; position: relative;">
+<div id="stat-analysis-results-shell" class="stat-analysis-results-shell">
 <div id="stat-analysis-loading" class="card-soft p-3 mb-4" hidden>
   <div class="placeholder-glow">
     <p class="placeholder col-12 mb-2"></p>
@@ -129,7 +129,7 @@
   <p class="mb-2"><i class="bi bi-exclamation-triangle me-1"></i>Unable to refresh stat analysis.</p>
   <button class="btn btn-sm btn-outline-danger" type="button" id="stat-analysis-refresh-retry">Retry</button>
 </div>
-<div id="stat-analysis-results">
+<div id="stat-analysis-results" class="refresh-content">
 {% if not matchups %}
 <div class="text-center text-secondary py-5 fade-up fade-up-4">
   <i class="bi bi-bar-chart-line fs-1 d-block mb-2 opacity-25"></i>
@@ -325,22 +325,22 @@
     {# ── Hit rate ─── #}
     <div class="stat-section-label mt-3">Hit Rate (L20)</div>
     <div class="d-flex gap-2 align-items-center mb-1">
-      <span class="small text-success" style="width:2.5rem">Over</span>
+      <span class="small text-success sp-hit-label">Over</span>
       <div class="flex-fill">
-        <div class="progress" style="height:6px;border-radius:3px">
-          <div id="sp-over-bar" class="progress-bar bg-success" style="width:0%;transition:width .4s ease"></div>
+        <div class="progress sp-hit-progress">
+          <div id="sp-over-bar" class="progress-bar bg-success sp-hit-bar"></div>
         </div>
       </div>
-      <span id="sp-over-pct" class="small fw-bold text-success" style="width:2.5rem;text-align:right">—</span>
+      <span id="sp-over-pct" class="small fw-bold text-success sp-hit-pct">—</span>
     </div>
     <div class="d-flex gap-2 align-items-center mb-3">
-      <span class="small text-danger" style="width:2.5rem">Under</span>
+      <span class="small text-danger sp-hit-label">Under</span>
       <div class="flex-fill">
-        <div class="progress" style="height:6px;border-radius:3px">
-          <div id="sp-under-bar" class="progress-bar bg-danger" style="width:0%;transition:width .4s ease"></div>
+        <div class="progress sp-hit-progress">
+          <div id="sp-under-bar" class="progress-bar bg-danger sp-hit-bar"></div>
         </div>
       </div>
-      <span id="sp-under-pct" class="small fw-bold text-danger" style="width:2.5rem;text-align:right">—</span>
+      <span id="sp-under-pct" class="small fw-bold text-danger sp-hit-pct">—</span>
     </div>
 
     {# ── Defensive context ─── #}
@@ -409,7 +409,7 @@ const SA_PROP_TO_COL = PROP_TO_STAT_COL;
 
   function setResultsLoading(isLoading) {
     if (resultsLoading) resultsLoading.hidden = !isLoading;
-    if (resultsWrap) resultsWrap.style.visibility = isLoading ? 'hidden' : 'visible';
+    if (resultsWrap) resultsWrap.classList.toggle('is-loading', isLoading);
     if (!isLoading && resultsError) resultsError.hidden = true;
     if (refreshBtn) {
       refreshBtn.disabled = isLoading;
@@ -451,6 +451,14 @@ const SA_PROP_TO_COL = PROP_TO_STAT_COL;
   function setText(id, val) {
     const el = document.getElementById(id);
     if (el) el.textContent = val;
+  }
+
+  function setCaseTone(el, tone) {
+    if (!el) return;
+    el.classList.remove('sp-case-val--up', 'sp-case-val--down', 'sp-case-val--neutral');
+    if (tone === 'up') el.classList.add('sp-case-val--up');
+    else if (tone === 'down') el.classList.add('sp-case-val--down');
+    else el.classList.add('sp-case-val--neutral');
   }
 
   // ── Bar chart ──────────────────────────────────────────────────────
@@ -560,11 +568,11 @@ const SA_PROP_TO_COL = PROP_TO_STAT_COL;
     setText('sp-line', prop.line != null ? prop.line : '—');
     const projEl = document.getElementById('sp-proj');
     projEl.textContent = prop.projection != null ? (+prop.projection).toFixed(1) : '—';
-    projEl.style.color = (prop.projection || 0) > (prop.line || 0) ? 'var(--bs-success)' : 'var(--bs-danger)';
+    setCaseTone(projEl, (prop.projection || 0) > (prop.line || 0) ? 'up' : 'down');
     const edgeEl = document.getElementById('sp-edge');
     const edgePct = (prop.edge * 100);
     edgeEl.textContent = prop.edge != null ? `${edgePct >= 0 ? '+' : ''}${edgePct.toFixed(1)}%` : '—';
-    edgeEl.style.color = (prop.edge || 0) >= 0.08 ? 'var(--bs-success)' : 'var(--bs-secondary-color)';
+    setCaseTone(edgeEl, (prop.edge || 0) >= 0.08 ? 'up' : 'neutral');
     // Recommendation: show actual recommended side
     const recSide = prop.recommended_side || (prop.indicator === 'avoid' ? 'Pass' : 'Over');
     setText('sp-rec', recSide.charAt(0).toUpperCase() + recSide.slice(1));

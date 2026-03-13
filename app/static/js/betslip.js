@@ -9,6 +9,17 @@
  */
 (function () {
   'use strict';
+  function showElement(el) {
+    if (!el) return;
+    el.classList.remove('d-none');
+    el.style.display = '';
+  }
+
+  function hideElement(el) {
+    if (!el) return;
+    el.classList.add('d-none');
+    el.style.display = 'none';
+  }
 
   // ── State ──────────────────────────────────────────────────────
   var slip = [];
@@ -252,16 +263,16 @@
     slipCount.textContent = slip.length;
 
     if (slip.length === 0) {
-      slipEl.style.display = 'none';
-      slipEmptyEl.style.display = '';
-      slipControls.style.display = 'none';
+      hideElement(slipEl);
+      showElement(slipEmptyEl);
+      hideElement(slipControls);
       slipLegsEl.innerHTML = '';
       return;
     }
 
-    slipEl.style.display = '';
-    slipEmptyEl.style.display = 'none';
-    slipControls.style.display = '';
+    showElement(slipEl);
+    hideElement(slipEmptyEl);
+    showElement(slipControls);
 
     var html = '';
     slip.forEach(function (leg, i) {
@@ -298,7 +309,7 @@
     if (slip.length < 2) {
       parlayToggle.checked = false;
       parlayToggle.parentElement.style.display = 'none';
-      parlayOdds.style.display = 'none';
+      hideElement(parlayOdds);
     } else {
       parlayToggle.parentElement.style.display = '';
     }
@@ -307,7 +318,7 @@
   // ── Parlay odds display ────────────────────────────────────────
   function updateParlayOdds() {
     if (!parlayToggle.checked || slip.length < 2) {
-      parlayOdds.style.display = 'none';
+      hideElement(parlayOdds);
       return;
     }
 
@@ -331,7 +342,7 @@
       american = '-' + Math.round(100 / (decimalProduct - 1));
     }
 
-    parlayOdds.style.display = '';
+    showElement(parlayOdds);
     parlayOdds.textContent = 'Parlay Odds: ' + american;
   }
 
@@ -353,16 +364,16 @@
 
     if (slipBonusPayout) {
       if (mult > 1.0 && stake > 0) {
-        slipBonusPayout.style.display = '';
+        showElement(slipBonusPayout);
         slipBonusPayout.textContent = 'Bonus active — payouts multiplied by ' + mult.toFixed(2);
       } else {
-        slipBonusPayout.style.display = 'none';
+        hideElement(slipBonusPayout);
       }
     }
 
     if (!slipPayoutInfo) return;
     if (!stake || !slip.length) {
-      slipPayoutInfo.style.display = 'none';
+      hideElement(slipPayoutInfo);
       return;
     }
 
@@ -394,7 +405,7 @@
       payoutText = slip.length + ' singles \xb7 $' + (stake * slip.length).toFixed(2) + ' total wagered';
     }
 
-    slipPayoutInfo.style.display = '';
+    showElement(slipPayoutInfo);
     slipPayoutInfo.textContent = payoutText;
   }
 
@@ -467,7 +478,7 @@
           + '<p class="mb-0 mt-1 small">' + data.message + '</p>'
           + '</div>';
         slip = [];
-        slipControls.style.display = 'none';
+        hideElement(slipControls);
         slipCount.textContent = '0';
         refreshPropButtons();
 
