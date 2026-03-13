@@ -272,6 +272,28 @@ def _build_training_data(stat_type: str):
     return features_list, targets
 
 
+def _points_sample_weights(training_rows: list[tuple]) -> list[float] | None:
+    """Return recency weights for points model rows (or None if unavailable)."""
+    dates = [row[0] for row in training_rows if row and row[0] is not None]
+    if len(dates) < 2:
+        return None
+
+    min_date = min(dates)
+    max_date = max(dates)
+    span_days = max((max_date - min_date).days, 1)
+
+    weights: list[float] = []
+    for row in training_rows:
+        row_date = row[0]
+        if row_date is None:
+            weights.append(1.0)
+            continue
+        recency = (row_date - min_date).days / span_days
+        # Newer rows get up to +75% weight while preserving older signal.
+        weights.append(1.0 + (0.75 * recency))
+    return weights
+
+
 def train_model(stat_type: str) -> dict:
     """Train an XGBoost model for a specific stat type.
 
@@ -306,16 +328,27 @@ def train_model(stat_type: str) -> dict:
         random_state=42,
         early_stopping_rounds=25,
     )
+    if stat_type == 'player_points':
+        # Points are high-variance; robust loss dampens outlier impact.
+        xgb_params['objective'] = 'reg:pseudohubererror'
+
+    weights = _points_sample_weights(training_rows) if stat_type == 'player_points' else None
+    weights_np = np.array(weights) if weights else None
 
     # TimeSeriesSplit CV to estimate MAE variance across time folds
     tscv = TimeSeriesSplit(n_splits=3)
     cv_maes = []
     for cv_train_idx, cv_val_idx in tscv.split(X):
         cv_model = XGBRegressor(**xgb_params)
-        cv_model.fit(
-            X[cv_train_idx], y[cv_train_idx],
+        cv_fit_kwargs = dict(
             eval_set=[(X[cv_val_idx], y[cv_val_idx])],
             verbose=False,
+        )
+        if weights_np is not None:
+            cv_fit_kwargs['sample_weight'] = weights_np[cv_train_idx]
+        cv_model.fit(
+            X[cv_train_idx], y[cv_train_idx],
+            **cv_fit_kwargs,
         )
         cv_preds = cv_model.predict(X[cv_val_idx])
         cv_maes.append(mean_absolute_error(y[cv_val_idx], cv_preds))
@@ -355,10 +388,16 @@ def train_model(stat_type: str) -> dict:
 
     model = XGBRegressor(**xgb_params)
 
-    model.fit(
-        X_train, y_train,
+    fit_kwargs = dict(
         eval_set=[(X_val, y_val)],
         verbose=False,
+    )
+    if weights_np is not None:
+        fit_kwargs['sample_weight'] = weights_np[train_idx]
+
+    model.fit(
+        X_train, y_train,
+        **fit_kwargs,
     )
 
     # Evaluate
@@ -405,6 +444,8 @@ def train_model(stat_type: str) -> dict:
             'cutoff_date': cutoff_date.isoformat() if cutoff_date else None,
             'cv_mean_mae': round(cv_mean_mae, 3),
             'cv_std_mae': round(cv_std_mae, 3),
+            'training_objective': xgb_params.get('objective', 'reg:squarederror'),
+            'recency_weighted': bool(weights_np is not None),
         }),
     )
     db.session.add(meta)
