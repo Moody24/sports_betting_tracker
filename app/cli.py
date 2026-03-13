@@ -29,6 +29,15 @@ BACKFILL_COMMIT_BATCH = 300
 MAX_FETCH_FAILURES = 3
 
 
+def _as_utc(dt: datetime | None) -> datetime | None:
+    """Normalize DB datetimes to UTC-aware for safe arithmetic."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
 def _parse_player_ids(raw_player_ids: str) -> list[str]:
     if not raw_player_ids:
         return []
@@ -1130,7 +1139,8 @@ def register_cli(app):
 
         pq_model = ModelMetadata.query.filter_by(model_name='pick_quality_nba', is_active=True).first()
         if pq_model:
-            trained_days_ago = (datetime.now(timezone.utc) - pq_model.training_date).days if pq_model.training_date else None
+            train_dt = _as_utc(pq_model.training_date)
+            trained_days_ago = (datetime.now(timezone.utc) - train_dt).days if train_dt else None
             acc_str = f'{pq_model.val_accuracy:.3f}' if pq_model.val_accuracy else 'n/a'
             age_str = f'{trained_days_ago}d ago' if trained_days_ago is not None else 'unknown'
             click.echo(f'  OK    pick_quality_nba active | val_accuracy={acc_str} | trained {age_str}')
@@ -1147,7 +1157,8 @@ def register_cli(app):
             .first()
         )
         if last_drift:
-            drift_age = (datetime.now(timezone.utc) - last_drift.started_at).days if last_drift.started_at else None
+            drift_dt = _as_utc(last_drift.started_at)
+            drift_age = (datetime.now(timezone.utc) - drift_dt).days if drift_dt else None
             drift_status = 'OK  ' if last_drift.status in ('success', 'warn') else 'WARN'
             drift_detail = f'last drift check: {drift_age}d ago, status={last_drift.status}'
             click.echo(f'  {drift_status}  {drift_detail}')

@@ -166,8 +166,9 @@
 
 {# ── Context notes badges ────────────────────────────────── #}
 {% macro context_badges(notes, max_notes=3) -%}
+  {% set _notes = notes or [] %}
   <div class="d-flex flex-wrap gap-1">
-    {% for note in notes[:max_notes] %}
+    {% for note in _notes[:max_notes] %}
     <span class="badge text-bg-dark ctx-note-badge">{{ note }}</span>
     {% endfor %}
   </div>

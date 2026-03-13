@@ -41,6 +41,24 @@ TIER_SLIGHT = 0.03
 STRONG_CONFIDENCE_LEVELS = {'medium', 'high'}
 
 
+def _sanitize_context_notes(notes, max_notes: int = 8) -> list[str]:
+    """Normalize, dedupe, and cap context notes for stable UI rendering."""
+    seen = set()
+    cleaned: list[str] = []
+    for raw in notes or []:
+        note = str(raw or '').strip()
+        if not note:
+            continue
+        key = note.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(note)
+        if len(cleaned) >= max_notes:
+            break
+    return cleaned
+
+
 def implied_prob(american_odds: int) -> float:
     """Convert American odds to implied probability (0..1)."""
     if american_odds > 0:
@@ -206,7 +224,7 @@ class ValueDetector:
             confidence_tier = 'no_edge'
 
         # Model 2 (pick quality) enhancement
-        context_notes = list(proj.get('context_notes', []))
+        context_notes = _sanitize_context_notes(proj.get('context_notes', []))
         win_probability = None
         pick_quality_recommendation = 'no_model'
         try:
@@ -250,6 +268,7 @@ class ValueDetector:
                 context_notes.append(f'ML caution: {win_prob:.0%} win prob')
         except Exception:
             pass  # Model 2 unavailable — degrade gracefully
+        context_notes = _sanitize_context_notes(context_notes)
 
         return {
             'player': player_name,
