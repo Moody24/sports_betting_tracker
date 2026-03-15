@@ -1165,6 +1165,19 @@ class TestFeatureEngine(BaseTestCase):
                 projected_edge=0.05, confidence_tier='slight',
             )
             self.assertFalse(ctx['back_to_back'])
+            self.assertTrue(ctx['context_flags'])
+
+    def test_build_pick_context_features_adds_confidence_flag(self):
+        from app.services.feature_engine import build_pick_context_features
+        with self.app.app_context():
+            _seed_player_logs(count=20, player_id='104a')
+            ctx = build_pick_context_features(
+                player_name='Test Player', player_id='104a',
+                prop_type='player_points', prop_line=20.0,
+                american_odds=-110, projected_stat=22.0,
+                projected_edge=0.07, confidence_tier='moderate',
+            )
+            self.assertIn('moderate_confidence', ctx['context_flags'])
 
     def test_build_pick_context_cold_streak(self):
         from app.services.feature_engine import build_pick_context_features

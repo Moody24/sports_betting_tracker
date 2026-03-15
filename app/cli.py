@@ -971,6 +971,203 @@ def register_cli(app):
         else:
             click.echo('WARN: significant over/under-confidence; recalibration advised.')
 
+    @app.cli.command('backfill-pick-context')
+    @click.option('--limit', default=500, show_default=True,
+                  help='Maximum missing prop bets to inspect.')
+    @click.option('--dry-run', is_flag=True, default=False,
+                  help='Preview changes without writing to DB.')
+    @click.option('--allow-weak-context', is_flag=True, default=False,
+                  help='Allow fallback team/opponent inference when player team is unknown.')
+    def cli_backfill_pick_context(limit, dry_run, allow_weak_context):
+        """Backfill missing PickContext rows for historical prop bets."""
+        import json as _json
+        from app.services.feature_engine import build_pick_context_features
+        from app.services.stats_service import find_player_id, get_cached_logs
+        from app.services.value_detector import ValueDetector
+
+        detector = ValueDetector()
+
+        def _norm(s: str) -> str:
+            return ''.join(ch for ch in (s or '').lower() if ch.isalnum())
+
+        def _infer_context(bet_obj, player_team_abbr: str) -> tuple[str, str, bool, str]:
+            team_a = (bet_obj.team_a or '').strip()
+            team_b = (bet_obj.team_b or '').strip()
+            picked_team = (bet_obj.picked_team or '').strip()
+
+            if team_a and team_b and picked_team in {team_a, team_b}:
+                if picked_team == team_a:
+                    return team_a, team_b, True, 'picked_team'
+                return team_b, team_a, False, 'picked_team'
+
+            # If team names are stored as abbreviations, match from player logs.
+            if player_team_abbr:
+                if _norm(team_a) == _norm(player_team_abbr):
+                    return team_a, team_b, True, 'team_abbr_match'
+                if _norm(team_b) == _norm(player_team_abbr):
+                    return team_b, team_a, False, 'team_abbr_match'
+
+            # Conservative fallback: preserve signal if both teams are present.
+            if allow_weak_context and team_a and team_b:
+                return team_a, team_b, True, 'weak_fallback'
+            return '', '', True, 'unresolved'
+
+        with app.app_context():
+            missing = (
+                Bet.query
+                .outerjoin(PickContext, PickContext.bet_id == Bet.id)
+                .filter(Bet.player_name.isnot(None), Bet.prop_type.isnot(None), Bet.prop_line.isnot(None))
+                .filter(PickContext.id.is_(None))
+                .order_by(Bet.created_at.asc())
+                .limit(int(limit))
+                .all()
+            )
+
+            click.echo(f'Missing PickContext candidates: {len(missing)}')
+            if not missing:
+                return
+
+            created = 0
+            skipped_no_player = 0
+            skipped_unresolved_context = 0
+            skipped_duplicate = 0
+            mode_counts = {}
+
+            for bet_obj in missing:
+                if PickContext.query.filter_by(bet_id=bet_obj.id).first():
+                    skipped_duplicate += 1
+                    continue
+
+                player_id = find_player_id((bet_obj.player_name or '').strip())
+                if not player_id:
+                    skipped_no_player += 1
+                    continue
+
+                latest_logs = get_cached_logs(str(player_id), last_n=1)
+                player_team_abbr = ''
+                if latest_logs:
+                    player_team_abbr = (getattr(latest_logs[0], 'team_abbr', '') or '').strip().upper()
+
+                team_name, opponent_name, is_home, mode = _infer_context(bet_obj, player_team_abbr)
+                mode_counts[mode] = mode_counts.get(mode, 0) + 1
+                if not team_name or not opponent_name:
+                    skipped_unresolved_context += 1
+                    continue
+
+                market_odds = int(bet_obj.american_odds or -110)
+                score = detector.score_prop(
+                    player_name=bet_obj.player_name or '',
+                    prop_type=bet_obj.prop_type or '',
+                    line=float(bet_obj.prop_line or 0.0),
+                    over_odds=market_odds,
+                    under_odds=market_odds,
+                    opponent_name=opponent_name,
+                    team_name=team_name,
+                    is_home=is_home,
+                    game_id=bet_obj.external_game_id or '',
+                )
+
+                projected_edge = score.get('edge', 0.0)
+                if bet_obj.bet_type == 'over':
+                    projected_edge = score.get('edge_over', projected_edge)
+                elif bet_obj.bet_type == 'under':
+                    projected_edge = score.get('edge_under', projected_edge)
+
+                context = build_pick_context_features(
+                    player_name=bet_obj.player_name or '',
+                    player_id=str(player_id),
+                    prop_type=bet_obj.prop_type or '',
+                    prop_line=float(bet_obj.prop_line or 0.0),
+                    american_odds=market_odds,
+                    projected_stat=float(score.get('projection', 0.0) or 0.0),
+                    projected_edge=float(projected_edge or 0.0),
+                    confidence_tier=score.get('confidence_tier', 'no_edge'),
+                    opponent_name=opponent_name,
+                    team_name=team_name,
+                    is_home=is_home,
+                )
+
+                if not dry_run:
+                    db.session.add(PickContext(
+                        bet_id=bet_obj.id,
+                        context_json=_json.dumps(context),
+                        projected_stat=score.get('projection'),
+                        projected_edge=projected_edge,
+                        confidence_tier=score.get('confidence_tier'),
+                    ))
+                created += 1
+
+            if not dry_run and created:
+                db.session.commit()
+
+            click.echo(f'Created PickContext rows: {created}')
+            click.echo(f'Skipped (no player id): {skipped_no_player}')
+            click.echo(f'Skipped (unresolved context): {skipped_unresolved_context}')
+            click.echo(f'Skipped (duplicate race): {skipped_duplicate}')
+            click.echo(f'Inference modes: {mode_counts}')
+            if dry_run:
+                click.echo('Dry-run only; no writes committed.')
+
+    @app.cli.command('normalize-pick-context-flags')
+    @click.option('--limit', default=5000, show_default=True,
+                  help='Maximum PickContext rows to inspect.')
+    @click.option('--dry-run', is_flag=True, default=False,
+                  help='Preview changes without writing to DB.')
+    def cli_normalize_pick_context_flags(limit, dry_run):
+        """Normalize/enrich context_flags for existing PickContext rows."""
+        import json as _json
+        from app.services.feature_engine import derive_context_flags_from_snapshot
+
+        with app.app_context():
+            rows = (
+                PickContext.query
+                .order_by(PickContext.created_at.asc())
+                .limit(int(limit))
+                .all()
+            )
+            updated = 0
+            invalid_json = 0
+            already_ok = 0
+
+            for row in rows:
+                try:
+                    ctx = _json.loads(row.context_json or '{}')
+                    if not isinstance(ctx, dict):
+                        invalid_json += 1
+                        continue
+                except (TypeError, ValueError):
+                    invalid_json += 1
+                    continue
+
+                new_flags = derive_context_flags_from_snapshot(ctx)
+                old_flags = ctx.get('context_flags')
+                if isinstance(old_flags, list):
+                    merged = list(old_flags)
+                    for flag in new_flags:
+                        if flag not in merged:
+                            merged.append(flag)
+                else:
+                    merged = new_flags
+
+                if old_flags == merged:
+                    already_ok += 1
+                    continue
+
+                ctx['context_flags'] = merged
+                if not dry_run:
+                    row.context_json = _json.dumps(ctx)
+                updated += 1
+
+            if not dry_run and updated:
+                db.session.commit()
+
+            click.echo(f'Rows scanned: {len(rows)}')
+            click.echo(f'Updated flags: {updated}')
+            click.echo(f'Already OK: {already_ok}')
+            click.echo(f'Invalid JSON skipped: {invalid_json}')
+            if dry_run:
+                click.echo('Dry-run only; no writes committed.')
+
     @click.command('pollution_report')
     @click.option('--fix', is_flag=True, default=False,
                   help='Delete polluted bootstrap rows and deactivate stale models.')

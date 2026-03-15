@@ -19,6 +19,90 @@ from app.services.context_service import check_back_to_back, get_days_rest, get_
 logger = logging.getLogger(__name__)
 
 
+def _append_unique_flag(flags: list[str], flag: str) -> None:
+    if flag and flag not in flags:
+        flags.append(flag)
+
+
+def derive_context_flags_from_snapshot(ctx: dict) -> list[str]:
+    """Derive stable context flags from a PickContext-like payload."""
+    flags: list[str] = []
+
+    matchup_adj = float(ctx.get('opp_matchup_adj', 1.0) or 1.0)
+    if matchup_adj > 1.05:
+        _append_unique_flag(flags, 'favorable_matchup')
+    elif matchup_adj < 0.95:
+        _append_unique_flag(flags, 'tough_matchup')
+
+    pos_adj = float(ctx.get('opp_positional_matchup_adj', 1.0) or 1.0)
+    if pos_adj > 1.05:
+        _append_unique_flag(flags, 'favorable_positional_matchup')
+    elif pos_adj < 0.95:
+        _append_unique_flag(flags, 'tough_positional_matchup')
+
+    trend = str(ctx.get('player_last5_trend', 'neutral') or 'neutral')
+    if trend == 'hot':
+        _append_unique_flag(flags, 'hot_streak')
+    elif trend == 'cold':
+        _append_unique_flag(flags, 'cold_streak')
+
+    pace_factor = float(ctx.get('opp_pace_factor', 1.0) or 1.0)
+    if pace_factor > 1.03:
+        _append_unique_flag(flags, 'pace_boost')
+    elif pace_factor < 0.97:
+        _append_unique_flag(flags, 'pace_slowdown')
+
+    if bool(ctx.get('back_to_back', False)):
+        _append_unique_flag(flags, 'back_to_back')
+
+    minutes_trend = str(ctx.get('minutes_trend', 'stable') or 'stable')
+    if minutes_trend == 'decreasing':
+        _append_unique_flag(flags, 'minutes_down')
+    elif minutes_trend == 'increasing':
+        _append_unique_flag(flags, 'minutes_up')
+
+    if bool(ctx.get('injury_returning', False)):
+        _append_unique_flag(flags, 'injury_returning')
+
+    projected_edge = float(ctx.get('projected_edge', 0.0) or 0.0)
+    abs_edge = abs(projected_edge)
+    if abs_edge >= 0.10:
+        _append_unique_flag(flags, 'high_edge')
+    elif abs_edge >= 0.05:
+        _append_unique_flag(flags, 'medium_edge')
+
+    confidence_tier = str(ctx.get('confidence_tier', '') or '')
+    if confidence_tier in {'strong', 'moderate', 'slight'}:
+        _append_unique_flag(flags, f'{confidence_tier}_confidence')
+
+    hit_rate = float(ctx.get('player_hit_rate_vs_line', 0.5) or 0.5)
+    if hit_rate >= 0.65:
+        _append_unique_flag(flags, 'high_hit_rate')
+    elif hit_rate <= 0.35:
+        _append_unique_flag(flags, 'low_hit_rate')
+
+    line_vs_season_avg = float(ctx.get('line_vs_season_avg', 0.0) or 0.0)
+    if line_vs_season_avg <= -2.0:
+        _append_unique_flag(flags, 'line_discount')
+    elif line_vs_season_avg >= 2.0:
+        _append_unique_flag(flags, 'line_premium')
+
+    player_variance = float(ctx.get('player_variance', 0.0) or 0.0)
+    if player_variance >= 8.0:
+        _append_unique_flag(flags, 'high_variance')
+    elif 0 < player_variance <= 3.0:
+        _append_unique_flag(flags, 'low_variance')
+
+    days_rest = float(ctx.get('days_rest', 0.0) or 0.0)
+    if days_rest >= 3:
+        _append_unique_flag(flags, 'extra_rest')
+
+    if not flags:
+        flags.append('neutral_context')
+
+    return flags
+
+
 def build_projection_features(
     player_id: str,
     prop_type: str,
@@ -166,7 +250,6 @@ def build_pick_context_features(
     days_rest = 0 if b2b else raw_days_rest
 
     # Context flags
-    flags = []
     matchup_adj = get_matchup_adjustment(opponent_name, prop_type) if opponent_name else 1.0
     position_matchup_adj = (
         get_position_matchup_adjustment(opponent_name, player_position)
@@ -174,31 +257,10 @@ def build_pick_context_features(
         else 1.0
     )
     combined_matchup_adj = matchup_adj * position_matchup_adj
-    if matchup_adj > 1.05:
-        flags.append('favorable_matchup')
-    elif matchup_adj < 0.95:
-        flags.append('tough_matchup')
-    if position_matchup_adj > 1.05:
-        flags.append('favorable_positional_matchup')
-    elif position_matchup_adj < 0.95:
-        flags.append('tough_positional_matchup')
-    if trend == 'hot':
-        flags.append('hot_streak')
-    if trend == 'cold':
-        flags.append('cold_streak')
     pace_factor = get_pace_factor(opponent_name) if opponent_name else 1.0
-    if pace_factor > 1.03:
-        flags.append('pace_boost')
-    if b2b:
-        flags.append('back_to_back')
-    if min_trend == 'decreasing':
-        flags.append('minutes_down')
-    elif min_trend == 'increasing':
-        flags.append('minutes_up')
-    if injury_returning:
-        flags.append('injury_returning')
+    line_vs_season_avg = round(prop_line - season_avg, 1) if season_avg else 0
 
-    return {
+    context = {
         # Model 1 outputs
         'projected_stat': projected_stat,
         'projected_edge': projected_edge,
@@ -230,11 +292,9 @@ def build_pick_context_features(
         # Market context
         'prop_line': prop_line,
         'american_odds': american_odds,
-        'line_vs_season_avg': round(prop_line - season_avg, 1) if season_avg else 0,
+        'line_vs_season_avg': line_vs_season_avg,
         'prop_type': prop_type,
-
-        # Context flags
-        'context_flags': flags,
+        'opp_pace_factor': round(pace_factor, 3),
 
         # Volatility features — help Model 2 learn which players are high-risk
         # regardless of edge direction.  Computed here at placement time so they
@@ -242,6 +302,8 @@ def build_pick_context_features(
         'minutes_volatility': _compute_std(logs[:20], 'minutes'),
         'stat_attempts_volatility': _compute_attempts_volatility(logs[:20], prop_type),
     }
+    context['context_flags'] = derive_context_flags_from_snapshot(context)
+    return context
 
 
 
