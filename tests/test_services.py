@@ -3112,6 +3112,55 @@ class TestCLI(BaseTestCase):
         self.assertIn('--- moneyline ---', result.output)
         self.assertIn('=== Apply ===', result.output)
 
+    @patch('app.services.market_recommender.guard_market_recommendations')
+    def test_market_guard_check(self, mock_guard):
+        mock_guard.return_value = {
+            'decisions': {
+                'moneyline': {
+                    'decision': 'disable', 'drift_breach': True, 'roi_breach': True,
+                    'recommended_bets': 24, 'accuracy_delta': -0.07, 'roi_per_bet': -0.12,
+                },
+                'total_ou': {
+                    'decision': 'keep_enabled', 'drift_breach': False, 'roi_breach': False,
+                    'recommended_bets': 30, 'accuracy_delta': 0.01, 'roi_per_bet': 0.05,
+                },
+            },
+            'applied': True,
+            'apply_result': {'moneyline': {'enabled': False}, 'total_ou': {'enabled': True}},
+        }
+        runner = self._runner()
+        result = runner.invoke(args=['market-guard-check', '--days', '60', '--apply'])
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn('=== Market Guard Check', result.output)
+        self.assertIn('Decision=disable', result.output)
+        self.assertIn('=== Apply ===', result.output)
+
+    @patch('app.services.market_recommender.walkforward_market_report')
+    def test_market_walkforward_report(self, mock_walk):
+        mock_walk.return_value = {
+            'rows_scanned': 120,
+            'policy_used': {'moneyline': {'min_edge': 0.03, 'min_confidence': 0.55}},
+            'markets': {
+                'moneyline': {
+                    'summary': {'avg_accuracy': 0.59, 'folds': 3},
+                    'folds': [
+                        {
+                            'test_start': '2026-02-01', 'test_end': '2026-02-14',
+                            'rows': 20, 'accuracy': 0.6, 'brier': 0.24,
+                            'recommended_bets': 8, 'roi_per_bet': 0.04,
+                        },
+                    ],
+                },
+                'total_ou': {'summary': {'avg_accuracy': 0.57, 'folds': 3}, 'folds': []},
+            },
+        }
+        runner = self._runner()
+        result = runner.invoke(args=['market-walkforward-report', '--days', '120'])
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn('=== Market Walk-Forward Report', result.output)
+        self.assertIn('--- moneyline ---', result.output)
+        self.assertIn('Summary:', result.output)
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # health/readiness endpoint tests

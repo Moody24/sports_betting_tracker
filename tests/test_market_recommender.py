@@ -192,3 +192,29 @@ class TestMarketRecommender(BaseTestCase):
         self.assertIn("policy", result)
         self.assertIn("moneyline", result["policy"])
         self.assertIn("total_ou", result["policy"])
+
+    def test_moneyline_env_killswitch_forces_pass(self):
+        from app.services.market_recommender import recommend_market_sides
+
+        class _FakeModel:
+            def __init__(self, p):
+                self._p = p
+
+            def predict_proba(self, _x):
+                return [[1 - self._p, self._p]]
+
+        with self.app.app_context():
+            with patch('app.services.market_recommender._load_active_model') as mock_loader:
+                with patch.dict(os.environ, {"MONEYLINE_RECS_ENABLED": "false"}, clear=False):
+                    mock_loader.side_effect = [
+                        (_FakeModel(0.67), SimpleNamespace(version='ml_v1')),
+                        (_FakeModel(0.61), SimpleNamespace(version='tot_v1')),
+                    ]
+                    recs = recommend_market_sides([{
+                        "espn_id": "g1",
+                        "over_under_line": 220.5,
+                        "moneyline_home": -130,
+                        "moneyline_away": 110,
+                    }])
+        self.assertEqual(recs["g1"]["moneyline"]["action"], "pass")
+        self.assertEqual(recs["g1"]["moneyline"]["action_reason"], "market_disabled")

@@ -295,6 +295,78 @@ def register_cli(app):
         else:
             click.echo('No changes persisted (--no-apply).')
 
+    @app.cli.command('market-guard-check')
+    @click.option('--days', type=int, default=60, show_default=True, help='Evaluation window in days.')
+    @click.option('--bins', type=int, default=5, show_default=True, help='Calibration bins.')
+    @click.option('--drift-threshold', type=float, default=0.05, show_default=True, help='Abs accuracy delta threshold.')
+    @click.option('--min-bets', type=int, default=20, show_default=True, help='Minimum bets before ROI disable gate applies.')
+    @click.option('--apply/--no-apply', default=True, show_default=True, help='Persist enable/disable decisions.')
+    def cli_market_guard_check(days, bins, drift_threshold, min_bets, apply):
+        """Auto-disable weak markets based on drift and ROI guardrails."""
+        from app.services.market_recommender import guard_market_recommendations
+
+        click.echo(f'=== Market Guard Check (last {days} days) ===')
+        result = guard_market_recommendations(
+            days=days,
+            bins=bins,
+            drift_threshold=drift_threshold,
+            min_bets=min_bets,
+            apply=apply,
+        )
+        if result.get('error'):
+            click.echo(f"Error: {result['error']}")
+            click.echo(f"Rows scanned: {result.get('rows_scanned', 0)}")
+            return
+        for market in ('moneyline', 'total_ou'):
+            d = (result.get('decisions') or {}).get(market, {})
+            click.echo(f"\n--- {market} ---")
+            click.echo(
+                f"Decision={d.get('decision')} | drift_breach={d.get('drift_breach')} | "
+                f"roi_breach={d.get('roi_breach')} | bets={d.get('recommended_bets')} | "
+                f"acc_delta={d.get('accuracy_delta')} | roi/bet={d.get('roi_per_bet')}"
+            )
+        click.echo('\n=== Apply ===')
+        if result.get('applied'):
+            click.echo(f"Applied: {result.get('apply_result')}")
+        else:
+            click.echo('No changes persisted (--no-apply).')
+
+    @app.cli.command('market-walkforward-report')
+    @click.option('--days', type=int, default=180, show_default=True, help='History window in days.')
+    @click.option('--train-days', type=int, default=60, show_default=True, help='Train window per fold.')
+    @click.option('--test-days', type=int, default=14, show_default=True, help='Test window per fold.')
+    @click.option('--step-days', type=int, default=14, show_default=True, help='Fold step size.')
+    @click.option('--bins', type=int, default=5, show_default=True, help='Calibration bins.')
+    def cli_market_walkforward_report(days, train_days, test_days, step_days, bins):
+        """Walk-forward report for market model stability and re-enable decisions."""
+        from app.services.market_recommender import walkforward_market_report
+
+        click.echo(f'=== Market Walk-Forward Report (last {days} days) ===')
+        report = walkforward_market_report(
+            days=days,
+            train_days=train_days,
+            test_days=test_days,
+            step_days=step_days,
+            bins=bins,
+        )
+        if report.get('error'):
+            click.echo(f"Error: {report['error']}")
+            click.echo(f"Rows scanned: {report.get('rows_scanned', 0)}")
+            return
+        click.echo(f"Rows scanned: {report.get('rows_scanned')}")
+        click.echo(f"Policy used: {report.get('policy_used')}")
+        for market in ('moneyline', 'total_ou'):
+            m = (report.get('markets') or {}).get(market, {})
+            click.echo(f"\n--- {market} ---")
+            click.echo(f"Summary: {m.get('summary')}")
+            folds = m.get('folds') or []
+            for f in folds[-5:]:
+                click.echo(
+                    f"Fold {f.get('test_start')}..{f.get('test_end')} | rows={f.get('rows')} | "
+                    f"acc={f.get('accuracy')} | brier={f.get('brier')} | "
+                    f"bets={f.get('recommended_bets')} | roi/bet={f.get('roi_per_bet')}"
+                )
+
     @app.cli.command('generate-auto-picks')
     def cli_generate_auto_picks():
         from app.services.scheduler import generate_daily_auto_picks

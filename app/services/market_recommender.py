@@ -45,6 +45,18 @@ def _env_float_optional(name: str) -> float | None:
         return None
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name, '').strip().lower()
+    if not raw:
+        return default
+    if raw in ('1', 'true', 'yes', 'on'):
+        return True
+    if raw in ('0', 'false', 'no', 'off'):
+        return False
+    logger.warning("Invalid %s=%r; using default %s", name, raw, default)
+    return default
+
+
 def _decide_market_action(edge: float, confidence: float, min_edge: float, min_confidence: float) -> tuple[str, str]:
     if edge < min_edge and confidence < min_confidence:
         return 'pass', 'edge_and_confidence_below_threshold'
@@ -159,6 +171,19 @@ def _resolve_market_policy(
                     policy[key]['min_confidence'] = float(override[key]['min_confidence'])
 
     return policy
+
+
+def _is_market_enabled(market_key: str, meta: ModelMetadata | None) -> bool:
+    if market_key == 'moneyline':
+        if not _env_bool('MONEYLINE_RECS_ENABLED', True):
+            return False
+    elif market_key == 'total_ou':
+        if not _env_bool('TOTAL_RECS_ENABLED', True):
+            return False
+    payload = _metadata_json(meta)
+    if bool(payload.get('disabled', False)):
+        return False
+    return True
 
 
 def _profit_per_unit(american_odds: int, won: bool) -> float:
@@ -500,6 +525,8 @@ def recommend_market_sides(games: list[dict]) -> dict[str, dict]:
     min_ml_conf = float(policy['moneyline']['min_confidence'])
     min_total_edge = float(policy['total_ou']['min_edge'])
     min_total_conf = float(policy['total_ou']['min_confidence'])
+    moneyline_enabled = _is_market_enabled('moneyline', ml_meta)
+    total_enabled = _is_market_enabled('total_ou', tot_meta)
 
     out: dict[str, dict] = {}
     for g in games:
@@ -521,12 +548,15 @@ def recommend_market_sides(games: list[dict]) -> dict[str, dict]:
             side = 'home' if edge_home >= edge_away else 'away'
             edge = edge_home if side == 'home' else edge_away
             confidence = max(p_home, p_away)
-            action, reason = _decide_market_action(
-                edge=edge,
-                confidence=confidence,
-                min_edge=min_ml_edge,
-                min_confidence=min_ml_conf,
-            )
+            if moneyline_enabled:
+                action, reason = _decide_market_action(
+                    edge=edge,
+                    confidence=confidence,
+                    min_edge=min_ml_edge,
+                    min_confidence=min_ml_conf,
+                )
+            else:
+                action, reason = 'pass', 'market_disabled'
             entry['moneyline'] = {
                 'side': side,
                 'edge': round(edge, 3),
@@ -540,12 +570,15 @@ def recommend_market_sides(games: list[dict]) -> dict[str, dict]:
             side = 'over' if p_over >= 0.5 else 'under'
             confidence = max(p_over, 1.0 - p_over)
             edge = abs(p_over - 0.5)
-            action, reason = _decide_market_action(
-                edge=edge,
-                confidence=confidence,
-                min_edge=min_total_edge,
-                min_confidence=min_total_conf,
-            )
+            if total_enabled:
+                action, reason = _decide_market_action(
+                    edge=edge,
+                    confidence=confidence,
+                    min_edge=min_total_edge,
+                    min_confidence=min_total_conf,
+                )
+            else:
+                action, reason = 'pass', 'market_disabled'
             entry['total'] = {
                 'side': side,
                 'confidence': round(confidence, 3),
@@ -615,6 +648,73 @@ def apply_market_threshold_policy(policy: dict) -> dict:
     return {'updated_models': updated}
 
 
+def set_market_enabled(market: str, enabled: bool) -> dict:
+    """Persist market recommendation enabled/disabled flag in active metadata."""
+    key = market.strip().lower()
+    if key not in ('moneyline', 'total_ou'):
+        return {'error': 'invalid_market'}
+    model_name = MODEL_NAME_ML if key == 'moneyline' else MODEL_NAME_TOTAL
+    meta = ModelMetadata.query.filter_by(model_name=model_name, is_active=True).first()
+    if not meta:
+        return {'error': 'no_active_model', 'market': key}
+    payload = _metadata_json(meta)
+    payload['disabled'] = not bool(enabled)
+    meta.metadata_json = json.dumps(payload)
+    db.session.commit()
+    return {'market': key, 'enabled': bool(enabled), 'model_version': meta.version}
+
+
+def guard_market_recommendations(
+    days: int = 60,
+    bins: int = 5,
+    drift_threshold: float = 0.05,
+    min_bets: int = 20,
+    apply: bool = True,
+) -> dict:
+    """Disable markets with drift breach or negative ROI on adequate sample."""
+    report = evaluate_market_models(days=days, bins=bins)
+    if report.get('error'):
+        return report
+
+    decisions = {}
+    for market in ('moneyline', 'total_ou'):
+        m = report.get('markets', {}).get(market) or {}
+        if m.get('error'):
+            decisions[market] = {'decision': 'skip', 'reason': m.get('error')}
+            continue
+        rec_bets = int(m.get('recommended_bets') or 0)
+        acc_delta = m.get('accuracy_delta')
+        roi = m.get('roi_per_bet')
+        drift_breach = acc_delta is not None and abs(float(acc_delta)) > float(drift_threshold)
+        roi_breach = rec_bets >= int(min_bets) and roi is not None and float(roi) < 0.0
+        disable = bool(drift_breach or roi_breach)
+        decisions[market] = {
+            'decision': 'disable' if disable else 'keep_enabled',
+            'drift_breach': drift_breach,
+            'roi_breach': roi_breach,
+            'recommended_bets': rec_bets,
+            'accuracy_delta': acc_delta,
+            'roi_per_bet': roi,
+        }
+
+    applied = {}
+    if apply:
+        for market, d in decisions.items():
+            if d.get('decision') == 'skip':
+                continue
+            enabled = d.get('decision') != 'disable'
+            applied[market] = set_market_enabled(market, enabled=enabled)
+
+    return {
+        'window_days': int(days),
+        'drift_threshold': float(drift_threshold),
+        'min_bets': int(min_bets),
+        'decisions': decisions,
+        'applied': bool(apply),
+        'apply_result': applied,
+    }
+
+
 def tune_market_thresholds(days: int = 180, bins: int = 5, min_bets: int = 40, apply: bool = True) -> dict:
     """Grid-search market recommendation thresholds for ROI + CLV proxy quality."""
     candidate_ml_edge = [0.015, 0.02, 0.03, 0.04, 0.05]
@@ -682,3 +782,183 @@ def tune_market_thresholds(days: int = 180, bins: int = 5, min_bets: int = 40, a
         result['applied'] = True
         result['apply_result'] = apply_result
     return result
+
+
+def walkforward_market_report(
+    days: int = 180,
+    train_days: int = 60,
+    test_days: int = 14,
+    step_days: int = 14,
+    bins: int = 5,
+) -> dict:
+    """Walk-forward evaluation for market models using rolling date windows."""
+    from datetime import timedelta
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.metrics import accuracy_score, brier_score_loss, log_loss
+    from sklearn.isotonic import IsotonicRegression
+
+    snaps = sorted(_load_recent_final_snapshots(days=days), key=lambda s: s.game_date or date_type.min)
+    if len(snaps) < 40:
+        return {'error': 'insufficient_rows', 'rows_scanned': len(snaps)}
+
+    ml_model_meta = ModelMetadata.query.filter_by(model_name=MODEL_NAME_ML, is_active=True).first()
+    tot_model_meta = ModelMetadata.query.filter_by(model_name=MODEL_NAME_TOTAL, is_active=True).first()
+    policy = _resolve_market_policy(ml_model_meta, tot_model_meta)
+
+    start_date = snaps[0].game_date
+    end_date = snaps[-1].game_date
+    if not start_date or not end_date:
+        return {'error': 'invalid_dates', 'rows_scanned': len(snaps)}
+
+    folds = []
+    cur_test_start = start_date + timedelta(days=train_days)
+    while cur_test_start <= end_date:
+        train_start = cur_test_start - timedelta(days=train_days)
+        test_end = cur_test_start + timedelta(days=test_days - 1)
+        train = [s for s in snaps if s.game_date and train_start <= s.game_date < cur_test_start]
+        test = [s for s in snaps if s.game_date and cur_test_start <= s.game_date <= test_end]
+        if train and test:
+            folds.append((train_start, cur_test_start, test_end, train, test))
+        cur_test_start = cur_test_start + timedelta(days=step_days)
+
+    if not folds:
+        return {'error': 'no_folds', 'rows_scanned': len(snaps)}
+
+    market_fold_metrics = {'moneyline': [], 'total_ou': []}
+
+    def _fit_predict(train_rows: list[dict], test_rows: list[dict]) -> tuple[list[float], list[int]]:
+        if len(train_rows) < 20 or len({r['y'] for r in train_rows}) < 2:
+            return [], []
+        X_train = [r['x'] for r in train_rows]
+        y_train = [r['y'] for r in train_rows]
+        X_test = [r['x'] for r in test_rows]
+        y_test = [r['y'] for r in test_rows]
+        model = LogisticRegression(max_iter=400, class_weight='balanced')
+        model.fit(X_train, y_train)
+        p_test = list(model.predict_proba(X_test)[:, 1])
+        if len(test_rows) >= 20 and len(set(y_test)) >= 2:
+            iso = IsotonicRegression(out_of_bounds='clip')
+            train_probs = list(model.predict_proba(X_train)[:, 1])
+            iso.fit(train_probs, y_train)
+            p_test = [max(0.0, min(1.0, float(iso.predict([p])[0]))) for p in p_test]
+        return p_test, y_test
+
+    for train_start, test_start, test_end, train_snaps, test_snaps in folds:
+        train_rows = {'moneyline': [], 'total_ou': []}
+        test_rows = {'moneyline': [], 'total_ou': []}
+        for s in train_snaps:
+            if s.home_score != s.away_score:
+                train_rows['moneyline'].append({
+                    'x': _features_for_snapshot(s),
+                    'y': 1 if (s.home_score or 0) > (s.away_score or 0) else 0,
+                    'moneyline_home': int(s.moneyline_home),
+                    'moneyline_away': int(s.moneyline_away),
+                })
+            total_score = (s.home_score or 0) + (s.away_score or 0)
+            line = float(s.over_under_line or 0.0)
+            if total_score != line:
+                train_rows['total_ou'].append({
+                    'x': _features_for_snapshot(s),
+                    'y': 1 if total_score > line else 0,
+                })
+        for s in test_snaps:
+            if s.home_score != s.away_score:
+                test_rows['moneyline'].append({
+                    'x': _features_for_snapshot(s),
+                    'y': 1 if (s.home_score or 0) > (s.away_score or 0) else 0,
+                    'moneyline_home': int(s.moneyline_home),
+                    'moneyline_away': int(s.moneyline_away),
+                })
+            total_score = (s.home_score or 0) + (s.away_score or 0)
+            line = float(s.over_under_line or 0.0)
+            if total_score != line:
+                test_rows['total_ou'].append({
+                    'x': _features_for_snapshot(s),
+                    'y': 1 if total_score > line else 0,
+                })
+
+        for market in ('moneyline', 'total_ou'):
+            probs, y_true = _fit_predict(train_rows[market], test_rows[market])
+            if not probs:
+                continue
+            y_pred = [1 if p >= 0.5 else 0 for p in probs]
+            edges = []
+            confidences = []
+            pick_correct = []
+            odds = []
+            if market == 'moneyline':
+                for p, row in zip(probs, test_rows[market]):
+                    p_home = p
+                    p_away = 1.0 - p_home
+                    edge_home = p_home - _implied_prob(int(row['moneyline_home']))
+                    edge_away = p_away - _implied_prob(int(row['moneyline_away']))
+                    side = 'home' if edge_home >= edge_away else 'away'
+                    edge = edge_home if side == 'home' else edge_away
+                    confidences.append(max(p_home, p_away))
+                    edges.append(edge)
+                    odds.append(int(row['moneyline_home']) if side == 'home' else int(row['moneyline_away']))
+                    home_won = int(row['y'])
+                    pick_correct.append(1 if ((side == 'home' and home_won == 1) or (side == 'away' and home_won == 0)) else 0)
+                p_policy = policy['moneyline']
+            else:
+                for p, row in zip(probs, test_rows[market]):
+                    side = 'over' if p >= 0.5 else 'under'
+                    edges.append(abs(p - 0.5))
+                    confidences.append(max(p, 1 - p))
+                    odds.append(-110)
+                    over_hit = int(row['y'])
+                    pick_correct.append(1 if ((side == 'over' and over_hit == 1) or (side == 'under' and over_hit == 0)) else 0)
+                p_policy = policy['total_ou']
+
+            bet_idx = [
+                i for i, (e, c) in enumerate(zip(edges, confidences))
+                if _decide_market_action(
+                    edge=float(e),
+                    confidence=float(c),
+                    min_edge=float(p_policy['min_edge']),
+                    min_confidence=float(p_policy['min_confidence']),
+                )[0] == 'bet'
+            ]
+            units_profit = sum(_profit_per_unit(int(odds[i]), bool(pick_correct[i])) for i in bet_idx)
+            market_fold_metrics[market].append({
+                'train_start': train_start.isoformat(),
+                'test_start': test_start.isoformat(),
+                'test_end': test_end.isoformat(),
+                'rows': len(y_true),
+                'accuracy': round(float(accuracy_score(y_true, y_pred)), 4),
+                'brier': round(float(brier_score_loss(y_true, probs)), 4),
+                'logloss': round(float(log_loss(y_true, probs)), 4),
+                'recommended_bets': len(bet_idx),
+                'roi_per_bet': round(float(units_profit / len(bet_idx)), 4) if bet_idx else None,
+                'avg_edge': round(float(sum(edges) / len(edges)), 4) if edges else None,
+                'bins': _calibration_bins(list(zip(probs, y_true)), bins=bins),
+            })
+
+    def _aggregate(rows: list[dict]) -> dict:
+        if not rows:
+            return {'error': 'no_fold_metrics'}
+        metric_keys = ('accuracy', 'brier', 'logloss')
+        avg = {f'avg_{k}': round(sum(float(r[k]) for r in rows) / len(rows), 4) for k in metric_keys}
+        roi_values = [float(r['roi_per_bet']) for r in rows if r.get('roi_per_bet') is not None]
+        avg['avg_roi_per_bet'] = round(sum(roi_values) / len(roi_values), 4) if roi_values else None
+        avg['folds'] = len(rows)
+        return avg
+
+    return {
+        'window_days': int(days),
+        'train_days': int(train_days),
+        'test_days': int(test_days),
+        'step_days': int(step_days),
+        'rows_scanned': len(snaps),
+        'policy_used': policy,
+        'markets': {
+            'moneyline': {
+                'summary': _aggregate(market_fold_metrics['moneyline']),
+                'folds': market_fold_metrics['moneyline'],
+            },
+            'total_ou': {
+                'summary': _aggregate(market_fold_metrics['total_ou']),
+                'folds': market_fold_metrics['total_ou'],
+            },
+        },
+    }
