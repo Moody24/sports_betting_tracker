@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+import os
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -99,3 +100,51 @@ class TestMarketRecommender(BaseTestCase):
         self.assertIn("g1", recs)
         self.assertEqual(recs["g1"]["moneyline"]["side"], "home")
         self.assertEqual(recs["g1"]["total"]["side"], "under")
+
+    def test_recommend_market_sides_respects_strict_env_gates(self):
+        from app.services.market_recommender import recommend_market_sides
+
+        class _FakeModel:
+            def __init__(self, p):
+                self._p = p
+
+            def predict_proba(self, _x):
+                return [[1 - self._p, self._p]]
+
+        strict_env = {
+            "MARKET_REC_MIN_EDGE_ML": "0.20",
+            "MARKET_REC_MIN_CONF_ML": "0.80",
+            "MARKET_REC_MIN_EDGE_TOTAL": "0.20",
+            "MARKET_REC_MIN_CONF_TOTAL": "0.80",
+        }
+        with self.app.app_context():
+            with patch('app.services.market_recommender._load_active_model') as mock_loader:
+                with patch.dict(os.environ, strict_env, clear=False):
+                    mock_loader.side_effect = [
+                        (_FakeModel(0.62), SimpleNamespace(version='ml_v1')),
+                        (_FakeModel(0.41), SimpleNamespace(version='tot_v1')),
+                    ]
+                    recs = recommend_market_sides([{
+                        "espn_id": "g1",
+                        "over_under_line": 219.5,
+                        "moneyline_home": -145,
+                        "moneyline_away": 122,
+                    }])
+
+        self.assertEqual(recs["g1"]["moneyline"]["action"], "pass")
+        self.assertEqual(recs["g1"]["total"]["action"], "pass")
+
+    def test_evaluate_market_models_returns_metrics(self):
+        from app.services.market_recommender import evaluate_market_models, train_market_models
+
+        self._seed_snapshots(90)
+        with self.app.app_context():
+            train_market_models(min_samples=40)
+            report = evaluate_market_models(days=365, bins=5)
+
+        self.assertNotIn("error", report)
+        self.assertIn("markets", report)
+        self.assertIn("moneyline", report["markets"])
+        self.assertIn("total_ou", report["markets"])
+        self.assertIn("accuracy", report["markets"]["moneyline"])
+        self.assertIn("brier", report["markets"]["total_ou"])

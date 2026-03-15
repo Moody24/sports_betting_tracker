@@ -3029,6 +3029,55 @@ class TestCLI(BaseTestCase):
         self.assertIn('=== Calibration Bins ===', result.output)
         self.assertIn('=== Verdict ===', result.output)
 
+    @patch('app.services.market_recommender.evaluate_market_models')
+    def test_market_model_report(self, mock_report):
+        mock_report.return_value = {
+            'rows_scanned': 180,
+            'markets': {
+                'moneyline': {
+                    'rows': 160,
+                    'accuracy': 0.61,
+                    'brier': 0.23,
+                    'logloss': 0.66,
+                    'avg_pred': 0.55,
+                    'actual_rate': 0.53,
+                    'overconfidence_gap': 0.02,
+                    'recommended_bets': 44,
+                    'recommended_bet_rate': 0.275,
+                    'recommended_hit_rate': 0.59,
+                    'train_val_accuracy': 0.64,
+                    'accuracy_delta': -0.03,
+                    'train_val_logloss': 0.62,
+                    'logloss_delta': 0.04,
+                    'bins': [{'range': '0.40-0.60', 'count': 40, 'avg_pred': 0.53, 'win_rate': 0.52, 'gap': 0.01}],
+                },
+                'total_ou': {
+                    'rows': 150,
+                    'accuracy': 0.58,
+                    'brier': 0.24,
+                    'logloss': 0.68,
+                    'avg_pred': 0.54,
+                    'actual_rate': 0.5,
+                    'overconfidence_gap': 0.04,
+                    'recommended_bets': 31,
+                    'recommended_bet_rate': 0.2067,
+                    'recommended_hit_rate': 0.55,
+                    'train_val_accuracy': 0.6,
+                    'accuracy_delta': -0.02,
+                    'train_val_logloss': 0.65,
+                    'logloss_delta': 0.03,
+                    'bins': [{'range': '0.60-0.80', 'count': 30, 'avg_pred': 0.64, 'win_rate': 0.6, 'gap': 0.04}],
+                },
+            },
+        }
+        runner = self._runner()
+        result = runner.invoke(args=['market-model-report', '--days', '90', '--bins', '5'])
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn('=== Market Model Report', result.output)
+        self.assertIn('--- moneyline ---', result.output)
+        self.assertIn('--- total_ou ---', result.output)
+        self.assertIn('=== Verdict ===', result.output)
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # health/readiness endpoint tests

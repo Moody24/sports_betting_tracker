@@ -168,6 +168,88 @@ def register_cli(app):
         result = train_market_models(min_samples=min_samples)
         click.echo(f'Market model train result: {result}')
 
+    @app.cli.command('market-model-report')
+    @click.option('--days', type=int, default=60, show_default=True, help='Rolling evaluation window in days.')
+    @click.option('--bins', type=int, default=5, show_default=True, help='Calibration bins (2-10).')
+    @click.option(
+        '--drift-threshold',
+        type=float,
+        default=0.05,
+        show_default=True,
+        help='Absolute accuracy delta threshold to flag drift.',
+    )
+    def cli_market_model_report(days, bins, drift_threshold):
+        """Evaluate market models (moneyline + total O/U) on recent finals."""
+        from app.services.market_recommender import evaluate_market_models
+
+        report = evaluate_market_models(days=days, bins=bins)
+        click.echo(f'=== Market Model Report (last {days} days) ===')
+        if report.get('error'):
+            click.echo(f"Error: {report['error']}")
+            click.echo(f"Rows scanned: {report.get('rows_scanned', 0)}")
+            return
+
+        click.echo(f"Rows scanned: {report.get('rows_scanned', 0)}")
+        markets = report.get('markets', {})
+        if not markets:
+            click.echo('No market metrics available.')
+            return
+
+        drift_flags = []
+        for market_name in ('moneyline', 'total_ou'):
+            m = markets.get(market_name)
+            if not m:
+                continue
+            click.echo(f'\n--- {market_name} ---')
+            if m.get('error'):
+                click.echo(f"Error: {m['error']}")
+                continue
+            click.echo(
+                f"Rows={m.get('rows', 0)} | "
+                f"Accuracy={m.get('accuracy')} | "
+                f"Brier={m.get('brier')} | "
+                f"LogLoss={m.get('logloss')}"
+            )
+            click.echo(
+                f"AvgPred={m.get('avg_pred')} vs Actual={m.get('actual_rate')} | "
+                f"Gap={m.get('overconfidence_gap')}"
+            )
+            click.echo(
+                f"Recommended bets={m.get('recommended_bets')} "
+                f"({m.get('recommended_bet_rate')}) | "
+                f"Recommended hit rate={m.get('recommended_hit_rate')}"
+            )
+            click.echo(
+                f"Train val_acc={m.get('train_val_accuracy')} | "
+                f"Delta={m.get('accuracy_delta')} | "
+                f"Train logloss={m.get('train_val_logloss')} | "
+                f"Logloss delta={m.get('logloss_delta')}"
+            )
+
+            acc_delta = m.get('accuracy_delta')
+            if acc_delta is not None and abs(float(acc_delta)) > drift_threshold:
+                drift_flags.append(
+                    f"{market_name}: accuracy delta {acc_delta:+.3f} exceeds {drift_threshold:.3f}",
+                )
+
+            click.echo('Calibration bins:')
+            for b in m.get('bins', []):
+                if b.get('count', 0) == 0:
+                    click.echo(f"  - {b.get('range')}: count=0")
+                    continue
+                click.echo(
+                    f"  - {b.get('range')}: count={b.get('count')}, "
+                    f"pred={b.get('avg_pred')}, actual={b.get('win_rate')}, gap={b.get('gap')}"
+                )
+
+        click.echo('\n=== Verdict ===')
+        if drift_flags:
+            click.echo('WARN: market drift indicators detected.')
+            for line in drift_flags:
+                click.echo(f'- {line}')
+        else:
+            click.echo('OK: no market drift beyond threshold.')
+
     @app.cli.command('generate-auto-picks')
     def cli_generate_auto_picks():
         from app.services.scheduler import generate_daily_auto_picks

@@ -19,6 +19,75 @@ MODEL_NAME_TOTAL = 'market_total_ou_nba'
 FEATURES = ['over_under_line', 'moneyline_home', 'moneyline_away', 'ml_gap_abs', 'implied_home']
 
 
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name, '').strip()
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        logger.warning("Invalid %s=%r; using default %.3f", name, raw, default)
+        return default
+
+
+def _decide_market_action(edge: float, confidence: float, min_edge: float, min_confidence: float) -> tuple[str, str]:
+    if edge < min_edge and confidence < min_confidence:
+        return 'pass', 'edge_and_confidence_below_threshold'
+    if edge < min_edge:
+        return 'pass', 'edge_below_threshold'
+    if confidence < min_confidence:
+        return 'pass', 'confidence_below_threshold'
+    return 'bet', 'meets_thresholds'
+
+
+def _calibration_bins(rows: list[tuple[float, int]], bins: int) -> list[dict]:
+    if bins < 2:
+        bins = 2
+    if bins > 10:
+        bins = 10
+    out = []
+    for idx in range(bins):
+        low = idx / bins
+        high = (idx + 1) / bins
+        bucket = []
+        for prob, outcome in rows:
+            if idx == bins - 1:
+                in_bin = low <= prob <= high
+            else:
+                in_bin = low <= prob < high
+            if in_bin:
+                bucket.append((prob, outcome))
+        if not bucket:
+            out.append({'range': f'{low:.2f}-{high:.2f}', 'count': 0})
+            continue
+        avg_pred = sum(p for p, _ in bucket) / len(bucket)
+        win_rate = sum(y for _, y in bucket) / len(bucket)
+        out.append({
+            'range': f'{low:.2f}-{high:.2f}',
+            'count': len(bucket),
+            'avg_pred': round(avg_pred, 4),
+            'win_rate': round(win_rate, 4),
+            'gap': round(avg_pred - win_rate, 4),
+        })
+    return out
+
+
+def _metadata_logloss(meta: ModelMetadata | None) -> float | None:
+    if not meta or not meta.metadata_json:
+        return None
+    try:
+        payload = json.loads(meta.metadata_json)
+    except (TypeError, ValueError):
+        return None
+    value = payload.get('logloss')
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _implied_prob(american_odds: int | None) -> float:
     if american_odds is None:
         return 0.5
@@ -143,6 +212,11 @@ def recommend_market_sides(games: list[dict]) -> dict[str, dict]:
     if not ml_model and not tot_model:
         return {}
 
+    min_ml_edge = _env_float('MARKET_REC_MIN_EDGE_ML', 0.03)
+    min_ml_conf = _env_float('MARKET_REC_MIN_CONF_ML', 0.55)
+    min_total_edge = _env_float('MARKET_REC_MIN_EDGE_TOTAL', 0.06)
+    min_total_conf = _env_float('MARKET_REC_MIN_CONF_TOTAL', 0.56)
+
     out: dict[str, dict] = {}
     for g in games:
         espn_id = g.get('espn_id')
@@ -162,30 +236,158 @@ def recommend_market_sides(games: list[dict]) -> dict[str, dict]:
             edge_away = p_away - _implied_prob(int(ml_a))
             side = 'home' if edge_home >= edge_away else 'away'
             edge = edge_home if side == 'home' else edge_away
+            confidence = max(p_home, p_away)
+            action, reason = _decide_market_action(
+                edge=edge,
+                confidence=confidence,
+                min_edge=min_ml_edge,
+                min_confidence=min_ml_conf,
+            )
             entry['moneyline'] = {
                 'side': side,
                 'edge': round(edge, 3),
-                'confidence': round(max(p_home, p_away), 3),
-                'action': 'bet' if edge >= 0.03 else 'pass',
+                'confidence': round(confidence, 3),
+                'action': action,
+                'action_reason': reason,
                 'model_version': ml_meta.version if ml_meta else None,
             }
         if tot_model:
             p_over = float(tot_model.predict_proba(row)[0][1])
-            if p_over >= 0.56:
-                action = 'bet'
-                side = 'over'
-            elif p_over <= 0.44:
-                action = 'bet'
-                side = 'under'
-            else:
-                action = 'pass'
-                side = 'over' if p_over >= 0.5 else 'under'
+            side = 'over' if p_over >= 0.5 else 'under'
+            confidence = max(p_over, 1.0 - p_over)
+            edge = abs(p_over - 0.5)
+            action, reason = _decide_market_action(
+                edge=edge,
+                confidence=confidence,
+                min_edge=min_total_edge,
+                min_confidence=min_total_conf,
+            )
             entry['total'] = {
                 'side': side,
-                'confidence': round(max(p_over, 1.0 - p_over), 3),
+                'confidence': round(confidence, 3),
                 'action': action,
-                'edge': round(abs(p_over - 0.5), 3),
+                'action_reason': reason,
+                'edge': round(edge, 3),
                 'model_version': tot_meta.version if tot_meta else None,
             }
         out[espn_id] = entry
     return out
+
+
+def evaluate_market_models(days: int = 60, bins: int = 5) -> dict:
+    """Evaluate active moneyline/total models on recent final snapshots."""
+    from sklearn.metrics import accuracy_score, brier_score_loss, log_loss
+
+    cutoff = date_type.today().toordinal() - max(1, int(days))
+    snaps = (
+        GameSnapshot.query
+        .filter(GameSnapshot.is_final.is_(True))
+        .filter(GameSnapshot.home_score.isnot(None))
+        .filter(GameSnapshot.away_score.isnot(None))
+        .filter(GameSnapshot.over_under_line.isnot(None))
+        .filter(GameSnapshot.moneyline_home.isnot(None))
+        .filter(GameSnapshot.moneyline_away.isnot(None))
+        .all()
+    )
+    snaps = [s for s in snaps if s.game_date and s.game_date.toordinal() >= cutoff]
+
+    ml_model, ml_meta = _load_active_model(MODEL_NAME_ML)
+    tot_model, tot_meta = _load_active_model(MODEL_NAME_TOTAL)
+    if not ml_model and not tot_model:
+        return {'error': 'no_active_market_models', 'rows_scanned': len(snaps)}
+
+    result = {
+        'window_days': int(days),
+        'rows_scanned': len(snaps),
+        'as_of': datetime.now(timezone.utc).isoformat(),
+        'markets': {},
+    }
+
+    def _evaluate(rows: list[dict], meta: ModelMetadata | None) -> dict:
+        if not rows:
+            return {'error': 'no_rows'}
+        y_true = [int(r['y']) for r in rows]
+        y_prob = [float(r['p']) for r in rows]
+        y_pred = [1 if p >= 0.5 else 0 for p in y_prob]
+        picks = [r for r in rows if r['action'] == 'bet']
+        pick_hits = sum(1 for r in picks if int(r['pick_correct']) == 1)
+
+        payload = {
+            'rows': len(rows),
+            'accuracy': round(float(accuracy_score(y_true, y_pred)), 4),
+            'brier': round(float(brier_score_loss(y_true, y_prob)), 4),
+            'avg_pred': round(float(sum(y_prob) / len(y_prob)), 4),
+            'actual_rate': round(float(sum(y_true) / len(y_true)), 4),
+            'overconfidence_gap': round(float((sum(y_prob) / len(y_prob)) - (sum(y_true) / len(y_true))), 4),
+            'recommended_bets': len(picks),
+            'recommended_bet_rate': round(float(len(picks) / len(rows)), 4),
+            'recommended_hit_rate': round(float(pick_hits / len(picks)), 4) if picks else None,
+            'bins': _calibration_bins([(r['p'], r['y']) for r in rows], bins=bins),
+            'model_version': meta.version if meta else None,
+        }
+        try:
+            payload['logloss'] = round(float(log_loss(y_true, y_prob)), 4)
+        except ValueError:
+            payload['logloss'] = None
+
+        train_acc = float(meta.val_accuracy) if meta and meta.val_accuracy is not None else None
+        train_ll = _metadata_logloss(meta)
+        payload['train_val_accuracy'] = round(train_acc, 4) if train_acc is not None else None
+        payload['train_val_logloss'] = round(train_ll, 4) if train_ll is not None else None
+        payload['accuracy_delta'] = (
+            round(payload['accuracy'] - train_acc, 4) if train_acc is not None else None
+        )
+        payload['logloss_delta'] = (
+            round(payload['logloss'] - train_ll, 4)
+            if payload.get('logloss') is not None and train_ll is not None else None
+        )
+        return payload
+
+    if ml_model:
+        min_ml_edge = _env_float('MARKET_REC_MIN_EDGE_ML', 0.03)
+        min_ml_conf = _env_float('MARKET_REC_MIN_CONF_ML', 0.55)
+        ml_rows = []
+        for s in snaps:
+            if s.home_score == s.away_score:
+                continue
+            row = [_features_for_snapshot(s)]
+            p_home = float(ml_model.predict_proba(row)[0][1])
+            p_away = 1.0 - p_home
+            edge_home = p_home - _implied_prob(int(s.moneyline_home))
+            edge_away = p_away - _implied_prob(int(s.moneyline_away))
+            side = 'home' if edge_home >= edge_away else 'away'
+            confidence = max(p_home, p_away)
+            edge = edge_home if side == 'home' else edge_away
+            action, _reason = _decide_market_action(edge, confidence, min_ml_edge, min_ml_conf)
+            home_won = 1 if (s.home_score or 0) > (s.away_score or 0) else 0
+            pick_correct = (
+                (side == 'home' and home_won == 1)
+                or (side == 'away' and home_won == 0)
+            )
+            ml_rows.append({'y': home_won, 'p': p_home, 'action': action, 'pick_correct': int(pick_correct)})
+        result['markets']['moneyline'] = _evaluate(ml_rows, ml_meta)
+
+    if tot_model:
+        min_total_edge = _env_float('MARKET_REC_MIN_EDGE_TOTAL', 0.06)
+        min_total_conf = _env_float('MARKET_REC_MIN_CONF_TOTAL', 0.56)
+        tot_rows = []
+        for s in snaps:
+            total_score = (s.home_score or 0) + (s.away_score or 0)
+            line = float(s.over_under_line or 0.0)
+            if total_score == line:
+                continue
+            row = [_features_for_snapshot(s)]
+            p_over = float(tot_model.predict_proba(row)[0][1])
+            confidence = max(p_over, 1.0 - p_over)
+            edge = abs(p_over - 0.5)
+            side = 'over' if p_over >= 0.5 else 'under'
+            action, _reason = _decide_market_action(edge, confidence, min_total_edge, min_total_conf)
+            over_hit = 1 if total_score > line else 0
+            pick_correct = (
+                (side == 'over' and over_hit == 1)
+                or (side == 'under' and over_hit == 0)
+            )
+            tot_rows.append({'y': over_hit, 'p': p_over, 'action': action, 'pick_correct': int(pick_correct)})
+        result['markets']['total_ou'] = _evaluate(tot_rows, tot_meta)
+
+    return result
