@@ -49,18 +49,23 @@
             </div>
 
             <div class="d-flex align-items-center gap-2 mt-3">
-              <button type="button" id="ub-load-props-btn" class="btn btn-sm btn-outline-secondary">
-                <i class="bi bi-cloud-download me-1"></i>Load Game Props
-              </button>
-              <input type="text" id="ub-props-search" class="form-control form-control-sm d-none"
-                     placeholder="Filter props…" autocomplete="off">
+              <div class="btn-group btn-group-sm" role="group" aria-label="Prop filters">
+                <button type="button" id="ub-filter-all" class="btn btn-outline-secondary active">All</button>
+                <button type="button" id="ub-filter-pts" class="btn btn-outline-secondary">PTS</button>
+                <button type="button" id="ub-filter-reb" class="btn btn-outline-secondary">REB</button>
+                <button type="button" id="ub-filter-ast" class="btn btn-outline-secondary">AST</button>
+                <button type="button" id="ub-filter-3pm" class="btn btn-outline-secondary">3PM</button>
+              </div>
             </div>
-            <div id="ub-props-status" class="form-text">Props not loaded yet.</div>
+            <div id="ub-props-status" class="form-text">Pick a game. Props auto-load for that matchup.</div>
             <div id="ub-props-list" class="bb-prop-list mt-2"></div>
           </div>
 
           <div>
-            <div class="bb-form-section-label"><i class="bi bi-receipt"></i> Slip</div>
+            <div class="d-flex align-items-center justify-content-between">
+              <div class="bb-form-section-label mb-0"><i class="bi bi-receipt"></i> Slip</div>
+              <span id="ub-mode-badge" class="badge text-bg-secondary">No picks</span>
+            </div>
             <div id="ub-slip-list" class="bb-legs-list">
               <div class="bb-legs-empty">
                 <i class="bi bi-plus-circle bb-legs-empty-icon"></i>
@@ -82,12 +87,23 @@
                   <i class="bi bi-check-lg me-1"></i>Submit Slip
                 </button>
               </div>
+              <div class="col-12 d-grid">
+                <button type="button" id="ub-clear-slip-btn" class="btn btn-outline-secondary btn-sm">
+                  Clear Slip
+                </button>
+              </div>
             </div>
           </div>
         </div>
       </div>
     </div>
 
+    <details class="bb-advanced mt-3">
+      <summary class="bb-advanced-toggle">
+        <i class="bi bi-sliders"></i> Legacy Builder (Advanced)
+        <i class="bi bi-chevron-down bb-chevron ms-auto"></i>
+      </summary>
+      <div class="bb-advanced-body mt-2">
     {# ── Mode selector ── #}
     <div class="bb-mode-bar mb-3" role="tablist" aria-label="Bet builder mode">
       <button class="bb-mode-btn active" id="bb-tab-single" data-bb-tab="single" type="button" role="tab" aria-controls="bb-panel-single" aria-selected="{{ 'true' if current_tab == 'single' else 'false' }}" tabindex="{{ '0' if current_tab == 'single' else '-1' }}">
@@ -741,6 +757,8 @@
       </div>
     </div>
 
+      </div>
+    </details>
   </div>{# end bb-main #}
 
   {# ─── Ticket summary sidebar ───────────────────────────────────── #}

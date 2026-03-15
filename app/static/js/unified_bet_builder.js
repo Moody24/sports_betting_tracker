@@ -11,19 +11,26 @@
   var awayMlBtn = document.getElementById('ub-away-ml-btn');
   var overBtn = document.getElementById('ub-over-btn');
   var underBtn = document.getElementById('ub-under-btn');
-  var loadPropsBtn = document.getElementById('ub-load-props-btn');
-  var propsSearch = document.getElementById('ub-props-search');
+  var filterAllBtn = document.getElementById('ub-filter-all');
+  var filterPtsBtn = document.getElementById('ub-filter-pts');
+  var filterRebBtn = document.getElementById('ub-filter-reb');
+  var filterAstBtn = document.getElementById('ub-filter-ast');
+  var filter3pmBtn = document.getElementById('ub-filter-3pm');
   var propsStatus = document.getElementById('ub-props-status');
   var propsList = document.getElementById('ub-props-list');
   var slipList = document.getElementById('ub-slip-list');
+  var modeBadge = document.getElementById('ub-mode-badge');
   var stakeEl = document.getElementById('ub-stake');
   var unitsEl = document.getElementById('ub-units');
   var submitBtn = document.getElementById('ub-submit-btn');
+  var clearSlipBtn = document.getElementById('ub-clear-slip-btn');
   var feedback = document.getElementById('ub-feedback');
 
   var games = [];
   var selectedGame = null;
   var allProps = null;
+  var propsPromise = null;
+  var propFilter = 'all';
   var slip = [];
 
   function fmtOdds(v) {
@@ -63,6 +70,37 @@
     if (!btn) return;
     btn.disabled = !enabled;
     if (label) btn.textContent = label;
+  }
+
+  function setFilter(next) {
+    propFilter = next;
+    [
+      [filterAllBtn, 'all'],
+      [filterPtsBtn, 'player_points'],
+      [filterRebBtn, 'player_rebounds'],
+      [filterAstBtn, 'player_assists'],
+      [filter3pmBtn, 'player_threes'],
+    ].forEach(function (pair) {
+      if (!pair[0]) return;
+      pair[0].classList.toggle('active', pair[1] === propFilter);
+    });
+    renderProps();
+  }
+
+  function updateModeBadge() {
+    if (!modeBadge) return;
+    if (!slip.length) {
+      modeBadge.className = 'badge text-bg-secondary';
+      modeBadge.textContent = 'No picks';
+      return;
+    }
+    if (slip.length === 1) {
+      modeBadge.className = 'badge text-bg-info';
+      modeBadge.textContent = 'Single';
+      return;
+    }
+    modeBadge.className = 'badge text-bg-success';
+    modeBadge.textContent = 'Parlay · ' + slip.length + ' legs';
   }
 
   function renderMarketButtons() {
@@ -112,6 +150,12 @@
     renderSlip();
   }
 
+  function clearSlip() {
+    slip = [];
+    renderSlip();
+    clearFeedback();
+  }
+
   function renderSlip() {
     if (!slipList) return;
     while (slipList.firstChild) slipList.removeChild(slipList.firstChild);
@@ -124,6 +168,7 @@
       p.textContent = 'No selections yet.';
       empty.appendChild(p);
       slipList.appendChild(empty);
+      updateModeBadge();
       return;
     }
 
@@ -178,20 +223,32 @@
       row.appendChild(remove);
       slipList.appendChild(row);
     });
+
+    updateModeBadge();
+  }
+
+  function isSameGameProp(p) {
+    if (!selectedGame) return false;
+    if ((p.game_id || '') && (selectedGame.game_id || '')) {
+      return String(p.game_id) === String(selectedGame.game_id);
+    }
+    var candidate = {
+      team_a: p.team_a || '',
+      team_b: p.team_b || '',
+      match_date: p.match_date || '',
+      game_id: p.game_id || '',
+    };
+    return gameKey(candidate) === gameKey(selectedGame);
   }
 
   function propsForSelectedGame() {
     if (!Array.isArray(allProps) || !selectedGame) return [];
-    var gk = gameKey(selectedGame);
-    return allProps.filter(function (p) {
-      var candidate = {
-        team_a: p.team_a || '',
-        team_b: p.team_b || '',
-        match_date: p.match_date || '',
-        game_id: p.game_id || '',
-      };
-      return gameKey(candidate) === gk;
-    });
+    return allProps.filter(isSameGameProp);
+  }
+
+  function applyPropFilter(rows) {
+    if (propFilter === 'all') return rows;
+    return rows.filter(function (p) { return (p.market || '') === propFilter; });
   }
 
   function renderProps() {
@@ -203,21 +260,14 @@
       return;
     }
     if (!Array.isArray(allProps)) {
-      propsStatus.textContent = 'Props not loaded yet.';
+      propsStatus.textContent = 'Loading props for selected game...';
       return;
     }
 
-    var search = ((propsSearch || {}).value || '').toLowerCase().trim();
-    var rows = propsForSelectedGame();
-    if (search) {
-      rows = rows.filter(function (p) {
-        var mkt = (window.MARKET_LABELS && window.MARKET_LABELS[p.market]) || p.market || '';
-        return (p.player || '').toLowerCase().indexOf(search) >= 0 ||
-          mkt.toLowerCase().indexOf(search) >= 0;
-      });
-    }
-
-    propsStatus.textContent = rows.length ? ('Showing ' + rows.length + ' props for selected game.') : 'No props available for selected game.';
+    var rows = applyPropFilter(propsForSelectedGame());
+    propsStatus.textContent = rows.length
+      ? ('Showing ' + rows.length + ' ' + (propFilter === 'all' ? 'props' : propFilter.replace('player_', '')) + ' picks for this game.')
+      : 'No props available for this filter.';
 
     rows.forEach(function (p) {
       var card = document.createElement('div');
@@ -380,6 +430,9 @@
     });
     renderMarketButtons();
     renderProps();
+    ensurePropsLoaded().then(function () {
+      renderProps();
+    });
   }
 
   function loadGames() {
@@ -393,26 +446,26 @@
       });
   }
 
-  function loadProps() {
-    propsStatus.textContent = 'Loading props...';
-    loadPropsBtn.disabled = true;
-    loadPropsBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Loading...';
+  function ensurePropsLoaded() {
+    if (Array.isArray(allProps)) return Promise.resolve(allProps);
+    if (propsPromise) return propsPromise;
 
-    fetch(ALL_PROPS_URL)
+    propsStatus.textContent = 'Loading props...';
+    propsPromise = fetch(ALL_PROPS_URL)
       .then(function (r) { return r.json(); })
       .then(function (data) {
         allProps = Array.isArray(data) ? data : [];
-        propsSearch.classList.remove('d-none');
-        renderProps();
-        loadPropsBtn.disabled = false;
-        loadPropsBtn.innerHTML = '<i class="bi bi-arrow-repeat me-1"></i>Reload Props';
+        propsPromise = null;
+        return allProps;
       })
       .catch(function () {
         allProps = [];
         propsStatus.textContent = 'Failed to load props.';
-        loadPropsBtn.disabled = false;
-        loadPropsBtn.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>Retry';
+        propsPromise = null;
+        return allProps;
       });
+
+    return propsPromise;
   }
 
   if (gamePicker) {
@@ -424,23 +477,30 @@
   if (awayMlBtn) awayMlBtn.addEventListener('click', function () { addMoneyline(false); });
   if (overBtn) overBtn.addEventListener('click', function () { addTotal('over'); });
   if (underBtn) underBtn.addEventListener('click', function () { addTotal('under'); });
-  if (loadPropsBtn) loadPropsBtn.addEventListener('click', loadProps);
-  if (propsSearch) {
-    propsSearch.addEventListener('input', function () {
-      renderProps();
-    });
-  }
+
+  if (filterAllBtn) filterAllBtn.addEventListener('click', function () { setFilter('all'); });
+  if (filterPtsBtn) filterPtsBtn.addEventListener('click', function () { setFilter('player_points'); });
+  if (filterRebBtn) filterRebBtn.addEventListener('click', function () { setFilter('player_rebounds'); });
+  if (filterAstBtn) filterAstBtn.addEventListener('click', function () { setFilter('player_assists'); });
+  if (filter3pmBtn) filter3pmBtn.addEventListener('click', function () { setFilter('player_threes'); });
+
   if (submitBtn) submitBtn.addEventListener('click', submitSlip);
+  if (clearSlipBtn) clearSlipBtn.addEventListener('click', clearSlip);
 
   renderMarketButtons();
   renderSlip();
 
   loadGames().then(function () {
     if (games.length) {
-      // Keep user context by preselecting first available game.
       selectedGame = games[0];
       if (gamePicker && !gamePicker.value) gamePicker.value = selectedGame.label || '';
       renderMarketButtons();
+      renderProps();
+      ensurePropsLoaded().then(function () {
+        renderProps();
+      });
+      return;
     }
+    propsStatus.textContent = 'No games available right now.';
   });
 })();
