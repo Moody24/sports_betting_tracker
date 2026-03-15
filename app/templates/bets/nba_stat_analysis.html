@@ -742,6 +742,9 @@ const SA_PROP_TO_COL = PROP_TO_STAT_COL;
         prop_type: currentProp.prop_type || 'player_points',
         prop_line: currentProp.line,
         bet_type: betType,
+        team_a: currentProp.away_team || currentProp.team_a || '',
+        team_b: currentProp.home_team || currentProp.team_b || '',
+        match_date: currentProp.match_date || '',
         game_id: currentProp.game_id || '',
       });
     }
@@ -753,6 +756,9 @@ const SA_PROP_TO_COL = PROP_TO_STAT_COL;
       prop_type: currentProp.prop_type || 'player_points',
       prop_line: String(currentProp.line || ''),
       bet_type: betType,
+      team_a: currentProp.away_team || currentProp.team_a || '',
+      team_b: currentProp.home_team || currentProp.team_b || '',
+      match_date: currentProp.match_date || '',
       game_id: currentProp.game_id || '',
     });
     window.location.href = '{{ url_for("bet.place_bet") }}?' + qp.toString();
