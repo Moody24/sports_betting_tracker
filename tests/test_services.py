@@ -3271,6 +3271,117 @@ class TestPickQualityModelCalibration(BaseTestCase):
             self.assertIn('win_probability', result)
             self.assertNotEqual(result['recommendation'], 'no_model')
 
+    def test_model_runtime_probe_no_active_model(self):
+        """Probe reports no_active_model when metadata is absent."""
+        from app.services import pick_quality_model
+
+        class _FakeXGB:
+            def load_model(self, path):
+                return None
+
+        with patch.dict(sys.modules, {'xgboost': SimpleNamespace(XGBClassifier=_FakeXGB)}):
+            with self.app.app_context():
+                probe = pick_quality_model.get_model_runtime_probe()
+        self.assertFalse(probe['active_model_found'])
+        self.assertFalse(probe['model_loadable'])
+        self.assertEqual(probe['reason'], 'no_active_model')
+
+    def test_model_runtime_probe_artifact_unavailable(self):
+        """Probe reports artifact_unavailable when no configured/fallback file exists."""
+        from app.services import pick_quality_model
+
+        class _FakeXGB:
+            def load_model(self, path):
+                return None
+
+        with self.app.app_context():
+            db.session.add(ModelMetadata(
+                model_name='pick_quality_nba',
+                model_type='xgboost_classifier',
+                version='probe_v1',
+                file_path='s3://bucket/model.pkl',
+                training_date=datetime.now(timezone.utc),
+                training_samples=200,
+                val_accuracy=0.6,
+                is_active=True,
+                metadata_json='{"feature_names":["projected_edge"]}',
+            ))
+            db.session.commit()
+
+            with patch.dict(sys.modules, {'xgboost': SimpleNamespace(XGBClassifier=_FakeXGB)}):
+                with patch('app.services.pick_quality_model.materialize_model_artifact', return_value=None):
+                    with patch('app.services.pick_quality_model._find_local_model_fallback', return_value=None):
+                        probe = pick_quality_model.get_model_runtime_probe()
+
+        self.assertTrue(probe['active_model_found'])
+        self.assertFalse(probe['model_loadable'])
+        self.assertEqual(probe['reason'], 'artifact_unavailable')
+
+    def test_model_runtime_probe_loadable_via_configured_pkl(self):
+        """Probe marks model loadable when configured .pkl artifact can be joblib-loaded."""
+        from app.services import pick_quality_model
+
+        class _FakeXGB:
+            def load_model(self, path):
+                return None
+
+        with self.app.app_context():
+            db.session.add(ModelMetadata(
+                model_name='pick_quality_nba',
+                model_type='xgboost_classifier',
+                version='probe_v2',
+                file_path='s3://bucket/model.pkl',
+                training_date=datetime.now(timezone.utc),
+                training_samples=200,
+                val_accuracy=0.6,
+                is_active=True,
+                metadata_json='{"feature_names":["projected_edge"]}',
+            ))
+            db.session.commit()
+
+            with patch.dict(sys.modules, {'xgboost': SimpleNamespace(XGBClassifier=_FakeXGB)}):
+                with patch('app.services.pick_quality_model.materialize_model_artifact',
+                           return_value='/tmp/pick_quality_nba_2026-03-15.pkl'):
+                    with patch('joblib.load', return_value=object()):
+                        probe = pick_quality_model.get_model_runtime_probe()
+
+        self.assertTrue(probe['active_model_found'])
+        self.assertTrue(probe['model_loadable'])
+        self.assertEqual(probe['artifact_source'], 'configured_path')
+        self.assertEqual(probe['reason'], 'ok')
+
+    def test_model_runtime_probe_reports_load_error(self):
+        """Probe returns load_error when artifact exists but fails to deserialize."""
+        from app.services import pick_quality_model
+
+        class _FakeXGB:
+            def load_model(self, path):
+                return None
+
+        with self.app.app_context():
+            db.session.add(ModelMetadata(
+                model_name='pick_quality_nba',
+                model_type='xgboost_classifier',
+                version='probe_v3',
+                file_path='s3://bucket/model.pkl',
+                training_date=datetime.now(timezone.utc),
+                training_samples=200,
+                val_accuracy=0.6,
+                is_active=True,
+                metadata_json='{"feature_names":["projected_edge"]}',
+            ))
+            db.session.commit()
+
+            with patch.dict(sys.modules, {'xgboost': SimpleNamespace(XGBClassifier=_FakeXGB)}):
+                with patch('app.services.pick_quality_model.materialize_model_artifact',
+                           return_value='/tmp/pick_quality_nba_2026-03-15.pkl'):
+                    with patch('joblib.load', side_effect=ValueError('broken')):
+                        probe = pick_quality_model.get_model_runtime_probe()
+
+        self.assertTrue(probe['active_model_found'])
+        self.assertFalse(probe['model_loadable'])
+        self.assertIn('load_error', probe['reason'])
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Unit 3: Model 1 steals/blocks in STAT_TYPES and ML_STAT_MAP
