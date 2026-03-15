@@ -927,6 +927,40 @@ def check_model_drift():
             db.session.commit()
 
 
+def run_market_governance_job():
+    """Weekly market governance cycle: tune thresholds, enforce guardrails, and walk-forward audit."""
+    app = _get_app()
+    with app.app_context():
+        from app.services.market_recommender import run_market_governance
+
+        days = int(os.getenv('MARKET_GOV_DAYS', '180'))
+        bins = int(os.getenv('MARKET_GOV_BINS', '5'))
+        min_bets = int(os.getenv('MARKET_GOV_MIN_BETS', '20'))
+        drift_threshold = float(os.getenv('MARKET_GOV_DRIFT_THRESHOLD', '0.05'))
+        train_days = int(os.getenv('MARKET_GOV_TRAIN_DAYS', '60'))
+        test_days = int(os.getenv('MARKET_GOV_TEST_DAYS', '14'))
+        step_days = int(os.getenv('MARKET_GOV_STEP_DAYS', '14'))
+        apply = os.getenv('MARKET_GOV_APPLY', 'true').strip().lower() in ('1', 'true', 'yes', 'on')
+
+        result = run_market_governance(
+            days=days,
+            bins=bins,
+            min_bets=min_bets,
+            drift_threshold=drift_threshold,
+            train_days=train_days,
+            test_days=test_days,
+            step_days=step_days,
+            apply=apply,
+        )
+        logger.info(
+            "market_governance: tune_selected=%s guard_decisions=%s wf_moneyline=%s wf_total=%s",
+            (result.get('tune') or {}).get('selected'),
+            (result.get('guard') or {}).get('decisions'),
+            (((result.get('walkforward') or {}).get('markets') or {}).get('moneyline') or {}).get('summary'),
+            (((result.get('walkforward') or {}).get('markets') or {}).get('total_ou') or {}).get('summary'),
+        )
+
+
 def snapshot_props_odds():
     """Snapshot today's player prop odds (FD+DK) for line movement tracking."""
     app = _get_app()
@@ -1083,6 +1117,15 @@ def init_scheduler(app):
         lambda: _log_job('drift_check', check_model_drift),
         CronTrigger(day_of_week='mon', hour=9, minute=0, timezone=APP_TIMEZONE),
         id='drift_check',
+        replace_existing=True,
+    )
+
+    # Weekly market governance (Monday 9:20 AM ET):
+    # threshold tune + drift/ROI guard + walk-forward stability report.
+    scheduler.add_job(
+        lambda: _log_job('market_governance', run_market_governance_job),
+        CronTrigger(day_of_week='mon', hour=9, minute=20, timezone=APP_TIMEZONE),
+        id='market_governance',
         replace_existing=True,
     )
 

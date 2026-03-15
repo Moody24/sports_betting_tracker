@@ -367,6 +367,39 @@ def register_cli(app):
                     f"bets={f.get('recommended_bets')} | roi/bet={f.get('roi_per_bet')}"
                 )
 
+    @app.cli.command('market-governance-run')
+    @click.option('--days', type=int, default=180, show_default=True)
+    @click.option('--bins', type=int, default=5, show_default=True)
+    @click.option('--min-bets', type=int, default=20, show_default=True)
+    @click.option('--drift-threshold', type=float, default=0.05, show_default=True)
+    @click.option('--train-days', type=int, default=60, show_default=True)
+    @click.option('--test-days', type=int, default=14, show_default=True)
+    @click.option('--step-days', type=int, default=14, show_default=True)
+    @click.option('--apply/--no-apply', default=True, show_default=True)
+    def cli_market_governance_run(days, bins, min_bets, drift_threshold, train_days, test_days, step_days, apply):
+        """Run full market governance cycle (tune + guard + walk-forward)."""
+        from app.services.market_recommender import run_market_governance
+
+        click.echo(f'=== Market Governance Run (last {days} days) ===')
+        result = run_market_governance(
+            days=days,
+            bins=bins,
+            min_bets=min_bets,
+            drift_threshold=drift_threshold,
+            train_days=train_days,
+            test_days=test_days,
+            step_days=step_days,
+            apply=apply,
+        )
+        click.echo(f"Tune summary: {(result.get('tune') or {}).get('selected')}")
+        click.echo(f"Guard summary: {(result.get('guard') or {}).get('decisions')}")
+        wf = (result.get('walkforward') or {}).get('markets', {})
+        click.echo(
+            "Walk-forward summary: "
+            f"moneyline={(wf.get('moneyline') or {}).get('summary')} | "
+            f"total_ou={(wf.get('total_ou') or {}).get('summary')}"
+        )
+
     @app.cli.command('generate-auto-picks')
     def cli_generate_auto_picks():
         from app.services.scheduler import generate_daily_auto_picks

@@ -962,3 +962,36 @@ def walkforward_market_report(
             },
         },
     }
+
+
+def run_market_governance(
+    days: int = 180,
+    bins: int = 5,
+    min_bets: int = 20,
+    drift_threshold: float = 0.05,
+    train_days: int = 60,
+    test_days: int = 14,
+    step_days: int = 14,
+    apply: bool = True,
+) -> dict:
+    """Run threshold tuning, guard checks, and walk-forward validation."""
+    tune = tune_market_thresholds(days=days, bins=bins, min_bets=min_bets, apply=apply)
+    guard = guard_market_recommendations(
+        days=days,
+        bins=bins,
+        drift_threshold=drift_threshold,
+        min_bets=min_bets,
+        apply=apply,
+    )
+    walkforward = walkforward_market_report(
+        days=days,
+        train_days=train_days,
+        test_days=test_days,
+        step_days=step_days,
+        bins=bins,
+    )
+    return {
+        'tune': tune,
+        'guard': guard,
+        'walkforward': walkforward,
+    }

@@ -2514,7 +2514,7 @@ class TestScheduler(BaseTestCase):
                 with patch.object(scheduler_module, '_acquire_scheduler_lock', return_value=True):
                     scheduler_module.init_scheduler(self.app)
         self.assertTrue(fake.started)
-        self.assertEqual(len(fake.jobs), 13)
+        self.assertEqual(len(fake.jobs), 14)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -3160,6 +3160,21 @@ class TestCLI(BaseTestCase):
         self.assertIn('=== Market Walk-Forward Report', result.output)
         self.assertIn('--- moneyline ---', result.output)
         self.assertIn('Summary:', result.output)
+
+    @patch('app.services.market_recommender.run_market_governance')
+    def test_market_governance_run(self, mock_governance):
+        mock_governance.return_value = {
+            'tune': {'selected': {'moneyline': {'min_edge': 0.03, 'min_confidence': 0.58}}},
+            'guard': {'decisions': {'moneyline': {'decision': 'disable'}}},
+            'walkforward': {'markets': {'moneyline': {'summary': {'avg_accuracy': 0.58}}, 'total_ou': {'summary': {'avg_accuracy': 0.56}}}},
+        }
+        runner = self._runner()
+        result = runner.invoke(args=['market-governance-run', '--days', '120', '--apply'])
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn('=== Market Governance Run', result.output)
+        self.assertIn('Tune summary:', result.output)
+        self.assertIn('Guard summary:', result.output)
+        self.assertIn('Walk-forward summary:', result.output)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -3925,6 +3940,7 @@ class TestSchedulerDriftJob(BaseTestCase):
                     sched_module.init_scheduler(self.app)
 
         self.assertIn('drift_check', fake.jobs)
+        self.assertIn('market_governance', fake.jobs)
 
 
 class Phase1FeatureBuilderTest(BaseTestCase):
