@@ -295,12 +295,12 @@
 {% endif %}
 
 {# ── Player Detail Modal ──────────────────────────────────── #}
-<div class="modal fade" id="playerDetailModal" tabindex="-1" aria-hidden="true">
+<div class="modal fade" id="playerDetailModal" tabindex="-1" aria-hidden="true" aria-labelledby="playerDetailTitle">
   <div class="modal-dialog modal-lg modal-dialog-scrollable">
     <div class="modal-content bg-dark border-secondary-subtle">
       <div class="modal-header border-secondary-subtle">
         <h5 class="modal-title" id="playerDetailTitle">Player Analysis</h5>
-        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close player analysis"></button>
       </div>
       <div class="modal-body" id="playerDetailBody">
         <div class="text-center py-4">
@@ -542,7 +542,10 @@ document.addEventListener('DOMContentLoaded', function() {
     const parlayBtn = e.target.closest('.quick-add-parlay-btn');
     if (parlayBtn) {
       e.preventDefault();
-      if (typeof addParlayLeg !== 'function' || typeof getParlayQueue !== 'function') return;
+      if (typeof addParlayLeg !== 'function' || typeof getParlayQueue !== 'function') {
+        showParlayToast('Parlay queue unavailable. Refresh the page and try again.');
+        return;
+      }
       const leg = {
         team_a: parlayBtn.dataset.away || '',
         team_b: parlayBtn.dataset.home || '',

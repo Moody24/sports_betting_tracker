@@ -41,6 +41,36 @@
   var parlayOdds      = document.getElementById('parlay-odds-display');
   var slipBody        = document.getElementById('slip-body');
   var slipToggle      = document.getElementById('slip-toggle-btn');
+  var slipInlineFeedback = null;
+
+  function ensureSlipFeedbackEl() {
+    if (slipInlineFeedback) return slipInlineFeedback;
+    if (!slipControls) return null;
+    var el = document.createElement('div');
+    el.id = 'slip-inline-feedback';
+    el.className = 'small mb-2 d-none';
+    slipControls.insertBefore(el, slipControls.firstChild);
+    slipInlineFeedback = el;
+    return el;
+  }
+
+  function showSlipFeedback(message, tone) {
+    var el = ensureSlipFeedbackEl();
+    if (!el) return;
+    el.classList.remove('d-none', 'text-danger', 'text-warning', 'text-success', 'text-info');
+    if (tone === 'danger') el.classList.add('text-danger');
+    else if (tone === 'warning') el.classList.add('text-warning');
+    else if (tone === 'success') el.classList.add('text-success');
+    else el.classList.add('text-info');
+    el.textContent = message || '';
+  }
+
+  function clearSlipFeedback() {
+    var el = ensureSlipFeedbackEl();
+    if (!el) return;
+    el.classList.add('d-none');
+    el.textContent = '';
+  }
 
   // ── Bet Slip: toggle collapse ──────────────────────────────────
   var slipCollapsed = false;
@@ -267,6 +297,7 @@
       showElement(slipEmptyEl);
       hideElement(slipControls);
       slipLegsEl.innerHTML = '';
+      clearSlipFeedback();
       return;
     }
 
@@ -431,9 +462,10 @@
   document.getElementById('slip-submit').addEventListener('click', function () {
     var stake = parseFloat(slipStake.value);
     if (!stake || stake <= 0) {
-      alert('Enter a valid stake amount.');
+      showSlipFeedback('Enter a valid stake amount.', 'danger');
       return;
     }
+    clearSlipFeedback();
 
     var isParlay = parlayToggle.checked && slip.length >= 2;
     var bonusMult = getBonusMultiplier();
@@ -472,6 +504,7 @@
     .then(function (r) { return r.json(); })
     .then(function (data) {
       if (data.success) {
+        showSlipFeedback(data.message || 'Bet placed successfully.', 'success');
         slipLegsEl.innerHTML =
           '<div class="text-center py-3 text-success">'
           + '<i class="bi bi-check-circle" style="font-size:1.5rem"></i>'
@@ -486,11 +519,11 @@
           refreshSlipUI();
         }, 2500);
       } else {
-        alert(data.error || 'Something went wrong.');
+        showSlipFeedback(data.error || 'Something went wrong.', 'danger');
       }
     })
     .catch(function () {
-      alert('Network error. Please try again.');
+      showSlipFeedback('Network error. Please try again.', 'danger');
     })
     .finally(function () {
       submitBtn.disabled = false;
