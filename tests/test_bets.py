@@ -316,11 +316,44 @@ class TestBetRoutes(BaseTestCase):
         resp = self.client.get("/nba/today", follow_redirects=True)
         self.assertIn(b"Login", resp.data)
 
+    @patch("app.routes.bet.recommend_market_sides", return_value={})
     @patch("app.routes.bet.get_todays_games", return_value=[])
-    def test_nba_today_renders(self, _mock):
+    def test_nba_today_renders(self, _mock, _rec_mock):
         self.register_and_login()
         resp = self.client.get("/nba/today")
         self.assertEqual(resp.status_code, 200)
+
+    @patch("app.routes.bet.fetch_upcoming_games", return_value=[])
+    @patch("app.routes.bet.recommend_market_sides")
+    @patch("app.routes.bet.get_todays_games")
+    def test_nba_today_renders_market_recommendations(self, mock_games, mock_recs, _upcoming):
+        self.register_and_login()
+        mock_games.return_value = [{
+            "espn_id": "espn_rec",
+            "home": {"name": "Boston Celtics", "score": 90, "logo": "", "abbr": "BOS"},
+            "away": {"name": "Miami Heat", "score": 88, "logo": "", "abbr": "MIA"},
+            "status": "STATUS_IN_PROGRESS",
+            "status_detail": "Q3",
+            "period": 3,
+            "clock": "05:00",
+            "start_time": "2026-02-28T19:00:00Z",
+            "over_under_line": 219.5,
+            "moneyline_home": -135,
+            "moneyline_away": 114,
+            "odds_event_id": "",
+            "total_score": 178,
+        }]
+        mock_recs.return_value = {
+            "espn_rec": {
+                "moneyline": {"side": "home", "action": "bet", "edge": 0.041, "confidence": 0.61},
+                "total": {"side": "under", "action": "pass", "edge": 0.018, "confidence": 0.53},
+            }
+        }
+        resp = self.client.get("/nba/today")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn(b"Model Recommendations", resp.data)
+        self.assertIn(b"Moneyline", resp.data)
+        self.assertIn(b"Total", resp.data)
 
     def test_nba_update_results_no_pending(self):
         self.register_and_login()

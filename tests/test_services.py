@@ -2822,6 +2822,83 @@ class TestPickQualityModel(BaseTestCase):
                     err_result = pick_quality_model.predict_pick_quality({'projected_edge': 1.0})
             self.assertEqual(err_result['recommendation'], 'no_model')
 
+    def test_predict_pick_quality_caution_band(self):
+        """Probabilities in caution band should return caution (not take_it)."""
+        from app.services import pick_quality_model
+
+        class _FakeXGBClassifier:
+            def load_model(self, _path):
+                return None
+
+            def predict_proba(self, _x):
+                return [[0.42, 0.60]]
+
+        fake_xgboost = SimpleNamespace(XGBClassifier=_FakeXGBClassifier)
+        fake_np = SimpleNamespace(array=lambda x: x)
+
+        with self.app.app_context():
+            db.session.add(ModelMetadata(
+                model_name='pick_quality_nba',
+                model_type='xgboost_classifier',
+                version='pq_caution',
+                file_path='/tmp/model.json',
+                training_date=datetime.now(timezone.utc),
+                training_samples=25,
+                val_accuracy=0.62,
+                is_active=True,
+                metadata_json=(
+                    '{"feature_names":["projected_edge","player_trend","minutes_trend","confidence_tier_num","injury_returning"],'
+                    '"probability_shrink":1.0,"take_it_threshold":0.62,"caution_threshold":0.54}'
+                ),
+            ))
+            db.session.commit()
+
+            with patch.dict(sys.modules, {'xgboost': fake_xgboost, 'numpy': fake_np}):
+                with patch('app.services.pick_quality_model.materialize_model_artifact', return_value='/tmp/model.json'):
+                    result = pick_quality_model.predict_pick_quality({'projected_edge': 1.0})
+
+            self.assertEqual(result['recommendation'], 'caution')
+            self.assertAlmostEqual(result['win_probability'], 0.6, places=2)
+
+    def test_predict_pick_quality_bias_correction_applied(self):
+        """Positive calibration_bias should lower final win probability."""
+        from app.services import pick_quality_model
+
+        class _FakeXGBClassifier:
+            def load_model(self, _path):
+                return None
+
+            def predict_proba(self, _x):
+                return [[0.30, 0.66]]
+
+        fake_xgboost = SimpleNamespace(XGBClassifier=_FakeXGBClassifier)
+        fake_np = SimpleNamespace(array=lambda x: x)
+
+        with self.app.app_context():
+            db.session.add(ModelMetadata(
+                model_name='pick_quality_nba',
+                model_type='xgboost_classifier',
+                version='pq_bias',
+                file_path='/tmp/model.json',
+                training_date=datetime.now(timezone.utc),
+                training_samples=25,
+                val_accuracy=0.62,
+                is_active=True,
+                metadata_json=(
+                    '{"feature_names":["projected_edge","player_trend","minutes_trend","confidence_tier_num","injury_returning"],'
+                    '"probability_shrink":1.0,"calibration_bias":0.05,"take_it_threshold":0.62,"caution_threshold":0.54}'
+                ),
+            ))
+            db.session.commit()
+
+            with patch.dict(sys.modules, {'xgboost': fake_xgboost, 'numpy': fake_np}):
+                with patch('app.services.pick_quality_model.materialize_model_artifact', return_value='/tmp/model.json'):
+                    result = pick_quality_model.predict_pick_quality({'projected_edge': 1.0})
+
+            # 0.66 raw - 0.05 bias => ~0.61
+            self.assertAlmostEqual(result['win_probability'], 0.61, places=2)
+            self.assertEqual(result['recommendation'], 'caution')
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # cli tests

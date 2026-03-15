@@ -145,6 +145,7 @@ def register_cli(app):
     def cli_retrain(force):
         from app.services.scheduler import retrain_models
         from app.services.pick_quality_model import train_pick_quality_model
+        from app.services.market_recommender import train_market_models
         click.echo('Retraining models...')
         if force:
             from app.services.ml_model import retrain_all_models
@@ -153,9 +154,19 @@ def register_cli(app):
             click.echo(f'Projection retrain: {results}')
             pq_result = train_pick_quality_model()
             click.echo(f'Pick quality retrain: {pq_result}')
+            market_result = train_market_models()
+            click.echo(f'Market models retrain: {market_result}')
         else:
             retrain_models()
         click.echo('Done.')
+
+    @app.cli.command('train-market-models')
+    @click.option('--min-samples', type=int, default=60, show_default=True)
+    def cli_train_market_models(min_samples):
+        from app.services.market_recommender import train_market_models
+        click.echo('Training market models (moneyline + total O/U)...')
+        result = train_market_models(min_samples=min_samples)
+        click.echo(f'Market model train result: {result}')
 
     @app.cli.command('generate-auto-picks')
     def cli_generate_auto_picks():

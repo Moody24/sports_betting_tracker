@@ -31,6 +31,7 @@ from app.services.nba_service import (
 )
 from app.services.projection_engine import ProjectionEngine
 from app.services.value_detector import ValueDetector
+from app.services.market_recommender import recommend_market_sides
 from app.services.feature_engine import build_pick_context_features
 from app.services.stats_service import find_player_id, get_cached_logs, get_player_stats_summary
 from app.services.postmortem_service import create_or_update_postmortem
@@ -801,6 +802,11 @@ def nba_today():
 
     # Separate active (non-final) vs completed today
     active_games = [g for g in games if g['status'] != 'STATUS_FINAL']
+    market_recs = {}
+    try:
+        market_recs = recommend_market_sides(active_games)
+    except Exception as exc:
+        logger.debug('Market recommendations unavailable: %s', exc)
     yesterday = today - timedelta(days=1)
     completed_snaps = (
         GameSnapshot.query
@@ -822,6 +828,7 @@ def nba_today():
         completed_snaps=completed_snaps,
         upcoming_games=upcoming_games,
         tracked=tracked,
+        market_recs=market_recs,
     )
 
 

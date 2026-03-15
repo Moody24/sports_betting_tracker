@@ -56,6 +56,39 @@ MINUTES_MAP = {'increasing': 1, 'stable': 0, 'decreasing': -1}
 TIER_MAP = {'strong': 3, 'moderate': 2, 'slight': 1, 'no_edge': 0}
 
 
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return default
+
+
+def _stabilize_probability(p_raw: float, metadata: dict) -> float:
+    """Apply conservative post-processing to reduce confidence inflation."""
+    # Shrink toward 0.5 to reduce overconfident tails in drift periods.
+    shrink = metadata.get('probability_shrink')
+    if shrink is None:
+        shrink = _env_float('MODEL2_PROBABILITY_SHRINK', 0.88)
+    try:
+        shrink = float(shrink)
+    except (TypeError, ValueError):
+        shrink = 0.88
+    shrink = min(max(shrink, 0.5), 1.0)
+    p = 0.5 + (p_raw - 0.5) * shrink
+
+    # Optional signed bias correction (positive means historically overconfident).
+    bias = metadata.get('calibration_bias', _env_float('MODEL2_CALIBRATION_BIAS', 0.0))
+    try:
+        p -= float(bias)
+    except (TypeError, ValueError):
+        pass
+
+    return min(max(float(p), 0.001), 0.999)
+
+
 def _model_name(user_id: int | None) -> str:
     if user_id is None:
         return 'pick_quality_nba'
@@ -249,6 +282,9 @@ def train_pick_quality_model(user_id: int | None = None) -> dict:
     y_prob = final_model.predict_proba(X_val)[:, 1]
     accuracy = accuracy_score(y_val, y_pred)
     logloss = log_loss(y_val, y_prob)
+    val_avg_pred = (sum(float(p) for p in y_prob) / len(y_prob)) if len(y_prob) else 0.5
+    val_win_rate = (sum(float(v) for v in y_val) / len(y_val)) if len(y_val) else 0.5
+    calibration_bias = round(val_avg_pred - val_win_rate, 4)
 
     # Feature importance from base XGBoost model
     importance = dict(zip(feature_names, [float(v) for v in model.feature_importances_]))
@@ -297,6 +333,12 @@ def train_pick_quality_model(user_id: int | None = None) -> dict:
             'top_features': top_features,
             'calibration_method': calibration_method,
             'split_method': split_method,
+            'calibration_bias': calibration_bias,
+            'val_avg_pred': round(val_avg_pred, 4),
+            'val_win_rate': round(val_win_rate, 4),
+            'probability_shrink': round(_env_float('MODEL2_PROBABILITY_SHRINK', 0.88), 3),
+            'take_it_threshold': round(_env_float('MODEL2_TAKE_IT_THRESHOLD', 0.60), 3),
+            'caution_threshold': round(_env_float('MODEL2_CAUTION_THRESHOLD', 0.56), 3),
         }),
     )
     db.session.add(meta)
@@ -405,10 +447,11 @@ def predict_pick_quality(context: dict, user_id: int | None = None) -> dict:
     X = np.array([[features.get(k, 0) for k in feature_names]])
 
     try:
-        win_prob = float(model.predict_proba(X)[0][1])
+        win_prob_raw = float(model.predict_proba(X)[0][1])
     except Exception as exc:
         logger.error("Pick quality prediction failed: %s", exc)
         return _no_model_result()
+    win_prob = _stabilize_probability(win_prob_raw, md)
 
     # Determine recommendation
     red_flags = []
@@ -421,10 +464,22 @@ def predict_pick_quality(context: dict, user_id: int | None = None) -> dict:
     if context.get('player_last5_trend') == 'cold':
         red_flags.append('cold streak')
 
-    if win_prob >= 0.60:
+    take_it_threshold = md.get('take_it_threshold', _env_float('MODEL2_TAKE_IT_THRESHOLD', 0.60))
+    caution_threshold = md.get('caution_threshold', _env_float('MODEL2_CAUTION_THRESHOLD', 0.56))
+    try:
+        take_it_threshold = float(take_it_threshold)
+    except (TypeError, ValueError):
+        take_it_threshold = 0.60
+    try:
+        caution_threshold = float(caution_threshold)
+    except (TypeError, ValueError):
+        caution_threshold = 0.56
+    caution_threshold = min(caution_threshold, take_it_threshold)
+
+    if win_prob >= take_it_threshold:
         recommendation = 'take_it'
-    elif win_prob >= 0.50:
-        recommendation = 'caution' if red_flags else 'take_it'
+    elif win_prob >= caution_threshold:
+        recommendation = 'caution'
     else:
         recommendation = 'skip'
 

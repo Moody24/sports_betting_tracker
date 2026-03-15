@@ -173,6 +173,37 @@
       </div>
       {% endif %}
 
+      {% set rec = market_recs.get(game.espn_id, {}) if market_recs else {} %}
+      {% if rec %}
+      <div class="today-model-rec small mb-2 p-2 rounded border border-secondary-subtle">
+        <div class="fw-semibold text-info mb-1"><i class="bi bi-robot me-1"></i>Model Recommendations</div>
+        {% if rec.get('moneyline') %}
+          {% set ml_rec = rec.get('moneyline') %}
+          <div class="d-flex justify-content-between align-items-center">
+            <span class="text-secondary">Moneyline</span>
+            <span>
+              <strong class="{{ 'text-success' if ml_rec.action == 'bet' else 'text-secondary' }}">
+                {{ 'Home' if ml_rec.side == 'home' else 'Away' }}
+              </strong>
+              <span class="text-secondary">({{ ml_rec.action|upper }}, edge {{ '%.1f'|format((ml_rec.edge or 0) * 100) }}%)</span>
+            </span>
+          </div>
+        {% endif %}
+        {% if rec.get('total') %}
+          {% set t_rec = rec.get('total') %}
+          <div class="d-flex justify-content-between align-items-center">
+            <span class="text-secondary">Total</span>
+            <span>
+              <strong class="{{ 'text-success' if t_rec.action == 'bet' else 'text-secondary' }}">
+                {{ t_rec.side|capitalize }}
+              </strong>
+              <span class="text-secondary">({{ t_rec.action|upper }}, conf {{ '%.0f'|format((t_rec.confidence or 0) * 100) }}%)</span>
+            </span>
+          </div>
+        {% endif %}
+      </div>
+      {% endif %}
+
       {# Player Props toggle #}
       <div class="mt-auto">
         <button class="btn btn-sm btn-outline-info w-100 props-toggle" aria-expanded="false"
