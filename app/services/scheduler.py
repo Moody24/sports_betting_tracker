@@ -1021,6 +1021,26 @@ def run_market_coverage_audit_job():
         )
 
 
+def run_historical_odds_ingest_job():
+    """Periodic historical odds ingestion for market backfill."""
+    app = _get_app()
+    with app.app_context():
+        from app.services.nba_service import ingest_historical_market_odds
+
+        lookback_days = int(os.getenv('HISTORICAL_ODDS_INGEST_DAYS', '120'))
+        sleep_seconds = float(os.getenv('HISTORICAL_ODDS_INGEST_SLEEP', '0.05'))
+        force = os.getenv('HISTORICAL_ODDS_INGEST_FORCE', 'false').strip().lower() in ('1', 'true', 'yes', 'on')
+        end_date = datetime.now(ZoneInfo("America/New_York")).date()
+        start_date = end_date - timedelta(days=max(1, lookback_days))
+        result = ingest_historical_market_odds(
+            start_date=start_date,
+            end_date=end_date,
+            force=force,
+            sleep_seconds=sleep_seconds,
+        )
+        logger.info("historical_odds_ingest: %s", result)
+
+
 def snapshot_props_odds():
     """Snapshot today's player prop odds (FD+DK) for line movement tracking."""
     app = _get_app()
@@ -1202,6 +1222,14 @@ def init_scheduler(app):
         lambda: _log_job('market_coverage_audit', run_market_coverage_audit_job),
         CronTrigger(day_of_week='sun', hour=9, minute=30, timezone=APP_TIMEZONE),
         id='market_coverage_audit',
+        replace_existing=True,
+    )
+
+    # Weekly historical odds ingest catch-up (Sunday 8:40 AM ET)
+    scheduler.add_job(
+        lambda: _log_job('historical_odds_ingest', run_historical_odds_ingest_job),
+        CronTrigger(day_of_week='sun', hour=8, minute=40, timezone=APP_TIMEZONE),
+        id='historical_odds_ingest',
         replace_existing=True,
     )
 

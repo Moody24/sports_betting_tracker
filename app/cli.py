@@ -676,6 +676,39 @@ def register_cli(app):
             click.echo(f"Moneyline summary: {m}")
             click.echo(f"Total O/U summary: {t}")
 
+    @app.cli.command('ingest-historical-market-odds')
+    @click.option('--start-date', required=True, help='Start date (YYYY-MM-DD)')
+    @click.option('--end-date', required=True, help='End date (YYYY-MM-DD)')
+    @click.option('--force/--no-force', default=False, show_default=True)
+    @click.option('--sleep', 'sleep_seconds', type=float, default=0.1, show_default=True)
+    def cli_ingest_historical_market_odds(start_date, end_date, force, sleep_seconds):
+        """Ingest historical moneyline + totals into GameSnapshot from odds providers."""
+        from app.services.nba_service import ingest_historical_market_odds
+
+        try:
+            start_dt = datetime.strptime(start_date, '%Y-%m-%d').date()
+            end_dt = datetime.strptime(end_date, '%Y-%m-%d').date()
+        except ValueError:
+            click.echo('Invalid date format. Use YYYY-MM-DD.')
+            return
+
+        click.echo(f'Ingesting historical market odds: {start_dt} -> {end_dt}')
+        result = ingest_historical_market_odds(
+            start_date=start_dt,
+            end_date=end_dt,
+            force=force,
+            sleep_seconds=sleep_seconds,
+        )
+        if result.get('error'):
+            click.echo(f"Error: {result['error']}")
+            return
+        click.echo(
+            f"Ingest result: scanned_days={result.get('scanned_days')} "
+            f"odds_games={result.get('odds_games')} matched_snapshots={result.get('matched_snapshots')} "
+            f"ou_updated={result.get('ou_updated')} moneyline_updated={result.get('moneyline_updated')} "
+            f"fallback_days={result.get('fallback_days')} errors={result.get('errors')}"
+        )
+
     @app.cli.command('data_quality_report')
     @click.option(
         '--stale-hours',

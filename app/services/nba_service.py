@@ -497,6 +497,219 @@ def backfill_game_snapshots(
     }
 
 
+def _extract_market_lines_from_odds_game(game: dict) -> tuple[float | None, int | None, int | None]:
+    """Extract (ou_line, home_ml, away_ml) from an odds payload game entry."""
+    home_team = game.get("home_team", "")
+    away_team = game.get("away_team", "")
+    ou_line = None
+    home_ml = away_ml = None
+
+    for bookmaker in game.get("bookmakers", []):
+        for market in bookmaker.get("markets", []):
+            mkey = market.get("key", "")
+
+            if mkey == "totals" and ou_line is None:
+                for outcome in market.get("outcomes", []):
+                    if outcome.get("name") == "Over" and outcome.get("point") is not None:
+                        try:
+                            ou_line = float(outcome.get("point"))
+                        except (TypeError, ValueError):
+                            ou_line = None
+                        break
+
+            if mkey == "h2h" and (home_ml is None or away_ml is None):
+                for outcome in market.get("outcomes", []):
+                    name = outcome.get("name", "")
+                    price = outcome.get("price")
+                    try:
+                        price_int = int(price) if price is not None else None
+                    except (TypeError, ValueError):
+                        price_int = None
+                    if name == home_team and price_int is not None:
+                        home_ml = price_int
+                    elif name == away_team and price_int is not None:
+                        away_ml = price_int
+
+        if ou_line is not None and home_ml is not None and away_ml is not None:
+            break
+
+    return ou_line, home_ml, away_ml
+
+
+def _fetch_historical_odds_for_date(target_date: date_type) -> tuple[list[dict], str]:
+    """Fetch historical odds rows for a date using provider historical endpoint."""
+    api_key = _get_odds_api_key()
+    if not api_key:
+        return [], 'missing_api_key'
+
+    url = os.getenv(
+        "ODDS_API_HISTORICAL_URL",
+        "https://api.the-odds-api.com/v4/historical/sports/basketball_nba/odds",
+    )
+    snapshot_hour = int(os.getenv("ODDS_API_HISTORICAL_SNAPSHOT_HOUR_UTC", "18"))
+    snapshot_hour = max(0, min(snapshot_hour, 23))
+    snap_ts = f"{target_date.isoformat()}T{snapshot_hour:02d}:00:00Z"
+
+    try:
+        resp = requests.get(
+            url,
+            params={
+                "apiKey": api_key,
+                "regions": "us",
+                "markets": "totals,h2h",
+                "oddsFormat": "american",
+                "date": snap_ts,
+            },
+            timeout=15,
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+    except (requests.RequestException, ValueError) as exc:
+        logger.warning("Historical odds fetch failed for %s: %s", target_date, _sanitize_api_error(exc))
+        return [], 'historical_endpoint_error'
+
+    if isinstance(payload, list):
+        return payload, 'ok'
+    if isinstance(payload, dict):
+        data = payload.get("data")
+        if isinstance(data, list):
+            return data, 'ok'
+    return [], 'historical_payload_empty'
+
+
+def _fetch_standard_odds_for_date_window(target_date: date_type) -> tuple[list[dict], str]:
+    """Fallback: query standard odds endpoint scoped to a single-date UTC window."""
+    api_key = _get_odds_api_key()
+    if not api_key:
+        return [], 'missing_api_key'
+
+    start_et = datetime.combine(target_date, datetime.min.time(), tzinfo=APP_TIMEZONE)
+    end_et = start_et + timedelta(days=1)
+    start_utc = start_et.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    end_utc = end_et.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    try:
+        resp = requests.get(
+            ODDS_API_URL,
+            params={
+                "apiKey": api_key,
+                "regions": "us",
+                "markets": "totals,h2h",
+                "oddsFormat": "american",
+                "commenceTimeFrom": start_utc,
+                "commenceTimeTo": end_utc,
+            },
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except (requests.RequestException, ValueError) as exc:
+        logger.warning("Standard odds fallback failed for %s: %s", target_date, _sanitize_api_error(exc))
+        return [], 'standard_endpoint_error'
+
+    return data if isinstance(data, list) else [], 'ok'
+
+
+def ingest_historical_market_odds(
+    start_date: date_type,
+    end_date: date_type,
+    *,
+    force: bool = False,
+    sleep_seconds: float = 0.1,
+) -> dict:
+    """Enrich historical GameSnapshot rows with market odds from provider APIs."""
+    from app import db
+    from app.models import GameSnapshot
+
+    if end_date < start_date:
+        return {'error': 'invalid_date_range'}
+
+    scanned_days = 0
+    odds_games = 0
+    matched_snapshots = 0
+    ou_updated = 0
+    ml_updated = 0
+    fallback_days = 0
+    errors = 0
+
+    cur = start_date
+    while cur <= end_date:
+        scanned_days += 1
+
+        games, status = _fetch_historical_odds_for_date(cur)
+        if not games:
+            games, status2 = _fetch_standard_odds_for_date_window(cur)
+            if status2 == 'ok':
+                fallback_days += 1
+            status = status2 if status2 != 'ok' else status
+
+        if not games:
+            if status not in ('missing_api_key', 'historical_payload_empty'):
+                errors += 1
+            cur += timedelta(days=1)
+            if sleep_seconds > 0:
+                _time.sleep(sleep_seconds)
+            continue
+
+        odds_games += len(games)
+        by_matchup: dict[tuple, tuple[float | None, int | None, int | None]] = {}
+        for g in games:
+            home = g.get("home_team", "")
+            away = g.get("away_team", "")
+            if not home or not away:
+                continue
+            key = _matchup_key(home, away)
+            ou_line, home_ml, away_ml = _extract_market_lines_from_odds_game(g)
+            if key not in by_matchup:
+                by_matchup[key] = (ou_line, home_ml, away_ml)
+                continue
+            # Keep first non-null values encountered.
+            prev_ou, prev_h, prev_a = by_matchup[key]
+            by_matchup[key] = (
+                prev_ou if prev_ou is not None else ou_line,
+                prev_h if prev_h is not None else home_ml,
+                prev_a if prev_a is not None else away_ml,
+            )
+
+        snaps = GameSnapshot.query.filter_by(game_date=cur).all()
+        for snap in snaps:
+            key = _matchup_key(snap.home_team, snap.away_team)
+            if key not in by_matchup:
+                continue
+            matched_snapshots += 1
+            ou_line, home_ml, away_ml = by_matchup[key]
+
+            if ou_line is not None and (force or snap.over_under_line is None):
+                if snap.over_under_line != ou_line:
+                    snap.over_under_line = ou_line
+                    ou_updated += 1
+
+            if home_ml is not None and (force or snap.moneyline_home is None):
+                if snap.moneyline_home != home_ml:
+                    snap.moneyline_home = home_ml
+                    ml_updated += 1
+
+            if away_ml is not None and (force or snap.moneyline_away is None):
+                if snap.moneyline_away != away_ml:
+                    snap.moneyline_away = away_ml
+                    ml_updated += 1
+
+        db.session.commit()
+        cur += timedelta(days=1)
+        if sleep_seconds > 0:
+            _time.sleep(sleep_seconds)
+
+    return {
+        'scanned_days': scanned_days,
+        'odds_games': odds_games,
+        'matched_snapshots': matched_snapshots,
+        'ou_updated': ou_updated,
+        'moneyline_updated': ml_updated,
+        'fallback_days': fallback_days,
+        'errors': errors,
+    }
+
+
 def fetch_odds_events() -> dict:
     """Return Odds API events with their IDs, mapped by matchup key."""
     api_key = _get_odds_api_key()

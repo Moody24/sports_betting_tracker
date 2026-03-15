@@ -2514,7 +2514,7 @@ class TestScheduler(BaseTestCase):
                 with patch.object(scheduler_module, '_acquire_scheduler_lock', return_value=True):
                     scheduler_module.init_scheduler(self.app)
         self.assertTrue(fake.started)
-        self.assertEqual(len(fake.jobs), 16)
+        self.assertEqual(len(fake.jobs), 17)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -3196,6 +3196,23 @@ class TestCLI(BaseTestCase):
         self.assertEqual(result.exit_code, 0)
         self.assertIn('=== Market Data Coverage', result.output)
         self.assertIn('Walk-forward feasibility: NOT READY', result.output)
+
+    @patch('app.services.nba_service.ingest_historical_market_odds')
+    def test_ingest_historical_market_odds_cli(self, mock_ingest):
+        mock_ingest.return_value = {
+            'scanned_days': 7,
+            'odds_games': 20,
+            'matched_snapshots': 12,
+            'ou_updated': 5,
+            'moneyline_updated': 9,
+            'fallback_days': 3,
+            'errors': 0,
+        }
+        runner = self._runner()
+        result = runner.invoke(args=['ingest-historical-market-odds', '--start-date', '2026-03-01', '--end-date', '2026-03-07'])
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn('Ingest result:', result.output)
+        self.assertIn('moneyline_updated=9', result.output)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -3963,6 +3980,8 @@ class TestSchedulerDriftJob(BaseTestCase):
         self.assertIn('drift_check', fake.jobs)
         self.assertIn('market_governance', fake.jobs)
         self.assertIn('snapshot_backfill', fake.jobs)
+        self.assertIn('market_coverage_audit', fake.jobs)
+        self.assertIn('historical_odds_ingest', fake.jobs)
         self.assertIn('market_coverage_audit', fake.jobs)
 
 
