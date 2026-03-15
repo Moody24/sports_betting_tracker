@@ -78,3 +78,27 @@ Recommended sequence for cleanup/retrain:
 - Keep a recent Neon backup/snapshot strategy.
 - If a deploy fails after migration, fix-forward is preferred. Only rollback DB schema when you have a validated reverse migration path.
 - For app-only regressions (no schema issue), redeploy previous working image.
+
+## Phase 5 (Web + Scheduler Split) Verification
+
+After deploying both services, run the production verification script:
+
+```bash
+./scripts/phase5_verify_prod.sh
+```
+
+Optional: pass a custom web URL.
+
+```bash
+./scripts/phase5_verify_prod.sh https://your-web-domain
+```
+
+What this checks:
+
+1. Web health/readiness endpoints respond and DB/model probes are healthy.
+2. Service guard rails remain correct:
+   - `sports_betting_tracker`: `SCHEDULER_ENABLED=false`
+   - `scheduler`: `SCHEDULER_ENABLED=true`
+3. Latest deployments for both services are visible.
+4. `prod-readiness` report passes with no `FAIL`.
+5. Recent scheduler `JobLog` entries are being written.
