@@ -28,6 +28,66 @@
   {# ─── Main column ──────────────────────────────────────────────── #}
   <div class="bb-main">
 
+    <div class="card-soft mb-3" id="ub-root">
+      <div class="bb-form-section">
+        <div class="bb-form-section-label"><i class="bi bi-layout-wtf"></i> Unified Bet Slip (Beta)</div>
+        <div class="small text-secondary mb-2">
+          One flow: choose game, tap markets/props, submit once. 1 pick = single, 2+ picks = parlay.
+        </div>
+        <div class="ub-grid">
+          <div>
+            <label class="form-label small mb-1">Game</label>
+            <input type="text" id="ub-game-picker" class="form-control bb-game-picker"
+                   placeholder="Search game…" list="game-datalist" autocomplete="off">
+            <div id="ub-game-meta" class="form-text">Pick a game to unlock moneyline, total, and props.</div>
+
+            <div class="ub-market-row mt-3">
+              <button type="button" id="ub-home-ml-btn" class="btn btn-sm btn-outline-secondary" disabled>Home ML</button>
+              <button type="button" id="ub-away-ml-btn" class="btn btn-sm btn-outline-secondary" disabled>Away ML</button>
+              <button type="button" id="ub-over-btn" class="btn btn-sm btn-outline-success" disabled>Over</button>
+              <button type="button" id="ub-under-btn" class="btn btn-sm btn-outline-danger" disabled>Under</button>
+            </div>
+
+            <div class="d-flex align-items-center gap-2 mt-3">
+              <button type="button" id="ub-load-props-btn" class="btn btn-sm btn-outline-secondary">
+                <i class="bi bi-cloud-download me-1"></i>Load Game Props
+              </button>
+              <input type="text" id="ub-props-search" class="form-control form-control-sm d-none"
+                     placeholder="Filter props…" autocomplete="off">
+            </div>
+            <div id="ub-props-status" class="form-text">Props not loaded yet.</div>
+            <div id="ub-props-list" class="bb-prop-list mt-2"></div>
+          </div>
+
+          <div>
+            <div class="bb-form-section-label"><i class="bi bi-receipt"></i> Slip</div>
+            <div id="ub-slip-list" class="bb-legs-list">
+              <div class="bb-legs-empty">
+                <i class="bi bi-plus-circle bb-legs-empty-icon"></i>
+                <p class="mb-0 small mt-2 bb-legs-empty-text">No selections yet.</p>
+              </div>
+            </div>
+            <div id="ub-feedback" class="alert d-none py-2 small mt-2"></div>
+            <div class="row g-2 mt-2">
+              <div class="col-6">
+                <label class="form-label small mb-1">Stake</label>
+                <input type="number" id="ub-stake" class="form-control form-control-sm" min="1" step="0.01" placeholder="25.00">
+              </div>
+              <div class="col-6">
+                <label class="form-label small mb-1">Units</label>
+                <input type="number" id="ub-units" class="form-control form-control-sm" min="0.1" step="0.1" placeholder="1.0">
+              </div>
+              <div class="col-12 d-grid">
+                <button type="button" id="ub-submit-btn" class="btn btn-primary btn-sm">
+                  <i class="bi bi-check-lg me-1"></i>Submit Slip
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     {# ── Mode selector ── #}
     <div class="bb-mode-bar mb-3" role="tablist" aria-label="Bet builder mode">
       <button class="bb-mode-btn active" id="bb-tab-single" data-bb-tab="single" type="button" role="tab" aria-controls="bb-panel-single" aria-selected="{{ 'true' if current_tab == 'single' else 'false' }}" tabindex="{{ '0' if current_tab == 'single' else '-1' }}">
@@ -416,16 +476,15 @@
         <div class="bb-parlay-browser card-soft">
           <div class="bb-browser-head">
             <div class="d-flex align-items-center gap-2">
-              <span class="bb-browser-title">Props</span>
+              <span class="bb-browser-title">Live Props</span>
+              <span id="parlay-props-status" class="badge text-bg-secondary">Auto-loading…</span>
               <span id="parlay-legs-count" class="badge d-none bb-count-badge">0 legs</span>
             </div>
-            <button type="button" id="load-parlay-props-btn" class="btn btn-sm btn-outline-secondary">
-              <i class="bi bi-arrow-repeat me-1"></i>Load / Retry
-            </button>
           </div>
-          <div class="bb-browser-filters">
+          <div class="small text-secondary px-3 pb-2">Select O/U on a player row to add it to your slip.</div>
+          <div id="parlay-filters-wrap" class="bb-browser-filters d-none">
             <input type="text" id="parlay-props-search-input" class="bb-browser-search"
-                   placeholder="Player, market…" autocomplete="off">
+                   placeholder="Optional filter: player, market, team…" autocomplete="off">
             <select id="parlay-game-filter" class="form-select form-select-sm bb-game-select">
               <option value="">All games</option>
             </select>
@@ -708,11 +767,13 @@
   var CSRF_TOKEN         = '{{ csrf_token() }}';
   var UPCOMING_GAMES_URL = '{{ url_for("bet.nba_upcoming_games") }}';
   var PARLAY_URL         = '{{ url_for("bet.manual_parlay") }}';
+  var PLACE_BETS_URL     = '{{ url_for("bet.nba_place_bets") }}';
   var ALL_PROPS_URL      = '{{ url_for("bet.nba_all_props") }}';
   var OCR_URL            = '{{ url_for("bet.ocr_screenshot") }}';
   var USER_UNIT_SIZE     = {{ current_user.unit_size|tojson }};
   var USER_BANKROLL      = {{ remaining_bankroll|default(none)|tojson }};
   var SERVER_CURRENT_TAB = {{ current_tab|tojson }};
 </script>
+<script src="{{ url_for('static', filename='js/unified_bet_builder.js') }}"></script>
 <script src="{{ url_for('static', filename='js/bet_builder.js') }}"></script>
 {% endblock %}

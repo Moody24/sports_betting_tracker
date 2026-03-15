@@ -53,6 +53,9 @@ class TestBetRoutes(BaseTestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertIn(b'id="parlay-prop-grid"', resp.data)
         self.assertIn(b'id="parlay-selected-legs"', resp.data)
+        self.assertIn(b'id="ub-root"', resp.data)
+        self.assertIn(b'id="ub-submit-btn"', resp.data)
+        self.assertIn(b'PLACE_BETS_URL', resp.data)
 
     def test_new_bet_form_lists_blocks_and_steals_prop_options(self):
         self.register_and_login()

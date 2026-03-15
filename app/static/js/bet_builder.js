@@ -726,7 +726,8 @@
   // Parlay search + game filter — live filtering of the card grid
   var parlayPropsSearchInp = document.getElementById('parlay-props-search-input');
   var parlayGameFilter = document.getElementById('parlay-game-filter');
-  var loadParlayPropsBtn = document.getElementById('load-parlay-props-btn');
+  var parlayFiltersWrap = document.getElementById('parlay-filters-wrap');
+  var parlayPropsStatus = document.getElementById('parlay-props-status');
 
   if (parlayPropsSearchInp) {
     parlayPropsSearchInp.addEventListener('input', function () {
@@ -752,35 +753,59 @@
     grid.appendChild(p);
   }
 
+  function setParlayPropsStatus(msg, level) {
+    if (!parlayPropsStatus) return;
+    parlayPropsStatus.textContent = msg;
+    parlayPropsStatus.className = 'badge';
+    if (level === 'ok') parlayPropsStatus.classList.add('text-bg-success');
+    else if (level === 'warn') parlayPropsStatus.classList.add('text-bg-warning');
+    else if (level === 'error') parlayPropsStatus.classList.add('text-bg-danger');
+    else parlayPropsStatus.classList.add('text-bg-secondary');
+  }
+
   function _maybeLoadParlayProps() {
     if (allPropsLoaded && allPropsData) {
+      if (parlayFiltersWrap) {
+        if (Array.isArray(allPropsData) && allPropsData.length) showElement(parlayFiltersWrap);
+        else hideElement(parlayFiltersWrap);
+      }
       renderParlayPropsBrowser(allPropsData);
       return;
     }
+    setParlayPropsStatus('Loading…', 'muted');
     setParlayGridStatus('Loading props...', false);
     ensureAllPropsLoaded(function (data) {
-      renderParlayPropsBrowser(data);
-      if (loadParlayPropsBtn) {
-        loadParlayPropsBtn.innerHTML = '<i class="bi bi-check-lg me-1"></i>Loaded';
+      if (parlayFiltersWrap) {
+        if (Array.isArray(data) && data.length) showElement(parlayFiltersWrap);
+        else hideElement(parlayFiltersWrap);
       }
+      renderParlayPropsBrowser(data);
       if (!Array.isArray(data) || !data.length) {
+        setParlayPropsStatus('No props', 'warn');
         showParlayFeedback('No live props found. Use "Add Leg Manually" below, or retry later when odds are posted.', 'warning');
+      } else {
+        setParlayPropsStatus(String(data.length) + ' props', 'ok');
       }
     }, function () {
       setParlayGridStatus('Failed to load props. Use Add Leg Manually or retry.', true);
+      setParlayPropsStatus('Load failed', 'error');
       showParlayFeedback('Live props could not be loaded. You can still build a parlay manually.', 'warning');
-      if (loadParlayPropsBtn) {
-        loadParlayPropsBtn.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>Retry';
-      }
     });
   }
 
-  if (loadParlayPropsBtn) {
-    loadParlayPropsBtn.addEventListener('click', function () {
-      loadParlayPropsBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Loading...';
-      _maybeLoadParlayProps();
+  // Preload props in background so the Parlay tab is ready when opened.
+  setTimeout(function () {
+    if (allPropsLoaded) return;
+    ensureAllPropsLoaded(function (data) {
+      if (Array.isArray(data) && data.length) {
+        setParlayPropsStatus(String(data.length) + ' props', 'ok');
+      } else {
+        setParlayPropsStatus('No props', 'warn');
+      }
+    }, function () {
+      setParlayPropsStatus('Load failed', 'error');
     });
-  }
+  }, 250);
 
   function applyPropBrowserSelection(data) {
     var side      = data.side;

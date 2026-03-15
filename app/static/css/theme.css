@@ -2101,6 +2101,24 @@ a:hover {
   color: var(--text-muted);
 }
 
+.ub-grid {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  gap: 0.9rem;
+}
+
+.ub-market-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+@media (max-width: 991.98px) {
+  .ub-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ── KEY FIX: prop-card → compact horizontal row ──────────────── */
 
 #props-browser .prop-card,

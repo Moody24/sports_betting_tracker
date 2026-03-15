@@ -881,6 +881,8 @@ def nba_upcoming_games():
             'match_date': g['start_time'][:10] if g.get('start_time') else '',
             'game_id': g['espn_id'],
             'over_under_line': g.get('over_under_line'),
+            'moneyline_away': g.get('moneyline_away'),
+            'moneyline_home': g.get('moneyline_home'),
         })
     for g in tomorrow_games:
         results.append({
@@ -890,6 +892,8 @@ def nba_upcoming_games():
             'match_date': g.get('match_date', ''),
             'game_id': g['espn_id'],
             'over_under_line': g.get('over_under_line'),
+            'moneyline_away': g.get('moneyline_away'),
+            'moneyline_home': g.get('moneyline_home'),
         })
 
     return jsonify(results)
@@ -1146,6 +1150,7 @@ def nba_place_bets():
         if not is_player_prop and over_under_line_val is None and prop_line_val is not None:
             # Backward-compatible fallback for totals if clients still send prop_line.
             over_under_line_val = prop_line_val
+        picked_team_val = str(leg.get("picked_team") or "")[:80] or None
 
         bet_obj = Bet(
             user_id=current_user.id,
@@ -1157,6 +1162,7 @@ def nba_place_bets():
             outcome=Outcome.PENDING.value,
             bet_type=leg.get("bet_type", BetType.OVER.value),
             over_under_line=None if is_player_prop else over_under_line_val,
+            picked_team=picked_team_val if leg.get("bet_type") == BetType.MONEYLINE.value else None,
             american_odds=american_odds_val,
             external_game_id=leg.get("game_id") or None,
             player_name=player_name_val,

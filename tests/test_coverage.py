@@ -36,6 +36,8 @@ class TestCoverageGap(BaseTestCase):
             "away": {"name": "Celtics"},
             "start_time": "2026-02-25T00:00:00Z",
             "over_under_line": 215.5,
+            "moneyline_home": -135,
+            "moneyline_away": 115,
         }]
         mock_upcoming.return_value = [{
             "espn_id": "espn2",
@@ -50,6 +52,8 @@ class TestCoverageGap(BaseTestCase):
         self.assertEqual(len(data), 2)
         self.assertIn("Lakers", data[0]["label"])
         self.assertIn("Tomorrow", data[1]["label"])
+        self.assertEqual(data[0]["moneyline_home"], -135)
+        self.assertEqual(data[0]["moneyline_away"], 115)
 
     # ── bet route: /bets/parlay (manual_parlay) ───────────────────────
 
