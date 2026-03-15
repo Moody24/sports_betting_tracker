@@ -113,7 +113,11 @@ def _build_training_data(user_id: int | None = None, include_bootstrap: bool = F
 
     By default, excludes AUTO_BOOTSTRAP_HIDDEN synthetic bets and rows with
     polluted (all-zero) matchup context — these are the primary sources of
-    model drift.  Pass ``include_bootstrap=True`` only if you explicitly want
+    model drift. Paper cohort rows (AUTO_PAPER_COHORT:*) are included by
+    default to accelerate learning and can be disabled with
+    MODEL2_INCLUDE_PAPER_COHORTS=false.
+
+    Pass ``include_bootstrap=True`` only if you explicitly want
     the synthetic rows (e.g. when real data is still sparse).
 
     Returns (features_list, targets) or (None, None) if insufficient data.
@@ -129,6 +133,13 @@ def _build_training_data(user_id: int | None = None, include_bootstrap: bool = F
     if not include_bootstrap:
         query = query.filter(
             db.or_(Bet.notes.is_(None), ~Bet.notes.like('AUTO_BOOTSTRAP_HIDDEN%'))
+        )
+    include_paper = str(os.getenv('MODEL2_INCLUDE_PAPER_COHORTS', 'true')).strip().lower() in (
+        '1', 'true', 'yes', 'on',
+    )
+    if not include_paper:
+        query = query.filter(
+            db.or_(Bet.notes.is_(None), ~Bet.notes.like('AUTO_PAPER_COHORT:%'))
         )
     resolved = query.all()
 

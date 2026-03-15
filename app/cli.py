@@ -86,6 +86,7 @@ def _resolved_win_rate(days: int):
         (b, pc) for b, pc in rows
         if b.source == 'auto_generated'
         and not (b.notes or '').startswith('AUTO_BOOTSTRAP_HIDDEN')
+        and not (b.notes or '').startswith('AUTO_PAPER_COHORT:')
     ]
     bootstrap = [
         (b, pc) for b, pc in rows

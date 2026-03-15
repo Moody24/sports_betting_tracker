@@ -1,6 +1,7 @@
 """Tests to improve coverage on low-coverage service files."""
 
 import json
+import os
 from datetime import datetime, timezone, timedelta, date as date_type
 from unittest.mock import patch, MagicMock
 
@@ -445,6 +446,40 @@ class TestPickQualityPollutionFilter(BaseTestCase):
             # Only the 2 clean rows should pass
             self.assertIsNotNone(features)
             self.assertEqual(len(features), 2)
+
+    def test_build_training_data_can_exclude_paper_cohorts(self):
+        """MODEL2_INCLUDE_PAPER_COHORTS=false excludes AUTO_PAPER_COHORT rows."""
+        from app.services import pick_quality_model
+        clean_ctx = json.dumps({
+            'opp_defense_rating': 110.0, 'opp_pace': 99.5, 'opp_matchup_adj': 1.02,
+        })
+        with self.app.app_context():
+            user = make_user('pqpaper', 'pqpaper@ex.com')
+            db.session.add(user)
+            db.session.commit()
+
+            b_real = make_bet(user.id, outcome='win')
+            db.session.add(b_real)
+            db.session.flush()
+            db.session.add(PickContext(bet_id=b_real.id, context_json=clean_ctx))
+
+            b_paper = make_bet(
+                user.id,
+                outcome='lose',
+                source='auto_generated',
+                notes='AUTO_PAPER_COHORT:mid_edge',
+            )
+            db.session.add(b_paper)
+            db.session.flush()
+            db.session.add(PickContext(bet_id=b_paper.id, context_json=clean_ctx))
+            db.session.commit()
+
+            with patch.object(pick_quality_model, 'MIN_RESOLVED_PICKS', 1):
+                with patch.dict(os.environ, {'MODEL2_INCLUDE_PAPER_COHORTS': 'false'}, clear=False):
+                    features, targets, dates = pick_quality_model._build_training_data()
+            self.assertIsNotNone(features)
+            self.assertEqual(len(features), 1)
+            self.assertEqual(targets, [1])
 
 
 # ── pollution report CLI ─────────────────────────────────────────────

@@ -29,6 +29,15 @@ AUTO_PICK_MIN_EDGE_2LEG = 0.15      # 2-leg parlay leg: ≥15% edge (strong tier
 AUTO_PICK_MIN_EDGE_3LEG = 0.15      # 3-leg parlay leg: ≥15% edge (strong tier only)
 AUTO_PICK_MIN_GAMES = 15            # minimum game log history for any pick
 AUTO_PICK_CONFIDENCE_TIER = 'strong'  # only strong-tier picks qualify
+AUTO_PAPER_ENABLED = os.getenv('AUTO_PAPER_ENABLED', 'true').strip().lower() in ('1', 'true', 'yes', 'on')
+AUTO_PAPER_MAX_PER_COHORT = int(os.getenv('AUTO_PAPER_MAX_PER_COHORT', '24'))
+AUTO_PAPER_MIN_GAMES = int(os.getenv('AUTO_PAPER_MIN_GAMES', '10'))
+AUTO_PAPER_COHORTS = (
+    # Mid-edge cohort: likely to contain some edge but lower confidence than production.
+    {'name': 'mid_edge', 'min_edge': 0.08, 'max_edge': 0.15, 'min_tier': 'moderate'},
+    # Low-edge cohort: mostly abstain-zone plays for label enrichment.
+    {'name': 'low_edge', 'min_edge': 0.03, 'max_edge': 0.08, 'min_tier': 'slight'},
+)
 
 scheduler = BackgroundScheduler(timezone=APP_TIMEZONE) if BackgroundScheduler else None
 
@@ -376,24 +385,31 @@ def generate_daily_auto_picks():
         detector = ValueDetector(ProjectionEngine())
         scores = detector.score_all_todays_props()
 
-        # ── Deduplicate and filter to strong-tier plays with sufficient history ──
+        tier_rank = {'no_edge': 0, 'slight': 1, 'moderate': 2, 'strong': 3}
+
+        # ── Deduplicate all scored plays with minimum history ──
         seen_keys: set = set()
         scored_players: set = set()   # one bet per player max
-        all_qualifying: list = []
+        all_candidates: list = []
 
         for s in sorted(scores, key=lambda x: x.get('edge', 0), reverse=True):
-            if (s.get('games_played') or 0) < AUTO_PICK_MIN_GAMES:
-                continue
-            if s.get('confidence_tier') != AUTO_PICK_CONFIDENCE_TIER:
+            if (s.get('games_played') or 0) < AUTO_PAPER_MIN_GAMES:
                 continue
             key = (s.get('player'), s.get('prop_type'), s.get('line'),
                    s.get('recommended_side'), s.get('game_id'))
             if key in seen_keys:
                 continue
             seen_keys.add(key)
-            all_qualifying.append(s)
+            all_candidates.append(s)
 
-        if not all_qualifying:
+        # ── Production qualifying set (strict) ────────────────────────────
+        all_qualifying = [
+            s for s in all_candidates
+            if (s.get('games_played') or 0) >= AUTO_PICK_MIN_GAMES
+            and s.get('confidence_tier') == AUTO_PICK_CONFIDENCE_TIER
+        ]
+
+        if not all_candidates:
             logger.info("Auto pick generation skipped: no qualifying plays today.")
             db.session.commit()
             return
@@ -472,7 +488,7 @@ def generate_daily_auto_picks():
             return
 
         # ── Helper: persist one bet + context ─────────────────────────────
-        def _persist_bet(play: dict, is_parlay: bool, parlay_id: str | None, bucket: str) -> Bet:
+        def _persist_bet(play: dict, is_parlay: bool, parlay_id: str | None, notes_tag: str) -> Bet:
             match_date = play.get('match_date') or today.isoformat()
             try:
                 match_dt = datetime.strptime(match_date, '%Y-%m-%d')
@@ -495,7 +511,7 @@ def generate_daily_auto_picks():
                 player_name=str(play.get('player') or '')[:100] or None,
                 prop_type=str(play.get('prop_type') or '')[:40] or None,
                 prop_line=float(play.get('line') or 0.0),
-                notes=f"AUTO_PICK_BUCKET:{bucket}",
+                notes=notes_tag,
             )
             db.session.add(bet_obj)
             db.session.flush()
@@ -511,25 +527,78 @@ def generate_daily_auto_picks():
             return bet_obj
 
         created_bets: list = []
+        persisted_market_keys: set = set()
 
         for play in straight_plays:
-            created_bets.append(_persist_bet(play, False, None, 'straight'))
+            created_bets.append(_persist_bet(play, False, None, 'AUTO_PICK_BUCKET:straight'))
+            persisted_market_keys.add((
+                play.get('player'), play.get('prop_type'), play.get('line'),
+                play.get('recommended_side'), play.get('game_id'),
+            ))
 
         for pid, legs in parlay_groups:
             n = len(legs)
             bucket = '3leg_parlay' if n == 3 else '2leg_parlay'
             for play in legs:
-                created_bets.append(_persist_bet(play, True, pid, bucket))
+                created_bets.append(_persist_bet(play, True, pid, f'AUTO_PICK_BUCKET:{bucket}'))
+                persisted_market_keys.add((
+                    play.get('player'), play.get('prop_type'), play.get('line'),
+                    play.get('recommended_side'), play.get('game_id'),
+                ))
+
+        paper_counts: dict[str, int] = {}
+        if AUTO_PAPER_ENABLED and AUTO_PAPER_MAX_PER_COHORT > 0:
+            paper_players: set = set()
+            # Avoid duplicate outcome rows across production+paper lanes.
+            for c in AUTO_PAPER_COHORTS:
+                cohort_name = str(c.get('name') or '').strip()
+                if not cohort_name:
+                    continue
+                min_edge = float(c.get('min_edge', 0.0) or 0.0)
+                max_edge = float(c.get('max_edge', 1.0) or 1.0)
+                min_tier_rank = int(tier_rank.get(str(c.get('min_tier') or 'slight'), 1))
+                created_for_cohort = 0
+
+                for play in all_candidates:
+                    if created_for_cohort >= AUTO_PAPER_MAX_PER_COHORT:
+                        break
+                    key = (
+                        play.get('player'), play.get('prop_type'), play.get('line'),
+                        play.get('recommended_side'), play.get('game_id'),
+                    )
+                    if key in persisted_market_keys:
+                        continue
+                    player = str(play.get('player') or '')
+                    if not player or player in paper_players:
+                        continue
+                    edge_abs = abs(float(play.get('edge') or 0.0))
+                    if edge_abs < min_edge or edge_abs >= max_edge:
+                        continue
+                    if int(tier_rank.get(str(play.get('confidence_tier') or 'no_edge'), 0)) < min_tier_rank:
+                        continue
+
+                    created_bets.append(_persist_bet(
+                        play,
+                        False,
+                        None,
+                        f'AUTO_PAPER_COHORT:{cohort_name}',
+                    ))
+                    persisted_market_keys.add(key)
+                    paper_players.add(player)
+                    created_for_cohort += 1
+
+                paper_counts[cohort_name] = created_for_cohort
 
         db.session.commit()
         logger.info(
-            "Generated %d auto picks for %s — %d straight | %d parlays (%d 3-leg, %d 2-leg)",
+            "Generated %d auto picks for %s — %d straight | %d parlays (%d 3-leg, %d 2-leg) | paper=%s",
             len(created_bets),
             today.isoformat(),
             len(straight_plays),
             len(parlay_groups),
             sum(1 for _, legs in parlay_groups if len(legs) == 3),
             sum(1 for _, legs in parlay_groups if len(legs) == 2),
+            paper_counts or {},
         )
 
 
@@ -820,9 +889,10 @@ def retrain_models():
 def check_model_drift():
     """Check 30-day rolling win-rate against model val_accuracy; log warn if drift > 4%.
 
-    Excludes AUTO_BOOTSTRAP_HIDDEN synthetic bets from the comparison — those rows are
-    part of the model's own training set, so including them would make the delta circular.
-    Only real bets (manual + real auto picks) are compared against val_accuracy.
+    Excludes synthetic/experimental lanes from the comparison:
+    - AUTO_BOOTSTRAP_HIDDEN% (synthetic bootstrap)
+    - AUTO_PAPER_COHORT:% (shadow paper cohorts)
+    Only real bets (manual + production auto picks) are compared against val_accuracy.
 
     Also reports training-data pollution ratio so drift can be attributed to data
     quality issues rather than model degradation.
@@ -840,7 +910,13 @@ def check_model_drift():
             .filter(Bet.outcome.in_(['win', 'lose']))
             .filter(Bet.match_date >= cutoff)
             .filter(
-                db.or_(Bet.notes.is_(None), ~Bet.notes.like('AUTO_BOOTSTRAP_HIDDEN%'))
+                db.or_(
+                    Bet.notes.is_(None),
+                    db.and_(
+                        ~Bet.notes.like('AUTO_BOOTSTRAP_HIDDEN%'),
+                        ~Bet.notes.like('AUTO_PAPER_COHORT:%'),
+                    ),
+                )
             )
             .all()
         )
