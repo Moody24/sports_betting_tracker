@@ -1420,8 +1420,8 @@ def nba_all_props():
                     'game_id': game_id or '',
                     'team_a': (game_row.away_team if game_row else '') or '',
                     'team_b': (game_row.home_team if game_row else '') or '',
-                    'team_a_abbr': (game_row.away_abbr if game_row else '') or '',
-                    'team_b_abbr': (game_row.home_abbr if game_row else '') or '',
+                    'team_a_abbr': '',
+                    'team_b_abbr': '',
                     'match_date': today.isoformat(),
                 })
                 player_names.add(player_name)
