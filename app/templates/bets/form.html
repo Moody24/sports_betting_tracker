@@ -30,7 +30,7 @@
 
     <div class="card-soft mb-3" id="ub-root">
       <div class="bb-form-section">
-        <div class="bb-form-section-label"><i class="bi bi-layout-wtf"></i> Unified Bet Slip (Beta)</div>
+        <div class="bb-form-section-label"><i class="bi bi-layout-wtf"></i> Unified Bet Slip <span class="badge text-bg-info ms-1">Primary</span></div>
         <div class="small text-secondary mb-2">
           One flow: choose game, tap markets/props, submit once. 1 pick = single, 2+ picks = parlay.
         </div>
@@ -113,10 +113,13 @@
 
     <details class="bb-advanced mt-3">
       <summary class="bb-advanced-toggle">
-        <i class="bi bi-sliders"></i> Legacy Builder (Advanced)
+        <i class="bi bi-sliders"></i> Legacy Builder (Fallback)
         <i class="bi bi-chevron-down bb-chevron ms-auto"></i>
       </summary>
       <div class="bb-advanced-body mt-2">
+    <div class="alert alert-secondary py-2 small mb-3">
+      Use this only if you need advanced/manual entry behavior not covered by the unified slip.
+    </div>
     {# ── Mode selector ── #}
     <div class="bb-mode-bar mb-3" role="tablist" aria-label="Bet builder mode">
       <button class="bb-mode-btn active" id="bb-tab-single" data-bb-tab="single" type="button" role="tab" aria-controls="bb-panel-single" aria-selected="{{ 'true' if current_tab == 'single' else 'false' }}" tabindex="{{ '0' if current_tab == 'single' else '-1' }}">

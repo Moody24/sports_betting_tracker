@@ -84,7 +84,7 @@
       </select>
     </div>
     <div class="ms-auto d-flex align-items-end gap-2 section-action-row">
-      <a href="/bets/new#parlay" class="btn btn-sm btn-outline-warning btn-toolbar-secondary" id="parlay-queue-btn">
+      <a href="{{ url_for('bet.new_bet', current_tab='parlay') }}#parlay" class="btn btn-sm btn-outline-warning btn-toolbar-secondary" id="parlay-queue-btn">
         <i class="bi bi-collection me-1"></i>Parlay (<span id="parlay-queue-count">0</span>)
       </a>
       <span id="analysis-last-updated" class="small text-secondary">Last updated at --:--</span>
@@ -317,7 +317,7 @@
   <div id="parlayQueueToast" class="toast text-bg-dark border border-secondary-subtle" role="status" aria-live="polite" aria-atomic="true">
     <div class="toast-body d-flex justify-content-between align-items-center gap-3">
       <span id="parlay-toast-message">Added to parlay.</span>
-      <a href="/bets/new#parlay" class="btn btn-sm btn-outline-light">Checkout</a>
+      <a href="{{ url_for('bet.new_bet', current_tab='parlay') }}#parlay" class="btn btn-sm btn-outline-light">Checkout</a>
     </div>
   </div>
 </div>
