@@ -110,7 +110,57 @@ def _features_for_snapshot(snap: GameSnapshot) -> list[float]:
     ]
 
 
-def _train_one(model_name: str, X: list[list[float]], y: list[int], min_samples: int) -> dict:
+def _split_time_aware(
+    X: list[list[float]],
+    y: list[int],
+    game_dates: list[date_type | None],
+) -> tuple[list[list[float]], list[list[float]], list[int], list[int], str]:
+    """Prefer chronological split; fallback to stratified random if needed."""
+    from sklearn.model_selection import train_test_split
+
+    rows = sorted(
+        zip(game_dates, X, y),
+        key=lambda t: t[0] or date_type.min,
+    )
+    split_idx = int(len(rows) * 0.7)
+    split_idx = max(1, min(split_idx, len(rows) - 1))
+    train_rows = rows[:split_idx]
+    val_rows = rows[split_idx:]
+
+    X_train = [r[1] for r in train_rows]
+    y_train = [r[2] for r in train_rows]
+    X_val = [r[1] for r in val_rows]
+    y_val = [r[2] for r in val_rows]
+
+    if len(set(y_train)) >= 2 and len(set(y_val)) >= 2:
+        return X_train, X_val, y_train, y_val, 'time_aware'
+
+    X_train, X_val, y_train, y_val = train_test_split(
+        X, y, test_size=0.3, random_state=42, stratify=y,
+    )
+    return X_train, X_val, y_train, y_val, 'stratified_fallback'
+
+
+def _predict_prob_one(model_obj, row: list[list[float]]) -> float:
+    """Return positive-class probability for either raw or calibrated payload."""
+    if isinstance(model_obj, dict):
+        base_model = model_obj.get('model')
+        calibrator = model_obj.get('calibrator')
+        p = float(base_model.predict_proba(row)[0][1])
+        if calibrator is not None:
+            p = float(calibrator.predict([p])[0])
+            return max(0.0, min(1.0, p))
+        return p
+    return float(model_obj.predict_proba(row)[0][1])
+
+
+def _train_one(
+    model_name: str,
+    X: list[list[float]],
+    y: list[int],
+    game_dates: list[date_type | None],
+    min_samples: int,
+) -> dict:
     if len(X) < min_samples:
         return {'error': f'insufficient_samples:{len(X)}'}
     if len(set(y)) < 2:
@@ -118,15 +168,24 @@ def _train_one(model_name: str, X: list[list[float]], y: list[int], min_samples:
 
     from sklearn.linear_model import LogisticRegression
     from sklearn.metrics import accuracy_score, log_loss
-    from sklearn.model_selection import train_test_split
+    from sklearn.isotonic import IsotonicRegression
     import joblib
 
-    X_train, X_val, y_train, y_val = train_test_split(
-        X, y, test_size=0.3, random_state=42, stratify=y,
+    X_train, X_val, y_train, y_val, split_strategy = _split_time_aware(
+        X=X, y=y, game_dates=game_dates,
     )
     model = LogisticRegression(max_iter=400, class_weight='balanced')
     model.fit(X_train, y_train)
-    probs = model.predict_proba(X_val)[:, 1]
+    raw_probs = model.predict_proba(X_val)[:, 1]
+    calibrator = None
+    calibration_method = 'none'
+    if len(X_val) >= 40 and len(set(y_val)) >= 2:
+        calibrator = IsotonicRegression(out_of_bounds='clip')
+        calibrator.fit(raw_probs, y_val)
+        probs = calibrator.predict(raw_probs)
+        calibration_method = 'isotonic'
+    else:
+        probs = raw_probs
     pred = (probs >= 0.5).astype(int)
     acc = float(accuracy_score(y_val, pred))
     ll = float(log_loss(y_val, probs))
@@ -135,7 +194,8 @@ def _train_one(model_name: str, X: list[list[float]], y: list[int], min_samples:
     today = date_type.today().isoformat()
     filename = f'{model_name}_{today}.pkl'
     filepath = os.path.join(MODEL_DIR, filename)
-    joblib.dump(model, filepath)
+    payload = {'model': model, 'calibrator': calibrator} if calibrator is not None else model
+    joblib.dump(payload, filepath)
     artifact_path = persist_model_artifact(filepath, filename)
 
     ModelMetadata.query.filter_by(model_name=model_name, is_active=True).update({'is_active': False})
@@ -152,11 +212,19 @@ def _train_one(model_name: str, X: list[list[float]], y: list[int], min_samples:
             'feature_names': FEATURES,
             'logloss': round(ll, 4),
             'val_samples': len(X_val),
+            'split_strategy': split_strategy,
+            'calibration_method': calibration_method,
         }),
     )
     db.session.add(meta)
     db.session.commit()
-    return {'accuracy': round(acc, 4), 'logloss': round(ll, 4), 'version': meta.version}
+    return {
+        'accuracy': round(acc, 4),
+        'logloss': round(ll, 4),
+        'version': meta.version,
+        'split_strategy': split_strategy,
+        'calibration_method': calibration_method,
+    }
 
 
 def train_market_models(min_samples: int = 60) -> dict:
@@ -172,20 +240,26 @@ def train_market_models(min_samples: int = 60) -> dict:
         .all()
     )
 
-    X_ml, y_ml = [], []
-    X_tot, y_tot = [], []
+    X_ml, y_ml, d_ml = [], [], []
+    X_tot, y_tot, d_tot = [], [], []
     for s in snaps:
         total_score = (s.home_score or 0) + (s.away_score or 0)
         if s.home_score != s.away_score:
             X_ml.append(_features_for_snapshot(s))
             y_ml.append(1 if (s.home_score or 0) > (s.away_score or 0) else 0)
+            d_ml.append(s.game_date)
         if total_score != float(s.over_under_line or 0):
             X_tot.append(_features_for_snapshot(s))
             y_tot.append(1 if total_score > float(s.over_under_line or 0) else 0)
+            d_tot.append(s.game_date)
 
     return {
-        'moneyline': _train_one(MODEL_NAME_ML, X_ml, y_ml, min_samples=min_samples),
-        'total_ou': _train_one(MODEL_NAME_TOTAL, X_tot, y_tot, min_samples=min_samples),
+        'moneyline': _train_one(
+            MODEL_NAME_ML, X_ml, y_ml, game_dates=d_ml, min_samples=min_samples,
+        ),
+        'total_ou': _train_one(
+            MODEL_NAME_TOTAL, X_tot, y_tot, game_dates=d_tot, min_samples=min_samples,
+        ),
         'rows_scanned': len(snaps),
     }
 
@@ -230,7 +304,7 @@ def recommend_market_sides(games: list[dict]) -> dict[str, dict]:
         row = [[float(ou_line), float(ml_h), float(ml_a), abs(float(ml_h - ml_a)), float(_implied_prob(int(ml_h)))]]
         entry = {}
         if ml_model:
-            p_home = float(ml_model.predict_proba(row)[0][1])
+            p_home = _predict_prob_one(ml_model, row)
             p_away = 1.0 - p_home
             edge_home = p_home - _implied_prob(int(ml_h))
             edge_away = p_away - _implied_prob(int(ml_a))
@@ -252,7 +326,7 @@ def recommend_market_sides(games: list[dict]) -> dict[str, dict]:
                 'model_version': ml_meta.version if ml_meta else None,
             }
         if tot_model:
-            p_over = float(tot_model.predict_proba(row)[0][1])
+            p_over = _predict_prob_one(tot_model, row)
             side = 'over' if p_over >= 0.5 else 'under'
             confidence = max(p_over, 1.0 - p_over)
             edge = abs(p_over - 0.5)
@@ -351,7 +425,7 @@ def evaluate_market_models(days: int = 60, bins: int = 5) -> dict:
             if s.home_score == s.away_score:
                 continue
             row = [_features_for_snapshot(s)]
-            p_home = float(ml_model.predict_proba(row)[0][1])
+            p_home = _predict_prob_one(ml_model, row)
             p_away = 1.0 - p_home
             edge_home = p_home - _implied_prob(int(s.moneyline_home))
             edge_away = p_away - _implied_prob(int(s.moneyline_away))
@@ -377,7 +451,7 @@ def evaluate_market_models(days: int = 60, bins: int = 5) -> dict:
             if total_score == line:
                 continue
             row = [_features_for_snapshot(s)]
-            p_over = float(tot_model.predict_proba(row)[0][1])
+            p_over = _predict_prob_one(tot_model, row)
             confidence = max(p_over, 1.0 - p_over)
             edge = abs(p_over - 0.5)
             side = 'over' if p_over >= 0.5 else 'under'
