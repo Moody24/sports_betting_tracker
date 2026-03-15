@@ -358,6 +358,10 @@
   (function () {
     var storedLegs = typeof getParlayQueue === 'function' ? getParlayQueue() : [];
     storedLegs.forEach(function (stored) {
+      var storedOdds = stored.american_odds;
+      if (storedOdds === undefined || storedOdds === null || storedOdds === '') {
+        storedOdds = stored.odds;
+      }
       parlayLegs.push({
         player: stored.player_name || '',
         player_name: stored.player_name || '',
@@ -366,7 +370,7 @@
         prop_line: parseFloat(stored.prop_line || '0') || 0,
         side: stored.bet_type || 'over',
         bet_type: stored.bet_type || 'over',
-        odds: null,
+        odds: storedOdds === undefined || storedOdds === null || storedOdds === '' ? null : (parseInt(storedOdds, 10) || null),
         bookmaker: '',
         team_a: stored.team_a || '',
         team_b: stored.team_b || '',
@@ -461,6 +465,7 @@
         player_name: l.player || l.player_name,
         prop_type: l.prop_type,
         prop_line: l.line || l.prop_line,
+        american_odds: l.odds,
       };
     });
     setParlayQueue(queue);
@@ -577,6 +582,7 @@
           player_name: leg.player || leg.player_name,
           prop_type: leg.prop_type,
           prop_line: leg.line || leg.prop_line,
+          american_odds: leg.odds,
         };
       });
 

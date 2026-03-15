@@ -89,6 +89,7 @@ class TestCoverageGap(BaseTestCase):
                     "team_b": "Celtics",
                     "match_date": "2026-02-25",
                     "bet_type": "over",
+                    "american_odds": -105,
                     "over_under_line": 215.5,
                     "player_name": "",
                     "prop_type": "",
@@ -103,6 +104,7 @@ class TestCoverageGap(BaseTestCase):
         with self.app.app_context():
             bet = Bet.query.filter_by(user_id=user_id).order_by(Bet.id.desc()).first()
             self.assertEqual(bet.units, 1.5)
+            self.assertEqual(bet.american_odds, -105)
 
     def test_manual_parlay_invalid_date_uses_fallback(self):
         self.register_and_login()

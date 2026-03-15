@@ -552,6 +552,7 @@ document.addEventListener('DOMContentLoaded', function() {
         player_name: parlayBtn.dataset.player || '',
         prop_type: parlayBtn.dataset.propType || 'player_points',
         prop_line: parlayBtn.dataset.line || '',
+        american_odds: parlayBtn.dataset.odds || '',
       };
       const queue = addParlayLeg(leg);
       updateParlayQueueCount();

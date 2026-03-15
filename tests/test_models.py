@@ -112,6 +112,14 @@ class TestModels(BaseTestCase):
         b = make_bet(1, bet_amount=50.0, american_odds=None)
         self.assertAlmostEqual(b.expected_profit_for_win(), 45.45, places=1)
 
+    def test_parlay_profit_loss_uses_leg_odds(self):
+        """Winning parlay P/L should use actual stored leg odds."""
+        legs = [
+            make_bet(1, bet_amount=100.0, outcome="win", is_parlay=True, parlay_id="p1", american_odds=-110),
+            make_bet(1, bet_amount=100.0, outcome="win", is_parlay=True, parlay_id="p1", american_odds=120),
+        ]
+        self.assertAlmostEqual(Bet.parlay_profit_loss(legs), 320.0, places=2)
+
     # Bet.margin
     def test_bet_margin(self):
         b = make_bet(1, over_under_line=210.5, actual_total=215.0)

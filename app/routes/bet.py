@@ -1276,6 +1276,16 @@ def manual_parlay():
             except (ValueError, TypeError):
                 pass
 
+        leg_odds = leg.get("american_odds", leg.get("odds"))
+        parsed_odds = None
+        if leg_odds not in (None, ""):
+            try:
+                parsed_odds = int(leg_odds)
+                if parsed_odds == 0:
+                    parsed_odds = None
+            except (TypeError, ValueError):
+                parsed_odds = None
+
         bet_obj = Bet(
             user_id=current_user.id,
             team_a=str(leg["team_a"])[:80],
@@ -1284,6 +1294,7 @@ def manual_parlay():
             bet_amount=stake,
             units=units_val,
             outcome=outcome,
+            american_odds=parsed_odds,
             bet_type=bet_type,
             over_under_line=ou_line,
             prop_line=prop_line,
