@@ -216,7 +216,8 @@
 
       {# Player Props toggle #}
       <div class="mt-auto">
-        <button class="btn btn-sm btn-outline-info w-100 props-toggle" aria-expanded="false"
+        <button class="btn btn-sm btn-outline-info w-100 props-toggle" type="button" aria-expanded="false"
+                aria-controls="props-{{ game.espn_id }}"
                 data-espn-id="{{ game.espn_id }}"
                 data-away="{{ game.away.name }}"
                 data-home="{{ game.home.name }}"

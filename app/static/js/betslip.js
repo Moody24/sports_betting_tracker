@@ -49,6 +49,9 @@
     var el = document.createElement('div');
     el.id = 'slip-inline-feedback';
     el.className = 'small mb-2 d-none';
+    el.setAttribute('role', 'status');
+    el.setAttribute('aria-live', 'polite');
+    el.setAttribute('aria-atomic', 'true');
     slipControls.insertBefore(el, slipControls.firstChild);
     slipInlineFeedback = el;
     return el;

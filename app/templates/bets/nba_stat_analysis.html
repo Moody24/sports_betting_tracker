@@ -249,7 +249,7 @@
       <div id="sp-meta" class="sp-meta-line"></div>
     </div>
     <div class="d-flex flex-column align-items-end gap-2 ms-2">
-      <button class="stat-panel-close" id="stat-panel-close" aria-label="Close details">&times;</button>
+      <button class="stat-panel-close" id="stat-panel-close" type="button" aria-label="Close details">&times;</button>
       <div id="sp-badge"></div>
     </div>
   </div>
@@ -297,13 +297,13 @@
     </div>
 
     {# ── Stat Toggle ─── #}
-    <div class="sp-stat-toggle mb-3" id="sp-stat-toggle">
-      <button class="sp-tog-btn active" data-stat="pts">PTS</button>
-      <button class="sp-tog-btn" data-stat="reb">REB</button>
-      <button class="sp-tog-btn" data-stat="ast">AST</button>
-      <button class="sp-tog-btn" data-stat="fg3m">3PM</button>
-      <button class="sp-tog-btn" data-stat="stl">STL</button>
-      <button class="sp-tog-btn" data-stat="blk">BLK</button>
+    <div class="sp-stat-toggle mb-3" id="sp-stat-toggle" role="group" aria-label="Stat view toggle">
+      <button class="sp-tog-btn active" type="button" data-stat="pts" aria-pressed="true">PTS</button>
+      <button class="sp-tog-btn" type="button" data-stat="reb" aria-pressed="false">REB</button>
+      <button class="sp-tog-btn" type="button" data-stat="ast" aria-pressed="false">AST</button>
+      <button class="sp-tog-btn" type="button" data-stat="fg3m" aria-pressed="false">3PM</button>
+      <button class="sp-tog-btn" type="button" data-stat="stl" aria-pressed="false">STL</button>
+      <button class="sp-tog-btn" type="button" data-stat="blk" aria-pressed="false">BLK</button>
     </div>
 
     {# ── Bar chart (last 10 games for selected stat) ─── #}
@@ -371,16 +371,16 @@
     <div id="sp-context-tags" class="mb-4"></div>
 
     {# ── Loading state for AJAX ─── #}
-    <div id="sp-loading" class="text-center text-secondary small py-2" hidden>
+    <div id="sp-loading" class="text-center text-secondary small py-2" role="status" aria-live="polite" aria-atomic="true" hidden>
       <span class="spinner-border spinner-border-sm me-1"></span>Loading game log…
     </div>
 
     {# ── Parlay buttons ─── #}
     <div class="d-flex gap-2 mt-2">
-      <button class="btn btn-sm btn-outline-success flex-fill" id="sp-add-over">
+      <button class="btn btn-sm btn-outline-success flex-fill" id="sp-add-over" type="button">
         <i class="bi bi-arrow-up me-1"></i>Add Over
       </button>
-      <button class="btn btn-sm btn-outline-danger flex-fill" id="sp-add-under">
+      <button class="btn btn-sm btn-outline-danger flex-fill" id="sp-add-under" type="button">
         <i class="bi bi-arrow-down me-1"></i>Add Under
       </button>
     </div>
@@ -557,7 +557,11 @@ const SA_PROP_TO_COL = PROP_TO_STAT_COL;
     const btn = e.target.closest('.sp-tog-btn');
     if (!btn || !currentProp) return;
     activeCol = btn.dataset.stat;
-    document.querySelectorAll('.sp-tog-btn').forEach(b => b.classList.toggle('active', b.dataset.stat === activeCol));
+    document.querySelectorAll('.sp-tog-btn').forEach(b => {
+      const isActive = b.dataset.stat === activeCol;
+      b.classList.toggle('active', isActive);
+      b.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+    });
     const line = (activeCol === SA_PROP_TO_COL[currentProp.prop_type]) ? (currentProp.line || 0) : 0;
     renderBarChart(currentLog, activeCol, line);
     renderGameLog(currentLog, activeCol, line);
@@ -575,7 +579,11 @@ const SA_PROP_TO_COL = PROP_TO_STAT_COL;
 
     // Set active toggle to match the prop type
     activeCol = SA_PROP_TO_COL[prop.prop_type] || 'pts';
-    document.querySelectorAll('.sp-tog-btn').forEach(b => b.classList.toggle('active', b.dataset.stat === activeCol));
+    document.querySelectorAll('.sp-tog-btn').forEach(b => {
+      const isActive = b.dataset.stat === activeCol;
+      b.classList.toggle('active', isActive);
+      b.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+    });
 
     // Header
     setText('sp-player-name', prop.player || '—');
