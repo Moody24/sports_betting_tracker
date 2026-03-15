@@ -17,7 +17,7 @@ from typing import Optional
 
 from app import db
 from app.models import Bet, PickContext, ModelMetadata
-from app.services.model_storage import materialize_model_artifact, persist_model_artifact
+from app.services.model_storage import materialize_model_artifact, persist_model_artifact, storage_mode
 
 logger = logging.getLogger(__name__)
 
@@ -450,6 +450,83 @@ def get_feature_importance() -> list:
         return md.get('top_features', [])
     except (ValueError, TypeError):
         return []
+
+
+def get_model_runtime_probe(user_id: int | None = None) -> dict:
+    """Return runtime diagnostics for active Model 2 artifact availability.
+
+    This is used by readiness endpoints to verify that the currently active
+    pick-quality model can be resolved and loaded in the running process.
+    """
+    probe = {
+        'model_name': _model_name(user_id),
+        'storage_mode': storage_mode(),
+        'active_model_found': False,
+        'model_version': None,
+        'path_scheme': None,
+        'artifact_source': None,
+        'artifact_basename': None,
+        'model_loadable': False,
+        'reason': 'unknown',
+    }
+
+    try:
+        from xgboost import XGBClassifier
+    except Exception:
+        probe['reason'] = 'xgboost_missing'
+        return probe
+
+    meta = None
+    if user_id is not None:
+        meta = ModelMetadata.query.filter_by(
+            model_name=_model_name(user_id), is_active=True,
+        ).first()
+    if meta is None:
+        meta = ModelMetadata.query.filter_by(
+            model_name=_model_name(None), is_active=True,
+        ).first()
+
+    if not meta:
+        probe['reason'] = 'no_active_model'
+        return probe
+
+    probe['active_model_found'] = True
+    probe['model_version'] = meta.version
+    probe['path_scheme'] = 's3' if str(meta.file_path or '').startswith('s3://') else 'local'
+
+    local_model_path = materialize_model_artifact(meta.file_path)
+    if local_model_path:
+        probe['artifact_source'] = 'configured_path'
+    else:
+        local_model_path = _find_local_model_fallback(_model_name(user_id))
+        if local_model_path:
+            probe['artifact_source'] = 'local_fallback'
+
+    if not local_model_path:
+        probe['reason'] = 'artifact_unavailable'
+        return probe
+
+    probe['artifact_basename'] = os.path.basename(local_model_path)
+
+    # Validate loadability without running predictions.
+    if local_model_path.endswith('.pkl'):
+        try:
+            import joblib
+            joblib.load(local_model_path)
+        except Exception as exc:
+            probe['reason'] = f'load_error:{type(exc).__name__}'
+            return probe
+    else:
+        try:
+            model = XGBClassifier()
+            model.load_model(local_model_path)
+        except Exception as exc:
+            probe['reason'] = f'load_error:{type(exc).__name__}'
+            return probe
+
+    probe['model_loadable'] = True
+    probe['reason'] = 'ok'
+    return probe
 
 
 def _no_model_result() -> dict:

@@ -2988,6 +2988,46 @@ class TestHealthEndpoint(BaseTestCase):
             self.assertEqual(data['status'], 'unhealthy')
             self.assertEqual(data['database'], 'disconnected')
 
+    @patch('app.routes.main._get_model2_probe')
+    def test_ready_model2_returns_200_when_loadable(self, mock_probe):
+        mock_probe.return_value = {
+            'model_name': 'pick_quality_nba',
+            'storage_mode': 's3',
+            'active_model_found': True,
+            'model_version': 'pick_quality_nba_2026-03-15',
+            'path_scheme': 's3',
+            'artifact_source': 'configured_path',
+            'artifact_basename': 'pick_quality_nba_2026-03-15.pkl',
+            'model_loadable': True,
+            'reason': 'ok',
+        }
+        resp = self.client.get('/ready/model2')
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertEqual(data['status'], 'healthy')
+        self.assertEqual(data['database'], 'connected')
+        self.assertTrue(data['model2']['model_loadable'])
+
+    @patch('app.routes.main._get_model2_probe')
+    def test_ready_model2_returns_503_when_not_loadable(self, mock_probe):
+        mock_probe.return_value = {
+            'model_name': 'pick_quality_nba',
+            'storage_mode': 's3',
+            'active_model_found': True,
+            'model_version': 'pick_quality_nba_2026-03-15',
+            'path_scheme': 's3',
+            'artifact_source': None,
+            'artifact_basename': None,
+            'model_loadable': False,
+            'reason': 'artifact_unavailable',
+        }
+        resp = self.client.get('/ready/model2')
+        self.assertEqual(resp.status_code, 503)
+        data = resp.get_json()
+        self.assertEqual(data['status'], 'unhealthy')
+        self.assertEqual(data['database'], 'connected')
+        self.assertFalse(data['model2']['model_loadable'])
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Unit 1: ValueDetector Model 2 integration

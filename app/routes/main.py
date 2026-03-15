@@ -14,6 +14,10 @@ logger = logging.getLogger(__name__)
 main = Blueprint('main', __name__)
 
 
+def _get_model2_probe() -> dict:
+    from app.services.pick_quality_model import get_model_runtime_probe
+    return get_model_runtime_probe()
+
 
 @main.route('/ready')
 def ready():
@@ -24,6 +28,33 @@ def ready():
     except Exception as exc:
         logger.error('Health check failed: %s', exc)
         return jsonify(status='unhealthy', database='disconnected'), 503
+
+
+@main.route('/ready/model2')
+def ready_model2():
+    """Readiness endpoint for Model 2 artifact resolution and loadability."""
+    try:
+        db.session.execute(text('SELECT 1'))
+    except Exception as exc:
+        logger.error('Model2 readiness failed (DB): %s', exc)
+        return jsonify(status='unhealthy', database='disconnected', model2={'model_loadable': False}), 503
+
+    try:
+        probe = _get_model2_probe()
+    except Exception as exc:
+        logger.error('Model2 readiness failed: %s', exc)
+        return jsonify(
+            status='unhealthy',
+            database='connected',
+            model2={'model_loadable': False, 'reason': 'probe_exception'},
+        ), 503
+
+    http_status = 200 if probe.get('model_loadable') else 503
+    return jsonify(
+        status='healthy' if http_status == 200 else 'unhealthy',
+        database='connected',
+        model2=probe,
+    ), http_status
 
 
 @main.route('/')
