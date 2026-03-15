@@ -2514,7 +2514,7 @@ class TestScheduler(BaseTestCase):
                 with patch.object(scheduler_module, '_acquire_scheduler_lock', return_value=True):
                     scheduler_module.init_scheduler(self.app)
         self.assertTrue(fake.started)
-        self.assertEqual(len(fake.jobs), 14)
+        self.assertEqual(len(fake.jobs), 16)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -3175,6 +3175,27 @@ class TestCLI(BaseTestCase):
         self.assertIn('Tune summary:', result.output)
         self.assertIn('Guard summary:', result.output)
         self.assertIn('Walk-forward summary:', result.output)
+
+    @patch('app.services.nba_service.backfill_game_snapshots')
+    def test_backfill_game_snapshots_cli(self, mock_backfill):
+        mock_backfill.return_value = {
+            'scanned_days': 10, 'scanned_games': 42, 'created': 10,
+            'updated': 5, 'ou_filled': 3, 'moneyline_filled': 2,
+        }
+        runner = self._runner()
+        result = runner.invoke(args=['backfill-game-snapshots', '--start-date', '2026-02-01', '--end-date', '2026-02-10'])
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn('Backfill result:', result.output)
+        self.assertIn('scanned_days=10', result.output)
+
+    @patch('app.services.market_recommender.walkforward_market_report')
+    def test_market_data_coverage_report_cli(self, mock_wf):
+        mock_wf.return_value = {'error': 'no_folds'}
+        runner = self._runner()
+        result = runner.invoke(args=['market-data-coverage-report', '--days', '180'])
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn('=== Market Data Coverage', result.output)
+        self.assertIn('Walk-forward feasibility: NOT READY', result.output)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -3941,6 +3962,8 @@ class TestSchedulerDriftJob(BaseTestCase):
 
         self.assertIn('drift_check', fake.jobs)
         self.assertIn('market_governance', fake.jobs)
+        self.assertIn('snapshot_backfill', fake.jobs)
+        self.assertIn('market_coverage_audit', fake.jobs)
 
 
 class Phase1FeatureBuilderTest(BaseTestCase):

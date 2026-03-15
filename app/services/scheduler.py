@@ -961,6 +961,66 @@ def run_market_governance_job():
         )
 
 
+def run_recent_snapshot_backfill_job():
+    """Backfill recent final GameSnapshot rows (with bet-derived odds enrichment)."""
+    app = _get_app()
+    with app.app_context():
+        from app.services.nba_service import backfill_game_snapshots
+
+        lookback_days = int(os.getenv('GAME_SNAPSHOT_BACKFILL_DAYS', '45'))
+        sleep_seconds = float(os.getenv('GAME_SNAPSHOT_BACKFILL_SLEEP', '0.05'))
+        end_date = datetime.now(ZoneInfo("America/New_York")).date()
+        start_date = end_date - timedelta(days=max(1, lookback_days))
+        result = backfill_game_snapshots(
+            start_date=start_date,
+            end_date=end_date,
+            include_existing=True,
+            sleep_seconds=sleep_seconds,
+        )
+        logger.info("recent_snapshot_backfill: %s", result)
+
+
+def run_market_coverage_audit_job():
+    """Log market data coverage + walk-forward readiness for observability."""
+    app = _get_app()
+    with app.app_context():
+        from app import db
+        from app.models import GameSnapshot
+        from app.services.market_recommender import walkforward_market_report
+
+        days = int(os.getenv('MARKET_COVERAGE_DAYS', '180'))
+        train_days = int(os.getenv('MARKET_COVERAGE_TRAIN_DAYS', '60'))
+        test_days = int(os.getenv('MARKET_COVERAGE_TEST_DAYS', '14'))
+        step_days = int(os.getenv('MARKET_COVERAGE_STEP_DAYS', '14'))
+        cutoff = datetime.now(ZoneInfo("America/New_York")).date() - timedelta(days=days)
+
+        usable_count = (
+            db.session.query(GameSnapshot.id)
+            .filter(GameSnapshot.game_date >= cutoff)
+            .filter(GameSnapshot.is_final.is_(True))
+            .filter(GameSnapshot.home_score.isnot(None))
+            .filter(GameSnapshot.away_score.isnot(None))
+            .filter(GameSnapshot.over_under_line.isnot(None))
+            .filter(GameSnapshot.moneyline_home.isnot(None))
+            .filter(GameSnapshot.moneyline_away.isnot(None))
+            .count()
+        )
+        wf = walkforward_market_report(
+            days=days,
+            train_days=train_days,
+            test_days=test_days,
+            step_days=step_days,
+            bins=5,
+        )
+        logger.info(
+            "market_coverage_audit: usable_rows=%d walkforward=%s moneyline=%s total=%s",
+            usable_count,
+            wf.get('error') or 'ready',
+            ((wf.get('markets') or {}).get('moneyline') or {}).get('summary'),
+            ((wf.get('markets') or {}).get('total_ou') or {}).get('summary'),
+        )
+
+
 def snapshot_props_odds():
     """Snapshot today's player prop odds (FD+DK) for line movement tracking."""
     app = _get_app()
@@ -1126,6 +1186,22 @@ def init_scheduler(app):
         lambda: _log_job('market_governance', run_market_governance_job),
         CronTrigger(day_of_week='mon', hour=9, minute=20, timezone=APP_TIMEZONE),
         id='market_governance',
+        replace_existing=True,
+    )
+
+    # Daily historical backfill for recent finished games (3:30 AM ET)
+    scheduler.add_job(
+        lambda: _log_job('snapshot_backfill', run_recent_snapshot_backfill_job),
+        CronTrigger(hour=3, minute=30, timezone=APP_TIMEZONE),
+        id='snapshot_backfill',
+        replace_existing=True,
+    )
+
+    # Weekly market coverage audit (Sunday 9:30 AM ET)
+    scheduler.add_job(
+        lambda: _log_job('market_coverage_audit', run_market_coverage_audit_job),
+        CronTrigger(day_of_week='sun', hour=9, minute=30, timezone=APP_TIMEZONE),
+        id='market_coverage_audit',
         replace_existing=True,
     )
 

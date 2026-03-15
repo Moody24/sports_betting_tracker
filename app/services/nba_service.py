@@ -374,6 +374,129 @@ def backfill_game_ids(pending_bets: list) -> int:
     return updated
 
 
+def backfill_game_snapshots(
+    start_date: date_type,
+    end_date: date_type,
+    *,
+    include_existing: bool = False,
+    sleep_seconds: float = 0.15,
+) -> dict:
+    """Backfill GameSnapshot rows from ESPN scoreboards and enrich odds from Bet history.
+
+    Historical moneyline/O-U are not available from ESPN scoreboards. This backfill
+    fills those fields from matching historical Bet records when possible.
+    """
+    from app import db
+    from app.models import Bet, GameSnapshot
+
+    if end_date < start_date:
+        return {'error': 'invalid_date_range'}
+
+    bet_rows = (
+        Bet.query
+        .filter(Bet.match_date.isnot(None))
+        .filter(Bet.team_a.isnot(None))
+        .filter(Bet.team_b.isnot(None))
+        .all()
+    )
+
+    # Match key: (game_date_iso, matchup_key)
+    line_by_key: dict = {}
+    ml_by_key: dict = {}
+    for b in bet_rows:
+        try:
+            b_date = b.match_date.date() if isinstance(b.match_date, datetime) else b.match_date
+        except Exception:
+            continue
+        if not isinstance(b_date, date_type):
+            continue
+        key = (b_date.isoformat(), _matchup_key(b.team_a or '', b.team_b or ''))
+        if b.bet_type in (BetType.OVER.value, BetType.UNDER.value) and b.over_under_line is not None:
+            line_by_key.setdefault(key, float(b.over_under_line))
+        if b.bet_type == BetType.MONEYLINE.value and b.american_odds is not None:
+            picked = _normalize_team_name((b.picked_team or '').strip())
+            if picked:
+                slot = ml_by_key.setdefault(key, {})
+                slot[picked] = int(b.american_odds)
+
+    created = 0
+    updated = 0
+    ou_filled = 0
+    ml_filled = 0
+    scanned_days = 0
+    scanned_games = 0
+
+    cur = start_date
+    while cur <= end_date:
+        scanned_days += 1
+        date_key = cur.strftime('%Y%m%d')
+        games = fetch_espn_scoreboard(date_key)
+        for game in games:
+            scanned_games += 1
+            espn_id = game.get('espn_id')
+            if not espn_id:
+                continue
+
+            snap = GameSnapshot.query.filter_by(espn_id=espn_id, game_date=cur).first()
+            if snap is None:
+                snap = GameSnapshot(
+                    espn_id=espn_id,
+                    game_date=cur,
+                    home_team=game.get('home', {}).get('name', ''),
+                    away_team=game.get('away', {}).get('name', ''),
+                    home_logo=game.get('home', {}).get('logo', ''),
+                    away_logo=game.get('away', {}).get('logo', ''),
+                    home_score=game.get('home', {}).get('score'),
+                    away_score=game.get('away', {}).get('score'),
+                    status=game.get('status') or 'STATUS_SCHEDULED',
+                    is_final=(game.get('status') == _STATUS_FINAL),
+                )
+                db.session.add(snap)
+                created += 1
+            else:
+                if include_existing:
+                    snap.home_team = game.get('home', {}).get('name', snap.home_team)
+                    snap.away_team = game.get('away', {}).get('name', snap.away_team)
+                    snap.home_logo = snap.home_logo or game.get('home', {}).get('logo', '')
+                    snap.away_logo = snap.away_logo or game.get('away', {}).get('logo', '')
+                    snap.home_score = game.get('home', {}).get('score')
+                    snap.away_score = game.get('away', {}).get('score')
+                    snap.status = game.get('status') or snap.status
+                    if game.get('status') == _STATUS_FINAL:
+                        snap.is_final = True
+                    updated += 1
+
+            odds_key = (cur.isoformat(), _matchup_key(snap.home_team, snap.away_team))
+            if snap.over_under_line is None and odds_key in line_by_key:
+                snap.over_under_line = line_by_key[odds_key]
+                ou_filled += 1
+
+            if (snap.moneyline_home is None or snap.moneyline_away is None) and odds_key in ml_by_key:
+                slot = ml_by_key[odds_key]
+                home_norm = _normalize_team_name(snap.home_team)
+                away_norm = _normalize_team_name(snap.away_team)
+                if snap.moneyline_home is None:
+                    snap.moneyline_home = slot.get(home_norm)
+                if snap.moneyline_away is None:
+                    snap.moneyline_away = slot.get(away_norm)
+                if snap.moneyline_home is not None or snap.moneyline_away is not None:
+                    ml_filled += 1
+
+        db.session.commit()
+        if sleep_seconds > 0:
+            _time.sleep(sleep_seconds)
+        cur += timedelta(days=1)
+
+    return {
+        'scanned_days': scanned_days,
+        'scanned_games': scanned_games,
+        'created': created,
+        'updated': updated,
+        'ou_filled': ou_filled,
+        'moneyline_filled': ml_filled,
+    }
+
+
 def fetch_odds_events() -> dict:
     """Return Odds API events with their IDs, mapped by matchup key."""
     api_key = _get_odds_api_key()

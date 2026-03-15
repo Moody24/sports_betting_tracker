@@ -598,6 +598,84 @@ def register_cli(app):
             job.message = message
             db.session.commit()
 
+    @app.cli.command('backfill-game-snapshots')
+    @click.option('--start-date', required=True, help='Start date (YYYY-MM-DD)')
+    @click.option('--end-date', required=True, help='End date (YYYY-MM-DD)')
+    @click.option('--include-existing/--no-include-existing', default=False, show_default=True)
+    @click.option('--sleep', 'sleep_seconds', type=float, default=0.15, show_default=True)
+    def cli_backfill_game_snapshots(start_date, end_date, include_existing, sleep_seconds):
+        """Backfill historical GameSnapshot rows from ESPN + bet-derived odds."""
+        from app.services.nba_service import backfill_game_snapshots
+
+        try:
+            start_dt = datetime.strptime(start_date, '%Y-%m-%d').date()
+            end_dt = datetime.strptime(end_date, '%Y-%m-%d').date()
+        except ValueError:
+            click.echo('Invalid date format. Use YYYY-MM-DD.')
+            return
+
+        click.echo(f'Backfilling game snapshots: {start_dt} -> {end_dt}')
+        result = backfill_game_snapshots(
+            start_date=start_dt,
+            end_date=end_dt,
+            include_existing=include_existing,
+            sleep_seconds=sleep_seconds,
+        )
+        if result.get('error'):
+            click.echo(f"Error: {result['error']}")
+            return
+        click.echo(
+            f"Backfill result: scanned_days={result.get('scanned_days')} "
+            f"scanned_games={result.get('scanned_games')} created={result.get('created')} "
+            f"updated={result.get('updated')} ou_filled={result.get('ou_filled')} "
+            f"moneyline_filled={result.get('moneyline_filled')}"
+        )
+
+    @app.cli.command('market-data-coverage-report')
+    @click.option('--days', type=int, default=180, show_default=True)
+    @click.option('--train-days', type=int, default=60, show_default=True)
+    @click.option('--test-days', type=int, default=14, show_default=True)
+    @click.option('--step-days', type=int, default=14, show_default=True)
+    def cli_market_data_coverage_report(days, train_days, test_days, step_days):
+        """Report market-snapshot coverage and walk-forward fold feasibility."""
+        from app.models import GameSnapshot
+        from app.services.market_recommender import walkforward_market_report
+
+        cutoff = datetime.now(APP_TIMEZONE).date() - timedelta(days=days)
+        rows = (
+            GameSnapshot.query
+            .filter(GameSnapshot.game_date >= cutoff)
+            .filter(GameSnapshot.is_final.is_(True))
+            .filter(GameSnapshot.home_score.isnot(None))
+            .filter(GameSnapshot.away_score.isnot(None))
+            .filter(GameSnapshot.over_under_line.isnot(None))
+            .filter(GameSnapshot.moneyline_home.isnot(None))
+            .filter(GameSnapshot.moneyline_away.isnot(None))
+            .all()
+        )
+        dates = sorted({r.game_date for r in rows if r.game_date is not None})
+        click.echo(f'=== Market Data Coverage (last {days} days) ===')
+        click.echo(f'Usable rows: {len(rows)}')
+        click.echo(f'Unique dates: {len(dates)}')
+        if dates:
+            click.echo(f'Date range: {dates[0]} -> {dates[-1]}')
+
+        wf = walkforward_market_report(
+            days=days,
+            train_days=train_days,
+            test_days=test_days,
+            step_days=step_days,
+            bins=5,
+        )
+        if wf.get('error'):
+            click.echo(f"Walk-forward feasibility: NOT READY ({wf.get('error')})")
+        else:
+            m = (wf.get('markets') or {}).get('moneyline', {}).get('summary', {})
+            t = (wf.get('markets') or {}).get('total_ou', {}).get('summary', {})
+            click.echo('Walk-forward feasibility: READY')
+            click.echo(f"Moneyline summary: {m}")
+            click.echo(f"Total O/U summary: {t}")
+
     @app.cli.command('data_quality_report')
     @click.option(
         '--stale-hours',
