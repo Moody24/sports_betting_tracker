@@ -1428,6 +1428,19 @@ a:hover {
 .analysis-toast-container { z-index: 1080; }
 .analysis-row-hidden { display: none !important; }
 
+/* Shared empty/error state treatment across sportsbook pages */
+.ux-empty-state {
+  border: 1px solid var(--border-subtle);
+  background: rgba(255,255,255,.012);
+}
+.ux-empty-icon {
+  opacity: 0.35;
+}
+.ux-state-error {
+  border: 1px solid rgba(240,68,56,.24);
+  background: rgba(240,68,56,.06);
+}
+
 .refresh-content {
   transition: opacity 0.18s ease;
 }

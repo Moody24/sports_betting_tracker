@@ -483,7 +483,7 @@
       return;
     }
     if (!Array.isArray(allProps)) {
-      propsStatus.textContent = 'Loading props for selected game...';
+      propsStatus.textContent = 'Loading player props for selected game...';
       return;
     }
 
@@ -739,7 +739,7 @@
     if (!forceRefresh && Array.isArray(allProps)) return Promise.resolve(allProps);
     if (!forceRefresh && propsPromise) return propsPromise;
 
-    propsStatus.textContent = 'Loading props...';
+    propsStatus.textContent = 'Loading player props...';
     propsPromise = fetch(ALL_PROPS_URL)
       .then(function (r) { return r.json(); })
       .then(function (data) {
@@ -788,7 +788,7 @@
         if (manual) setFeedback('Odds refreshed.', 'success');
       })
       .catch(function () {
-        if (manual) setFeedback('Failed to refresh odds.', 'warning');
+        if (manual) setFeedback('Unable to refresh odds. Showing last available data.', 'warning');
       })
       .finally(function () {
         if (refreshBtn) {
@@ -829,7 +829,7 @@
   setLastUpdated(null);
 
   refreshData(false).then(function () {
-    if (!games.length) propsStatus.textContent = 'No games available right now.';
+    if (!games.length) propsStatus.textContent = 'No games available right now. Try Refresh Odds again shortly.';
   });
 
   // Keep odds current while user is on the page.

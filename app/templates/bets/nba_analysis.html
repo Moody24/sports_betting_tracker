@@ -192,8 +192,8 @@
       <p class="placeholder col-10 mb-0"></p>
     </div>
   </div>
-  <div id="analysis-table-error" class="text-center text-danger py-4" hidden>
-    <p class="mb-2"><i class="bi bi-exclamation-triangle me-1"></i>Could not refresh analysis table.</p>
+  <div id="analysis-table-error" class="ux-state-error card-soft p-3 text-center text-danger mb-3" hidden>
+    <p class="mb-2"><i class="bi bi-exclamation-triangle me-1"></i>Unable to refresh prop analysis.</p>
     <button class="btn btn-sm btn-outline-danger" type="button" id="analysis-refresh-retry">Retry</button>
   </div>
 
@@ -287,8 +287,8 @@
   </div>
 </div>
 {% else %}
-<div class="card-soft p-4 text-center text-secondary mb-4">
-  <i class="bi bi-graph-up analysis-empty-icon"></i>
+<div class="ux-empty-state card-soft p-4 text-center text-secondary mb-4">
+  <i class="bi bi-graph-up analysis-empty-icon ux-empty-icon"></i>
   <p class="mt-2 mb-0">No value plays detected yet. Analysis runs when player stat data is available.</p>
   <p class="small mt-1 mb-0">Check back closer to game time or after running the stats refresh.</p>
 </div>

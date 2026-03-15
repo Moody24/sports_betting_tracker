@@ -43,9 +43,10 @@
    ACTIVE GAMES
 ══════════════════════════════════════════════════════════════ #}
 {% if not games and not completed_snaps %}
-<div class="card-soft p-4 text-center text-secondary mb-4">
-  <i class="bi bi-calendar-x today-empty-icon"></i>
+<div class="ux-empty-state card-soft p-4 text-center text-secondary mb-4">
+  <i class="bi bi-calendar-x today-empty-icon ux-empty-icon"></i>
   <p class="mt-2 mb-0">No NBA games scheduled today.</p>
+  <p class="small mt-1 mb-0">Check back later or use Refresh Live Games.</p>
 </div>
 {% endif %}
 
@@ -253,7 +254,7 @@
   {% endfor %}
 </div>
 
-<div id="active-games-error" class="card-soft p-3 text-center text-danger mb-4" hidden>
+<div id="active-games-error" class="ux-state-error card-soft p-3 text-center text-danger mb-4" hidden>
   <div class="mb-2"><i class="bi bi-exclamation-triangle me-1"></i>Unable to refresh live games.</div>
   <button class="btn btn-sm btn-outline-danger" type="button" id="retry-active-games">Retry</button>
 </div>

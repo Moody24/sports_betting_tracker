@@ -139,15 +139,16 @@
     <p class="placeholder col-10 mb-0"></p>
   </div>
 </div>
-<div id="stat-analysis-error" class="card-soft p-3 mb-4 text-danger text-center" hidden>
+<div id="stat-analysis-error" class="ux-state-error card-soft p-3 mb-4 text-danger text-center" hidden>
   <p class="mb-2"><i class="bi bi-exclamation-triangle me-1"></i>Unable to refresh stat analysis.</p>
   <button class="btn btn-sm btn-outline-danger" type="button" id="stat-analysis-refresh-retry">Retry</button>
 </div>
 <div id="stat-analysis-results" class="refresh-content">
 {% if not matchups %}
-<div class="text-center text-secondary py-5 fade-up fade-up-4">
-  <i class="bi bi-bar-chart-line fs-1 d-block mb-2 opacity-25"></i>
+<div class="ux-empty-state card-soft p-4 text-center text-secondary mb-4 fade-up fade-up-4">
+  <i class="bi bi-bar-chart-line fs-1 d-block mb-2 ux-empty-icon"></i>
   <p class="mb-0">No props available for today.</p>
+  <p class="small mt-1 mb-0">Try refreshing closer to tip-off when books post more lines.</p>
 </div>
 {% endif %}
 
