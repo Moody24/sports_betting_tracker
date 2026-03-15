@@ -43,6 +43,19 @@
     return n > 0 ? ('+' + n) : String(n);
   }
 
+  function asAmerican(v) {
+    if (v === null || v === undefined || v === '') return null;
+    var n = parseInt(v, 10);
+    if (!n) return null;
+    return n;
+  }
+
+  function americanToDecimal(american) {
+    if (!american) return null;
+    if (american > 0) return 1 + (american / 100);
+    return 1 + (100 / Math.abs(american));
+  }
+
   function setFeedback(msg, type) {
     if (!feedback) return;
     feedback.className = 'alert alert-' + type + ' py-2 small';
@@ -72,14 +85,14 @@
     return [g.team_a || '', g.team_b || '', g.match_date || '', g.game_id || ''].join('|');
   }
 
-  function legKey(leg) {
+  function marketIdentityKey(leg) {
     if (leg.player_name) {
-      return ['prop', leg.player_name, leg.prop_type, leg.bet_type, leg.game_id || '', leg.prop_line].join('|');
+      return ['prop', leg.player_name, leg.prop_type || '', leg.game_id || '', leg.match_date || ''].join('|');
     }
     if (leg.bet_type === 'moneyline') {
-      return ['ml', leg.picked_team, leg.game_id || '', leg.match_date || ''].join('|');
+      return ['ml', leg.game_id || '', leg.match_date || '', leg.team_a || '', leg.team_b || ''].join('|');
     }
-    return ['total', leg.bet_type, leg.game_id || '', leg.over_under_line].join('|');
+    return ['total', leg.game_id || '', leg.match_date || '', leg.team_a || '', leg.team_b || ''].join('|');
   }
 
   function setBtnState(btn, enabled, label) {
@@ -88,17 +101,35 @@
     if (label) btn.textContent = label;
   }
 
-  function asAmerican(v) {
-    if (v === null || v === undefined || v === '') return null;
-    var n = parseInt(v, 10);
-    if (!n) return null;
-    return n;
+  function setFilter(next) {
+    propFilter = next;
+    [
+      [filterAllBtn, 'all'],
+      [filterPtsBtn, 'player_points'],
+      [filterRebBtn, 'player_rebounds'],
+      [filterAstBtn, 'player_assists'],
+      [filter3pmBtn, 'player_threes'],
+    ].forEach(function (pair) {
+      if (!pair[0]) return;
+      pair[0].classList.toggle('active', pair[1] === propFilter);
+    });
+    renderProps();
   }
 
-  function americanToDecimal(american) {
-    if (!american) return null;
-    if (american > 0) return 1 + (american / 100);
-    return 1 + (100 / Math.abs(american));
+  function updateModeBadge() {
+    if (!modeBadge) return;
+    if (!slip.length) {
+      modeBadge.className = 'badge text-bg-secondary';
+      modeBadge.textContent = 'No picks';
+      return;
+    }
+    if (slip.length === 1) {
+      modeBadge.className = 'badge text-bg-info';
+      modeBadge.textContent = 'Single';
+      return;
+    }
+    modeBadge.className = 'badge text-bg-success';
+    modeBadge.textContent = 'Parlay · ' + slip.length + ' legs';
   }
 
   function updatePayoutPreview() {
@@ -143,37 +174,6 @@
     payoutPreviewEl.textContent = 'Parlay projected: +$' + parlayProfit.toFixed(2) + ' (total $' + parlayPayout.toFixed(2) + ')';
   }
 
-  function updateModeBadge() {
-    if (!modeBadge) return;
-    if (!slip.length) {
-      modeBadge.className = 'badge text-bg-secondary';
-      modeBadge.textContent = 'No picks';
-      return;
-    }
-    if (slip.length === 1) {
-      modeBadge.className = 'badge text-bg-info';
-      modeBadge.textContent = 'Single';
-      return;
-    }
-    modeBadge.className = 'badge text-bg-success';
-    modeBadge.textContent = 'Parlay · ' + slip.length + ' legs';
-  }
-
-  function setFilter(next) {
-    propFilter = next;
-    [
-      [filterAllBtn, 'all'],
-      [filterPtsBtn, 'player_points'],
-      [filterRebBtn, 'player_rebounds'],
-      [filterAstBtn, 'player_assists'],
-      [filter3pmBtn, 'player_threes'],
-    ].forEach(function (pair) {
-      if (!pair[0]) return;
-      pair[0].classList.toggle('active', pair[1] === propFilter);
-    });
-    renderProps();
-  }
-
   function renderMarketButtons() {
     if (!selectedGame) {
       setBtnState(homeMlBtn, false, 'Home ML');
@@ -202,18 +202,21 @@
   }
 
   function addLeg(leg) {
-    var key = legKey(leg);
-    var replaced = false;
-    slip = slip.map(function (existing) {
-      if (legKey(existing) === key) {
-        replaced = true;
-        return leg;
-      }
-      return existing;
+    var identity = marketIdentityKey(leg);
+    var idx = -1;
+    slip.forEach(function (existing, i) {
+      if (marketIdentityKey(existing) === identity) idx = i;
     });
-    if (!replaced) slip.push(leg);
+
+    if (idx >= 0) {
+      slip[idx] = leg;
+      setFeedback('Updated existing pick for this market.', 'info');
+    } else {
+      slip.push(leg);
+      clearFeedback();
+    }
+
     renderSlip();
-    clearFeedback();
   }
 
   function removeLeg(idx) {
@@ -271,19 +274,83 @@
       info.appendChild(title);
       info.appendChild(detail);
 
-      var oddsWrap = document.createElement('div');
+      var controls = document.createElement('div');
+      controls.className = 'd-flex align-items-center gap-1';
+
+      var sideSelect = document.createElement('select');
+      sideSelect.className = 'form-select form-select-sm';
+      sideSelect.style.width = '72px';
+      ['over', 'under'].forEach(function (side) {
+        var opt = document.createElement('option');
+        opt.value = side;
+        opt.textContent = side === 'over' ? 'Over' : 'Under';
+        if (leg.bet_type === side) opt.selected = true;
+        sideSelect.appendChild(opt);
+      });
+
+      var lineInput = document.createElement('input');
+      lineInput.type = 'number';
+      lineInput.step = '0.5';
+      lineInput.className = 'form-control form-control-sm';
+      lineInput.style.width = '74px';
+
+      if (leg.player_name) {
+        lineInput.value = leg.prop_line === null || leg.prop_line === undefined ? '' : String(leg.prop_line);
+        sideSelect.addEventListener('change', function () {
+          leg.bet_type = sideSelect.value;
+          refreshSlipOdds();
+        });
+        lineInput.addEventListener('input', function () {
+          var v = parseFloat(lineInput.value);
+          leg.prop_line = Number.isFinite(v) ? v : leg.prop_line;
+          renderSlip();
+        });
+        controls.appendChild(sideSelect);
+        controls.appendChild(lineInput);
+      } else if (leg.bet_type === 'moneyline') {
+        var teamSelect = document.createElement('select');
+        teamSelect.className = 'form-select form-select-sm';
+        teamSelect.style.width = '120px';
+        [leg.team_a, leg.team_b].forEach(function (tm) {
+          if (!tm) return;
+          var optTm = document.createElement('option');
+          optTm.value = tm;
+          optTm.textContent = tm;
+          if (leg.picked_team === tm) optTm.selected = true;
+          teamSelect.appendChild(optTm);
+        });
+        teamSelect.addEventListener('change', function () {
+          leg.picked_team = teamSelect.value;
+          refreshSlipOdds();
+        });
+        controls.appendChild(teamSelect);
+      } else {
+        lineInput.value = leg.over_under_line === null || leg.over_under_line === undefined ? '' : String(leg.over_under_line);
+        sideSelect.addEventListener('change', function () {
+          leg.bet_type = sideSelect.value;
+          renderSlip();
+        });
+        lineInput.addEventListener('input', function () {
+          var vv = parseFloat(lineInput.value);
+          leg.over_under_line = Number.isFinite(vv) ? vv : leg.over_under_line;
+          renderSlip();
+        });
+        controls.appendChild(sideSelect);
+        controls.appendChild(lineInput);
+      }
+
       var oddsInput = document.createElement('input');
       oddsInput.type = 'number';
       oddsInput.className = 'form-control form-control-sm';
-      oddsInput.style.width = '86px';
+      oddsInput.style.width = '80px';
       oddsInput.placeholder = 'Odds';
       oddsInput.value = leg.american_odds === null || leg.american_odds === undefined ? '' : String(leg.american_odds);
       oddsInput.addEventListener('input', function () {
-        var v = oddsInput.value;
-        slip[idx].american_odds = v === '' ? null : parseInt(v, 10);
+        var vOdds = oddsInput.value;
+        leg.american_odds = vOdds === '' ? null : parseInt(vOdds, 10);
         updatePayoutPreview();
       });
-      oddsWrap.appendChild(oddsInput);
+      controls.appendChild(oddsInput);
 
       var remove = document.createElement('button');
       remove.type = 'button';
@@ -292,7 +359,7 @@
       remove.addEventListener('click', function () { removeLeg(idx); });
 
       row.appendChild(info);
-      row.appendChild(oddsWrap);
+      row.appendChild(controls);
       row.appendChild(remove);
       slipList.appendChild(row);
     });
@@ -315,9 +382,31 @@
     return gameKey(candidate) === gameKey(selectedGame);
   }
 
+  function propRelevanceScore(p) {
+    var score = 0;
+    var over = asAmerican(p.over_odds);
+    var under = asAmerican(p.under_odds);
+    if (over !== null) score += 40;
+    if (under !== null) score += 40;
+    if (p.line !== null && p.line !== undefined && p.line !== '') score += 30;
+    var bestOver = americanToDecimal(over) || 0;
+    var bestUnder = americanToDecimal(under) || 0;
+    score += Math.max(bestOver, bestUnder) * 5;
+    var movement = (p.movement || {}).line_delta;
+    if (movement !== null && movement !== undefined) score += Math.min(Math.abs(movement), 3);
+    return score;
+  }
+
   function propsForSelectedGame() {
     if (!Array.isArray(allProps) || !selectedGame) return [];
-    return allProps.filter(isSameGameProp);
+    return allProps
+      .filter(isSameGameProp)
+      .filter(function (p) {
+        var hasLine = p.line !== null && p.line !== undefined && p.line !== '';
+        var hasAnyOdds = asAmerican(p.over_odds) !== null || asAmerican(p.under_odds) !== null;
+        return hasLine && hasAnyOdds;
+      })
+      .sort(function (a, b) { return propRelevanceScore(b) - propRelevanceScore(a); });
   }
 
   function applyPropFilter(rows) {
@@ -338,10 +427,20 @@
       return;
     }
 
-    var rows = applyPropFilter(propsForSelectedGame());
-    propsStatus.textContent = rows.length
-      ? ('Showing ' + rows.length + ' ' + (propFilter === 'all' ? 'props' : propFilter.replace('player_', '')) + ' picks for this game.')
-      : 'No props available for this filter.';
+    var allGameRows = propsForSelectedGame();
+    var rows = applyPropFilter(allGameRows);
+    var filteredOut = Math.max(0, allGameRows.length - rows.length);
+
+    if (!rows.length) {
+      propsStatus.textContent = propFilter === 'all'
+        ? 'No tradable props available for this game yet.'
+        : 'No props available for this filter.';
+      return;
+    }
+
+    propsStatus.textContent = 'Showing ' + rows.length + ' curated props' +
+      (filteredOut ? (' (' + filteredOut + ' hidden by filter).') : '.') +
+      ' Ranked by line quality and pricing.';
 
     rows.forEach(function (p) {
       var card = document.createElement('div');
@@ -366,6 +465,7 @@
       ob.type = 'button';
       ob.className = 'btn btn-xs btn-outline-success';
       ob.textContent = 'O ' + fmtOdds(p.over_odds);
+      ob.disabled = asAmerican(p.over_odds) === null;
       ob.addEventListener('click', function () {
         addLeg({
           team_a: p.team_a,
@@ -386,6 +486,7 @@
       ub.type = 'button';
       ub.className = 'btn btn-xs btn-outline-danger';
       ub.textContent = 'U ' + fmtOdds(p.under_odds);
+      ub.disabled = asAmerican(p.under_odds) === null;
       ub.addEventListener('click', function () {
         addLeg({
           team_a: p.team_a,
@@ -452,9 +553,8 @@
 
   function findGameForLeg(leg) {
     if (!Array.isArray(games) || !games.length) return null;
-    var byId = null;
     if (leg.game_id) {
-      byId = games.find(function (g) { return String(g.game_id || '') === String(leg.game_id || ''); });
+      var byId = games.find(function (g) { return String(g.game_id || '') === String(leg.game_id || ''); });
       if (byId) return byId;
     }
     return games.find(function (g) {
