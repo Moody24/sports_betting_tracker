@@ -394,6 +394,8 @@ class TestAnalysisRoute(BaseTestCase):
             resp = self.client.get('/nba/analysis')
             self.assertEqual(resp.status_code, 200)
             self.assertIn(b'Prop Analysis', resp.data)
+            self.assertIn(b'/bets/new?current_tab=prop#prop', resp.data)
+            self.assertIn(b"current_tab=prop", resp.data)
 
     def test_analysis_counts_from_full_filtered_set(self):
         self.register_and_login()

@@ -325,6 +325,7 @@ class TestBetRoutes(BaseTestCase):
         self.register_and_login()
         resp = self.client.get("/nba/today")
         self.assertEqual(resp.status_code, 200)
+        self.assertIn(b'/bets/new?current_tab=prop#prop', resp.data)
 
     @patch("app.routes.bet.fetch_upcoming_games", return_value=[])
     @patch("app.routes.bet.recommend_market_sides")

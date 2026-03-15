@@ -135,6 +135,7 @@ class TestStatAnalysisRoute(BaseTestCase):
         self._login()
         resp = self.client.get('/nba/stat-analysis')
         self.assertEqual(resp.status_code, 200)
+        self.assertIn(b'/bets/new?current_tab=prop#prop', resp.data)
 
     @patch('app.services.nba_service.get_todays_games')
     @patch('app.services.score_cache.get_todays_scores')
