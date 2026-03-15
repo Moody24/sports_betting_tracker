@@ -3033,6 +3033,10 @@ class TestCLI(BaseTestCase):
     def test_market_model_report(self, mock_report):
         mock_report.return_value = {
             'rows_scanned': 180,
+            'policy_used': {
+                'moneyline': {'min_edge': 0.03, 'min_confidence': 0.55},
+                'total_ou': {'min_edge': 0.06, 'min_confidence': 0.56},
+            },
             'markets': {
                 'moneyline': {
                     'rows': 160,
@@ -3077,6 +3081,36 @@ class TestCLI(BaseTestCase):
         self.assertIn('--- moneyline ---', result.output)
         self.assertIn('--- total_ou ---', result.output)
         self.assertIn('=== Verdict ===', result.output)
+
+    @patch('app.services.market_recommender.tune_market_thresholds')
+    def test_market_threshold_tune(self, mock_tune):
+        mock_tune.return_value = {
+            'policy': {
+                'moneyline': {'min_edge': 0.03, 'min_confidence': 0.58},
+                'total_ou': {'min_edge': 0.06, 'min_confidence': 0.59},
+            },
+            'selected': {
+                'moneyline': {
+                    'selected': {'min_edge': 0.03, 'min_confidence': 0.58},
+                    'score': 0.1234,
+                    'metrics': {'recommended_bets': 40, 'roi_per_bet': 0.08, 'closing_edge_proxy': 0.05, 'overconfidence_gap': 0.01},
+                },
+                'total_ou': {
+                    'selected': {'min_edge': 0.06, 'min_confidence': 0.59},
+                    'score': 0.1102,
+                    'metrics': {'recommended_bets': 38, 'roi_per_bet': 0.06, 'closing_edge_proxy': 0.04, 'overconfidence_gap': 0.02},
+                },
+            },
+            'applied': True,
+            'apply_result': {'updated_models': ['market_moneyline_nba', 'market_total_ou_nba']},
+        }
+        runner = self._runner()
+        result = runner.invoke(args=['market-threshold-tune', '--days', '90', '--min-bets', '20'])
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn('=== Market Threshold Tune', result.output)
+        self.assertIn('Selected policy:', result.output)
+        self.assertIn('--- moneyline ---', result.output)
+        self.assertIn('=== Apply ===', result.output)
 
 
 # ═══════════════════════════════════════════════════════════════════════════

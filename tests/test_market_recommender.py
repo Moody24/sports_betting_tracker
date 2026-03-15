@@ -148,3 +148,47 @@ class TestMarketRecommender(BaseTestCase):
         self.assertIn("total_ou", report["markets"])
         self.assertIn("accuracy", report["markets"]["moneyline"])
         self.assertIn("brier", report["markets"]["total_ou"])
+
+    def test_apply_market_threshold_policy_affects_recommendations(self):
+        from app.services.market_recommender import (
+            apply_market_threshold_policy,
+            recommend_market_sides,
+            train_market_models,
+        )
+
+        self._seed_snapshots(90)
+        with self.app.app_context():
+            train_market_models(min_samples=40)
+            baseline = recommend_market_sides([{
+                "espn_id": "g1",
+                "over_under_line": 219.5,
+                "moneyline_home": -145,
+                "moneyline_away": 122,
+            }])
+            apply_market_threshold_policy({
+                "moneyline": {"min_edge": 0.2, "min_confidence": 0.85},
+                "total_ou": {"min_edge": 0.2, "min_confidence": 0.85},
+            })
+            strict = recommend_market_sides([{
+                "espn_id": "g1",
+                "over_under_line": 219.5,
+                "moneyline_home": -145,
+                "moneyline_away": 122,
+            }])
+
+        self.assertIn(baseline["g1"]["moneyline"]["action"], ("bet", "pass"))
+        self.assertEqual(strict["g1"]["moneyline"]["action"], "pass")
+        self.assertEqual(strict["g1"]["total"]["action"], "pass")
+
+    def test_tune_market_thresholds_returns_policy(self):
+        from app.services.market_recommender import train_market_models, tune_market_thresholds
+
+        self._seed_snapshots(120)
+        with self.app.app_context():
+            train_market_models(min_samples=40)
+            result = tune_market_thresholds(days=365, bins=5, min_bets=5, apply=False)
+
+        self.assertNotIn("error", result)
+        self.assertIn("policy", result)
+        self.assertIn("moneyline", result["policy"])
+        self.assertIn("total_ou", result["policy"])

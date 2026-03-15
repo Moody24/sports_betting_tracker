@@ -190,6 +190,9 @@ def register_cli(app):
             return
 
         click.echo(f"Rows scanned: {report.get('rows_scanned', 0)}")
+        policy = report.get('policy_used') or {}
+        if policy:
+            click.echo(f"Policy used: {policy}")
         markets = report.get('markets', {})
         if not markets:
             click.echo('No market metrics available.')
@@ -217,7 +220,9 @@ def register_cli(app):
             click.echo(
                 f"Recommended bets={m.get('recommended_bets')} "
                 f"({m.get('recommended_bet_rate')}) | "
-                f"Recommended hit rate={m.get('recommended_hit_rate')}"
+                f"Recommended hit rate={m.get('recommended_hit_rate')} | "
+                f"ROI/bet={m.get('roi_per_bet')} | "
+                f"CLV-proxy={m.get('closing_edge_proxy')}"
             )
             click.echo(
                 f"Train val_acc={m.get('train_val_accuracy')} | "
@@ -249,6 +254,46 @@ def register_cli(app):
                 click.echo(f'- {line}')
         else:
             click.echo('OK: no market drift beyond threshold.')
+
+    @app.cli.command('market-threshold-tune')
+    @click.option('--days', type=int, default=180, show_default=True, help='History window in days.')
+    @click.option('--bins', type=int, default=5, show_default=True, help='Calibration bins (2-10).')
+    @click.option('--min-bets', type=int, default=40, show_default=True, help='Minimum recommended bets per market.')
+    @click.option('--apply/--no-apply', default=True, show_default=True, help='Persist tuned thresholds to active model metadata.')
+    def cli_market_threshold_tune(days, bins, min_bets, apply):
+        """Tune market recommendation thresholds for ROI + CLV proxy + calibration."""
+        from app.services.market_recommender import tune_market_thresholds
+
+        click.echo(f'=== Market Threshold Tune (last {days} days) ===')
+        result = tune_market_thresholds(days=days, bins=bins, min_bets=min_bets, apply=apply)
+        if result.get('error'):
+            click.echo(f"Error: {result['error']}")
+            click.echo(f"Rows scanned: {result.get('rows_scanned', 0)}")
+            return
+
+        click.echo(f"Selected policy: {result.get('policy')}")
+        selected = result.get('selected', {})
+        for market in ('moneyline', 'total_ou'):
+            s = selected.get(market, {})
+            click.echo(f"\n--- {market} ---")
+            click.echo(f"Thresholds: {s.get('selected')}")
+            click.echo(f"Objective score: {s.get('score')}")
+            metrics = s.get('metrics') or {}
+            if metrics:
+                click.echo(
+                    f"Bets={metrics.get('recommended_bets')} | "
+                    f"ROI/bet={metrics.get('roi_per_bet')} | "
+                    f"CLV-proxy={metrics.get('closing_edge_proxy')} | "
+                    f"Cal gap={metrics.get('overconfidence_gap')}"
+                )
+            else:
+                click.echo('No valid candidate met min-bets gate; kept previous/default thresholds.')
+
+        click.echo('\n=== Apply ===')
+        if result.get('applied'):
+            click.echo(f"Applied: {result.get('apply_result')}")
+        else:
+            click.echo('No changes persisted (--no-apply).')
 
     @app.cli.command('generate-auto-picks')
     def cli_generate_auto_picks():
