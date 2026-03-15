@@ -40,6 +40,12 @@
             <input type="text" id="ub-game-picker" class="form-control bb-game-picker"
                    placeholder="Search game…" list="game-datalist" autocomplete="off">
             <div id="ub-game-meta" class="form-text">Pick a game to unlock moneyline, total, and props.</div>
+            <div class="d-flex align-items-center gap-2 mt-1">
+              <button type="button" id="ub-refresh-btn" class="btn btn-outline-secondary btn-sm">
+                <i class="bi bi-arrow-clockwise me-1"></i>Refresh Odds
+              </button>
+              <span id="ub-last-updated" class="small text-secondary">Not refreshed yet.</span>
+            </div>
 
             <div class="ub-market-row mt-3">
               <button type="button" id="ub-home-ml-btn" class="btn btn-sm btn-outline-secondary" disabled>Home ML</button>
@@ -91,6 +97,9 @@
                 <button type="button" id="ub-clear-slip-btn" class="btn btn-outline-secondary btn-sm">
                   Clear Slip
                 </button>
+              </div>
+              <div class="col-12">
+                <div id="ub-payout-preview" class="small text-info">Projected payout appears here once stake and odds are set.</div>
               </div>
             </div>
           </div>

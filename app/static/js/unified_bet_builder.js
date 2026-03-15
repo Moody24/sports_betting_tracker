@@ -7,6 +7,8 @@
 
   var gamePicker = document.getElementById('ub-game-picker');
   var gameMeta = document.getElementById('ub-game-meta');
+  var refreshBtn = document.getElementById('ub-refresh-btn');
+  var lastUpdatedEl = document.getElementById('ub-last-updated');
   var homeMlBtn = document.getElementById('ub-home-ml-btn');
   var awayMlBtn = document.getElementById('ub-away-ml-btn');
   var overBtn = document.getElementById('ub-over-btn');
@@ -24,6 +26,7 @@
   var unitsEl = document.getElementById('ub-units');
   var submitBtn = document.getElementById('ub-submit-btn');
   var clearSlipBtn = document.getElementById('ub-clear-slip-btn');
+  var payoutPreviewEl = document.getElementById('ub-payout-preview');
   var feedback = document.getElementById('ub-feedback');
 
   var games = [];
@@ -52,6 +55,19 @@
     feedback.classList.add('d-none');
   }
 
+  function setLastUpdated(ts) {
+    if (!lastUpdatedEl) return;
+    if (!ts) {
+      lastUpdatedEl.textContent = 'Not refreshed yet.';
+      return;
+    }
+    try {
+      lastUpdatedEl.textContent = 'Updated ' + new Date(ts).toLocaleTimeString();
+    } catch (_e) {
+      lastUpdatedEl.textContent = 'Updated';
+    }
+  }
+
   function gameKey(g) {
     return [g.team_a || '', g.team_b || '', g.match_date || '', g.game_id || ''].join('|');
   }
@@ -72,19 +88,59 @@
     if (label) btn.textContent = label;
   }
 
-  function setFilter(next) {
-    propFilter = next;
-    [
-      [filterAllBtn, 'all'],
-      [filterPtsBtn, 'player_points'],
-      [filterRebBtn, 'player_rebounds'],
-      [filterAstBtn, 'player_assists'],
-      [filter3pmBtn, 'player_threes'],
-    ].forEach(function (pair) {
-      if (!pair[0]) return;
-      pair[0].classList.toggle('active', pair[1] === propFilter);
+  function asAmerican(v) {
+    if (v === null || v === undefined || v === '') return null;
+    var n = parseInt(v, 10);
+    if (!n) return null;
+    return n;
+  }
+
+  function americanToDecimal(american) {
+    if (!american) return null;
+    if (american > 0) return 1 + (american / 100);
+    return 1 + (100 / Math.abs(american));
+  }
+
+  function updatePayoutPreview() {
+    if (!payoutPreviewEl) return;
+    var stake = parseFloat((stakeEl || {}).value || '');
+    if (!stake || stake <= 0) {
+      payoutPreviewEl.textContent = 'Projected payout appears here once stake and odds are set.';
+      return;
+    }
+    if (!slip.length) {
+      payoutPreviewEl.textContent = 'Add at least one pick to see projected payout.';
+      return;
+    }
+
+    var decimals = [];
+    slip.forEach(function (leg) {
+      var d = americanToDecimal(asAmerican(leg.american_odds));
+      if (d) decimals.push(d);
     });
-    renderProps();
+
+    if (slip.length === 1) {
+      if (!decimals.length) {
+        payoutPreviewEl.textContent = 'Set odds for your pick to calculate payout.';
+        return;
+      }
+      var dec = decimals[0];
+      var payout = stake * dec;
+      var profit = payout - stake;
+      payoutPreviewEl.textContent = 'Projected: +$' + profit.toFixed(2) + ' (total $' + payout.toFixed(2) + ')';
+      return;
+    }
+
+    if (decimals.length !== slip.length) {
+      payoutPreviewEl.textContent = 'Set odds for all legs to calculate parlay payout.';
+      return;
+    }
+
+    var combined = 1;
+    decimals.forEach(function (d) { combined *= d; });
+    var parlayPayout = stake * combined;
+    var parlayProfit = parlayPayout - stake;
+    payoutPreviewEl.textContent = 'Parlay projected: +$' + parlayProfit.toFixed(2) + ' (total $' + parlayPayout.toFixed(2) + ')';
   }
 
   function updateModeBadge() {
@@ -101,6 +157,21 @@
     }
     modeBadge.className = 'badge text-bg-success';
     modeBadge.textContent = 'Parlay · ' + slip.length + ' legs';
+  }
+
+  function setFilter(next) {
+    propFilter = next;
+    [
+      [filterAllBtn, 'all'],
+      [filterPtsBtn, 'player_points'],
+      [filterRebBtn, 'player_rebounds'],
+      [filterAstBtn, 'player_assists'],
+      [filter3pmBtn, 'player_threes'],
+    ].forEach(function (pair) {
+      if (!pair[0]) return;
+      pair[0].classList.toggle('active', pair[1] === propFilter);
+    });
+    renderProps();
   }
 
   function renderMarketButtons() {
@@ -169,6 +240,7 @@
       empty.appendChild(p);
       slipList.appendChild(empty);
       updateModeBadge();
+      updatePayoutPreview();
       return;
     }
 
@@ -209,6 +281,7 @@
       oddsInput.addEventListener('input', function () {
         var v = oddsInput.value;
         slip[idx].american_odds = v === '' ? null : parseInt(v, 10);
+        updatePayoutPreview();
       });
       oddsWrap.appendChild(oddsInput);
 
@@ -225,6 +298,7 @@
     });
 
     updateModeBadge();
+    updatePayoutPreview();
   }
 
   function isSameGameProp(p) {
@@ -304,7 +378,7 @@
           prop_line: p.line,
           over_under_line: null,
           picked_team: null,
-          american_odds: p.over_odds || null,
+          american_odds: asAmerican(p.over_odds),
         });
       });
 
@@ -324,7 +398,7 @@
           prop_line: p.line,
           over_under_line: null,
           picked_team: null,
-          american_odds: p.under_odds || null,
+          american_odds: asAmerican(p.under_odds),
         });
       });
 
@@ -353,7 +427,7 @@
       prop_line: null,
       over_under_line: null,
       picked_team: pickedTeam,
-      american_odds: odds || null,
+      american_odds: asAmerican(odds),
     });
   }
 
@@ -374,6 +448,52 @@
       picked_team: null,
       american_odds: -110,
     });
+  }
+
+  function findGameForLeg(leg) {
+    if (!Array.isArray(games) || !games.length) return null;
+    var byId = null;
+    if (leg.game_id) {
+      byId = games.find(function (g) { return String(g.game_id || '') === String(leg.game_id || ''); });
+      if (byId) return byId;
+    }
+    return games.find(function (g) {
+      return (g.team_a || '') === (leg.team_a || '') &&
+        (g.team_b || '') === (leg.team_b || '') &&
+        (g.match_date || '') === (leg.match_date || '');
+    }) || null;
+  }
+
+  function refreshSlipOdds() {
+    if (!slip.length) return;
+    slip = slip.map(function (leg) {
+      var next = Object.assign({}, leg);
+      if (leg.player_name && Array.isArray(allProps)) {
+        var match = allProps.find(function (p) {
+          return (p.player || '') === (leg.player_name || '') &&
+            (p.market || '') === (leg.prop_type || '') &&
+            String(p.game_id || '') === String(leg.game_id || '');
+        });
+        if (match) {
+          next.american_odds = leg.bet_type === 'over' ? asAmerican(match.over_odds) : asAmerican(match.under_odds);
+          next.prop_line = match.line;
+        }
+      } else if (leg.bet_type === 'moneyline') {
+        var gm = findGameForLeg(leg);
+        if (gm) {
+          next.american_odds = (leg.picked_team === gm.team_b)
+            ? asAmerican(gm.moneyline_home)
+            : asAmerican(gm.moneyline_away);
+        }
+      } else if (leg.bet_type === 'over' || leg.bet_type === 'under') {
+        var tg = findGameForLeg(leg);
+        if (tg && tg.over_under_line !== null && tg.over_under_line !== undefined && tg.over_under_line !== '') {
+          next.over_under_line = tg.over_under_line;
+        }
+      }
+      return next;
+    });
+    renderSlip();
   }
 
   function submitSlip() {
@@ -432,6 +552,7 @@
     renderProps();
     ensurePropsLoaded().then(function () {
       renderProps();
+      refreshSlipOdds();
     });
   }
 
@@ -440,15 +561,17 @@
       .then(function (r) { return r.json(); })
       .then(function (data) {
         games = Array.isArray(data) ? data : [];
+        return games;
       })
       .catch(function () {
         games = [];
+        return games;
       });
   }
 
-  function ensurePropsLoaded() {
-    if (Array.isArray(allProps)) return Promise.resolve(allProps);
-    if (propsPromise) return propsPromise;
+  function ensurePropsLoaded(forceRefresh) {
+    if (!forceRefresh && Array.isArray(allProps)) return Promise.resolve(allProps);
+    if (!forceRefresh && propsPromise) return propsPromise;
 
     propsStatus.textContent = 'Loading props...';
     propsPromise = fetch(ALL_PROPS_URL)
@@ -468,11 +591,56 @@
     return propsPromise;
   }
 
+  function hydrateSelectionAfterRefresh() {
+    if (!selectedGame) return;
+    var prior = selectedGame;
+    if (prior.game_id) {
+      var byId = games.find(function (g) { return String(g.game_id || '') === String(prior.game_id || ''); });
+      if (byId) selectedGame = byId;
+    }
+    if (!selectedGame || !selectedGame.label) {
+      selectedGame = games.find(function (g) { return g.label === prior.label; }) || selectedGame;
+    }
+    if (selectedGame && gamePicker) gamePicker.value = selectedGame.label || gamePicker.value;
+  }
+
+  function refreshData(manual) {
+    if (refreshBtn) {
+      refreshBtn.disabled = true;
+      refreshBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Refreshing...';
+    }
+
+    return Promise.all([loadGames(), ensurePropsLoaded(true)])
+      .then(function () {
+        hydrateSelectionAfterRefresh();
+        renderMarketButtons();
+        renderProps();
+        refreshSlipOdds();
+        setLastUpdated(Date.now());
+        if (manual) setFeedback('Odds refreshed.', 'success');
+      })
+      .catch(function () {
+        if (manual) setFeedback('Failed to refresh odds.', 'warning');
+      })
+      .finally(function () {
+        if (refreshBtn) {
+          refreshBtn.disabled = false;
+          refreshBtn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Refresh Odds';
+        }
+      });
+  }
+
   if (gamePicker) {
     gamePicker.addEventListener('input', function () {
       selectGameByLabel(gamePicker.value || '');
     });
   }
+  if (refreshBtn) {
+    refreshBtn.addEventListener('click', function () {
+      refreshData(true);
+    });
+  }
+
   if (homeMlBtn) homeMlBtn.addEventListener('click', function () { addMoneyline(true); });
   if (awayMlBtn) awayMlBtn.addEventListener('click', function () { addMoneyline(false); });
   if (overBtn) overBtn.addEventListener('click', function () { addTotal('over'); });
@@ -484,23 +652,28 @@
   if (filterAstBtn) filterAstBtn.addEventListener('click', function () { setFilter('player_assists'); });
   if (filter3pmBtn) filter3pmBtn.addEventListener('click', function () { setFilter('player_threes'); });
 
+  if (stakeEl) stakeEl.addEventListener('input', updatePayoutPreview);
   if (submitBtn) submitBtn.addEventListener('click', submitSlip);
   if (clearSlipBtn) clearSlipBtn.addEventListener('click', clearSlip);
 
   renderMarketButtons();
   renderSlip();
+  setLastUpdated(null);
 
-  loadGames().then(function () {
+  refreshData(false).then(function () {
     if (games.length) {
       selectedGame = games[0];
       if (gamePicker && !gamePicker.value) gamePicker.value = selectedGame.label || '';
       renderMarketButtons();
       renderProps();
-      ensurePropsLoaded().then(function () {
-        renderProps();
-      });
+      refreshSlipOdds();
       return;
     }
     propsStatus.textContent = 'No games available right now.';
   });
+
+  // Keep odds current while user is on the page.
+  setInterval(function () {
+    refreshData(false);
+  }, 60000);
 })();
