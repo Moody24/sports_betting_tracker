@@ -2671,6 +2671,11 @@ a:hover {
   font-weight: 500;
   transition: all 0.15s ease;
 }
+.ux-flow-link > span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .ux-flow-link:hover {
   border-color: var(--border-mid);
   color: var(--text-main);
@@ -3127,6 +3132,70 @@ a:hover {
   .sa-filter-form button,
   .sa-filter-form a {
     width: 100%;
+  }
+}
+
+@media (max-width: 991.98px) {
+  .today-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .today-toolbar-actions {
+    justify-content: stretch;
+  }
+
+  .today-toolbar-actions > * {
+    width: 100%;
+  }
+
+  .today-toolbar-actions form .btn {
+    width: 100%;
+  }
+}
+
+@media (max-width: 767.98px) {
+  .ux-flow-nav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .section-action-row {
+    align-items: stretch;
+  }
+
+  .section-action-row .small.text-secondary {
+    flex: 1 0 100%;
+    order: -1;
+  }
+
+  .analysis-filter-select,
+  .sa-search-input {
+    width: 100%;
+  }
+
+  .sa-filter-toolbar > .btn {
+    flex: 1 1 calc(50% - 0.5rem);
+    text-align: center;
+  }
+
+  .ub-grid {
+    gap: 0.7rem;
+  }
+}
+
+@media (max-width: 575.98px) {
+  .ub-market-row > .btn {
+    flex: 1 1 calc(50% - 0.25rem);
+    min-width: 0;
+  }
+
+  .stat-panel {
+    width: 100vw;
+    max-width: 100vw;
+  }
+
+  .stat-panel-body {
+    padding: 0.8rem 0.8rem 1.1rem;
   }
 }
 
