@@ -188,6 +188,11 @@
               <span class="text-secondary">({{ ml_rec.action|upper }}, edge {{ '%.1f'|format((ml_rec.edge or 0) * 100) }}%)</span>
             </span>
           </div>
+          {% if ml_rec.action_reason == 'market_disabled' %}
+          <div class="text-warning-emphasis small">
+            <i class="bi bi-shield-exclamation me-1"></i>Temporarily disabled by governance guardrails
+          </div>
+          {% endif %}
         {% endif %}
         {% if rec.get('total') %}
           {% set t_rec = rec.get('total') %}
@@ -200,6 +205,11 @@
               <span class="text-secondary">({{ t_rec.action|upper }}, conf {{ '%.0f'|format((t_rec.confidence or 0) * 100) }}%)</span>
             </span>
           </div>
+          {% if t_rec.action_reason == 'market_disabled' %}
+          <div class="text-warning-emphasis small">
+            <i class="bi bi-shield-exclamation me-1"></i>Temporarily disabled by governance guardrails
+          </div>
+          {% endif %}
         {% endif %}
       </div>
       {% endif %}

@@ -16,7 +16,17 @@ logger = logging.getLogger(__name__)
 MODEL_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'ml_models')
 MODEL_NAME_ML = 'market_moneyline_nba'
 MODEL_NAME_TOTAL = 'market_total_ou_nba'
-FEATURES = ['over_under_line', 'moneyline_home', 'moneyline_away', 'ml_gap_abs', 'implied_home']
+FEATURES = [
+    'over_under_line',
+    'moneyline_home',
+    'moneyline_away',
+    'ml_gap_abs',
+    'implied_home',
+    'implied_away',
+    'implied_gap',
+    'favorite_home_flag',
+    'ou_centered_220',
+]
 DEFAULT_POLICY = {
     'moneyline': {'min_edge': 0.03, 'min_confidence': 0.55},
     'total_ou': {'min_edge': 0.06, 'min_confidence': 0.56},
@@ -207,14 +217,28 @@ def _implied_prob(american_odds: int | None) -> float:
 
 
 def _features_for_snapshot(snap: GameSnapshot) -> list[float]:
-    ml_h = int(snap.moneyline_home or 0)
-    ml_a = int(snap.moneyline_away or 0)
+    return _features_for_inputs(
+        over_under_line=float(snap.over_under_line or 0.0),
+        moneyline_home=int(snap.moneyline_home or 0),
+        moneyline_away=int(snap.moneyline_away or 0),
+    )
+
+
+def _features_for_inputs(over_under_line: float, moneyline_home: int, moneyline_away: int) -> list[float]:
+    implied_home = float(_implied_prob(moneyline_home))
+    implied_away = float(_implied_prob(moneyline_away))
+    implied_gap = implied_home - implied_away
+    favorite_home_flag = 1.0 if implied_home >= implied_away else 0.0
     return [
-        float(snap.over_under_line or 0.0),
-        float(ml_h),
-        float(ml_a),
-        abs(float(ml_h - ml_a)),
-        float(_implied_prob(ml_h)),
+        float(over_under_line),
+        float(moneyline_home),
+        float(moneyline_away),
+        abs(float(moneyline_home - moneyline_away)),
+        implied_home,
+        implied_away,
+        implied_gap,
+        favorite_home_flag,
+        float(over_under_line) - 220.0,
     ]
 
 
@@ -251,15 +275,31 @@ def _split_time_aware(
 
 def _predict_prob_one(model_obj, row: list[list[float]]) -> float:
     """Return positive-class probability for either raw or calibrated payload."""
+    model_row = _adapt_row_to_model(model_obj, row)
     if isinstance(model_obj, dict):
         base_model = model_obj.get('model')
         calibrator = model_obj.get('calibrator')
-        p = float(base_model.predict_proba(row)[0][1])
+        p = float(base_model.predict_proba(model_row)[0][1])
         if calibrator is not None:
             p = float(calibrator.predict([p])[0])
             return max(0.0, min(1.0, p))
         return p
-    return float(model_obj.predict_proba(row)[0][1])
+    return float(model_obj.predict_proba(model_row)[0][1])
+
+
+def _adapt_row_to_model(model_obj, row: list[list[float]]) -> list[list[float]]:
+    """Adapt feature width for backward compatibility with older artifacts."""
+    try:
+        base_model = model_obj.get('model') if isinstance(model_obj, dict) else model_obj
+        expected = int(getattr(base_model, 'n_features_in_', len(row[0])))
+    except Exception:
+        return row
+    actual = len(row[0])
+    if actual == expected:
+        return row
+    if actual > expected:
+        return [row[0][:expected]]
+    return [row[0] + ([0.0] * (expected - actual))]
 
 
 def _train_one(
@@ -282,9 +322,19 @@ def _train_one(
     X_train, X_val, y_train, y_val, split_strategy = _split_time_aware(
         X=X, y=y, game_dates=game_dates,
     )
-    model = LogisticRegression(max_iter=400, class_weight='balanced')
-    model.fit(X_train, y_train)
-    raw_probs = model.predict_proba(X_val)[:, 1]
+    candidate_cs = [0.3, 1.0, 3.0]
+    model = None
+    raw_probs = None
+    best_ll = None
+    for c in candidate_cs:
+        m = LogisticRegression(max_iter=500, class_weight='balanced', C=c)
+        m.fit(X_train, y_train)
+        p = m.predict_proba(X_val)[:, 1]
+        ll = float(log_loss(y_val, p))
+        if best_ll is None or ll < best_ll:
+            best_ll = ll
+            model = m
+            raw_probs = p
     calibrator = None
     calibration_method = 'none'
     if len(X_val) >= 40 and len(set(y_val)) >= 2:
@@ -322,6 +372,7 @@ def _train_one(
             'val_samples': len(X_val),
             'split_strategy': split_strategy,
             'calibration_method': calibration_method,
+            'best_c': float(model.C) if model is not None else None,
         }),
     )
     db.session.add(meta)
@@ -332,6 +383,7 @@ def _train_one(
         'version': meta.version,
         'split_strategy': split_strategy,
         'calibration_method': calibration_method,
+        'best_c': float(model.C) if model is not None else None,
     }
 
 
@@ -538,7 +590,7 @@ def recommend_market_sides(games: list[dict]) -> dict[str, dict]:
         ml_a = g.get('moneyline_away')
         if ou_line is None or ml_h is None or ml_a is None:
             continue
-        row = [[float(ou_line), float(ml_h), float(ml_a), abs(float(ml_h - ml_a)), float(_implied_prob(int(ml_h)))]]
+        row = [_features_for_inputs(float(ou_line), int(ml_h), int(ml_a))]
         entry = {}
         if ml_model:
             p_home = _predict_prob_one(ml_model, row)
@@ -677,6 +729,7 @@ def guard_market_recommendations(
         return report
 
     decisions = {}
+    wf = walkforward_market_report(days=min(max(days, 30), 365), train_days=60, test_days=14, step_days=14, bins=bins)
     for market in ('moneyline', 'total_ou'):
         m = report.get('markets', {}).get(market) or {}
         if m.get('error'):
@@ -687,11 +740,18 @@ def guard_market_recommendations(
         roi = m.get('roi_per_bet')
         drift_breach = acc_delta is not None and abs(float(acc_delta)) > float(drift_threshold)
         roi_breach = rec_bets >= int(min_bets) and roi is not None and float(roi) < 0.0
-        disable = bool(drift_breach or roi_breach)
+        wf_summary = (((wf.get('markets') or {}).get(market) or {}).get('summary') if not wf.get('error') else None) or {}
+        wf_folds = int(wf_summary.get('folds') or 0)
+        wf_roi = wf_summary.get('avg_roi_per_bet')
+        wf_roi_breach = wf_folds >= 3 and wf_roi is not None and float(wf_roi) < 0.0
+        disable = bool(drift_breach or roi_breach or wf_roi_breach)
         decisions[market] = {
             'decision': 'disable' if disable else 'keep_enabled',
             'drift_breach': drift_breach,
             'roi_breach': roi_breach,
+            'walkforward_roi_breach': wf_roi_breach,
+            'walkforward_avg_roi_per_bet': wf_roi,
+            'walkforward_folds': wf_folds,
             'recommended_bets': rec_bets,
             'accuracy_delta': acc_delta,
             'roi_per_bet': roi,

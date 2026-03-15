@@ -322,8 +322,13 @@ def register_cli(app):
             click.echo(f"\n--- {market} ---")
             click.echo(
                 f"Decision={d.get('decision')} | drift_breach={d.get('drift_breach')} | "
-                f"roi_breach={d.get('roi_breach')} | bets={d.get('recommended_bets')} | "
+                f"roi_breach={d.get('roi_breach')} | wf_roi_breach={d.get('walkforward_roi_breach')} | "
+                f"bets={d.get('recommended_bets')} | "
                 f"acc_delta={d.get('accuracy_delta')} | roi/bet={d.get('roi_per_bet')}"
+            )
+            click.echo(
+                f"Walk-forward: folds={d.get('walkforward_folds')} "
+                f"avg_roi_per_bet={d.get('walkforward_avg_roi_per_bet')}"
             )
         click.echo('\n=== Apply ===')
         if result.get('applied'):
