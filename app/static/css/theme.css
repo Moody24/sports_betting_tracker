@@ -247,7 +247,12 @@ h1, h2, h3, h4, h5, h6,
 .toast-close:focus-visible,
 .parlay-toggle-btn:focus-visible,
 .props-toggle:focus-visible,
-.icon-btn:focus-visible {
+.icon-btn:focus-visible,
+.ux-flow-link:focus-visible,
+.sa-featured-card:focus-visible,
+.sa-player-row:focus-visible,
+.sp-tog-btn:focus-visible,
+.stat-panel-close:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
   box-shadow: 0 0 0 3px rgba(20, 241, 182, 0.18);

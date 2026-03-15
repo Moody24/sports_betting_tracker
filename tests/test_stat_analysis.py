@@ -172,6 +172,10 @@ class TestStatAnalysisRoute(BaseTestCase):
         resp = self.client.get('/nba/stat-analysis')
         self.assertEqual(resp.status_code, 200)
         self.assertIn(b'sa-ind-badge-strong', resp.data)
+        self.assertIn(b'sa-featured-card sa-clickable', resp.data)
+        self.assertIn(b'role="button"', resp.data)
+        self.assertIn(b'tabindex="0"', resp.data)
+        self.assertIn(b'aria-label="Open breakdown for', resp.data)
 
     @patch('app.services.nba_service.get_todays_games')
     @patch('app.services.score_cache.get_todays_scores')

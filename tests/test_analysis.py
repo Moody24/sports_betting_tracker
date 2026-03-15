@@ -396,6 +396,7 @@ class TestAnalysisRoute(BaseTestCase):
             self.assertIn(b'Prop Analysis', resp.data)
             self.assertIn(b'/bets/new?current_tab=prop#prop', resp.data)
             self.assertIn(b"current_tab=prop", resp.data)
+            self.assertIn(b'/bets/new?current_tab=parlay#parlay', resp.data)
 
     def test_analysis_counts_from_full_filtered_set(self):
         self.register_and_login()

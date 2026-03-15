@@ -69,6 +69,9 @@
     {% for s in strong_picks %}
     {% set pos = (s.breakdown or {}).get('player_position', '') %}
     <div class="featured-play-card sa-featured-card sa-clickable"
+         role="button"
+         tabindex="0"
+         aria-label="Open breakdown for {{ s.player }} {{ PROP_LABELS_SHORT.get(s.prop_type, s.prop_type) }}"
          data-prop='{{ s | tojson }}'>
       <div class="d-flex justify-content-between align-items-start mb-1">
         <span class="tier-strong">STRONG ★</span>
@@ -436,6 +439,8 @@ const SA_PROP_TO_COL = PROP_TO_STAT_COL;
 
   function rebindResultRows() {
     document.querySelectorAll('.sa-player-row, .sa-featured-card').forEach(row => {
+      if (row.dataset.boundPanelOpen === '1') return;
+      row.dataset.boundPanelOpen = '1';
       const openFromRow = () => {
         try {
           const raw = row.dataset.prop || row.getAttribute('data-prop') || '';
