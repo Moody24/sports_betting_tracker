@@ -2107,6 +2107,34 @@ a:hover {
   gap: 0.9rem;
 }
 
+.ub-game-select-wrap {
+  position: relative;
+}
+
+.ub-game-select-icon {
+  position: absolute;
+  left: 0.7rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-dim);
+  pointer-events: none;
+  z-index: 2;
+}
+
+.ub-game-select {
+  padding-left: 2rem;
+  min-height: 2.35rem;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02)), var(--bg-panel);
+  border: 1px solid var(--border-mid);
+  color: var(--text-main);
+  font-size: 0.86rem;
+}
+
+.ub-game-select:focus {
+  border-color: rgba(20, 241, 182, 0.4);
+  box-shadow: 0 0 0 0.2rem rgba(20, 241, 182, 0.14);
+}
+
 .ub-market-row {
   display: flex;
   flex-wrap: wrap;

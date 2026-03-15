@@ -85,6 +85,66 @@
     return [g.team_a || '', g.team_b || '', g.match_date || '', g.game_id || ''].join('|');
   }
 
+  function gameSelectValue(g) {
+    if (g && g.game_id) return 'id:' + String(g.game_id);
+    return 'key:' + gameKey(g || {});
+  }
+
+  function gameOptionLabel(g) {
+    var teamA = g.team_a || 'Away';
+    var teamB = g.team_b || 'Home';
+    var dateTxt = g.match_date || 'Date TBD';
+    var line = g.over_under_line;
+    var totalTxt = (line !== null && line !== undefined && line !== '') ? ('O/U ' + line) : 'O/U --';
+    return teamA + ' @ ' + teamB + ' • ' + dateTxt + ' • ' + totalTxt;
+  }
+
+  function populateGamePicker() {
+    if (!gamePicker) return;
+
+    var selectedValue = selectedGame ? gameSelectValue(selectedGame) : '';
+    while (gamePicker.firstChild) gamePicker.removeChild(gamePicker.firstChild);
+
+    var defaultOpt = document.createElement('option');
+    defaultOpt.value = '';
+    defaultOpt.textContent = games.length ? 'Select a game...' : 'No games available';
+    gamePicker.appendChild(defaultOpt);
+
+    if (!games.length) {
+      gamePicker.disabled = true;
+      gamePicker.value = '';
+      return;
+    }
+    gamePicker.disabled = false;
+
+    var grouped = {};
+    var dateOrder = [];
+    games.forEach(function (g) {
+      var dateKey = g.match_date || 'Other';
+      if (!grouped[dateKey]) {
+        grouped[dateKey] = [];
+        dateOrder.push(dateKey);
+      }
+      grouped[dateKey].push(g);
+    });
+
+    dateOrder.sort();
+    dateOrder.forEach(function (dateKey) {
+      var optgroup = document.createElement('optgroup');
+      optgroup.label = dateKey;
+      grouped[dateKey].forEach(function (g) {
+        var opt = document.createElement('option');
+        opt.value = gameSelectValue(g);
+        opt.textContent = gameOptionLabel(g);
+        if (selectedValue && opt.value === selectedValue) opt.selected = true;
+        optgroup.appendChild(opt);
+      });
+      gamePicker.appendChild(optgroup);
+    });
+
+    if (!selectedValue) gamePicker.value = '';
+  }
+
   function marketIdentityKey(leg) {
     if (leg.player_name) {
       return ['prop', leg.player_name, leg.prop_type || '', leg.game_id || '', leg.match_date || ''].join('|');
@@ -643,10 +703,10 @@
       });
   }
 
-  function selectGameByLabel(label) {
+  function selectGameByValue(value) {
     selectedGame = null;
     games.forEach(function (g) {
-      if (g.label === label) selectedGame = g;
+      if (gameSelectValue(g) === value) selectedGame = g;
     });
     renderMarketButtons();
     renderProps();
@@ -661,6 +721,12 @@
       .then(function (r) { return r.json(); })
       .then(function (data) {
         games = Array.isArray(data) ? data : [];
+        games.sort(function (a, b) {
+          var da = String(a.match_date || '');
+          var db = String(b.match_date || '');
+          if (da !== db) return da.localeCompare(db);
+          return String(a.label || '').localeCompare(String(b.label || ''));
+        });
         return games;
       })
       .catch(function () {
@@ -701,7 +767,6 @@
     if (!selectedGame || !selectedGame.label) {
       selectedGame = games.find(function (g) { return g.label === prior.label; }) || selectedGame;
     }
-    if (selectedGame && gamePicker) gamePicker.value = selectedGame.label || gamePicker.value;
   }
 
   function refreshData(manual) {
@@ -713,6 +778,9 @@
     return Promise.all([loadGames(), ensurePropsLoaded(true)])
       .then(function () {
         hydrateSelectionAfterRefresh();
+        if (!selectedGame && games.length) selectedGame = games[0];
+        populateGamePicker();
+        if (selectedGame && gamePicker) gamePicker.value = gameSelectValue(selectedGame);
         renderMarketButtons();
         renderProps();
         refreshSlipOdds();
@@ -731,8 +799,8 @@
   }
 
   if (gamePicker) {
-    gamePicker.addEventListener('input', function () {
-      selectGameByLabel(gamePicker.value || '');
+    gamePicker.addEventListener('change', function () {
+      selectGameByValue(gamePicker.value || '');
     });
   }
   if (refreshBtn) {
@@ -761,15 +829,7 @@
   setLastUpdated(null);
 
   refreshData(false).then(function () {
-    if (games.length) {
-      selectedGame = games[0];
-      if (gamePicker && !gamePicker.value) gamePicker.value = selectedGame.label || '';
-      renderMarketButtons();
-      renderProps();
-      refreshSlipOdds();
-      return;
-    }
-    propsStatus.textContent = 'No games available right now.';
+    if (!games.length) propsStatus.textContent = 'No games available right now.';
   });
 
   // Keep odds current while user is on the page.
