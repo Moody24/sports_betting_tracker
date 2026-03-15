@@ -407,6 +407,9 @@
        Split panel: browse props (left) · legs + wager (right)
     ══════════════════════════════════════════════════════════════ #}
     <div id="bb-panel-parlay" data-bb-panel="parlay" role="tabpanel" aria-labelledby="bb-tab-parlay" {{ '' if current_tab == 'parlay' else 'hidden' }}>
+      <div class="alert alert-info py-2 small mb-3">
+        Build flow: `1)` pick legs from the left prop browser (or add manually on the right), `2)` confirm at least 2 selected legs, `3)` enter stake and submit.
+      </div>
       <div class="bb-parlay-shell">
 
         {# — Left: Prop Browser — #}

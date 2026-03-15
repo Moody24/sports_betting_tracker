@@ -440,3 +440,40 @@ class TestNewBetFormParlayTab(BaseTestCase):
         self.assertIn('movement', prop)
         self.assertIn('fanduel', prop['books'])
         self.assertIn('draftkings', prop['books'])
+
+    def test_all_props_falls_back_to_upcoming_games_when_today_empty(self):
+        self.register_and_login()
+        upcoming_game = {
+            'espn_id': 'g_upcoming',
+            'odds_event_id': 'ev_upcoming',
+            'away': {'name': 'Knicks', 'abbr': 'NYK'},
+            'home': {'name': 'Bulls', 'abbr': 'CHI'},
+            'match_date': '2026-03-09',
+            'start_time': '',
+        }
+        upcoming_props = {
+            'player_points': [{
+                'player': 'Jalen Brunson',
+                'line': 27.5,
+                'over_odds': -108,
+                'under_odds': -112,
+                'books': {
+                    'fanduel': {'over_odds': -108, 'under_odds': -112},
+                },
+                'best_over_book': 'fanduel',
+                'best_under_book': 'fanduel',
+            }]
+        }
+        with patch('app.routes.bet.get_todays_games', return_value=[]), \
+             patch('app.routes.bet.fetch_upcoming_games', return_value=[upcoming_game]), \
+             patch('app.routes.bet.fetch_player_props_for_event', return_value=upcoming_props), \
+             patch('app.routes.bet._resolve_player_team_abbrs', return_value={'Jalen Brunson': 'NYK'}):
+            resp = self.client.get('/nba/all-props')
+
+        self.assertEqual(resp.status_code, 200)
+        data = json.loads(resp.data)
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]['player'], 'Jalen Brunson')
+        self.assertEqual(data[0]['team_a'], 'Knicks')
+        self.assertEqual(data[0]['team_b'], 'Bulls')
+        self.assertEqual(data[0]['match_date'], '2026-03-09')

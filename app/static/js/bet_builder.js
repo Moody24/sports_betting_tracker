@@ -416,7 +416,7 @@
       var bookLabel = leg.bookmaker ? ' · ' + leg.bookmaker.slice(0, 2).toUpperCase() : '';
 
       var chipEl = document.createElement('div');
-      chipEl.className = 'parlay-selected-leg';
+      chipEl.className = 'parlay-selected-leg parlay-leg-item';
 
       var labelSpan = document.createElement('span');
       var playerStrong = document.createElement('strong');
@@ -763,8 +763,12 @@
       if (loadParlayPropsBtn) {
         loadParlayPropsBtn.innerHTML = '<i class="bi bi-check-lg me-1"></i>Loaded';
       }
+      if (!Array.isArray(data) || !data.length) {
+        showParlayFeedback('No live props found. Use "Add Leg Manually" below, or retry later when odds are posted.', 'warning');
+      }
     }, function () {
-      setParlayGridStatus('Failed to load props. You can retry or add a leg manually.', true);
+      setParlayGridStatus('Failed to load props. Use Add Leg Manually or retry.', true);
+      showParlayFeedback('Live props could not be loaded. You can still build a parlay manually.', 'warning');
       if (loadParlayPropsBtn) {
         loadParlayPropsBtn.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>Retry';
       }
@@ -1091,6 +1095,14 @@
       }
       if (!Number.isFinite(line)) {
         showParlayFeedback('Enter a valid line for the manual leg.', 'danger');
+        return;
+      }
+      if (!teamA || !teamB) {
+        showParlayFeedback('Enter both away and home teams for the manual leg.', 'danger');
+        return;
+      }
+      if (!matchDate) {
+        showParlayFeedback('Select a game date for the manual leg.', 'danger');
         return;
       }
 

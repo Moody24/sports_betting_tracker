@@ -1354,37 +1354,50 @@ def nba_all_props():
     """
     today = date_type.today()
 
-    games = get_todays_games()
     raw_props = []
     player_names: set[str] = set()
 
-    for game in games:
-        event_id = game.get('odds_event_id', '')
-        if not event_id:
-            continue
-        props = fetch_player_props_for_event(event_id)
-        team_a_abbr = (game.get('away', {}).get('abbr') or '').upper()
-        team_b_abbr = (game.get('home', {}).get('abbr') or '').upper()
-        for market_key, market_props in props.items():
-            for prop in market_props:
-                player_name = prop['player']
-                player_names.add(player_name)
-                raw_props.append({
-                    'player': player_name,
-                    'market': market_key,
-                    'line': prop['line'],
-                    'over_odds': prop['over_odds'],
-                    'under_odds': prop['under_odds'],
-                    'books': prop.get('books', {}),
-                    'best_over_book': prop.get('best_over_book', ''),
-                    'best_under_book': prop.get('best_under_book', ''),
-                    'game_id': game['espn_id'],
-                    'team_a': game['away']['name'],
-                    'team_b': game['home']['name'],
-                    'team_a_abbr': team_a_abbr,
-                    'team_b_abbr': team_b_abbr,
-                    'match_date': game['start_time'][:10] if game.get('start_time') else '',
-                })
+    def _append_props_for_games(games_batch: list[dict]) -> None:
+        for game in games_batch:
+            event_id = game.get('odds_event_id', '')
+            if not event_id:
+                continue
+            props = fetch_player_props_for_event(event_id)
+            if not isinstance(props, dict):
+                continue
+            away = game.get('away', {}) or {}
+            home = game.get('home', {}) or {}
+            team_a_abbr = (away.get('abbr') or '').upper()
+            team_b_abbr = (home.get('abbr') or '').upper()
+            for market_key, market_props in props.items():
+                for prop in market_props:
+                    player_name = prop.get('player')
+                    if not player_name:
+                        continue
+                    player_names.add(player_name)
+                    raw_props.append({
+                        'player': player_name,
+                        'market': market_key,
+                        'line': prop.get('line'),
+                        'over_odds': prop.get('over_odds'),
+                        'under_odds': prop.get('under_odds'),
+                        'books': prop.get('books', {}),
+                        'best_over_book': prop.get('best_over_book', ''),
+                        'best_under_book': prop.get('best_under_book', ''),
+                        'game_id': game.get('espn_id', ''),
+                        'team_a': away.get('name', ''),
+                        'team_b': home.get('name', ''),
+                        'team_a_abbr': team_a_abbr,
+                        'team_b_abbr': team_b_abbr,
+                        'match_date': (game.get('start_time', '') or game.get('match_date', ''))[:10],
+                    })
+
+    _append_props_for_games(get_todays_games())
+
+    # Off-days can leave "today" empty; include upcoming feed so the parlay
+    # browser still has actionable legs instead of an empty grid.
+    if not raw_props:
+        _append_props_for_games(fetch_upcoming_games())
 
     # Fallback: when live odds fetch is unavailable, use today's cached snapshots.
     if not raw_props:
