@@ -79,6 +79,7 @@ def create_app(testing=False):
     )
     app.config['SQLALCHEMY_ENGINE_OPTIONS'] = engine_options
     app.config['WTF_CSRF_ENABLED'] = True
+    app.config['RATELIMIT_ENABLED'] = os.getenv('RATELIMIT_ENABLED', 'true').lower() == 'true'
     app.config['SESSION_COOKIE_HTTPONLY'] = True
     app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
     # In production behind HTTPS (Railway), cookies must be Secure.

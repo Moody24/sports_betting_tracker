@@ -34,6 +34,7 @@ jobs:
     env:
       SECRET_KEY: ci-e2e-secret
       DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/sportsbook_e2e
+      RATELIMIT_ENABLED: "false"
 
     steps:
       - name: Checkout code
