@@ -17,6 +17,23 @@ jobs:
     name: Playwright E2E + A11y
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sportsbook_e2e
+        options: >-
+          --health-cmd "pg_isready -U postgres -d sportsbook_e2e"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    env:
+      SECRET_KEY: ci-e2e-secret
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/sportsbook_e2e
 
     steps:
       - name: Checkout code
@@ -46,9 +63,6 @@ jobs:
       - name: Run Playwright E2E and accessibility checks
         timeout-minutes: 10
         run: npx playwright test
-        env:
-          SECRET_KEY: ci-e2e-secret
-          DATABASE_URL: sqlite:////tmp/e2e.sqlite
 
       - name: Upload Playwright report
         if: always()
