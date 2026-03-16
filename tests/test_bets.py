@@ -17,7 +17,7 @@ class TestBetRoutes(BaseTestCase):
     def setUp(self):
         super().setUp()
         # Clear game-summary cache so ESPN mock call counts are predictable across tests.
-        from app.routes.bet import _GAME_SUMMARY_CACHE, _PROP_PROGRESS_CACHE
+        from app.routes.nba_live import _GAME_SUMMARY_CACHE, _PROP_PROGRESS_CACHE
         _GAME_SUMMARY_CACHE.clear()
         _PROP_PROGRESS_CACHE.clear()
 

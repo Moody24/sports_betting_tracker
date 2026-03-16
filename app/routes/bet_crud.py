@@ -5,7 +5,7 @@ import io
 import json
 import logging
 import time
-from datetime import datetime, date as date_type, timezone
+from datetime import datetime, date as date_type
 
 from flask import render_template, redirect, url_for, flash, request, jsonify, Response, abort
 from flask_login import login_required, current_user
@@ -13,10 +13,9 @@ from sqlalchemy import case as sa_case
 from sqlalchemy.orm import joinedload
 
 from app import db
-from app.enums import BetSource, BetType, Outcome
+from app.enums import BetType, Outcome
 from app.forms import BetForm
 from app.models import Bet, PickContext, compute_bets_net_pl
-from app.utils import safe_float
 from app.services.nba_service import backfill_game_ids
 from app.services.projection_engine import ProjectionEngine
 from app.services.value_detector import ValueDetector

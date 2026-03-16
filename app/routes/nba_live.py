@@ -14,7 +14,7 @@ import requests
 from app import db
 from app.config_display import PROP_ESPN_COLUMN, PROP_TO_OPP_ALLOWED
 from app.enums import BetSource, BetType, Outcome
-from app.models import Bet, GameSnapshot, OddsSnapshot, TeamDefenseSnapshot
+from app.models import Bet, GameSnapshot, TeamDefenseSnapshot
 from app.utils import safe_float
 from app.services.nba_service import (
     get_todays_games,

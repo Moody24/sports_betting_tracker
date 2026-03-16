@@ -24,8 +24,7 @@ from app.routes.bet_crud import (       # noqa: E402
 )
 from app.routes.nba_live import (       # noqa: E402
     nba_today, nba_update_results, nba_upcoming_games, nba_props,
-    nba_prop_progress, nba_prop_progress_batch, nba_place_bets,
-    _GAME_SUMMARY_CACHE, _PROP_PROGRESS_CACHE,              # re-exported for test teardown
+    nba_prop_progress, nba_prop_progress_batch, nba_place_bets,              # re-exported for test teardown
 )
 from app.routes.nba_analysis import (   # noqa: E402
     nba_all_props, nba_analysis, nba_player_analysis, nba_stat_analysis,

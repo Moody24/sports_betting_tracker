@@ -6,10 +6,9 @@ from collections import defaultdict
 from datetime import date as date_type
 
 from flask import request, jsonify, render_template
-from flask_login import login_required, current_user
+from flask_login import login_required
 
-from app import db
-from app.config_display import PROP_STAT_KEY, PROP_TO_OPP_ALLOWED
+from app.config_display import PROP_STAT_KEY
 from app.models import GameSnapshot, OddsSnapshot, PlayerGameLog, TeamDefenseSnapshot
 from app.services.nba_service import (
     get_todays_games,
