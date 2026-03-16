@@ -3,9 +3,10 @@ from __future__ import annotations
 import logging
 import os
 import sys
+from time import perf_counter
 from datetime import datetime, timezone
 
-from flask import Flask, render_template
+from flask import Flask, g, render_template
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_login import LoginManager, current_user
@@ -125,10 +126,19 @@ def create_app(testing=False):
 
     @app.after_request
     def add_security_headers(response):
+        started = getattr(g, '_request_started_at', None)
+        if started is not None:
+            duration_ms = (perf_counter() - started) * 1000.0
+            response.headers['X-Response-Time-ms'] = f'{duration_ms:.1f}'
+            response.headers['Server-Timing'] = f'app;dur={duration_ms:.1f}'
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['X-Frame-Options'] = 'SAMEORIGIN'
         response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
         return response
+
+    @app.before_request
+    def mark_request_start():
+        g._request_started_at = perf_counter()
 
     # ── Liveness check (fast, always 200) ────────────────────────────
     @app.route('/health')

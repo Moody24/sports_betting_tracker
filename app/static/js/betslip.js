@@ -9,6 +9,7 @@
  */
 (function () {
   'use strict';
+  var COPY = window.UX_COPY || {};
   function showElement(el) {
     if (!el) return;
     el.classList.remove('d-none');
@@ -108,7 +109,7 @@
     if (!container) return;
     container.innerHTML =
       '<div class="small text-danger py-2 text-center">' +
-      '<i class="bi bi-exclamation-triangle me-1"></i>Unable to load player props.' +
+      '<i class="bi bi-exclamation-triangle me-1"></i>' + (COPY.unableToLoadPlayerProps || 'Unable to load player props.') +
       '<button type="button" class="btn btn-xs btn-outline-danger ms-2 props-retry-btn">Retry</button>' +
       '</div>';
     var retryBtn = container.querySelector('.props-retry-btn');

@@ -1,0 +1,14 @@
+{
+  "name": "sports-betting-tracker-ui-tests",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Playwright visual/e2e/accessibility checks for sportsbook UX",
+  "scripts": {
+    "test:e2e": "playwright test",
+    "test:e2e:update": "playwright test --update-snapshots"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.10.2",
+    "@playwright/test": "^1.53.1"
+  }
+}

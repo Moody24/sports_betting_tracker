@@ -6,20 +6,9 @@
 {% block page_subtitle %}Model-driven value detection for today's player props.{% endblock %}
 
 {% block content %}
-<nav class="ux-flow-nav mb-4 fade-up fade-up-1" aria-label="Sportsbook workflow">
-  <a class="ux-flow-link" href="{{ url_for('bet.nba_today') }}">
-    <i class="bi bi-dribbble"></i><span>NBA Today</span>
-  </a>
-  <a class="ux-flow-link is-active" href="{{ url_for('bet.nba_analysis') }}">
-    <i class="bi bi-bullseye"></i><span>Prop Analysis</span>
-  </a>
-  <a class="ux-flow-link" href="{{ url_for('bet.nba_stat_analysis') }}">
-    <i class="bi bi-bar-chart-line"></i><span>Stat Analysis</span>
-  </a>
-  <a class="ux-flow-link" href="{{ url_for('bet.new_bet', current_tab='prop') }}#prop">
-    <i class="bi bi-plus-circle"></i><span>Bet Builder</span>
-  </a>
-</nav>
+{% set flow_active = 'analysis' %}
+{% set flow_builder_tab = 'prop' %}
+{% include 'bets/_workflow_nav.html' %}
 
 {# ── Summary Cards ────────────────────────────────────────── #}
 <div class="row g-3 mb-4 fade-up fade-up-1" id="analysis-kpis">
@@ -388,6 +377,7 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 
   function refreshAnalysisTable() {
+    if (typeof trackUxEvent === 'function') trackUxEvent('prop_analysis_refresh_started');
     setTableLoading(true);
     fetch(window.location.pathname + window.location.search, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
       .then(r => {
@@ -415,10 +405,12 @@ document.addEventListener('DOMContentLoaded', function() {
         if (retryRefresh) retryRefresh.addEventListener('click', refreshAnalysisTable);
         applyFilters();
         stampUpdated();
+        if (typeof trackUxEvent === 'function') trackUxEvent('prop_analysis_refresh_success');
       })
       .catch(() => {
         const tableError = document.getElementById('analysis-table-error');
         if (tableError) tableError.hidden = false;
+        if (typeof trackUxEvent === 'function') trackUxEvent('prop_analysis_refresh_error');
       })
       .finally(() => setTableLoading(false));
   }
@@ -536,6 +528,7 @@ document.addEventListener('DOMContentLoaded', function() {
         prop_line: quickPropBtn.dataset.line,
         game_id: quickPropBtn.dataset.gameId,
       });
+      if (typeof trackUxEvent === 'function') trackUxEvent('prop_analysis_quick_add_single');
       window.location.href = '/bets/new?' + params.toString() + '#prop';
       return;
     }
@@ -561,6 +554,7 @@ document.addEventListener('DOMContentLoaded', function() {
       const queue = addParlayLeg(leg);
       updateParlayQueueCount();
       showParlayToast(`Added to parlay (${queue.length} leg${queue.length === 1 ? '' : 's'})`);
+      if (typeof trackUxEvent === 'function') trackUxEvent('prop_analysis_quick_add_parlay', { legs: queue.length });
     }
   });
 

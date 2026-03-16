@@ -127,3 +127,14 @@ class TestMainRoutes(BaseTestCase):
         resp = self.client.get('/')
         self.assertIn(b'Skip to main content', resp.data)
         self.assertIn(b'id="main-content"', resp.data)
+
+    def test_ux_telemetry_accepts_event_payload(self):
+        resp = self.client.post(
+            '/telemetry/ux',
+            json={'event': 'test_event', 'page': '/nba/today', 'meta': {'source': 'test'}},
+        )
+        self.assertEqual(resp.status_code, 204)
+
+    def test_ux_telemetry_rejects_missing_event(self):
+        resp = self.client.post('/telemetry/ux', json={'page': '/nba/today'})
+        self.assertEqual(resp.status_code, 400)

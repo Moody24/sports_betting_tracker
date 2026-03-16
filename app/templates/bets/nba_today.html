@@ -5,20 +5,9 @@
 {% block page_subtitle %}Live dashboard — active games auto-archive when final with odds &amp; props locked at snapshot time.{% endblock %}
 
 {% block content %}
-<nav class="ux-flow-nav mb-4 fade-up fade-up-1" aria-label="Sportsbook workflow">
-  <a class="ux-flow-link is-active" href="{{ url_for('bet.nba_today') }}">
-    <i class="bi bi-dribbble"></i><span>NBA Today</span>
-  </a>
-  <a class="ux-flow-link" href="{{ url_for('bet.nba_analysis') }}">
-    <i class="bi bi-bullseye"></i><span>Prop Analysis</span>
-  </a>
-  <a class="ux-flow-link" href="{{ url_for('bet.nba_stat_analysis') }}">
-    <i class="bi bi-bar-chart-line"></i><span>Stat Analysis</span>
-  </a>
-  <a class="ux-flow-link" href="{{ url_for('bet.new_bet', current_tab='prop') }}#prop">
-    <i class="bi bi-plus-circle"></i><span>Bet Builder</span>
-  </a>
-</nav>
+{% set flow_active = 'today' %}
+{% set flow_builder_tab = 'prop' %}
+{% include 'bets/_workflow_nav.html' %}
 
 <div class="today-toolbar">
   <p class="today-toolbar-stats">
@@ -79,7 +68,7 @@
       <div class="d-flex align-items-center justify-content-between mb-2">
         <div class="text-center today-team-col">
           {% if game.away.logo %}
-          <img src="{{ game.away.logo }}" alt="{{ game.away.abbr }}" class="nba-team-logo-lg mb-1">
+          <img src="{{ game.away.logo }}" alt="{{ game.away.abbr }}" class="nba-team-logo-lg mb-1" loading="lazy" decoding="async">
           {% endif %}
           <div class="small fw-semibold text-truncate">{{ game.away.name }}</div>
           <div class="score-main">{{ game.away.score }}</div>
@@ -94,7 +83,7 @@
         <div class="text-secondary fw-bold px-1">@</div>
         <div class="text-center today-team-col">
           {% if game.home.logo %}
-          <img src="{{ game.home.logo }}" alt="{{ game.home.abbr }}" class="nba-team-logo-lg mb-1">
+          <img src="{{ game.home.logo }}" alt="{{ game.home.abbr }}" class="nba-team-logo-lg mb-1" loading="lazy" decoding="async">
           {% endif %}
           <div class="small fw-semibold text-truncate">{{ game.home.name }}</div>
           <div class="score-main">{{ game.home.score }}</div>
@@ -289,7 +278,7 @@
       <div class="d-flex align-items-center justify-content-between mb-2">
         <div class="text-center today-team-col">
           {% if snap.away_logo %}
-          <img src="{{ snap.away_logo }}" alt="" width="36" height="36" class="nba-team-logo mb-1">
+          <img src="{{ snap.away_logo }}" alt="" width="36" height="36" class="nba-team-logo mb-1" loading="lazy" decoding="async">
           {% endif %}
           <div class="small fw-semibold">{{ snap.away_team }}</div>
           <div class="h5 mb-0">{{ snap.away_score or 0 }}</div>
@@ -297,7 +286,7 @@
         <div class="text-secondary fw-bold">@</div>
         <div class="text-center today-team-col">
           {% if snap.home_logo %}
-          <img src="{{ snap.home_logo }}" alt="" width="36" height="36" class="nba-team-logo mb-1">
+          <img src="{{ snap.home_logo }}" alt="" width="36" height="36" class="nba-team-logo mb-1" loading="lazy" decoding="async">
           {% endif %}
           <div class="small fw-semibold">{{ snap.home_team }}</div>
           <div class="h5 mb-0">{{ snap.home_score or 0 }}</div>
@@ -568,6 +557,7 @@ document.addEventListener('DOMContentLoaded', function () {
   }
 
   function refreshActiveGames() {
+    if (typeof trackUxEvent === 'function') trackUxEvent('nba_today_refresh_started');
     setLoading(true);
     fetch(window.location.pathname, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
       .then(function (res) {
@@ -581,9 +571,11 @@ document.addEventListener('DOMContentLoaded', function () {
         contentEl.innerHTML = nextContent.innerHTML;
         if (window.__initBetSlipUI) window.__initBetSlipUI();
         stampUpdated();
+        if (typeof trackUxEvent === 'function') trackUxEvent('nba_today_refresh_success');
       })
       .catch(function () {
         if (errorEl) errorEl.hidden = false;
+        if (typeof trackUxEvent === 'function') trackUxEvent('nba_today_refresh_error');
       })
       .finally(function () {
         setLoading(false);
@@ -591,7 +583,10 @@ document.addEventListener('DOMContentLoaded', function () {
   }
 
   if (refreshBtn) refreshBtn.addEventListener('click', refreshActiveGames);
-  if (retryBtn) retryBtn.addEventListener('click', refreshActiveGames);
+  if (retryBtn) retryBtn.addEventListener('click', function () {
+    if (typeof trackUxEvent === 'function') trackUxEvent('nba_today_refresh_retry');
+    refreshActiveGames();
+  });
   stampUpdated();
 });
 </script>

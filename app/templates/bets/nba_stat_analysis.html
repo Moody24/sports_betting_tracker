@@ -6,20 +6,9 @@
 {% block page_subtitle %}Today's props by matchup — click any player for the full breakdown.{% endblock %}
 
 {% block content %}
-<nav class="ux-flow-nav mb-4 fade-up fade-up-1" aria-label="Sportsbook workflow">
-  <a class="ux-flow-link" href="{{ url_for('bet.nba_today') }}">
-    <i class="bi bi-dribbble"></i><span>NBA Today</span>
-  </a>
-  <a class="ux-flow-link" href="{{ url_for('bet.nba_analysis') }}">
-    <i class="bi bi-bullseye"></i><span>Prop Analysis</span>
-  </a>
-  <a class="ux-flow-link is-active" href="{{ url_for('bet.nba_stat_analysis') }}">
-    <i class="bi bi-bar-chart-line"></i><span>Stat Analysis</span>
-  </a>
-  <a class="ux-flow-link" href="{{ url_for('bet.new_bet', current_tab='prop') }}#prop">
-    <i class="bi bi-plus-circle"></i><span>Bet Builder</span>
-  </a>
-</nav>
+{% set flow_active = 'stat' %}
+{% set flow_builder_tab = 'prop' %}
+{% include 'bets/_workflow_nav.html' %}
 
 {# ── Display maps from centralized config (context processor) ─── #}
 {# PROP_LABELS_SHORT and INDICATOR_TIERS available via context_processor #}
@@ -461,6 +450,7 @@ const SA_PROP_TO_COL = PROP_TO_STAT_COL;
   }
 
   function refreshStatAnalysis() {
+    if (typeof trackUxEvent === 'function') trackUxEvent('stat_analysis_refresh_started');
     setResultsLoading(true);
     fetch(window.location.pathname + window.location.search, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
       .then(r => {
@@ -474,9 +464,11 @@ const SA_PROP_TO_COL = PROP_TO_STAT_COL;
         resultsWrap.innerHTML = incoming.innerHTML;
         rebindResultRows();
         stampUpdated();
+        if (typeof trackUxEvent === 'function') trackUxEvent('stat_analysis_refresh_success');
       })
       .catch(() => {
         if (resultsError) resultsError.hidden = false;
+        if (typeof trackUxEvent === 'function') trackUxEvent('stat_analysis_refresh_error');
       })
       .finally(() => setResultsLoading(false));
   }
@@ -775,6 +767,7 @@ const SA_PROP_TO_COL = PROP_TO_STAT_COL;
       match_date: currentProp.match_date || '',
       game_id: currentProp.game_id || '',
     });
+    if (typeof trackUxEvent === 'function') trackUxEvent('stat_analysis_add_to_parlay', { side: betType });
     window.location.href = '{{ url_for("bet.place_bet") }}?' + qp.toString();
   }
   document.getElementById('sp-add-over').addEventListener('click',  () => parlayClick('over'));

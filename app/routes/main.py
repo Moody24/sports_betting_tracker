@@ -5,7 +5,7 @@ from flask import Blueprint, jsonify, render_template, request, redirect, url_fo
 from flask_login import current_user, login_required
 from sqlalchemy import func, case, text
 
-from app import db
+from app import db, csrf
 from app.enums import Outcome
 from app.models import Bet, compute_bets_net_pl, compute_bets_wagered
 
@@ -60,6 +60,28 @@ def ready_model2():
 @main.route('/')
 def home():
     return render_template('home.html')
+
+
+@main.route('/telemetry/ux', methods=['POST'])
+@csrf.exempt
+def ux_telemetry():
+    """Receive lightweight UX events for interaction quality monitoring."""
+    payload = request.get_json(silent=True) or {}
+    event = str(payload.get('event') or '').strip()[:64]
+    if not event:
+        return jsonify(error='event required'), 400
+
+    page = str(payload.get('page') or '').strip()[:120]
+    meta_in = payload.get('meta') if isinstance(payload.get('meta'), dict) else {}
+    meta = {}
+    for raw_key, raw_val in list(meta_in.items())[:20]:
+        key = str(raw_key)[:32]
+        val = str(raw_val)[:120]
+        meta[key] = val
+
+    uid = current_user.id if current_user.is_authenticated else None
+    logger.info('ux_event event=%s page=%s user_id=%s meta=%s', event, page, uid, meta)
+    return ('', 204)
 
 
 @main.route('/dashboard')

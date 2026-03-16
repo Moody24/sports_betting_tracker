@@ -4,6 +4,7 @@
 
   var root = document.getElementById('ub-root');
   if (!root) return;
+  var COPY = window.UX_COPY || {};
 
   var gamePicker = document.getElementById('ub-game-picker');
   var gameMeta = document.getElementById('ub-game-meta');
@@ -299,7 +300,7 @@
       empty.className = 'bb-legs-empty';
       var p = document.createElement('p');
       p.className = 'mb-0 small mt-2 bb-legs-empty-text';
-      p.textContent = 'No selections yet.';
+      p.textContent = COPY.noSelectionsYet || 'No selections yet.';
       empty.appendChild(p);
       slipList.appendChild(empty);
       updateModeBadge();
@@ -483,7 +484,7 @@
       return;
     }
     if (!Array.isArray(allProps)) {
-      propsStatus.textContent = 'Loading player props for selected game...';
+      propsStatus.textContent = COPY.loadingSelectedGameProps || 'Loading player props for selected game...';
       return;
     }
 
@@ -675,6 +676,7 @@
 
     submitBtn.disabled = true;
     submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Submitting...';
+    if (typeof trackUxEvent === 'function') trackUxEvent('unified_slip_submit_started', { legs: slip.length });
 
     fetch(PLACE_BETS_URL, {
       method: 'POST',
@@ -689,15 +691,18 @@
       .then(function (r) { return r.json(); })
       .then(function (data) {
         if (data && data.success) {
+          if (typeof trackUxEvent === 'function') trackUxEvent('unified_slip_submit_success', { legs: slip.length });
           window.location.href = '/bets';
           return;
         }
-        setFeedback((data && data.error) ? data.error : 'Unable to submit slip.', 'danger');
+        if (typeof trackUxEvent === 'function') trackUxEvent('unified_slip_submit_error');
+        setFeedback((data && data.error) ? data.error : (COPY.unableToSubmitSlip || 'Unable to submit slip.'), 'danger');
         submitBtn.disabled = false;
         submitBtn.innerHTML = '<i class="bi bi-check-lg me-1"></i>Submit Slip';
       })
       .catch(function () {
-        setFeedback('Network error while submitting slip.', 'danger');
+        if (typeof trackUxEvent === 'function') trackUxEvent('unified_slip_submit_network_error');
+        setFeedback(COPY.networkSubmitError || 'Network error while submitting slip.', 'danger');
         submitBtn.disabled = false;
         submitBtn.innerHTML = '<i class="bi bi-check-lg me-1"></i>Submit Slip';
       });
@@ -739,7 +744,7 @@
     if (!forceRefresh && Array.isArray(allProps)) return Promise.resolve(allProps);
     if (!forceRefresh && propsPromise) return propsPromise;
 
-    propsStatus.textContent = 'Loading player props...';
+    propsStatus.textContent = COPY.loadingPlayerProps || 'Loading player props...';
     propsPromise = fetch(ALL_PROPS_URL)
       .then(function (r) { return r.json(); })
       .then(function (data) {
@@ -770,6 +775,7 @@
   }
 
   function refreshData(manual) {
+    if (manual && typeof trackUxEvent === 'function') trackUxEvent('unified_slip_refresh_started');
     if (refreshBtn) {
       refreshBtn.disabled = true;
       refreshBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Refreshing...';
@@ -786,9 +792,11 @@
         refreshSlipOdds();
         setLastUpdated(Date.now());
         if (manual) setFeedback('Odds refreshed.', 'success');
+        if (manual && typeof trackUxEvent === 'function') trackUxEvent('unified_slip_refresh_success');
       })
       .catch(function () {
-        if (manual) setFeedback('Unable to refresh odds. Showing last available data.', 'warning');
+        if (manual) setFeedback(COPY.oddsRefreshWarning || 'Unable to refresh odds. Showing last available data.', 'warning');
+        if (manual && typeof trackUxEvent === 'function') trackUxEvent('unified_slip_refresh_error');
       })
       .finally(function () {
         if (refreshBtn) {
@@ -829,7 +837,10 @@
   setLastUpdated(null);
 
   refreshData(false).then(function () {
-    if (!games.length) propsStatus.textContent = 'No games available right now. Try Refresh Odds again shortly.';
+    if (!games.length) {
+      propsStatus.textContent = COPY.noGamesAvailable || 'No games available right now. Try Refresh Odds again shortly.';
+      if (typeof trackUxEvent === 'function') trackUxEvent('unified_slip_no_games');
+    }
   });
 
   // Keep odds current while user is on the page.

@@ -1,0 +1,14 @@
+<nav class="ux-flow-nav mb-4 fade-up fade-up-1" aria-label="Sportsbook workflow">
+  <a class="ux-flow-link{% if flow_active == 'today' %} is-active{% endif %}" href="{{ url_for('bet.nba_today') }}">
+    <i class="bi bi-dribbble"></i><span>NBA Today</span>
+  </a>
+  <a class="ux-flow-link{% if flow_active == 'analysis' %} is-active{% endif %}" href="{{ url_for('bet.nba_analysis') }}">
+    <i class="bi bi-bullseye"></i><span>Prop Analysis</span>
+  </a>
+  <a class="ux-flow-link{% if flow_active == 'stat' %} is-active{% endif %}" href="{{ url_for('bet.nba_stat_analysis') }}">
+    <i class="bi bi-bar-chart-line"></i><span>Stat Analysis</span>
+  </a>
+  <a class="ux-flow-link{% if flow_active == 'builder' %} is-active{% endif %}" href="{{ url_for('bet.new_bet', current_tab=flow_builder_tab|default('prop')) }}#{{ flow_builder_tab|default('prop') }}">
+    <i class="bi bi-plus-circle"></i><span>Bet Builder</span>
+  </a>
+</nav>
