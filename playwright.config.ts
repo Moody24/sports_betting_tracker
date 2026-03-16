@@ -25,7 +25,7 @@ export default defineConfig({
   webServer: runLocalServer
     ? {
         command:
-          'SECRET_KEY=e2e-dev-secret DATABASE_URL=sqlite:///instance/e2e.sqlite FLASK_APP=run.py python -m flask db upgrade && SECRET_KEY=e2e-dev-secret DATABASE_URL=sqlite:///instance/e2e.sqlite python run.py',
+          'mkdir -p instance && SECRET_KEY=e2e-dev-secret DATABASE_URL=sqlite:///instance/e2e.sqlite FLASK_APP=run.py python -m flask db upgrade && SECRET_KEY=e2e-dev-secret DATABASE_URL=sqlite:///instance/e2e.sqlite python run.py',
         url: baseURL,
         reuseExistingServer: !process.env.CI,
         timeout: 120_000,
