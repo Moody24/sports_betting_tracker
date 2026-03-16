@@ -52,8 +52,9 @@ class TestNBAService(unittest.TestCase):
         nba_service._UPCOMING_CACHE.clear()
 
     def test_player_prop_markets_include_steals_and_blocks(self):
-        self.assertIn("player_steals", nba_service.PLAYER_PROP_MARKETS)
-        self.assertIn("player_blocks", nba_service.PLAYER_PROP_MARKETS)
+        from app.config_display import SUPPORTED_PROP_MARKETS
+        self.assertIn("player_steals", SUPPORTED_PROP_MARKETS)
+        self.assertIn("player_blocks", SUPPORTED_PROP_MARKETS)
 
     # fetch_espn_scoreboard
     @patch("app.services.nba_service.requests.get")

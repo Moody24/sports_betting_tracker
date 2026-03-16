@@ -20,6 +20,8 @@ from app.services.projection_engine import ProjectionEngine
 from app.services.feature_engine import build_pick_context_features
 from app.services.context_service import is_player_available
 from app.services.stats_service import find_player_id, get_cached_logs
+from app.utils.odds import american_from_decimal, decimal_odds, implied_prob
+from app.utils.time_helpers import et_date_str
 
 logger = logging.getLogger(__name__)
 
@@ -28,11 +30,6 @@ logger = logging.getLogger(__name__)
 # Multiple web-request threads share this cache within the same worker process.
 _SCORE_CACHE: dict = {}
 _SCORE_CACHE_TTL = 600  # 10 minutes — pre-game props rarely change faster than this
-
-
-def _et_date_str() -> str:
-    return datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
-
 
 # Confidence tier thresholds (edge %)
 TIER_STRONG = 0.15
@@ -354,7 +351,7 @@ class ValueDetector:
         _t0 = _time.perf_counter()
 
         if use_cache:
-            cache_date = _et_date_str()
+            cache_date = et_date_str()
             cached = _SCORE_CACHE.get(cache_date)
             if cached and _time.monotonic() < cached["expires_at"]:
                 logger.info("PERF score_all_todays_props: cache_hit scores=%d elapsed=0.00s", len(cached["scores"]))
@@ -527,7 +524,7 @@ class ValueDetector:
 
         # Populate module-level cache for subsequent requests within the TTL window.
         if use_cache:
-            cache_date = _et_date_str()
+            cache_date = et_date_str()
             _SCORE_CACHE.clear()  # drop any prior-date entry
             _SCORE_CACHE[cache_date] = {
                 "scores": all_scores,

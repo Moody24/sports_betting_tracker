@@ -710,8 +710,8 @@ class TestNBAServiceHelpers(BaseTestCase):
         self.assertIsNone(_coerce_match_date(bet))
 
     def test_et_date_str_format(self):
-        from app.services.nba_service import _et_date_str
-        result = _et_date_str()
+        from app.utils.time_helpers import et_date_str
+        result = et_date_str()
         # Should be YYYY-MM-DD format
         self.assertRegex(result, r'\d{4}-\d{2}-\d{2}')
 

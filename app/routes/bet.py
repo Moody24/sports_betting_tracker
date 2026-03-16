@@ -16,6 +16,7 @@ from app import db
 from app.config_display import (
     PROP_STAT_KEY, PROP_ESPN_COLUMN, PROP_TO_OPP_ALLOWED,
 )
+from app.utils import safe_float
 from app.enums import BetSource, BetType, Outcome
 from app.forms import BetForm
 from app.models import Bet, GameSnapshot, OddsSnapshot, PickContext, PlayerGameLog, TeamDefenseSnapshot, compute_bets_net_pl
@@ -285,12 +286,6 @@ def _extract_prop_boxscore(summary_data: dict) -> dict:
     return player_stats
 
 
-def _safe_float(value, default: float = 0.0) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return default
-
 
 def _clock_to_seconds(clock_value: str) -> int:
     if not clock_value or ':' not in str(clock_value):
@@ -424,7 +419,7 @@ def _resolve_card_progress(
         return {'ok': False, 'error': f'Stat {prop_type} unavailable for {best_name}', 'player': best_name}
 
     status_meta = _derive_game_status(summary_data)
-    current_stat = _safe_float(stat_val, 0.0)
+    current_stat = safe_float(stat_val, 0.0)
     elapsed_ratio = status_meta['elapsed_ratio']
     projected_final = current_stat if elapsed_ratio <= 0 else current_stat / max(elapsed_ratio, 0.01)
     progress_pct = 0.0
@@ -934,7 +929,7 @@ def nba_prop_progress(espn_id):
     if not player_name or not prop_type:
         return jsonify({'ok': False, 'error': 'player and prop_type are required'}), 400
 
-    line = _safe_float(request.args.get('line'), 0.0)
+    line = safe_float(request.args.get('line'), 0.0)
     bet_type = (request.args.get('bet_type') or '').strip().lower()
 
     use_cache = not current_app.testing
@@ -1013,7 +1008,7 @@ def nba_prop_progress_batch():
             card_id = str(item.get('card_id') or '')
             player_name = (item.get('player') or '').strip()
             prop_type = (item.get('prop_type') or '').strip()
-            line = _safe_float(item.get('line'), 0.0)
+            line = safe_float(item.get('line'), 0.0)
             bet_type = (item.get('bet_type') or '').strip().lower()
 
             if not card_id or not player_name or not prop_type:

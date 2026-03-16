@@ -725,7 +725,8 @@ class TestContextService(BaseTestCase):
 
     @patch('app.services.context_service.requests.get')
     def test_get_days_rest_found(self, mock_get):
-        from app.services.context_service import get_days_rest, _today_et
+        from app.services.context_service import get_days_rest
+        from app.utils.time_helpers import et_today as _today_et
 
         def side_effect(url, params=None, timeout=None, **kwargs):
             resp = MagicMock()
@@ -3675,12 +3676,10 @@ class TestModel1StealsBocks(BaseTestCase):
         self.assertEqual(STAT_KEY_MAP['player_steals'], 'stl')
         self.assertEqual(STAT_KEY_MAP['player_blocks'], 'blk')
 
-    def test_ml_stat_map_in_projection_engine_includes_steals_blocks(self):
-        from app.services.projection_engine import ML_STAT_MAP
-        self.assertIn('player_steals', ML_STAT_MAP)
-        self.assertIn('player_blocks', ML_STAT_MAP)
-        self.assertEqual(ML_STAT_MAP['player_steals'], 'player_steals')
-        self.assertEqual(ML_STAT_MAP['player_blocks'], 'player_blocks')
+    def test_prop_stat_key_includes_steals_blocks(self):
+        from app.config_display import PROP_STAT_KEY
+        self.assertIn('player_steals', PROP_STAT_KEY)
+        self.assertIn('player_blocks', PROP_STAT_KEY)
 
     def test_train_model_metadata_includes_cv_fields(self):
         """train_model source contains cv_mean_mae/cv_std_mae metadata keys."""

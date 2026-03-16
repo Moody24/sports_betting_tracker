@@ -18,6 +18,7 @@ from typing import Optional
 from app import db
 from app.models import Bet, PickContext, ModelMetadata
 from app.services.model_storage import materialize_model_artifact, persist_model_artifact, storage_mode
+from app.utils import env_float
 
 logger = logging.getLogger(__name__)
 
@@ -56,22 +57,13 @@ MINUTES_MAP = {'increasing': 1, 'stable': 0, 'decreasing': -1}
 TIER_MAP = {'strong': 3, 'moderate': 2, 'slight': 1, 'no_edge': 0}
 
 
-def _env_float(name: str, default: float) -> float:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    try:
-        return float(raw)
-    except (TypeError, ValueError):
-        return default
-
 
 def _stabilize_probability(p_raw: float, metadata: dict) -> float:
     """Apply conservative post-processing to reduce confidence inflation."""
     # Shrink toward 0.5 to reduce overconfident tails in drift periods.
     shrink = metadata.get('probability_shrink')
     if shrink is None:
-        shrink = _env_float('MODEL2_PROBABILITY_SHRINK', 0.88)
+        shrink = env_float('MODEL2_PROBABILITY_SHRINK', 0.88)
     try:
         shrink = float(shrink)
     except (TypeError, ValueError):
@@ -80,7 +72,7 @@ def _stabilize_probability(p_raw: float, metadata: dict) -> float:
     p = 0.5 + (p_raw - 0.5) * shrink
 
     # Optional signed bias correction (positive means historically overconfident).
-    bias = metadata.get('calibration_bias', _env_float('MODEL2_CALIBRATION_BIAS', 0.0))
+    bias = metadata.get('calibration_bias', env_float('MODEL2_CALIBRATION_BIAS', 0.0))
     try:
         p -= float(bias)
     except (TypeError, ValueError):
@@ -347,9 +339,9 @@ def train_pick_quality_model(user_id: int | None = None) -> dict:
             'calibration_bias': calibration_bias,
             'val_avg_pred': round(val_avg_pred, 4),
             'val_win_rate': round(val_win_rate, 4),
-            'probability_shrink': round(_env_float('MODEL2_PROBABILITY_SHRINK', 0.88), 3),
-            'take_it_threshold': round(_env_float('MODEL2_TAKE_IT_THRESHOLD', 0.60), 3),
-            'caution_threshold': round(_env_float('MODEL2_CAUTION_THRESHOLD', 0.56), 3),
+            'probability_shrink': round(env_float('MODEL2_PROBABILITY_SHRINK', 0.88), 3),
+            'take_it_threshold': round(env_float('MODEL2_TAKE_IT_THRESHOLD', 0.60), 3),
+            'caution_threshold': round(env_float('MODEL2_CAUTION_THRESHOLD', 0.56), 3),
         }),
     )
     db.session.add(meta)
@@ -475,8 +467,8 @@ def predict_pick_quality(context: dict, user_id: int | None = None) -> dict:
     if context.get('player_last5_trend') == 'cold':
         red_flags.append('cold streak')
 
-    take_it_threshold = md.get('take_it_threshold', _env_float('MODEL2_TAKE_IT_THRESHOLD', 0.60))
-    caution_threshold = md.get('caution_threshold', _env_float('MODEL2_CAUTION_THRESHOLD', 0.56))
+    take_it_threshold = md.get('take_it_threshold', env_float('MODEL2_TAKE_IT_THRESHOLD', 0.60))
+    caution_threshold = md.get('caution_threshold', env_float('MODEL2_CAUTION_THRESHOLD', 0.56))
     try:
         take_it_threshold = float(take_it_threshold)
     except (TypeError, ValueError):

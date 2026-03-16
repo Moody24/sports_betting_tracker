@@ -10,6 +10,7 @@ from datetime import datetime, timezone, date as date_type
 from zoneinfo import ZoneInfo
 
 from app.config_display import STAT_KEY_TO_OPP_ALLOWED, PROP_TO_OPP_ALLOWED
+from app.utils.time_helpers import et_today
 
 from app import db
 from app.models import TeamDefenseSnapshot
@@ -161,9 +162,6 @@ def fetch_team_defense_stats() -> list:
     return results
 
 
-def _today_et() -> date_type:
-    return datetime.now(APP_TIMEZONE).date()
-
 
 def refresh_all_team_defense() -> int:
     """Refresh defensive snapshots for all 30 NBA teams.
@@ -171,7 +169,7 @@ def refresh_all_team_defense() -> int:
     Fetches from NBA API and upserts into ``TeamDefenseSnapshot``.
     Returns the number of teams updated.
     """
-    today = _today_et()
+    today = et_today()
     team_stats = fetch_team_defense_stats()
     if not team_stats:
         team_stats = _build_baseline_team_stats()
@@ -242,7 +240,7 @@ def get_team_defense(team_name: str, date: date_type = None) -> dict:
     ``get_matchup_adjustment``).
     """
     if date is None:
-        date = _today_et()
+        date = et_today()
 
     cache_key = (team_name.lower().strip(), str(date))
     now = time.monotonic()

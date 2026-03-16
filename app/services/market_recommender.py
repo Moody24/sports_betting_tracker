@@ -10,6 +10,8 @@ from datetime import date as date_type, datetime, timezone
 from app import db
 from app.models import GameSnapshot, ModelMetadata
 from app.services.model_storage import materialize_model_artifact, persist_model_artifact
+from app.utils import env_float
+from app.utils.odds import implied_prob
 
 logger = logging.getLogger(__name__)
 
@@ -32,16 +34,6 @@ DEFAULT_POLICY = {
     'total_ou': {'min_edge': 0.06, 'min_confidence': 0.56},
 }
 
-
-def _env_float(name: str, default: float) -> float:
-    raw = os.getenv(name, '').strip()
-    if not raw:
-        return default
-    try:
-        return float(raw)
-    except ValueError:
-        logger.warning("Invalid %s=%r; using default %.3f", name, raw, default)
-        return default
 
 
 def _env_float_optional(name: str) -> float | None:
@@ -206,15 +198,6 @@ def _profit_per_unit(american_odds: int, won: bool) -> float:
     return 1.0
 
 
-def _implied_prob(american_odds: int | None) -> float:
-    if american_odds is None:
-        return 0.5
-    if american_odds > 0:
-        return 100.0 / (american_odds + 100.0)
-    if american_odds < 0:
-        return abs(american_odds) / (abs(american_odds) + 100.0)
-    return 0.5
-
 
 def _features_for_snapshot(snap: GameSnapshot) -> list[float]:
     return _features_for_inputs(
@@ -225,8 +208,8 @@ def _features_for_snapshot(snap: GameSnapshot) -> list[float]:
 
 
 def _features_for_inputs(over_under_line: float, moneyline_home: int, moneyline_away: int) -> list[float]:
-    implied_home = float(_implied_prob(moneyline_home))
-    implied_away = float(_implied_prob(moneyline_away))
+    implied_home = float(implied_prob(moneyline_home))
+    implied_away = float(implied_prob(moneyline_away))
     implied_gap = implied_home - implied_away
     favorite_home_flag = 1.0 if implied_home >= implied_away else 0.0
     return [
@@ -463,8 +446,8 @@ def _build_market_eval_rows(snaps: list[GameSnapshot], ml_model, tot_model) -> d
             row = [_features_for_snapshot(s)]
             p_home = _predict_prob_one(ml_model, row)
             p_away = 1.0 - p_home
-            edge_home = p_home - _implied_prob(int(s.moneyline_home))
-            edge_away = p_away - _implied_prob(int(s.moneyline_away))
+            edge_home = p_home - implied_prob(int(s.moneyline_home))
+            edge_away = p_away - implied_prob(int(s.moneyline_away))
             side = 'home' if edge_home >= edge_away else 'away'
             edge = edge_home if side == 'home' else edge_away
             confidence = max(p_home, p_away)
@@ -595,8 +578,8 @@ def recommend_market_sides(games: list[dict]) -> dict[str, dict]:
         if ml_model:
             p_home = _predict_prob_one(ml_model, row)
             p_away = 1.0 - p_home
-            edge_home = p_home - _implied_prob(int(ml_h))
-            edge_away = p_away - _implied_prob(int(ml_a))
+            edge_home = p_home - implied_prob(int(ml_h))
+            edge_away = p_away - implied_prob(int(ml_a))
             side = 'home' if edge_home >= edge_away else 'away'
             edge = edge_home if side == 'home' else edge_away
             confidence = max(p_home, p_away)
@@ -950,8 +933,8 @@ def walkforward_market_report(
                 for p, row in zip(probs, test_rows[market]):
                     p_home = p
                     p_away = 1.0 - p_home
-                    edge_home = p_home - _implied_prob(int(row['moneyline_home']))
-                    edge_away = p_away - _implied_prob(int(row['moneyline_away']))
+                    edge_home = p_home - implied_prob(int(row['moneyline_home']))
+                    edge_away = p_away - implied_prob(int(row['moneyline_away']))
                     side = 'home' if edge_home >= edge_away else 'away'
                     edge = edge_home if side == 'home' else edge_away
                     confidences.append(max(p_home, p_away))

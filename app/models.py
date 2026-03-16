@@ -10,16 +10,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from . import db
 from .config_display import prop_label_short
 from .enums import BetType, Outcome, PostmortemReason
-
-
-def _american_to_decimal(odds: int) -> float:
-    """Convert American odds to decimal odds (includes stake)."""
-    if odds > 0:
-        return 1.0 + odds / 100.0
-    if odds < 0:
-        return 1.0 + 100.0 / abs(odds)
-    # 0 is not a valid real-world line; treat as even money (+100) => 2.0 decimal.
-    return 2.0
+from .utils.odds import american_to_decimal
 
 
 def compute_bets_wagered(bets: list) -> float:
@@ -225,7 +216,7 @@ class Bet(db.Model):
         combined_decimal = 1.0
         for leg in legs:
             if leg.outcome == Outcome.WIN.value:
-                combined_decimal *= _american_to_decimal(leg.american_odds or -110)
+                combined_decimal *= american_to_decimal(leg.american_odds or -110)
 
         if combined_decimal == 1.0:
             return 0.0  # every leg pushed — stake returned

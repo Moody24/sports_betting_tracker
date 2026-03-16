@@ -10,6 +10,8 @@ import requests
 from app.config_display import PROP_ESPN_COLUMN, SUPPORTED_PROP_MARKETS
 from app.enums import BetType, Outcome
 from app.services.base import SportService, SPORT_REGISTRY
+from app.utils.odds import american_to_decimal
+from app.utils.time_helpers import et_date_str
 
 logger = logging.getLogger(__name__)
 APP_TIMEZONE = ZoneInfo("America/New_York")
@@ -33,13 +35,6 @@ _GAMES_CACHE_TTL = 60
 _UPCOMING_CACHE: dict = {}
 _UPCOMING_CACHE_TTL = 300
 
-
-def _et_date_str() -> str:
-    return datetime.now(APP_TIMEZONE).strftime("%Y-%m-%d")
-
-
-# Re-export from centralized config for backward compatibility
-PLAYER_PROP_MARKETS = SUPPORTED_PROP_MARKETS
 _PROP_STAT_COLUMN = PROP_ESPN_COLUMN
 
 
@@ -746,7 +741,7 @@ def fetch_upcoming_games() -> list[dict]:
     exhausted, or the API returns an empty list.  Cached for
     _UPCOMING_CACHE_TTL seconds — tomorrow's schedule changes rarely.
     """
-    cache_date = _et_date_str()
+    cache_date = et_date_str()
     cached = _UPCOMING_CACHE.get(cache_date)
     if cached and _time.monotonic() < cached["expires_at"]:
         return list(cached["games"])
@@ -885,12 +880,6 @@ def _fetch_upcoming_games_espn(tomorrow) -> list[dict]:
 _TARGET_BOOKMAKERS = ["fanduel", "draftkings"]
 
 
-def _american_to_decimal(odds_int: int) -> float:
-    """Convert American odds to decimal odds for comparison (higher = better)."""
-    if odds_int >= 0:
-        return 1 + odds_int / 100
-    return 1 + 100 / abs(odds_int)
-
 
 def _best_odds(books_dict: dict, side: str) -> tuple:
     """Return (best_american_odds, book_name) for a given side across all books.
@@ -905,7 +894,7 @@ def _best_odds(books_dict: dict, side: str) -> tuple:
         if odds_val is None:
             continue
         odds_int = int(odds_val)
-        dec = _american_to_decimal(odds_int)
+        dec = american_to_decimal(odds_int)
         if dec > best_decimal:
             best_odds_val = odds_int
             best_book = book_name
@@ -932,7 +921,7 @@ def fetch_player_props_for_event(odds_event_id: str) -> dict:
             params={
                 "apiKey": api_key,
                 "bookmakers": ",".join(_TARGET_BOOKMAKERS),
-                "markets": ",".join(PLAYER_PROP_MARKETS),
+                "markets": ",".join(SUPPORTED_PROP_MARKETS),
                 "oddsFormat": "american",
             },
             timeout=10,
@@ -950,7 +939,7 @@ def fetch_player_props_for_event(odds_event_id: str) -> dict:
         book_name = (bookmaker.get("key") or "").lower()
         for market in bookmaker.get("markets", []):
             market_key = market.get("key", "")
-            if market_key not in PLAYER_PROP_MARKETS:
+            if market_key not in SUPPORTED_PROP_MARKETS:
                 continue
 
             outcomes = market.get("outcomes", [])
@@ -1083,7 +1072,7 @@ def get_todays_games() -> list[dict]:
     calls on every page load.  The scheduler and NBA Today upsert path call
     this frequently, so even a 60-second cache cuts many redundant requests.
     """
-    cache_date = _et_date_str()
+    cache_date = et_date_str()
     cached = _GAMES_CACHE.get(cache_date)
     if cached and _time.monotonic() < cached["expires_at"]:
         return list(cached["games"])
@@ -1306,7 +1295,7 @@ class NBAService(SportService):
         return resolve_pending_bets(pending_bets)
 
     def get_prop_markets(self) -> list[str]:
-        return list(PLAYER_PROP_MARKETS)
+        return list(SUPPORTED_PROP_MARKETS)
 
 
 # Register so other code can do  get_sport_service("nba")

@@ -18,6 +18,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app import db
 from app.models import PlayerGameLog
+from app.utils import safe_float
 from app.services.nba_service import ESPN_SUMMARY_URL, fetch_espn_scoreboard
 
 logger = logging.getLogger(__name__)
@@ -533,22 +534,16 @@ def update_player_logs_for_games(games: list) -> int:
     return count
 
 
-def _safe_float(value, default=0.0) -> float:
-    try:
-        return float(str(value).replace("+", "").strip())
-    except (ValueError, TypeError):
-        return default
-
 
 def _parse_made_attempt(raw_val) -> tuple[float, float]:
     if raw_val is None:
         return 0.0, 0.0
     text = str(raw_val).strip()
     if '-' not in text:
-        val = _safe_float(text, 0.0)
+        val = safe_float(text, 0.0)
         return val, 0.0
     made, attempted = text.split('-', 1)
-    return _safe_float(made, 0.0), _safe_float(attempted, 0.0)
+    return safe_float(made, 0.0), safe_float(attempted, 0.0)
 
 
 def _extract_stat_value(columns: list[str], stats: list[str], key: str):
@@ -613,9 +608,9 @@ def _extract_logs_from_espn_summary(summary_data: dict, game: dict, game_date: d
                 fg3m, fg3a = _parse_made_attempt(fg3_raw)
                 ftm, fta = _parse_made_attempt(ft_raw)
 
-                reb_val = _safe_float(reb_raw, 0.0)
+                reb_val = safe_float(reb_raw, 0.0)
                 if reb_val == 0.0 and (oreb_raw is not None or dreb_raw is not None):
-                    reb_val = _safe_float(oreb_raw, 0.0) + _safe_float(dreb_raw, 0.0)
+                    reb_val = safe_float(oreb_raw, 0.0) + safe_float(dreb_raw, 0.0)
 
                 resolved_player_id = find_player_id(player_name)
                 if not resolved_player_id:
@@ -629,19 +624,19 @@ def _extract_logs_from_espn_summary(summary_data: dict, game: dict, game_date: d
                     'game_date': game_date,
                     'matchup': matchup,
                     'minutes': _parse_minutes(min_raw),
-                    'pts': _safe_float(pts_raw, 0.0),
+                    'pts': safe_float(pts_raw, 0.0),
                     'reb': reb_val,
-                    'ast': _safe_float(ast_raw, 0.0),
-                    'stl': _safe_float(stl_raw, 0.0),
-                    'blk': _safe_float(blk_raw, 0.0),
-                    'tov': _safe_float(tov_raw, 0.0),
+                    'ast': safe_float(ast_raw, 0.0),
+                    'stl': safe_float(stl_raw, 0.0),
+                    'blk': safe_float(blk_raw, 0.0),
+                    'tov': safe_float(tov_raw, 0.0),
                     'fgm': fgm,
                     'fga': fga,
                     'ftm': ftm,
                     'fta': fta,
                     'fg3m': fg3m,
                     'fg3a': fg3a,
-                    'plus_minus': _safe_float(pm_raw, 0.0),
+                    'plus_minus': safe_float(pm_raw, 0.0),
                     'home_away': home_away,
                     'win_loss': win_loss,
                 })

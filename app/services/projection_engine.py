@@ -33,18 +33,6 @@ from app.config_display import PROP_STAT_KEY
 
 logger = logging.getLogger(__name__)
 
-# Re-export from centralized config for backward compatibility
-PROP_STAT_MAP = PROP_STAT_KEY
-
-ML_STAT_MAP = {
-    'player_points': 'player_points',
-    'player_rebounds': 'player_rebounds',
-    'player_assists': 'player_assists',
-    'player_threes': 'player_threes',
-    'player_steals': 'player_steals',
-    'player_blocks': 'player_blocks',
-}
-
 COMBO_PROP_COMPONENTS = {
     'player_points_rebounds_assists': (
         'player_points',
@@ -154,7 +142,7 @@ class ProjectionEngine:
             self._projection_cache[cache_key] = result
             return deepcopy(result)
 
-        stat_key = PROP_STAT_MAP.get(prop_type)
+        stat_key = PROP_STAT_KEY.get(prop_type)
         if not stat_key:
             return self._empty_projection()
 
@@ -294,7 +282,7 @@ class ProjectionEngine:
         confidence = self._compute_confidence(games_played, std_dev, season_avg)
 
         projection_source = 'heuristic'
-        if self._use_ml_projections() and games_played >= 10 and prop_type in ML_STAT_MAP:
+        if self._use_ml_projections() and games_played >= 10 and prop_type in PROP_STAT_KEY:
             # Build matchup string so Phase 1 opponent features are populated
             _current_matchup = ''
             if team_name and opponent_name:
@@ -321,7 +309,7 @@ class ProjectionEngine:
             if ml_features:
                 try:
                     from app.services.ml_model import predict_stat
-                    ml_prediction = predict_stat(ML_STAT_MAP[prop_type], ml_features)
+                    ml_prediction = predict_stat(prop_type, ml_features)
                     if ml_prediction > 0:
                         final_projection = ml_prediction
                         projection_source = 'ml'
@@ -495,7 +483,7 @@ class ProjectionEngine:
         Returns {prop_type: projection_dict}.
         """
         results = {}
-        for prop_type in tuple(PROP_STAT_MAP) + tuple(COMBO_PROP_COMPONENTS):
+        for prop_type in tuple(PROP_STAT_KEY) + tuple(COMBO_PROP_COMPONENTS):
             results[prop_type] = self.project_stat(
                 player_name, prop_type, opponent_name, team_name, is_home,
             )

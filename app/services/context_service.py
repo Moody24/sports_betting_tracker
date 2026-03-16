@@ -14,6 +14,7 @@ import requests
 
 from app import db
 from app.models import InjuryReport
+from app.utils.time_helpers import et_today
 
 logger = logging.getLogger(__name__)
 APP_TIMEZONE = ZoneInfo("America/New_York")
@@ -161,9 +162,6 @@ def _normalize_injury_status(raw: str) -> str:
     return raw_lower or 'unknown'
 
 
-def _today_et() -> date_type:
-    return datetime.now(APP_TIMEZONE).date()
-
 
 def _fetch_scoreboard_for_date(date_str: str) -> dict:
     """Fetch ESPN scoreboard for *date_str* (YYYYMMDD), with process-level caching.
@@ -196,7 +194,7 @@ def _fetch_scoreboard_for_date(date_str: str) -> dict:
     logger.debug("PERF scoreboard fetch date=%s elapsed=%.2fs events=%d",
                  date_str, elapsed, len(data.get('events', [])))
 
-    today_str = _today_et().strftime('%Y%m%d')
+    today_str = et_today().strftime('%Y%m%d')
     ttl = _SCOREBOARD_CACHE_TTL_TODAY if date_str == today_str else _SCOREBOARD_CACHE_TTL_PAST
     _SCOREBOARD_CACHE[date_str] = data
     _SCOREBOARD_CACHE_EXPIRES[date_str] = now + ttl
@@ -221,7 +219,7 @@ def refresh_injuries() -> int:
 
     Clears today's entries and replaces them.  Returns count of injuries stored.
     """
-    today = _today_et()
+    today = et_today()
     injuries = fetch_espn_injuries()
     if not injuries:
         cloned = _clone_latest_injuries_for_today(today)
@@ -325,7 +323,7 @@ def check_back_to_back(team_name: str) -> bool:
     Reads from the shared per-date scoreboard cache — never makes a
     redundant ESPN request if the same date was already fetched.
     """
-    yesterday = _today_et() - timedelta(days=1)
+    yesterday = et_today() - timedelta(days=1)
     date_str = yesterday.strftime('%Y%m%d')
     return _team_played_on_date(team_name, date_str)
 
@@ -337,7 +335,7 @@ def get_days_rest(team_name: str, check_days: int = 5) -> int:
     Each date's scoreboard is fetched at most once (shared cache).
     Defaults to 2 if no recent game is found.
     """
-    today = _today_et()
+    today = et_today()
     for days_ago in range(1, check_days + 1):
         check_date = today - timedelta(days=days_ago)
         date_str = check_date.strftime('%Y%m%d')
@@ -355,7 +353,7 @@ def get_game_context(player_name: str, team_name: str) -> dict:
     so repeated calls across multiple scoring passes reuse the same result
     without re-fetching ESPN data.
     """
-    today_str = _today_et().strftime('%Y%m%d')
+    today_str = et_today().strftime('%Y%m%d')
     ctx_key = (team_name.lower().strip(), today_str)
 
     now = _time.monotonic()
