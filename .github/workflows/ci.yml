@@ -45,6 +45,7 @@ jobs:
 
   ui_e2e:
     name: UI E2E + A11y
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     needs: test
 
