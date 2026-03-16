@@ -18,16 +18,16 @@ class TestCoverageGap(BaseTestCase):
         resp = self.client.get("/nba/upcoming-games", follow_redirects=False)
         self.assertEqual(resp.status_code, 302)
 
-    @patch("app.routes.bet.get_todays_games", return_value=[])
-    @patch("app.routes.bet.fetch_upcoming_games", return_value=[])
+    @patch("app.routes.nba_live.get_todays_games", return_value=[])
+    @patch("app.routes.nba_live.fetch_upcoming_games", return_value=[])
     def test_nba_upcoming_games_empty(self, _mock_upcoming, _mock_today):
         self.register_and_login()
         resp = self.client.get("/nba/upcoming-games")
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(json.loads(resp.data), [])
 
-    @patch("app.routes.bet.get_todays_games")
-    @patch("app.routes.bet.fetch_upcoming_games")
+    @patch("app.routes.nba_live.get_todays_games")
+    @patch("app.routes.nba_live.fetch_upcoming_games")
     def test_nba_upcoming_games_returns_json(self, mock_upcoming, mock_today):
         self.register_and_login()
         mock_today.return_value = [{
