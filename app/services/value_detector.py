@@ -56,33 +56,6 @@ def _sanitize_context_notes(notes, max_notes: int = 8) -> list[str]:
     return cleaned
 
 
-def implied_prob(american_odds: int) -> float:
-    """Convert American odds to implied probability (0..1)."""
-    if american_odds > 0:
-        return 100.0 / (american_odds + 100.0)
-    elif american_odds < 0:
-        return abs(american_odds) / (abs(american_odds) + 100.0)
-    return 0.5
-
-
-def decimal_odds(american_odds: int) -> float:
-    """Convert American odds to decimal odds."""
-    if american_odds > 0:
-        return 1.0 + american_odds / 100.0
-    elif american_odds < 0:
-        return 1.0 + 100.0 / abs(american_odds)
-    return 2.0
-
-
-def american_from_decimal(decimal_value: float) -> int:
-    """Convert decimal odds to American odds."""
-    if decimal_value <= 1.0:
-        return 0
-    if decimal_value >= 2.0:
-        return int(round((decimal_value - 1.0) * 100))
-    return int(round(-100.0 / (decimal_value - 1.0)))
-
-
 def devig_probs(over_odds: int, under_odds: int) -> tuple[float, float]:
     """Convert over/under odds to no-vig probabilities."""
     over_raw = implied_prob(over_odds) if over_odds else 0.5

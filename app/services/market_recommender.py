@@ -10,7 +10,6 @@ from datetime import date as date_type, datetime, timezone
 from app import db
 from app.models import GameSnapshot, ModelMetadata
 from app.services.model_storage import materialize_model_artifact, persist_model_artifact
-from app.utils import env_float
 from app.utils.odds import implied_prob
 
 logger = logging.getLogger(__name__)
