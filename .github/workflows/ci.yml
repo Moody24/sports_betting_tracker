@@ -77,7 +77,7 @@ jobs:
         run: npx playwright test
         env:
           SECRET_KEY: ci-e2e-secret
-          DATABASE_URL: sqlite:///instance/e2e.sqlite
+          DATABASE_URL: sqlite:////tmp/e2e.sqlite
 
       - name: Upload Playwright report
         if: always()
