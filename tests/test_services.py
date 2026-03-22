@@ -268,6 +268,33 @@ class TestStatsService(BaseTestCase):
             summary = get_player_stats_summary('302')
             self.assertEqual(summary['games_played'], 5)
 
+    def test_get_player_stats_summary_excludes_dnp_rows(self):
+        """DNP rows (minutes=0) must not dilute averages or consume window slots."""
+        from app.services.stats_service import get_player_stats_summary
+        with self.app.app_context():
+            # 4 real games (30 pts each) followed by 3 DNPs
+            played = _seed_player_logs(count=4, player_id='303', base_pts=30.0, base_minutes=35.0)
+            for i in range(3):
+                dnp = PlayerGameLog(
+                    player_id='303', player_name='Test Player', team_abbr='TST',
+                    game_date=date(2026, 2, 1) + timedelta(days=i),
+                    matchup='TST vs OPP', minutes=0, pts=0, reb=0, ast=0,
+                    stl=0, blk=0, tov=0, fgm=0, fga=0, ftm=0, fta=0,
+                    fg3m=0, fg3a=0, plus_minus=0,
+                )
+                db.session.add(dnp)
+            db.session.commit()
+
+            from app.services.stats_service import get_cached_logs
+            logs = get_cached_logs('303', last_n=82)
+            summary = get_player_stats_summary('303', logs)
+
+            # games_played counts only games with minutes > 0
+            self.assertEqual(summary['games_played'], 4)
+            # last_5 should reflect the 4 played games, not be diluted by DNPs
+            self.assertGreater(summary['last_5'].get('pts', 0), 20,
+                               'DNPs should not dilute the pts average below played-game values')
+
     # -- prune_expired_cache --
 
     def test_prune_expired_cache(self):

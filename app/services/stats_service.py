@@ -465,11 +465,24 @@ def get_player_stats_summary(player_id: str, logs: list = None) -> dict:
     """Compute stat averages over different windows from cached logs.
 
     Returns a dict with keys: last_5, last_10, season, std_dev, games_played.
+
+    DNP rows (minutes == 0) are excluded from all stat windows so they do
+    not dilute averages or consume slots in last_5 / last_10.
     """
     if logs is None:
         logs = get_cached_logs(player_id, last_n=82)
 
     if not logs:
+        return {
+            'last_5': {}, 'last_10': {}, 'season': {},
+            'std_dev': {}, 'games_played': 0,
+        }
+
+    # Exclude DNP rows — zero minutes drag down all stat averages and
+    # displace real games from the last_5 / last_10 windows.
+    played_logs = [lg for lg in logs if (getattr(lg, 'minutes', 0) or 0) > 0]
+
+    if not played_logs:
         return {
             'last_5': {}, 'last_10': {}, 'season': {},
             'std_dev': {}, 'games_played': 0,
@@ -498,11 +511,11 @@ def get_player_stats_summary(player_id: str, logs: list = None) -> dict:
         return result
 
     return {
-        'last_5': _averages(logs[:5]),
-        'last_10': _averages(logs[:10]),
-        'season': _averages(logs),
-        'std_dev': _std_devs(logs[:10]),
-        'games_played': len(logs),
+        'last_5': _averages(played_logs[:5]),
+        'last_10': _averages(played_logs[:10]),
+        'season': _averages(played_logs),
+        'std_dev': _std_devs(played_logs[:10]),
+        'games_played': len(played_logs),
     }
 
 
