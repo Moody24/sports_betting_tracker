@@ -241,11 +241,20 @@ def cli_model_accuracy(days, stat_type):
         click.echo('No postmortem data with projections yet.')
         return
 
-    # Group by stat_type
+    # Split OT vs non-OT. OT games inflate counting stats (extra possessions)
+    # and are structural noise, not model error — excluded from drift comparison.
+    non_ot_rows = [pm for pm in rows if not pm.overtime_flag]
+    ot_rows = [pm for pm in rows if pm.overtime_flag]
+
+    # Group by stat_type (non-OT only for drift comparison)
     by_stat: dict = {}
-    for pm in rows:
+    by_stat_ot: dict = {}
+    for pm in non_ot_rows:
         key = pm.stat_type or 'unknown'
         by_stat.setdefault(key, []).append(abs((pm.actual_stat or 0.0) - (pm.projected_stat or 0.0)))
+    for pm in ot_rows:
+        key = pm.stat_type or 'unknown'
+        by_stat_ot.setdefault(key, []).append(abs((pm.actual_stat or 0.0) - (pm.projected_stat or 0.0)))
 
     # Expected MAE thresholds per stat type (healthy ranges)
     thresholds = {
@@ -257,6 +266,7 @@ def cli_model_accuracy(days, stat_type):
         'player_blocks': 1.0,
     }
 
+    click.echo(f'\n--- Regulation games only (n={len(non_ot_rows)}) ---')
     click.echo(f'{"Stat Type":<30} {"N":>5} {"MAE":>7} {"Threshold":>10} {"Status":>8}')
     click.echo('-' * 65)
     for stype, errors in sorted(by_stat.items()):
@@ -265,12 +275,21 @@ def cli_model_accuracy(days, stat_type):
         status = 'OK' if mae <= threshold else 'WARN'
         click.echo(f'{stype:<30} {len(errors):>5} {mae:>7.3f} {threshold:>10.1f} {status:>8}')
 
-    total_errors = [e for errs in by_stat.values() for e in errs]
-    overall_mae = sum(total_errors) / len(total_errors)
-    click.echo(f'\nOverall MAE across all stat types: {overall_mae:.3f}  (n={len(total_errors)})')
+    if by_stat:
+        total_errors = [e for errs in by_stat.values() for e in errs]
+        overall_mae = sum(total_errors) / len(total_errors)
+        click.echo(f'\nOverall MAE (regulation): {overall_mae:.3f}  (n={len(total_errors)})')
 
-    # Compare against val_mae from ModelMetadata
-    click.echo('\n=== vs Training val_mae ===')
+    if ot_rows:
+        ot_total = [abs((pm.actual_stat or 0.0) - (pm.projected_stat or 0.0)) for pm in ot_rows]
+        ot_mae = sum(ot_total) / len(ot_total)
+        click.echo(f'Overall MAE (OT games):    {ot_mae:.3f}  (n={len(ot_rows)}) — '
+                   f'excluded from drift; OT inflates counting stats')
+        all_errors = [abs((pm.actual_stat or 0.0) - (pm.projected_stat or 0.0)) for pm in rows]
+        click.echo(f'Overall MAE (combined):    {sum(all_errors)/len(all_errors):.3f}  (n={len(rows)})')
+
+    # Drift comparison uses regulation-only MAE (apples-to-apples vs val_mae)
+    click.echo('\n=== vs Training val_mae (regulation games only) ===')
     for stype in sorted(by_stat.keys()):
         model_meta = (
             ModelMetadata.query
@@ -278,12 +297,15 @@ def cli_model_accuracy(days, stat_type):
             .first()
         )
         live_mae = sum(by_stat[stype]) / len(by_stat[stype])
+        ot_n = len(by_stat_ot.get(stype, []))
         if model_meta and model_meta.val_mae:
             gap = live_mae - model_meta.val_mae
+            ot_note = f'  [{ot_n} OT games excluded]' if ot_n else ''
             click.echo(
                 f'  {stype:<30} live={live_mae:.3f}  val={model_meta.val_mae:.3f}  '
                 f'gap={gap:+.3f}'
                 + ('  WARN: live >> val' if gap > 1.0 else '')
+                + ot_note
             )
         else:
             click.echo(f'  {stype:<30} live={live_mae:.3f}  val=n/a (no active model)')
