@@ -5,12 +5,17 @@ set -e
 # Allow failure so the container can still serve /health during DB cold starts.
 # Guard with timeout to avoid blocking web startup long enough to fail Railway healthchecks.
 MIGRATION_MAX_SECONDS="${MIGRATION_MAX_SECONDS:-45}"
+MIGRATE_CMD='import os; os.environ.setdefault("SCHEDULER_ENABLED","false");
+from app import create_app
+from flask_migrate import upgrade
+app = create_app()
+with app.app_context():
+    upgrade(directory="migrations")'
 if command -v timeout >/dev/null 2>&1; then
-  timeout "${MIGRATION_MAX_SECONDS}"s sh -c \
-    'SCHEDULER_ENABLED=false flask --app run.py db upgrade heads' \
+  timeout "${MIGRATION_MAX_SECONDS}"s python -c "${MIGRATE_CMD}" \
     || echo "WARNING: DB migration failed/timed out — continuing startup"
 else
-  SCHEDULER_ENABLED=false flask --app run.py db upgrade heads \
+  python -c "${MIGRATE_CMD}" \
     || echo "WARNING: DB migration failed — continuing startup"
 fi
 
