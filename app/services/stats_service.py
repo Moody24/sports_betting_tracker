@@ -145,6 +145,16 @@ def fetch_player_game_logs(
     if df.empty:
         return []
 
+    # PlayerGameLog endpoint doesn't include PLAYER_NAME per row — resolve
+    # from the nba_api static player list using the player_id.
+    try:
+        from nba_api.stats.static import players as nba_players
+        _pid_int = int(player_id)
+        _pid_map = {p['id']: p['full_name'] for p in nba_players.get_active_players()}
+        _resolved_name = _pid_map.get(_pid_int, '')
+    except Exception:
+        _resolved_name = ''
+
     rows = []
     frame = df if last_n is None else df.head(last_n)
 
@@ -156,7 +166,7 @@ def fetch_player_game_logs(
         home_away = 'home' if 'vs.' in matchup else 'away'
         rows.append({
             'player_id': str(player_id),
-            'player_name': str(row.get('PLAYER_NAME', '')),
+            'player_name': _resolved_name or str(row.get('PLAYER_NAME', '')),
             'team_abbr': str(row.get('TEAM_ABBREVIATION', '')),
             'game_date': game_date,
             'matchup': matchup,

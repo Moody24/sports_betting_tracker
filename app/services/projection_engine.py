@@ -41,6 +41,17 @@ COMBO_PROP_COMPONENTS = {
     ),
 }
 
+# Calibration corrections for combo props derived by summing individual
+# projections. Summing pts+reb+ast underestimates PRA because it ignores
+# the positive correlation between components (high-usage games produce
+# more of all three). Derived from N=57 postmortem observations:
+# avg projected 25.08, avg actual 30.35 → additive bias +5.27.
+# Use half the observed bias as a conservative correction to avoid
+# overfit on a small sample.
+COMBO_PROP_BIAS_CORRECTION = {
+    'player_points_rebounds_assists': 2.6,
+}
+
 
 class ProjectionEngine:
     """Generates projected stat values for player props.
@@ -117,6 +128,7 @@ class ProjectionEngine:
                 for component in components
             }
             total_projection = sum(r.get('projection', 0) or 0 for r in component_results.values())
+            total_projection += COMBO_PROP_BIAS_CORRECTION.get(prop_type, 0)
             total_variance = sum((r.get('std_dev', 0) or 0) ** 2 for r in component_results.values())
             combo_context = []
             for component in components:

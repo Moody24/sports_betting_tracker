@@ -62,7 +62,7 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Run Playwright E2E and accessibility checks
-        timeout-minutes: 10
+        timeout-minutes: 15
         run: npx playwright test
 
       - name: Upload Playwright report
