@@ -44,12 +44,21 @@ COMBO_PROP_COMPONENTS = {
 # Calibration corrections for combo props derived by summing individual
 # projections. Summing pts+reb+ast underestimates PRA because it ignores
 # the positive correlation between components (high-usage games produce
-# more of all three). Derived from N=57 postmortem observations:
-# avg projected 25.08, avg actual 30.35 → additive bias +5.27.
-# Use half the observed bias as a conservative correction to avoid
-# overfit on a small sample.
+# more of all three). Derived from N=57 postmortem observations after
+# retroactive DNP cleanup: avg_err +4.01, over_rate 66.7%.
+# Correction = ~80% of observed structural bias (conservative; avoids overfit).
 COMBO_PROP_BIAS_CORRECTION = {
-    'player_points_rebounds_assists': 2.6,
+    'player_points_rebounds_assists': 3.2,
+}
+
+# Additive calibration corrections for single-stat props derived from
+# postmortem bias analysis. Applied after both heuristic and ML projections
+# to correct systematic model underestimation.
+# Updated: N=57 rebounds (avg_err +0.36), N=32 assists (avg_err +0.69).
+# Blocks (N=12) and steals (N=10) sample too small — deferred.
+SINGLE_STAT_BIAS_CORRECTION = {
+    'player_assists': 0.5,
+    'player_rebounds': 0.3,
 }
 
 
@@ -330,6 +339,11 @@ class ProjectionEngine:
                         "ML projection failed for %s (%s); using heuristic fallback: %s",
                         player_name, prop_type, exc,
                     )
+
+        # Apply single-stat systematic bias correction (postmortem-derived).
+        bias = SINGLE_STAT_BIAS_CORRECTION.get(prop_type, 0)
+        if bias:
+            final_projection = round(final_projection + bias, 1)
 
         result = {
             'projection': final_projection,

@@ -1348,8 +1348,8 @@ class TestProjectionEngine(BaseTestCase):
                     return mapping[prop_type]
                 mock_project.side_effect = side_effect
                 result = ProjectionEngine.project_stat(engine, 'LeBron James', 'player_points_rebounds_assists')
-            # 25.0 + 9.0 + 8.0 = 42.0, plus PRA bias correction of +2.6 = 44.6
-            self.assertEqual(result['projection'], 44.6)
+            # 25.0 + 9.0 + 8.0 = 42.0, plus PRA bias correction of +3.2 = 45.2
+            self.assertEqual(result['projection'], 45.2)
             self.assertEqual(result['projection_source'], 'derived_combo')
             self.assertEqual(result['games_played'], 28)
             self.assertIn('components', result['breakdown'])
