@@ -89,6 +89,8 @@ def _resolved_win_rate(days: int):
 
 def register_cli(app):
     """Register all CLI commands with the Flask app."""
+    import copy
+    import functools
     from app.cli.stats_commands import register_stats_commands
     from app.cli.model_commands import register_model_commands
     from app.cli.market_commands import register_market_commands
@@ -97,3 +99,18 @@ def register_cli(app):
     register_model_commands(app)
     register_market_commands(app)
     register_reporting_commands(app)
+    # Commands registered via add_command() don't get an app context
+    # automatically (unlike @app.cli.command()). Wrap each registered
+    # command to push this specific app's context before running.
+    def _push_ctx(cb):
+        @functools.wraps(cb)
+        def wrapped(*args, **kwargs):
+            with app.app_context():
+                return cb(*args, **kwargs)
+        return wrapped
+
+    for name, cmd in list(app.cli.commands.items()):
+        if callable(getattr(cmd, 'callback', None)):
+            c = copy.copy(cmd)
+            c.callback = _push_ctx(cmd.callback)
+            app.cli.commands[name] = c

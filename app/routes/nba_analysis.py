@@ -324,6 +324,7 @@ def nba_player_analysis(player_name):
 def nba_stat_analysis():
     """Display today's props grouped by matchup with a slide-in detail panel."""
     from app.services.score_cache import get_todays_scores
+    from app.services.nba_service import get_todays_games as _get_todays_games
 
     try:
         scores = get_todays_scores()
@@ -331,7 +332,7 @@ def nba_stat_analysis():
         logger.error("Stat analysis engine error: %s", exc)
         scores = []
 
-    games_today = get_todays_games()
+    games_today = _get_todays_games()
 
     game_lookup = {g.get('espn_id'): g for g in games_today}
 

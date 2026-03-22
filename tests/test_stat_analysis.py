@@ -7,7 +7,8 @@ from unittest.mock import patch
 from tests.helpers import BaseTestCase
 from app import db
 from app.models import PlayerGameLog
-from app.routes.bet import _compute_hit_rates, _build_stat_context
+from app.routes.nba_analysis import _compute_hit_rates
+from app.routes.nba_live import _build_stat_context
 
 
 class TestComputeHitRates(BaseTestCase):

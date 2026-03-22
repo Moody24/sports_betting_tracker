@@ -182,9 +182,9 @@ class TestMovementCalc(BaseTestCase):
             }]
         }
 
-        with patch('app.routes.bet.get_todays_games', return_value=[mock_game]), \
-             patch('app.routes.bet.fetch_player_props_for_event', return_value=mock_prop), \
-             patch('app.routes.bet._resolve_player_team_abbrs', return_value={'LeBron James': 'LAL'}):
+        with patch('app.routes.nba_analysis.get_todays_games', return_value=[mock_game]), \
+             patch('app.routes.nba_analysis.fetch_player_props_for_event', return_value=mock_prop), \
+             patch('app.routes.nba_analysis._resolve_player_team_abbrs', return_value={'LeBron James': 'LAL'}):
             resp = self.client.get('/nba/all-props')
 
         self.assertEqual(resp.status_code, 200)
@@ -218,9 +218,9 @@ class TestMovementCalc(BaseTestCase):
             }]
         }
 
-        with patch('app.routes.bet.get_todays_games', return_value=[mock_game]), \
-             patch('app.routes.bet.fetch_player_props_for_event', return_value=mock_prop), \
-             patch('app.routes.bet._resolve_player_team_abbrs', return_value={}):
+        with patch('app.routes.nba_analysis.get_todays_games', return_value=[mock_game]), \
+             patch('app.routes.nba_analysis.fetch_player_props_for_event', return_value=mock_prop), \
+             patch('app.routes.nba_analysis._resolve_player_team_abbrs', return_value={}):
             resp = self.client.get('/nba/all-props')
 
         self.assertEqual(resp.status_code, 200)
@@ -361,8 +361,8 @@ class TestParlaySubmitWithPropFields(BaseTestCase):
         mock_detector_instance = MagicMock()
         mock_detector_instance.score_prop.return_value = mock_score
         mock_detector_cls = MagicMock(return_value=mock_detector_instance)
-        with patch('app.routes.bet.ProjectionEngine'), \
-             patch('app.routes.bet.ValueDetector', mock_detector_cls):
+        with patch('app.routes.bet_crud.ProjectionEngine'), \
+             patch('app.routes.bet_crud.ValueDetector', mock_detector_cls):
             resp = self.client.post(
                 '/bets/parlay',
                 data=json.dumps(payload),
@@ -426,9 +426,9 @@ class TestNewBetFormParlayTab(BaseTestCase):
                 'best_under_book': 'draftkings',
             }]
         }
-        with patch('app.routes.bet.get_todays_games', return_value=[mock_game]), \
-             patch('app.routes.bet.fetch_player_props_for_event', return_value=mock_prop), \
-             patch('app.routes.bet._resolve_player_team_abbrs', return_value={'LeBron James': 'LAL'}):
+        with patch('app.routes.nba_analysis.get_todays_games', return_value=[mock_game]), \
+             patch('app.routes.nba_analysis.fetch_player_props_for_event', return_value=mock_prop), \
+             patch('app.routes.nba_analysis._resolve_player_team_abbrs', return_value={'LeBron James': 'LAL'}):
             resp = self.client.get('/nba/all-props')
         self.assertEqual(resp.status_code, 200)
         data = json.loads(resp.data)
@@ -464,10 +464,10 @@ class TestNewBetFormParlayTab(BaseTestCase):
                 'best_under_book': 'fanduel',
             }]
         }
-        with patch('app.routes.bet.get_todays_games', return_value=[]), \
-             patch('app.routes.bet.fetch_upcoming_games', return_value=[upcoming_game]), \
-             patch('app.routes.bet.fetch_player_props_for_event', return_value=upcoming_props), \
-             patch('app.routes.bet._resolve_player_team_abbrs', return_value={'Jalen Brunson': 'NYK'}):
+        with patch('app.routes.nba_analysis.get_todays_games', return_value=[]), \
+             patch('app.routes.nba_analysis.fetch_upcoming_games', return_value=[upcoming_game]), \
+             patch('app.routes.nba_analysis.fetch_player_props_for_event', return_value=upcoming_props), \
+             patch('app.routes.nba_analysis._resolve_player_team_abbrs', return_value={'Jalen Brunson': 'NYK'}):
             resp = self.client.get('/nba/all-props')
 
         self.assertEqual(resp.status_code, 200)
