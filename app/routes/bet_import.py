@@ -42,15 +42,21 @@ def _parse_ocr_text(text: str) -> dict:
     ou_match = re.search(r'\b(over|under)\s+([\d]+\.?\d*)\b', text, re.IGNORECASE)
     if ou_match:
         result['bet_type'] = ou_match.group(1).lower()
-        result['prop_line'] = float(ou_match.group(2))
+        raw_line = float(ou_match.group(2))
+        if 0 < raw_line < 200:  # reject impossible lines (negative, zero, or absurd)
+            result['prop_line'] = raw_line
 
     odds_matches = re.findall(r'([+\-]\d{3,4})', text)
     if odds_matches:
-        result['american_odds'] = int(odds_matches[0])
+        raw_odds = int(odds_matches[0])
+        if raw_odds != 0 and -2500 <= raw_odds <= 2500:  # valid American odds range
+            result['american_odds'] = raw_odds
 
     stake_matches = re.findall(r'\$\s*([\d]+\.?\d*)', text)
     if stake_matches:
-        result['stake'] = float(stake_matches[0])
+        raw_stake = float(stake_matches[0])
+        if 0 < raw_stake <= 10000:  # reject zero, negative, or implausible stakes
+            result['stake'] = raw_stake
 
     vs_match = re.search(
         r'([A-Za-z][A-Za-z\s]{2,25})\s+(?:@|vs\.?)\s+([A-Za-z][A-Za-z\s]{2,25})',

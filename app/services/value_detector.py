@@ -98,7 +98,8 @@ class ValueDetector:
                 logs = get_cached_logs(player_id, last_n=1)
                 if logs and logs[0].team_abbr:
                     resolved[player_name] = (logs[0].team_abbr or '').upper()
-            except Exception:
+            except Exception as exc:
+                logger.debug("Could not resolve team for %s: %s", player_name, exc)
                 continue
         return resolved
 
@@ -236,8 +237,8 @@ class ValueDetector:
                 context_notes.append(f'ML quality: {win_prob:.0%} win prob')
             elif win_prob < 0.40:
                 context_notes.append(f'ML caution: {win_prob:.0%} win prob')
-        except Exception:
-            pass  # Model 2 unavailable — degrade gracefully
+        except Exception as exc:
+            logger.warning("Model 2 quality scoring unavailable for %s/%s: %s", player_name, prop_type, exc)
         context_notes = _sanitize_context_notes(context_notes)
 
         return {

@@ -10,9 +10,9 @@ from datetime import datetime, date as date_type
 from flask import render_template, redirect, url_for, flash, request, jsonify, Response, abort
 from flask_login import login_required, current_user
 from sqlalchemy import case as sa_case
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, selectinload
 
-from app import db
+from app import db, limiter
 from app.enums import BetType, Outcome
 from app.forms import BetForm
 from app.models import Bet, PickContext, compute_bets_net_pl
@@ -41,7 +41,10 @@ def _filtered_bets_query(user_id: int, args):
 
     Shared by the bet list and CSV export endpoints to avoid duplication.
     """
-    query = Bet.query.options(joinedload(Bet.pick_context)).filter_by(user_id=user_id)
+    query = Bet.query.options(
+        joinedload(Bet.pick_context),
+        selectinload(Bet.postmortem),
+    ).filter_by(user_id=user_id)
 
     status = args.get('status', '').strip()
     search_query = args.get('q', '').strip()
@@ -487,6 +490,7 @@ def grade_bet(bet_id):
 
 
 @login_required
+@limiter.limit("10 per minute")
 def export_bets():
     """Export all (optionally filtered) bets for the current user as a CSV file."""
     query = _filtered_bets_query(current_user.id, request.args)

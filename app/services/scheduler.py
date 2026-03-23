@@ -23,12 +23,12 @@ except ModuleNotFoundError:  # pragma: no cover - handled in environments withou
 logger = logging.getLogger(__name__)
 
 APP_TIMEZONE = "US/Eastern"
-AUTO_PICK_MAX_TOTAL = 50            # hard cap on total bets per day
-AUTO_PICK_MIN_EDGE_STRAIGHT = 0.15  # straight bet: ≥15% edge (strong tier only)
-AUTO_PICK_MIN_EDGE_2LEG = 0.15      # 2-leg parlay leg: ≥15% edge (strong tier only)
-AUTO_PICK_MIN_EDGE_3LEG = 0.15      # 3-leg parlay leg: ≥15% edge (strong tier only)
-AUTO_PICK_MIN_GAMES = 15            # minimum game log history for any pick
-AUTO_PICK_CONFIDENCE_TIER = 'strong'  # only strong-tier picks qualify
+AUTO_PICK_MAX_TOTAL = int(os.getenv('AUTO_PICK_MAX_TOTAL', '50'))
+AUTO_PICK_MIN_EDGE_STRAIGHT = float(os.getenv('AUTO_PICK_MIN_EDGE_STRAIGHT', '0.15'))
+AUTO_PICK_MIN_EDGE_2LEG = float(os.getenv('AUTO_PICK_MIN_EDGE_2LEG', '0.15'))
+AUTO_PICK_MIN_EDGE_3LEG = float(os.getenv('AUTO_PICK_MIN_EDGE_3LEG', '0.15'))
+AUTO_PICK_MIN_GAMES = int(os.getenv('AUTO_PICK_MIN_GAMES', '15'))
+AUTO_PICK_CONFIDENCE_TIER = os.getenv('AUTO_PICK_CONFIDENCE_TIER', 'strong')
 AUTO_PAPER_ENABLED = os.getenv('AUTO_PAPER_ENABLED', 'true').strip().lower() in ('1', 'true', 'yes', 'on')
 AUTO_PAPER_MAX_PER_COHORT = int(os.getenv('AUTO_PAPER_MAX_PER_COHORT', '24'))
 AUTO_PAPER_MIN_GAMES = int(os.getenv('AUTO_PAPER_MIN_GAMES', '10'))
@@ -108,7 +108,7 @@ def _log_job(job_name, func):
                 entry.status = 'success'
                 db.session.commit()
     except Exception as exc:
-        logger.error("Job %s failed: %s", job_name, exc)
+        logger.error("Job %s failed: %s", job_name, exc, exc_info=True)
         with app.app_context():
             entry = db.session.get(JobLog, log_id)
             if entry:

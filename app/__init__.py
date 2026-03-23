@@ -70,13 +70,19 @@ def create_app(testing=False):
     app.config['SQLALCHEMY_DATABASE_URI'] = db_url
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     engine_options = dict(app.config.get('SQLALCHEMY_ENGINE_OPTIONS', {}))
-    engine_options.update(
-        {
-            'pool_pre_ping': True,
-            'pool_recycle': 300,
-            'pool_timeout': 30,
-        }
-    )
+    base_pool_opts: dict = {
+        'pool_pre_ping': True,
+        'pool_recycle': 300,
+        'pool_timeout': 30,
+    }
+    # pool_size / max_overflow only apply to QueuePool (PostgreSQL).
+    # SQLite (sqlite:///:memory: used in tests) uses StaticPool — passing
+    # these params would give each pool connection a separate in-memory DB,
+    # breaking test isolation.
+    if not db_url.startswith('sqlite'):
+        base_pool_opts['pool_size'] = int(os.getenv('DB_POOL_SIZE', '2'))
+        base_pool_opts['max_overflow'] = int(os.getenv('DB_MAX_OVERFLOW', '3'))
+    engine_options.update(base_pool_opts)
     app.config['SQLALCHEMY_ENGINE_OPTIONS'] = engine_options
     app.config['WTF_CSRF_ENABLED'] = True
     app.config['RATELIMIT_ENABLED'] = os.getenv('RATELIMIT_ENABLED', 'true').lower() == 'true'

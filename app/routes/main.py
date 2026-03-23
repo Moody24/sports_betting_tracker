@@ -5,7 +5,7 @@ from flask import Blueprint, jsonify, render_template, request, redirect, url_fo
 from flask_login import current_user, login_required
 from sqlalchemy import func, case, text
 
-from app import db, csrf
+from app import db, csrf, limiter
 from app.enums import Outcome
 from app.models import Bet, compute_bets_net_pl, compute_bets_wagered
 
@@ -64,6 +64,7 @@ def home():
 
 @main.route('/telemetry/ux', methods=['POST'])
 @csrf.exempt
+@limiter.limit("60 per minute")
 def ux_telemetry():
     """Receive lightweight UX events for interaction quality monitoring."""
     payload = request.get_json(silent=True) or {}
