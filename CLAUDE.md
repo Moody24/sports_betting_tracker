@@ -18,11 +18,15 @@ source .venv/bin/activate && bandit -q -r app -x tests -ll
 ```
 - CI runs both on every push — run locally before committing to catch issues early
 - **Gotcha**: auto-generated Alembic merge migrations (`flask db merge`) always include unused `from alembic import op` / `import sqlalchemy as sa` — delete both lines before committing or ruff will fail
+- `ruff==0.15.5` and `bandit==1.9.4` are pinned in `requirements-dev.txt` — use that for reproducible local installs
 
 ## Key Conventions
 - All dates/times use **ET** (`ZoneInfo("America/New_York")` / `"US/Eastern"`) — normalization is critical for daily freshness checks and snapshot reads/writes.
 - `_is_non_server_invocation()` in `app/__init__.py` guards scheduler startup — never start APScheduler in pytest/alembic/CLI contexts.
 - ML model JSON artifacts (`app/ml_models/*.json`) are gitignored — stored on S3 in prod, generated locally via CLI.
+- **pool_size / max_overflow are PostgreSQL-only** — `__init__.py` skips them for SQLite. Tests use `sqlite:///:memory:` via `BaseTestCase.setUp()`; adding QueuePool params there gives each connection a separate in-memory DB and breaks all tests.
+- **Calibration constants** live in `projection_engine.py`: `COMBO_PROP_BIAS_CORRECTION` (PRA +3.2) and `SINGLE_STAT_BIAS_CORRECTION` (assists +0.5, rebounds +0.3) — revisit blocks/steals when N≥30.
+- **Auto-pick thresholds** are env-configurable: `AUTO_PICK_MAX_TOTAL`, `AUTO_PICK_MIN_EDGE_STRAIGHT/2LEG/3LEG`, `AUTO_PICK_MIN_GAMES`, `AUTO_PICK_CONFIDENCE_TIER` (all in `scheduler.py`, defaults unchanged).
 
 ## Project Layout
 - `app/routes/` — Flask blueprints (auth, bet, main)
