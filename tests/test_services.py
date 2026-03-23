@@ -273,7 +273,7 @@ class TestStatsService(BaseTestCase):
         from app.services.stats_service import get_player_stats_summary
         with self.app.app_context():
             # 4 real games (30 pts each) followed by 3 DNPs
-            played = _seed_player_logs(count=4, player_id='303', base_pts=30.0, base_minutes=35.0)
+            _seed_player_logs(count=4, player_id='303', base_pts=30.0, base_minutes=35.0)
             for i in range(3):
                 dnp = PlayerGameLog(
                     player_id='303', player_name='Test Player', team_abbr='TST',
