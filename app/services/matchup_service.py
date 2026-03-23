@@ -23,8 +23,12 @@ _NBA_API_DELAY = 0.6
 # Process-level cache for team defense lookups.
 # get_team_defense() fires an ilike DB query per call; with 100-300 props
 # per scoring run and only ~15 unique opponents, caching eliminates ~280 redundant queries.
+# On a cache miss we load ALL 30 teams at once (one query), then do Python-side
+# substring matching — preserves original ilike semantics without separate DB queries.
 _TEAM_DEFENSE_CACHE: dict[tuple, dict] = {}   # (name_lower, date_str) → result dict
 _TEAM_DEFENSE_CACHE_TS: dict[tuple, float] = {}
+_TEAM_DEFENSE_ALL_ROWS: dict[str, list] = {}   # date_str → list of all result dicts
+_TEAM_DEFENSE_ALL_LOADED: dict[str, float] = {}  # date_str → monotonic ts of bulk-load
 _TEAM_DEFENSE_TTL = 3600  # 1 h; defense data changes only once per scheduler run
 
 # League-average baselines (approximate, updated each season)
@@ -226,6 +230,8 @@ def invalidate_team_defense_cache() -> None:
     """
     _TEAM_DEFENSE_CACHE.clear()
     _TEAM_DEFENSE_CACHE_TS.clear()
+    _TEAM_DEFENSE_ALL_ROWS.clear()
+    _TEAM_DEFENSE_ALL_LOADED.clear()
     logger.debug("team_defense_cache: invalidated")
 
 
@@ -242,43 +248,66 @@ def get_team_defense(team_name: str, date: date_type = None) -> dict:
     if date is None:
         date = et_today()
 
-    cache_key = (team_name.lower().strip(), str(date))
+    date_str = str(date)
+    cache_key = (team_name.lower().strip(), date_str)
     now = time.monotonic()
     if cache_key in _TEAM_DEFENSE_CACHE and now - _TEAM_DEFENSE_CACHE_TS.get(cache_key, 0) < _TEAM_DEFENSE_TTL:
         return _TEAM_DEFENSE_CACHE[cache_key]
 
-    snap = (
-        TeamDefenseSnapshot.query
-        .filter(TeamDefenseSnapshot.team_name.ilike(f'%{team_name}%'))
-        .filter(TeamDefenseSnapshot.snapshot_date <= date)
-        .order_by(TeamDefenseSnapshot.snapshot_date.desc())
-        .first()
-    )
+    # Bulk-load all teams for this date in one query (max 30 rows) so that
+    # subsequent per-team calls use Python-side matching instead of separate DB queries.
+    # Skip TTL in test mode: each test creates a fresh in-memory DB and the
+    # module-level cache would return stale rows from the previous test's DB.
+    from flask import current_app
+    testing = current_app.config.get('TESTING', False)
+    all_loaded_ts = _TEAM_DEFENSE_ALL_LOADED.get(date_str, 0)
+    if testing or now - all_loaded_ts >= _TEAM_DEFENSE_TTL:
+        snaps = (
+            TeamDefenseSnapshot.query
+            .filter(TeamDefenseSnapshot.snapshot_date <= date)
+            .order_by(TeamDefenseSnapshot.snapshot_date.desc())
+            .all()
+        )
+        seen_teams: set[str] = set()
+        rows_for_date: list = []
+        for snap in snaps:
+            # keep only the latest snapshot per team
+            tid = snap.team_id or snap.team_name
+            if tid in seen_teams:
+                continue
+            seen_teams.add(tid)
+            entry = {
+                'team_id': snap.team_id,
+                'team_name': snap.team_name,
+                'team_abbr': snap.team_abbr,
+                'opp_pts_pg': snap.opp_pts_pg or 0,
+                'opp_reb_pg': snap.opp_reb_pg or 0,
+                'opp_ast_pg': snap.opp_ast_pg or 0,
+                'opp_3pm_pg': snap.opp_3pm_pg or 0,
+                'opp_stl_pg': snap.opp_stl_pg or 0,
+                'opp_blk_pg': snap.opp_blk_pg or 0,
+                'opp_tov_pg': snap.opp_tov_pg or 0,
+                'pace': snap.pace or 0,
+                'def_rating': snap.def_rating or 0,
+                'opp_pts_allowed_pg': snap.opp_pts_allowed_pg or 0,
+                'opp_pts_allowed_sg': snap.opp_pts_allowed_sg or 0,
+                'opp_pts_allowed_sf': snap.opp_pts_allowed_sf or 0,
+                'opp_pts_allowed_pf': snap.opp_pts_allowed_pf or 0,
+                'opp_pts_allowed_c': snap.opp_pts_allowed_c or 0,
+            }
+            rows_for_date.append(entry)
+        _TEAM_DEFENSE_ALL_ROWS[date_str] = rows_for_date
+        _TEAM_DEFENSE_ALL_LOADED[date_str] = now
 
-    if not snap:
-        _TEAM_DEFENSE_CACHE[cache_key] = {}
-        _TEAM_DEFENSE_CACHE_TS[cache_key] = now
-        return {}
-
-    result = {
-        'team_id': snap.team_id,
-        'team_name': snap.team_name,
-        'team_abbr': snap.team_abbr,
-        'opp_pts_pg': snap.opp_pts_pg or 0,
-        'opp_reb_pg': snap.opp_reb_pg or 0,
-        'opp_ast_pg': snap.opp_ast_pg or 0,
-        'opp_3pm_pg': snap.opp_3pm_pg or 0,
-        'opp_stl_pg': snap.opp_stl_pg or 0,
-        'opp_blk_pg': snap.opp_blk_pg or 0,
-        'opp_tov_pg': snap.opp_tov_pg or 0,
-        'pace': snap.pace or 0,
-        'def_rating': snap.def_rating or 0,
-        'opp_pts_allowed_pg': snap.opp_pts_allowed_pg or 0,
-        'opp_pts_allowed_sg': snap.opp_pts_allowed_sg or 0,
-        'opp_pts_allowed_sf': snap.opp_pts_allowed_sf or 0,
-        'opp_pts_allowed_pf': snap.opp_pts_allowed_pf or 0,
-        'opp_pts_allowed_c': snap.opp_pts_allowed_c or 0,
-    }
+    # Python-side substring match — replicates original ilike('%term%') semantics
+    # but operates on the in-memory list instead of hitting the DB.
+    term = team_name.lower().strip()
+    result: dict = {}
+    for entry in _TEAM_DEFENSE_ALL_ROWS.get(date_str, []):
+        if (term in (entry.get('team_name') or '').lower()
+                or term in (entry.get('team_abbr') or '').lower()):
+            result = entry
+            break
     _TEAM_DEFENSE_CACHE[cache_key] = result
     _TEAM_DEFENSE_CACHE_TS[cache_key] = now
     return result
