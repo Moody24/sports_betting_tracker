@@ -65,4 +65,4 @@ jobs:
           SECRET_KEY: ci-test-secret-key-not-for-production
 
       - name: Coverage report
-        run: python -m coverage report --include="app/*" --show-missing --fail-under=74
+        run: python -m coverage report --include="app/*" --show-missing --fail-under=75
