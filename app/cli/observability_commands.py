@@ -9,7 +9,17 @@ from app import db
 from app.models import BetPostmortem, JobLog, ModelMetadata
 
 
+@click.command('generate-auto-picks')
+def cli_generate_auto_picks():
+    from app.services.scheduler import generate_daily_auto_picks
+    click.echo('Generating daily auto picks...')
+    generate_daily_auto_picks()
+    click.echo('Done.')
+
+
 def register_observability_commands(app):
+
+    app.cli.add_command(cli_generate_auto_picks)
 
     @app.cli.command('health-report')
     @click.option('--days', default=30, show_default=True,
