@@ -6,7 +6,7 @@ Flask + SQLAlchemy NBA betting tracker (app name: **Edge Tracker**) with ML proj
 ## Running Tests
 ```
 source .venv/bin/activate && SECRET_KEY=test python -m coverage run -m unittest discover -s tests -v
-python -m coverage report --include="app/*"   # CI requires ≥ 80%
+python -m coverage report --include="app/*"   # CI gate is currently 75% (actual coverage). Target is 80% — tracked in backlog.
 ```
 - Test runner is **unittest** (not pytest). `SECRET_KEY` env var is required or app raises.
 - `.venv/` is the active virtualenv; `venv/` and `venv310/` are stale.
@@ -32,7 +32,7 @@ source .venv/bin/activate && bandit -q -r app -x tests -ll
 - `app/routes/` — Flask blueprints (auth, bet, main)
 - `app/services/` — business logic: `scheduler.py`, `nba_service.py`, `ml_model.py`, `pick_quality_model.py`, `postmortem_service.py`, `stats_service.py`, `projection_engine.py`, `value_detector.py`, `ml_feature_builder.py` (canonical shared feature builder — `FEATURE_KEYS` must stay in sync between training and inference), etc.
 - `app/ml_models/` — model artifact files (gitignored JSON)
-- `app/cli.py` — Flask CLI commands (`flask refresh-stats`, calibration reports, etc.)
+- `app/cli/` — Flask CLI commands package: `__init__.py` (registration), `model_commands.py`, `market_commands.py`, `stats_commands.py`, `observability_commands.py`
 - `tests/` — unittest test files; CI runs all of them
 
 ## Environment
