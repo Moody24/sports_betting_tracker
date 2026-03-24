@@ -512,7 +512,7 @@
         slipLegsEl.innerHTML =
           '<div class="text-center py-3 text-success">'
           + '<i class="bi bi-check-circle" style="font-size:1.5rem"></i>'
-          + '<p class="mb-0 mt-1 small">' + data.message + '</p>'
+          + '<p class="mb-0 mt-1 small">' + escapeHtml(data.message || 'Bet placed successfully.') + '</p>'
           + '</div>';
         slip = [];
         hideElement(slipControls);
