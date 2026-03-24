@@ -387,5 +387,8 @@
 {% endblock %}
 
 {% block scripts %}
+<script>
+  var CSRF_TOKEN = '{{ csrf_token() }}';
+</script>
 <script src="{{ url_for('static', filename='js/bets_list.js') }}"></script>
 {% endblock %}

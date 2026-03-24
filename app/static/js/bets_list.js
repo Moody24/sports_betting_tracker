@@ -123,7 +123,7 @@
 
     fetch('/nba/prop-progress/batch', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF_TOKEN },
       body: JSON.stringify(descriptors),
     })
       .then((r) => r.json())
