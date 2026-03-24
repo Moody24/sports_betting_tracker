@@ -410,4 +410,4 @@ def ocr_screenshot():
 
     except Exception as exc:
         logger.error("OCR processing failed: %s", exc)
-        return jsonify({'error': f'OCR failed: {exc}'}), 500
+        return jsonify({'error': 'OCR processing failed. Please try a clearer image.'}), 500

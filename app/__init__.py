@@ -69,6 +69,7 @@ def create_app(testing=False):
         db_url = db_url.replace('postgres://', 'postgresql://', 1)
     app.config['SQLALCHEMY_DATABASE_URI'] = db_url
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+    app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024  # 10 MB
     engine_options = dict(app.config.get('SQLALCHEMY_ENGINE_OPTIONS', {}))
     base_pool_opts: dict = {
         'pool_pre_ping': True,
