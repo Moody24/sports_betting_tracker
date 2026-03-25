@@ -1,6 +1,7 @@
 """Model, pick-quality, postmortem, and accuracy Flask CLI commands."""
 
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 
 import click
@@ -22,6 +23,14 @@ from app.models import (
 from app.cli import _as_utc, _resolved_win_rate
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class CheckResult:
+    name: str
+    passed: bool
+    detail: str
+    critical: bool = False
 
 
 # ── Projection / training commands ────────────────────────────────────────────
@@ -412,6 +421,128 @@ def cli_model_status():
         )
 
 
+def _check_model1_projection() -> list:
+    """Check val_mae for all active projection models. Returns list[CheckResult]."""
+    stat_thresholds = {
+        'player_points': 3.5,
+        'player_rebounds': 2.0,
+        'player_assists': 2.0,
+        'player_threes': 1.5,
+        'player_steals': 1.0,
+        'player_blocks': 1.0,
+    }
+    active_proj = (
+        ModelMetadata.query
+        .filter(ModelMetadata.model_name.like('projection_%'))
+        .filter_by(is_active=True)
+        .all()
+    )
+    if not active_proj:
+        return [CheckResult('Model 1 models', False, 'No active projection models found', critical=True)]
+    results = []
+    for m in active_proj:
+        stype = m.model_name.replace('projection_', '')
+        threshold = stat_thresholds.get(stype, 3.5)
+        if m.val_mae is None:
+            results.append(CheckResult(f'Model1:{stype}', False, f'{m.model_name}: val_mae=None'))
+        elif m.val_mae <= threshold:
+            results.append(CheckResult(f'Model1:{stype}', True,
+                                       f'{m.model_name}: val_mae={m.val_mae:.3f} <= {threshold}'))
+        else:
+            results.append(CheckResult(f'Model1:{stype}', False,
+                                       f'{m.model_name}: val_mae={m.val_mae:.3f} > threshold {threshold}'))
+    return results
+
+
+def _check_model2_resolved_count() -> CheckResult:
+    """Check that enough resolved picks with context exist for Model 2."""
+    MIN_PROD_SAFE = 300
+    resolved_count = (
+        db.session.query(Bet)
+        .join(PickContext, Bet.id == PickContext.bet_id)
+        .filter(Bet.outcome.in_(['win', 'lose']))
+        .count()
+    )
+    detail = f'Resolved picks with context: {resolved_count} (prod-safe threshold: {MIN_PROD_SAFE})'
+    if resolved_count >= MIN_PROD_SAFE:
+        return CheckResult('Model2:resolved_count', True, detail)
+    if resolved_count >= 200:
+        return CheckResult('Model2:resolved_count', False, detail)
+    return CheckResult('Model2:resolved_count', False, detail, critical=True)
+
+
+def _check_model2_active() -> CheckResult:
+    """Check that an active pick_quality_nba model exists."""
+    pq_model = ModelMetadata.query.filter_by(model_name='pick_quality_nba', is_active=True).first()
+    if pq_model:
+        train_dt = _as_utc(pq_model.training_date)
+        trained_days_ago = (datetime.now(timezone.utc) - train_dt).days if train_dt else None
+        acc_str = f'{pq_model.val_accuracy:.3f}' if pq_model.val_accuracy else 'n/a'
+        age_str = f'{trained_days_ago}d ago' if trained_days_ago is not None else 'unknown'
+        return CheckResult('Model2:active', True,
+                           f'pick_quality_nba active | val_accuracy={acc_str} | trained {age_str}')
+    return CheckResult('Model2:active', False, 'No active pick_quality_nba model')
+
+
+def _check_model2_drift() -> CheckResult:
+    """Check that a recent drift-check job has run successfully."""
+    last_drift = (
+        JobLog.query
+        .filter_by(job_name='drift_check')
+        .order_by(JobLog.started_at.desc())
+        .first()
+    )
+    if not last_drift:
+        return CheckResult('Model2:drift', False,
+                           'No drift check job found — weekly drift monitor may not have run yet')
+    drift_dt = _as_utc(last_drift.started_at)
+    drift_age = (datetime.now(timezone.utc) - drift_dt).days if drift_dt else None
+    passed = last_drift.status in ('success', 'warn')
+    detail = f'last drift check: {drift_age}d ago, status={last_drift.status}'
+    if last_drift.status == 'warn' and last_drift.message:
+        detail += f'\n        Drift message: {last_drift.message[:120]}'
+    return CheckResult('Model2:drift', passed, detail)
+
+
+def _check_team_defense_snapshot(today) -> CheckResult:
+    """Check TeamDefenseSnapshot freshness."""
+    latest = db.session.query(func.max(TeamDefenseSnapshot.snapshot_date)).scalar()
+    if latest is None:
+        return CheckResult('TeamDefenseSnapshot', False, 'no TeamDefenseSnapshot rows', critical=True)
+    days_old = (today - latest).days
+    detail = f'latest TeamDefenseSnapshot: {latest} ({days_old}d old)'
+    if days_old <= 2:
+        return CheckResult('TeamDefenseSnapshot', True, detail)
+    if days_old <= 7:
+        return CheckResult('TeamDefenseSnapshot', False, detail)
+    return CheckResult('TeamDefenseSnapshot', False, detail, critical=True)
+
+
+def _check_odds_snapshot(today) -> CheckResult:
+    """Check OddsSnapshot freshness."""
+    latest = db.session.query(func.max(OddsSnapshot.game_date)).scalar()
+    if latest is None:
+        return CheckResult('OddsSnapshot', False,
+                           'no OddsSnapshot rows (line movement features unavailable)')
+    days_old = (today - latest).days
+    detail = f'latest OddsSnapshot: {latest} ({days_old}d old)'
+    return CheckResult('OddsSnapshot', days_old <= 3, detail)
+
+
+def _check_player_game_log(today) -> CheckResult:
+    """Check PlayerGameLog freshness."""
+    latest = db.session.query(func.max(PlayerGameLog.game_date)).scalar()
+    if latest is None:
+        return CheckResult('PlayerGameLog', False, 'no PlayerGameLog rows', critical=True)
+    days_old = (today - latest).days
+    detail = f'latest PlayerGameLog: {latest} ({days_old}d old)'
+    if days_old <= 2:
+        return CheckResult('PlayerGameLog', True, detail)
+    if days_old <= 7:
+        return CheckResult('PlayerGameLog', False, detail)
+    return CheckResult('PlayerGameLog', False, detail, critical=True)
+
+
 @click.command('prod-readiness')
 def cli_prod_readiness():
     """Production readiness checklist for models and data freshness.
@@ -432,163 +563,47 @@ def cli_prod_readiness():
     click.echo(f'Generated: {now_et.isoformat()}')
     click.echo('')
 
-    checks = []  # list of (label, status, detail)
+    checks = []  # list[CheckResult]
 
-    # ── Model 1: val_mae per stat ──────────────────────────────────
+    def _status(r):
+        return 'OK  ' if r.passed else ('FAIL' if r.critical else 'WARN')
+
     click.echo('--- Model 1: Projection val_mae ---')
-    stat_thresholds = {
-        'player_points': 3.5,
-        'player_rebounds': 2.0,
-        'player_assists': 2.0,
-        'player_threes': 1.5,
-        'player_steals': 1.0,
-        'player_blocks': 1.0,
-    }
-    active_proj = (
-        ModelMetadata.query
-        .filter(ModelMetadata.model_name.like('projection_%'))
-        .filter_by(is_active=True)
-        .all()
-    )
-    if not active_proj:
-        click.echo('  FAIL  No active projection models found')
-        checks.append(('Model 1 models', 'FAIL', 'no active models'))
-    else:
-        for m in active_proj:
-            stype = m.model_name.replace('projection_', '')
-            threshold = stat_thresholds.get(stype, 3.5)
-            if m.val_mae is None:
-                status = 'WARN'
-                detail = f'{m.model_name}: val_mae=None'
-            elif m.val_mae <= threshold:
-                status = 'OK  '
-                detail = f'{m.model_name}: val_mae={m.val_mae:.3f} <= {threshold}'
-            else:
-                status = 'WARN'
-                detail = f'{m.model_name}: val_mae={m.val_mae:.3f} > threshold {threshold}'
-            click.echo(f'  {status}  {detail}')
-            checks.append((f'Model1:{stype}', status.strip(), detail))
+    for r in _check_model1_projection():
+        click.echo(f'  {_status(r)}  {r.detail}')
+        checks.append(r)
 
-    # ── Model 2: resolved picks + drift ───────────────────────────
     click.echo('\n--- Model 2: Pick Quality ---')
-    resolved_count = (
-        db.session.query(Bet)
-        .join(PickContext, Bet.id == PickContext.bet_id)
-        .filter(Bet.outcome.in_(['win', 'lose']))
-        .count()
-    )
-    MIN_PROD_SAFE = 300
-    if resolved_count >= MIN_PROD_SAFE:
-        m2_count_status = 'OK  '
-    elif resolved_count >= 200:
-        m2_count_status = 'WARN'
-    else:
-        m2_count_status = 'FAIL'
-    click.echo(
-        f'  {m2_count_status}  Resolved picks with context: {resolved_count} '
-        f'(prod-safe threshold: {MIN_PROD_SAFE})'
-    )
-    checks.append(('Model2:resolved_count', m2_count_status.strip(), f'{resolved_count} resolved'))
+    for r in [
+        _check_model2_resolved_count(),
+        _check_model2_active(),
+        _check_model2_drift(),
+    ]:
+        click.echo(f'  {_status(r)}  {r.detail}')
+        checks.append(r)
 
-    pq_model = ModelMetadata.query.filter_by(model_name='pick_quality_nba', is_active=True).first()
-    if pq_model:
-        train_dt = _as_utc(pq_model.training_date)
-        trained_days_ago = (datetime.now(timezone.utc) - train_dt).days if train_dt else None
-        acc_str = f'{pq_model.val_accuracy:.3f}' if pq_model.val_accuracy else 'n/a'
-        age_str = f'{trained_days_ago}d ago' if trained_days_ago is not None else 'unknown'
-        click.echo(f'  OK    pick_quality_nba active | val_accuracy={acc_str} | trained {age_str}')
-        checks.append(('Model2:active', 'OK', f'val_accuracy={acc_str}'))
-    else:
-        click.echo('  WARN  No active pick_quality_nba model')
-        checks.append(('Model2:active', 'WARN', 'no active model'))
-
-    # Last drift check
-    last_drift = (
-        JobLog.query
-        .filter_by(job_name='drift_check')
-        .order_by(JobLog.started_at.desc())
-        .first()
-    )
-    if last_drift:
-        drift_dt = _as_utc(last_drift.started_at)
-        drift_age = (datetime.now(timezone.utc) - drift_dt).days if drift_dt else None
-        drift_status = 'OK  ' if last_drift.status in ('success', 'warn') else 'WARN'
-        drift_detail = f'last drift check: {drift_age}d ago, status={last_drift.status}'
-        click.echo(f'  {drift_status}  {drift_detail}')
-        if last_drift.status == 'warn' and last_drift.message:
-            click.echo(f'        Drift message: {last_drift.message[:120]}')
-        checks.append(('Model2:drift', drift_status.strip(), drift_detail))
-    else:
-        click.echo('  WARN  No drift check job found — weekly drift monitor may not have run yet')
-        checks.append(('Model2:drift', 'WARN', 'no drift check found'))
-
-    # ── Data freshness ─────────────────────────────────────────────
     click.echo('\n--- Data Freshness ---')
+    for r in [
+        _check_team_defense_snapshot(today),
+        _check_odds_snapshot(today),
+        _check_player_game_log(today),
+    ]:
+        click.echo(f'  {_status(r)}  {r.detail}')
+        checks.append(r)
 
-    # TeamDefenseSnapshot
-    latest_defense = (
-        db.session.query(func.max(TeamDefenseSnapshot.snapshot_date))
-        .scalar()
-    )
-    if latest_defense is None:
-        def_status = 'FAIL'
-        def_detail = 'no TeamDefenseSnapshot rows'
-    else:
-        days_old = (today - latest_defense).days
-        if days_old <= 2:
-            def_status = 'OK  '
-        elif days_old <= 7:
-            def_status = 'WARN'
-        else:
-            def_status = 'FAIL'
-        def_detail = f'latest TeamDefenseSnapshot: {latest_defense} ({days_old}d old)'
-    click.echo(f'  {def_status}  {def_detail}')
-    checks.append(('TeamDefenseSnapshot', def_status.strip(), def_detail))
-
-    # OddsSnapshot
-    latest_odds = (
-        db.session.query(func.max(OddsSnapshot.game_date))
-        .scalar()
-    )
-    if latest_odds is None:
-        odds_status = 'WARN'
-        odds_detail = 'no OddsSnapshot rows (line movement features unavailable)'
-    else:
-        days_old = (today - latest_odds).days
-        odds_status = 'OK  ' if days_old <= 3 else 'WARN'
-        odds_detail = f'latest OddsSnapshot: {latest_odds} ({days_old}d old)'
-    click.echo(f'  {odds_status}  {odds_detail}')
-    checks.append(('OddsSnapshot', odds_status.strip(), odds_detail))
-
-    # PlayerGameLog freshness
-    latest_log = (
-        db.session.query(func.max(PlayerGameLog.game_date))
-        .scalar()
-    )
-    if latest_log is None:
-        log_status = 'FAIL'
-        log_detail = 'no PlayerGameLog rows'
-    else:
-        days_old = (today - latest_log).days
-        log_status = 'OK  ' if days_old <= 2 else ('WARN' if days_old <= 7 else 'FAIL')
-        log_detail = f'latest PlayerGameLog: {latest_log} ({days_old}d old)'
-    click.echo(f'  {log_status}  {log_detail}')
-    checks.append(('PlayerGameLog', log_status.strip(), log_detail))
-
-    # ── Summary ────────────────────────────────────────────────────
     click.echo('\n--- Summary ---')
-    fails = [c for c in checks if c[1] == 'FAIL']
-    warns = [c for c in checks if c[1] == 'WARN']
-    oks = [c for c in checks if c[1] == 'OK']
+    fails = [r for r in checks if not r.passed and r.critical]
+    warns = [r for r in checks if not r.passed and not r.critical]
+    oks   = [r for r in checks if r.passed]
     click.echo(f'  OK: {len(oks)}  WARN: {len(warns)}  FAIL: {len(fails)}')
     if fails:
         click.echo('VERDICT: NOT READY FOR PRODUCTION')
-        for label, _status, detail in fails:
-            click.echo(f'  FAIL [{label}] {detail}')
+        for r in fails:
+            click.echo(f'  FAIL [{r.name}] {r.detail}')
     elif warns:
         click.echo('VERDICT: CAUTION — address warnings before high-stakes use')
-        for label, _status, detail in warns:
-            click.echo(f'  WARN [{label}] {detail}')
+        for r in warns:
+            click.echo(f'  WARN [{r.name}] {r.detail}')
     else:
         click.echo('VERDICT: PRODUCTION READY')
 
