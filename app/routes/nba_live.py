@@ -216,6 +216,7 @@ def _get_game_summary(espn_id: str, now_monotonic: float) -> dict:
         resp.raise_for_status()
         data = resp.json()
     except Exception:
+        logger.warning("Live data fetch failed — returning empty result", exc_info=True)
         data = {}
     _GAME_SUMMARY_CACHE[espn_id] = {'data': data, 'expires_at': now_monotonic + _GAME_SUMMARY_TTL}
     return data
@@ -496,6 +497,7 @@ def nba_prop_progress(espn_id):
             resp.raise_for_status()
             summary_data = resp.json()
         except Exception:
+            logger.warning("Summary fetch failed for espn_id=%s — returning empty", espn_id, exc_info=True)
             summary_data = {}
 
     if not summary_data:
@@ -565,6 +567,7 @@ def nba_prop_progress_batch():
                         resp.raise_for_status()
                         summary_data = resp.json()
                     except Exception:
+                        logger.warning("Summary fetch failed — returning empty", exc_info=True)
                         summary_data = {}
 
             if not summary_data:

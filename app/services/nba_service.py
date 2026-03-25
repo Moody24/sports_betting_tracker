@@ -151,6 +151,7 @@ def fetch_espn_boxscore(espn_id: str) -> dict:
                         try:
                             raw = raw.split("-")[0]
                         except Exception:
+                            logger.debug("Skipping prop parse row due to unexpected error", exc_info=True)
                             continue
                     try:
                         entry[prop_type] = float(raw)
@@ -310,7 +311,7 @@ def _choose_game_for_bet(bet, scoreboards: list[dict], espn_lookup: dict) -> Opt
                 start_dt = datetime.fromisoformat(str(start_raw).replace("Z", "+00:00"))
                 return abs((start_dt.date() - match_dt.date()).days)
             except Exception:
-                return 99
+                return 99  # 99 = unknown distance, sorts last
 
         candidates.sort(key=_distance_days)
 
@@ -1145,6 +1146,7 @@ def resolve_pending_bets(pending_bets: list) -> list[tuple]:
                 day = match_date + timedelta(days=delta_days)
                 date_keys.add(day.strftime("%Y%m%d"))
         except Exception:
+            logger.debug("Skipping bet row due to unexpected error", exc_info=True)
             continue
 
     if date_keys:

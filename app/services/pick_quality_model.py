@@ -531,6 +531,7 @@ def get_model_runtime_probe(user_id: int | None = None) -> dict:
     try:
         from xgboost import XGBClassifier
     except Exception:
+        logger.warning("XGBoost model missing or failed to load for pick quality probe", exc_info=True)
         probe['reason'] = 'xgboost_missing'
         return probe
 

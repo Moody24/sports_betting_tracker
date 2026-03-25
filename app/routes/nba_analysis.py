@@ -94,6 +94,7 @@ def _resolve_player_team_abbrs(player_names: set[str]) -> dict[str, str]:
             if logs and logs[0].team_abbr:
                 resolved[player_name] = (logs[0].team_abbr or "").upper()
         except Exception:
+            logger.warning("Skipping analysis row due to unexpected error", exc_info=True)
             continue
 
     return resolved

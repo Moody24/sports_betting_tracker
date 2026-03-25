@@ -275,7 +275,7 @@ def _adapt_row_to_model(model_obj, row: list[list[float]]) -> list[list[float]]:
         base_model = model_obj.get('model') if isinstance(model_obj, dict) else model_obj
         expected = int(getattr(base_model, 'n_features_in_', len(row[0])))
     except Exception:
-        return row
+        return row  # intentional fallback for schema compatibility
     actual = len(row[0])
     if actual == expected:
         return row
