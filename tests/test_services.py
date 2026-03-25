@@ -4301,5 +4301,38 @@ class Phase1FeatureBuilderTest(BaseTestCase):
         self.assertAlmostEqual(lookup['MIA']['def_rating'], 108.0)
 
 
+class TestComputeBetOutcome(unittest.TestCase):
+    """Unit tests for the _compute_bet_outcome() pure function."""
+
+    def setUp(self):
+        from app.services.nba_service import _compute_bet_outcome
+        self.fn = _compute_bet_outcome
+
+    def test_push_when_actual_equals_line(self):
+        from app.models import Outcome
+        result = self.fn('over', 25.5, 25.5)
+        self.assertEqual(result, Outcome.PUSH.value)
+
+    def test_over_win(self):
+        from app.models import Outcome
+        result = self.fn('over', 25.5, 26.0)
+        self.assertEqual(result, Outcome.WIN.value)
+
+    def test_over_lose(self):
+        from app.models import Outcome
+        result = self.fn('over', 25.5, 25.0)
+        self.assertEqual(result, Outcome.LOSE.value)
+
+    def test_under_win(self):
+        from app.models import Outcome
+        result = self.fn('under', 25.5, 25.0)
+        self.assertEqual(result, Outcome.WIN.value)
+
+    def test_under_lose(self):
+        from app.models import Outcome
+        result = self.fn('under', 25.5, 26.0)
+        self.assertEqual(result, Outcome.LOSE.value)
+
+
 if __name__ == '__main__':
     unittest.main()

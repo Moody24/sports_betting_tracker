@@ -1126,6 +1126,15 @@ def get_player_props(espn_id: str, games: Optional[list[dict]] = None) -> dict:
 # ── Result checker ───────────────────────────────────────────────────
 
 
+def _compute_bet_outcome(bet_type: str, line: float, actual: float) -> str:
+    """Return 'win', 'lose', or 'push' for an over/under bet."""
+    if actual == line:
+        return Outcome.PUSH.value
+    if bet_type == BetType.OVER.value:
+        return Outcome.WIN.value if actual > line else Outcome.LOSE.value
+    return Outcome.WIN.value if actual < line else Outcome.LOSE.value
+
+
 def resolve_pending_bets(pending_bets: list) -> list[tuple]:
     """Check ESPN for final scores and resolve all pending bet types.
 
@@ -1175,12 +1184,7 @@ def resolve_pending_bets(pending_bets: list) -> list[tuple]:
             if bet.over_under_line is None:
                 continue
             actual_total = float(game["total_score"])
-            if actual_total == bet.over_under_line:
-                outcome = Outcome.PUSH.value
-            elif bet.bet_type == BetType.OVER.value:
-                outcome = Outcome.WIN.value if actual_total > bet.over_under_line else Outcome.LOSE.value
-            else:
-                outcome = Outcome.WIN.value if actual_total < bet.over_under_line else Outcome.LOSE.value
+            outcome = _compute_bet_outcome(bet.bet_type, float(bet.over_under_line), actual_total)
             results.append((bet, outcome, actual_total))
 
         # ── Moneyline ────────────────────────────────────────────────
@@ -1244,13 +1248,7 @@ def resolve_pending_bets(pending_bets: list) -> list[tuple]:
                 )
                 continue
 
-            if actual_stat == bet.prop_line:
-                outcome = Outcome.PUSH.value
-            elif bet.bet_type == BetType.OVER.value:
-                outcome = Outcome.WIN.value if actual_stat > bet.prop_line else Outcome.LOSE.value
-            else:
-                outcome = Outcome.WIN.value if actual_stat < bet.prop_line else Outcome.LOSE.value
-
+            outcome = _compute_bet_outcome(bet.bet_type, float(bet.prop_line), float(actual_stat))
             results.append((bet, outcome, actual_stat))
 
     return results
