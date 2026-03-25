@@ -188,7 +188,9 @@
         dl.appendChild(opt);
       });
     })
-    .catch(() => {});
+    .catch(() => {
+        console.warn('[bet_builder] Failed to load upcoming games for datalist');
+    });
 
   function autofillFromPicker(inputEl, teamAEl, teamBEl, dateEl, gameIdEl, ouLineEl, onMatch) {
     if (!inputEl) return;
