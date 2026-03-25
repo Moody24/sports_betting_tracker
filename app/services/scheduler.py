@@ -10,6 +10,7 @@ import logging
 import os
 import random
 import secrets
+import tempfile
 from datetime import datetime, timezone, timedelta, time as dt_time
 from zoneinfo import ZoneInfo
 
@@ -60,11 +61,9 @@ def _get_app():
 
 
 def _acquire_scheduler_lock(lock_path=None):
-    if lock_path is None:
-        import os
-        import tempfile
-        lock_path = os.path.join(tempfile.gettempdir(), 'sports_betting_scheduler.lock')
     """Ensure only one process in the container starts APScheduler."""
+    if lock_path is None:
+        lock_path = os.path.join(tempfile.gettempdir(), 'sports_betting_scheduler.lock')
     global _scheduler_lock_fd
 
     if _scheduler_lock_fd is not None:
