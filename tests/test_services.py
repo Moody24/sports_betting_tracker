@@ -4301,6 +4301,52 @@ class Phase1FeatureBuilderTest(BaseTestCase):
         self.assertAlmostEqual(lookup['MIA']['def_rating'], 108.0)
 
 
+class TestPrepareTrainingData(BaseTestCase):
+    """Unit tests for _prepare_training_data()."""
+
+    def _rows(self, n):
+        return (
+            [{'projected_stat': float(i), 'prop_line': float(i % 5)} for i in range(n)],
+            [i % 2 for i in range(n)],
+            [None] * n,
+        )
+
+    def test_return_shape_correct(self):
+        from app.services.pick_quality_model import _prepare_training_data
+        features_list, targets, dates = self._rows(50)
+        X_train, X_val, y_train, y_val, split_method = _prepare_training_data(
+            features_list, targets, dates,
+        )
+        self.assertEqual(len(X_train) + len(X_val), 50)
+        self.assertEqual(len(y_train) + len(y_val), 50)
+
+    def test_x_y_row_counts_match(self):
+        from app.services.pick_quality_model import _prepare_training_data
+        features_list, targets, dates = self._rows(40)
+        X_train, X_val, y_train, y_val, _ = _prepare_training_data(
+            features_list, targets, dates,
+        )
+        self.assertEqual(len(X_train), len(y_train))
+        self.assertEqual(len(X_val), len(y_val))
+
+
+class TestComputeClassWeights(BaseTestCase):
+    """Unit tests for _compute_class_weights()."""
+
+    def test_balanced_labels_close_to_one(self):
+        import numpy as np
+        from app.services.pick_quality_model import _compute_class_weights
+        y = np.array([0, 1, 0, 1, 0, 1, 0, 1])
+        self.assertAlmostEqual(_compute_class_weights(y), 1.0, places=5)
+
+    def test_imbalanced_minority_gets_higher_weight(self):
+        import numpy as np
+        from app.services.pick_quality_model import _compute_class_weights
+        # 1 positive out of 10 → scale_pos_weight = 9
+        y = np.array([0, 0, 0, 0, 0, 0, 0, 0, 0, 1])
+        self.assertAlmostEqual(_compute_class_weights(y), 9.0, places=5)
+
+
 class TestComputeBetOutcome(unittest.TestCase):
     """Unit tests for the _compute_bet_outcome() pure function."""
 

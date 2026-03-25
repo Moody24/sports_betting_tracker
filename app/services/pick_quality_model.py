@@ -194,6 +194,42 @@ def _build_training_data(user_id: int | None = None, include_bootstrap: bool = F
     return features_list, targets, _dates
 
 
+def _prepare_training_data(features_list, targets, dates) -> tuple:
+    """Returns (X_train, X_val, y_train, y_val, split_method). Pure — no db, no S3."""
+    import numpy as np
+
+    feature_names = list(features_list[0].keys())
+    X = np.array([[f[k] for k in feature_names] for f in features_list])
+    y = np.array(targets)
+
+    use_time_split = os.getenv('MODEL2_TIME_AWARE_SPLIT', 'false').lower() == 'true'
+    split_method = 'time_ordered' if use_time_split else 'stratified_random'
+
+    if use_time_split and dates and any(d is not None for d in dates):
+        order = sorted(range(len(dates)), key=lambda i: (dates[i] is None, dates[i]))
+        X = X[order]
+        y = y[order]
+        split_idx = int(len(X) * 0.7)
+        split_idx = max(1, min(split_idx, len(X) - 1))
+        X_train, X_val = X[:split_idx], X[split_idx:]
+        y_train, y_val = y[:split_idx], y[split_idx:]
+        logger.info("Model 2 time-aware split: %d train / %d val", len(X_train), len(X_val))
+    else:
+        from sklearn.model_selection import train_test_split
+        X_train, X_val, y_train, y_val = train_test_split(
+            X, y, test_size=0.3, stratify=y, random_state=42,
+        )
+
+    return X_train, X_val, y_train, y_val, split_method
+
+
+def _compute_class_weights(y_train) -> float:
+    """Returns scale_pos_weight for XGBClassifier. Pure — no db, no S3."""
+    pos_count = sum(y_train)
+    neg_count = len(y_train) - pos_count
+    return neg_count / max(pos_count, 1)
+
+
 def train_pick_quality_model(user_id: int | None = None) -> dict:
     """Train the pick quality XGBoost classifier.
 
@@ -216,34 +252,12 @@ def train_pick_quality_model(user_id: int | None = None) -> dict:
         }
 
     feature_names = list(features_list[0].keys())
-    X = np.array([[f[k] for k in feature_names] for f in features_list])
-    y = np.array(targets)
-
-    # Time-aware split: sort by match_date, use last 30% as validation.
-    # Enabled via MODEL2_TIME_AWARE_SPLIT=true; falls back to stratified random split.
-    use_time_split = os.getenv('MODEL2_TIME_AWARE_SPLIT', 'false').lower() == 'true'
-    split_method = 'time_ordered' if use_time_split else 'stratified_random'
-
-    if use_time_split and dates and any(d is not None for d in dates):
-        # Sort rows by date (None dates go last so they land in val set)
-        order = sorted(range(len(dates)), key=lambda i: (dates[i] is None, dates[i]))
-        X = X[order]
-        y = y[order]
-        split_idx = int(len(X) * 0.7)
-        split_idx = max(1, min(split_idx, len(X) - 1))
-        X_train, X_val = X[:split_idx], X[split_idx:]
-        y_train, y_val = y[:split_idx], y[split_idx:]
-        logger.info("Model 2 time-aware split: %d train / %d val", len(X_train), len(X_val))
-    else:
-        from sklearn.model_selection import train_test_split
-        X_train, X_val, y_train, y_val = train_test_split(
-            X, y, test_size=0.3, stratify=y, random_state=42,
-        )
+    X_train, X_val, y_train, y_val, split_method = _prepare_training_data(
+        features_list, targets, dates,
+    )
 
     # Handle class imbalance
-    pos_count = sum(y_train)
-    neg_count = len(y_train) - pos_count
-    scale_pos = neg_count / max(pos_count, 1)
+    scale_pos = _compute_class_weights(y_train)
 
     model = XGBClassifier(
         n_estimators=150,
