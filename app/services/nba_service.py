@@ -401,7 +401,8 @@ def backfill_game_snapshots(
     for b in bet_rows:
         try:
             b_date = b.match_date.date() if isinstance(b.match_date, datetime) else b.match_date
-        except Exception:
+        except (AttributeError, TypeError):
+            logger.warning("Skipping bet id=%s: invalid match_date %r", b.id, b.match_date)
             continue
         if not isinstance(b_date, date_type):
             continue
