@@ -315,7 +315,7 @@ def train_pick_quality_model(user_id: int | None = None) -> dict:
         db.session.remove()
         db.engine.dispose()
     except Exception:
-        pass
+        logger.warning("DB pool dispose failed before post-training write", exc_info=True)
     ModelMetadata.query.filter_by(
         model_name=model_name, is_active=True,
     ).update({'is_active': False})

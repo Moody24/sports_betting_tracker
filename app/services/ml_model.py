@@ -434,7 +434,7 @@ def train_model(stat_type: str) -> dict:
         db.session.remove()
         db.engine.dispose()
     except Exception:
-        pass
+        logger.warning("DB pool dispose failed before post-training write", exc_info=True)
     # Deactivate previous models for this stat type
     ModelMetadata.query.filter_by(
         model_name=f"projection_{stat_type}", is_active=True
