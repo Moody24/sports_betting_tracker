@@ -4301,6 +4301,82 @@ class Phase1FeatureBuilderTest(BaseTestCase):
         self.assertAlmostEqual(lookup['MIA']['def_rating'], 108.0)
 
 
+class TestBuildCandidates(unittest.TestCase):
+    """Unit tests for _build_candidates()."""
+
+    def _score(self, player, prop, line, side, game, edge, games_played):
+        return {'player': player, 'prop_type': prop, 'line': line,
+                'recommended_side': side, 'game_id': game,
+                'edge': edge, 'games_played': games_played}
+
+    def test_drops_below_min_games(self):
+        from app.services.scheduler import _build_candidates
+        scores = [self._score('A', 'pts', 20.5, 'over', 'g1', 0.2, 3)]
+        self.assertEqual(_build_candidates(scores, min_games=5), [])
+
+    def test_deduplicates_identical_key(self):
+        from app.services.scheduler import _build_candidates
+        s = self._score('A', 'pts', 20.5, 'over', 'g1', 0.2, 10)
+        result = _build_candidates([s, s], min_games=5)
+        self.assertEqual(len(result), 1)
+
+    def test_sorts_by_edge_descending(self):
+        from app.services.scheduler import _build_candidates
+        lo = self._score('A', 'pts', 20.5, 'over', 'g1', 0.05, 10)
+        hi = self._score('B', 'reb', 8.5,  'over', 'g2', 0.20, 10)
+        result = _build_candidates([lo, hi], min_games=5)
+        self.assertEqual(result[0]['player'], 'B')
+
+
+class TestFilterQualifying(unittest.TestCase):
+    """Unit tests for _filter_qualifying()."""
+
+    def _cand(self, games_played, tier):
+        return {'games_played': games_played, 'confidence_tier': tier, 'edge': 0.1}
+
+    def test_keeps_meeting_both_thresholds(self):
+        from app.services.scheduler import _filter_qualifying
+        c = self._cand(10, 'strong')
+        self.assertEqual(_filter_qualifying([c], 5, 'strong'), [c])
+
+    def test_drops_wrong_tier(self):
+        from app.services.scheduler import _filter_qualifying
+        c = self._cand(10, 'moderate')
+        self.assertEqual(_filter_qualifying([c], 5, 'strong'), [])
+
+    def test_drops_below_min_games(self):
+        from app.services.scheduler import _filter_qualifying
+        c = self._cand(3, 'strong')
+        self.assertEqual(_filter_qualifying([c], 5, 'strong'), [])
+
+
+class TestBuildStraightPlays(unittest.TestCase):
+    """Unit tests for _build_straight_plays()."""
+
+    def _play(self, player, edge):
+        return {'player': player, 'edge': edge, 'prop_type': 'pts',
+                'line': 20.5, 'game_id': f'g_{player}'}
+
+    def test_drops_below_min_edge(self):
+        from app.services.scheduler import _build_straight_plays
+        plays = [self._play('A', 0.05)]
+        self.assertEqual(_build_straight_plays(plays, min_edge_straight=0.15), [])
+
+    def test_one_per_player(self):
+        from app.services.scheduler import _build_straight_plays
+        p1 = self._play('A', 0.20)
+        p2 = self._play('A', 0.18)
+        result = _build_straight_plays([p1, p2], min_edge_straight=0.15)
+        self.assertEqual(len(result), 1)
+        self.assertIs(result[0], p1)
+
+    def test_different_players_both_included(self):
+        from app.services.scheduler import _build_straight_plays
+        plays = [self._play('A', 0.20), self._play('B', 0.16)]
+        result = _build_straight_plays(plays, min_edge_straight=0.15)
+        self.assertEqual(len(result), 2)
+
+
 class TestPrepareTrainingData(BaseTestCase):
     """Unit tests for _prepare_training_data()."""
 
