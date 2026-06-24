@@ -238,7 +238,6 @@ def train_pick_quality_model(user_id: int | None = None) -> dict:
     try:
         from xgboost import XGBClassifier
         from sklearn.metrics import accuracy_score, log_loss
-        import numpy as np
     except ImportError:
         logger.error("xgboost or scikit-learn not installed")
         return {'error': 'Missing ML dependencies'}
