@@ -317,6 +317,7 @@ class ProjectionEngine:
                     from app.services.ml_model import _build_defense_lookup
                     _defense_lookup = _build_defense_lookup()
                 except Exception:
+                    logger.warning("Defense lookup failed — projections will run without defensive context", exc_info=True)
                     _defense_lookup = {}
                 self._context_cache['_defense_lookup'] = _defense_lookup
 

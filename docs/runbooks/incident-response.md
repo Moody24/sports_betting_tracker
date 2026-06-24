@@ -1,3 +1,12 @@
+# Incident Response Runbook — Edge Tracker (Railway — INACTIVE)
+
+> ⚠️ **This runbook was written for the Railway + Neon production stack, which is currently inactive.**
+> Railway-specific commands (`railway logs`, `railway link`) will not work locally.
+> For local issues, use `flask health-report`, `flask pollution-report`, and `sqlite3 instance/app.db`.
+> This file is preserved for when external deployment is restored.
+
+---
+
 # Incident Response Runbook — Edge Tracker
 **Stack:** Flask · Railway · Neon PostgreSQL · APScheduler
 **Last verified:** 2026-03-22

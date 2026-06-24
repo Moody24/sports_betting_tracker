@@ -1,3 +1,11 @@
+# Deployment Runbook (Railway + Neon) — INACTIVE
+
+> ⚠️ **This runbook documents the former Railway + Neon deployment stack, which is currently disconnected.**
+> For local development, see [`README.md`](../README.md) and [`ARCHITECTURE.md`](../ARCHITECTURE.md).
+> This file is preserved as a reference for when external deployment is restored.
+
+---
+
 # Deployment Runbook (Railway + Neon)
 
 This runbook is for deploying the app on Railway with Neon Postgres.

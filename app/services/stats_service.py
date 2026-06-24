@@ -153,6 +153,7 @@ def fetch_player_game_logs(
         _pid_map = {p['id']: p['full_name'] for p in nba_players.get_active_players()}
         _resolved_name = _pid_map.get(_pid_int, '')
     except Exception:
+        logger.warning("Name resolution failed — using empty string fallback", exc_info=True)
         _resolved_name = ''
 
     rows = []
@@ -237,6 +238,7 @@ def _is_postgres() -> bool:
     try:
         return db.engine.dialect.name == 'postgresql'
     except Exception:
+        logger.warning("Unexpected error in stat check — returning False", exc_info=True)
         return False
 
 
@@ -535,6 +537,7 @@ def update_player_logs_for_games(games: list) -> int:
         try:
             props = fetch_player_props_for_event(event_id)
         except Exception:
+            logger.debug("Skipping stat row due to unexpected error", exc_info=True)
             continue
         for market_props in props.values():
             for prop in market_props:

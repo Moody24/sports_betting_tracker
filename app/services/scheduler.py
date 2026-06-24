@@ -353,6 +353,55 @@ def _ensure_autopicks_user(db, User):
     return system_user
 
 
+def _build_candidates(scores: list, min_games: int) -> list:
+    """Filter and deduplicate raw prop scores into the candidate pool.
+
+    Sorts by edge descending, drops rows below min_games, then deduplicates
+    by (player, prop_type, line, recommended_side, game_id).
+    Pure — no db, no app context, no side effects.
+    """
+    seen_keys: set = set()
+    candidates: list = []
+    for s in sorted(scores, key=lambda x: x.get('edge', 0), reverse=True):
+        if (s.get('games_played') or 0) < min_games:
+            continue
+        key = (s.get('player'), s.get('prop_type'), s.get('line'),
+               s.get('recommended_side'), s.get('game_id'))
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        candidates.append(s)
+    return candidates
+
+
+def _filter_qualifying(candidates: list, min_games: int, confidence_tier: str) -> list:
+    """Return candidates meeting the production min_games and confidence_tier thresholds.
+    Pure — no db, no app context, no side effects.
+    """
+    return [
+        s for s in candidates
+        if (s.get('games_played') or 0) >= min_games
+        and s.get('confidence_tier') == confidence_tier
+    ]
+
+
+def _build_straight_plays(qualifying: list, min_edge_straight: float) -> list:
+    """Select straight-bet plays: edge >= min_edge_straight, one per player.
+    Pure — no db, no app context, no side effects.
+    """
+    straight_plays: list = []
+    seen_players: set = set()
+    for s in qualifying:
+        if (s.get('edge') or 0) < min_edge_straight:
+            continue
+        player = s.get('player') or ''
+        if player in seen_players:
+            continue
+        seen_players.add(player)
+        straight_plays.append(s)
+    return straight_plays
+
+
 def generate_daily_auto_picks():
     """Generate a separated daily basket of auto picks for faster model learning."""
     from app import db
@@ -386,27 +435,10 @@ def generate_daily_auto_picks():
 
         tier_rank = {'no_edge': 0, 'slight': 1, 'moderate': 2, 'strong': 3}
 
-        # ── Deduplicate all scored plays with minimum history ──
-        seen_keys: set = set()
-        scored_players: set = set()   # one bet per player max
-        all_candidates: list = []
-
-        for s in sorted(scores, key=lambda x: x.get('edge', 0), reverse=True):
-            if (s.get('games_played') or 0) < AUTO_PAPER_MIN_GAMES:
-                continue
-            key = (s.get('player'), s.get('prop_type'), s.get('line'),
-                   s.get('recommended_side'), s.get('game_id'))
-            if key in seen_keys:
-                continue
-            seen_keys.add(key)
-            all_candidates.append(s)
-
-        # ── Production qualifying set (strict) ────────────────────────────
-        all_qualifying = [
-            s for s in all_candidates
-            if (s.get('games_played') or 0) >= AUTO_PICK_MIN_GAMES
-            and s.get('confidence_tier') == AUTO_PICK_CONFIDENCE_TIER
-        ]
+        all_candidates = _build_candidates(scores, AUTO_PAPER_MIN_GAMES)
+        all_qualifying = _filter_qualifying(
+            all_candidates, AUTO_PICK_MIN_GAMES, AUTO_PICK_CONFIDENCE_TIER,
+        )
 
         if not all_candidates:
             logger.info("Auto pick generation skipped: no qualifying plays today.")
@@ -414,15 +446,8 @@ def generate_daily_auto_picks():
             return
 
         # ── Straight bets: one per player, strong tier only (edge ≥ 15%) ───
-        straight_plays: list = []
-        for s in all_qualifying:
-            if (s.get('edge') or 0) < AUTO_PICK_MIN_EDGE_STRAIGHT:
-                continue
-            player = s.get('player') or ''
-            if player in scored_players:
-                continue  # already have a bet on this player
-            scored_players.add(player)
-            straight_plays.append(s)
+        straight_plays = _build_straight_plays(all_qualifying, AUTO_PICK_MIN_EDGE_STRAIGHT)
+        scored_players = {s.get('player') or '' for s in straight_plays}
 
         # ── Parlay pool: remaining strong-tier plays not already straight-bet ──
         # Each parlay leg must be strong tier (edge ≥ 15%); legs come from

@@ -151,6 +151,7 @@ def fetch_espn_boxscore(espn_id: str) -> dict:
                         try:
                             raw = raw.split("-")[0]
                         except Exception:
+                            logger.debug("Skipping prop parse row due to unexpected error", exc_info=True)
                             continue
                     try:
                         entry[prop_type] = float(raw)
@@ -310,7 +311,7 @@ def _choose_game_for_bet(bet, scoreboards: list[dict], espn_lookup: dict) -> Opt
                 start_dt = datetime.fromisoformat(str(start_raw).replace("Z", "+00:00"))
                 return abs((start_dt.date() - match_dt.date()).days)
             except Exception:
-                return 99
+                return 99  # 99 = unknown distance, sorts last
 
         candidates.sort(key=_distance_days)
 
@@ -1125,6 +1126,15 @@ def get_player_props(espn_id: str, games: Optional[list[dict]] = None) -> dict:
 # ── Result checker ───────────────────────────────────────────────────
 
 
+def _compute_bet_outcome(bet_type: str, line: float, actual: float) -> str:
+    """Return 'win', 'lose', or 'push' for an over/under bet."""
+    if actual == line:
+        return Outcome.PUSH.value
+    if bet_type == BetType.OVER.value:
+        return Outcome.WIN.value if actual > line else Outcome.LOSE.value
+    return Outcome.WIN.value if actual < line else Outcome.LOSE.value
+
+
 def resolve_pending_bets(pending_bets: list) -> list[tuple]:
     """Check ESPN for final scores and resolve all pending bet types.
 
@@ -1145,6 +1155,7 @@ def resolve_pending_bets(pending_bets: list) -> list[tuple]:
                 day = match_date + timedelta(days=delta_days)
                 date_keys.add(day.strftime("%Y%m%d"))
         except Exception:
+            logger.debug("Skipping bet row due to unexpected error", exc_info=True)
             continue
 
     if date_keys:
@@ -1173,12 +1184,7 @@ def resolve_pending_bets(pending_bets: list) -> list[tuple]:
             if bet.over_under_line is None:
                 continue
             actual_total = float(game["total_score"])
-            if actual_total == bet.over_under_line:
-                outcome = Outcome.PUSH.value
-            elif bet.bet_type == BetType.OVER.value:
-                outcome = Outcome.WIN.value if actual_total > bet.over_under_line else Outcome.LOSE.value
-            else:
-                outcome = Outcome.WIN.value if actual_total < bet.over_under_line else Outcome.LOSE.value
+            outcome = _compute_bet_outcome(bet.bet_type, float(bet.over_under_line), actual_total)
             results.append((bet, outcome, actual_total))
 
         # ── Moneyline ────────────────────────────────────────────────
@@ -1242,13 +1248,7 @@ def resolve_pending_bets(pending_bets: list) -> list[tuple]:
                 )
                 continue
 
-            if actual_stat == bet.prop_line:
-                outcome = Outcome.PUSH.value
-            elif bet.bet_type == BetType.OVER.value:
-                outcome = Outcome.WIN.value if actual_stat > bet.prop_line else Outcome.LOSE.value
-            else:
-                outcome = Outcome.WIN.value if actual_stat < bet.prop_line else Outcome.LOSE.value
-
+            outcome = _compute_bet_outcome(bet.bet_type, float(bet.prop_line), float(actual_stat))
             results.append((bet, outcome, actual_stat))
 
     return results
