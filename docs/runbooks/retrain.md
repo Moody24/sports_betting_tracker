@@ -1,89 +1,146 @@
 # ML Retrain Runbook — Edge Tracker
-**Stack:** XGBoost · scikit-learn · S3 (model artifacts) · Neon PostgreSQL
-**Last verified:** 2026-03-22
+**Stack:** XGBoost · scikit-learn · Local model artifacts (`app/ml_models/*.json`)
+**Last verified:** 2026-06-24
 **Source configs:** `app/services/ml_model.py`, `app/services/ml_feature_builder.py`
-**Est. total time:** 15–20 min (local retrain + S3 reactivation)
+**Est. total time:** 10–15 min
 
 ---
 
 ## How Retraining Works
 
-- **Production:** Railway scheduler runs `flask retrain` at 10:30 AM ET daily.
-  The guardrail skips retrain if the active model is < 7 days old OR no new `PlayerGameLog` rows exist since last train.
-- **Local retrain:** Use only when the Railway scheduler is unavailable or you need a forced retrain with fresh hyperparameters.
-
-**Never run `railway run flask retrain --force`** — Railway's 10-min timeout kills it mid-way, leaving S3 artifacts without a corresponding `ModelMetadata` record.
-
----
-
-## Production Auto-Retrain (normal path)
-
-No action needed. Verify via:
-```bash
-railway logs | grep -i "retrain\|model\|train"
-```
-✅ Expected: `Retrain complete. Models saved to S3.` by 10:45 AM ET.
-
-Or via the health-report command:
-```bash
-source .venv/bin/activate && export $(grep -v '^#' .env | xargs)
-flask health-report
-```
-✅ Expected: `=== Active ML Models ===` section shows models < 7 days old, no `<-- STALE` flags.
+- Models are XGBoost regressors (Model 1: stat projections) and a classifier (Model 2: pick quality)
+- Training data comes from the `player_game_log` table — you need at least 500 rows for meaningful models
+- Artifacts are saved to `app/ml_models/*.json` (gitignored, local-only)
+- The guardrail skips retrain if the active model is < 7 days old OR no new `PlayerGameLog` rows exist since last train
 
 ---
 
 ## Forced Local Retrain
 
-Use when:
-- Production model is STALE (> 14 days per health-report)
-- Major feature engineering change deployed (update `FEATURE_KEYS` in `ml_feature_builder.py`)
-- Significant calibration drift detected (avg_err > 2.0 in health-report)
-
-### Step 1 — Confirm prerequisites (2 min)
+### Step 1 — Confirm data exists (1 min)
 ```bash
-source .venv/bin/activate && export $(grep -v '^#' .env | xargs)
-# Verify Neon connection
-python3 -c "from app import create_app, db; app = create_app(); \
-  ctx = app.app_context(); ctx.push(); \
-  print('PlayerGameLog rows:', db.session.execute(db.text('SELECT count(*) FROM player_game_log')).scalar())"
+source .venv/bin/activate
+python3 << 'PYEOF'
+from app import create_app, db
+app = create_app()
+with app.app_context():
+    count = db.session.execute(db.text("SELECT count(*) FROM player_game_log")).scalar()
+    print(f"PlayerGameLog rows: {count}")
+    if count < 500:
+        print("⚠️  Row count is low — retrain may produce unreliable models")
+    else:
+        print("✅ Sufficient data for retrain")
+PYEOF
 ```
-✅ Expected: Row count > 500 (not enough rows = retrain won't help).
 
 ### Step 2 — Run retrain (8–12 min)
 ```bash
-source .venv/bin/activate && export $(grep -v '^#' .env | xargs)
+source .venv/bin/activate
 flask retrain --force
 ```
+
 ✅ Expected output sequence:
 ```
 Starting retrain (forced)...
 Training player_points... val_mae=1.23
 Training player_rebounds... val_mae=0.87
-...
-Models saved to S3: s3://bucket/models/xgb_player_points_v<timestamp>.json
+Training player_assists... val_mae=0.71
+Training player_threes... val_mae=0.62
+Training player_steals... val_mae=0.31
+Training player_blocks... val_mae=0.28
+Models saved to app/ml_models/
 ModelMetadata records created.
 ```
-⚠️ Neon drops SSL after ~5 min idle. If you see `SSL connection closed`, the script handles `db.session.remove(); db.engine.dispose()` internally — it should retry.
 
-### Step 3 — Verify local artifacts created (1 min)
+### Step 3 — Verify artifacts created (1 min)
 ```bash
-ls -la app/ml_models/*.json | head -10
+ls -la app/ml_models/*.json
 ```
 ✅ Expected: Fresh `.json` files with today's timestamp.
 
-### Step 4 — Reactivate S3 entries for Railway (3 min)
-
-Local retrain stores artifacts with local paths (`app/ml_models/...`), which Railway can't access. Reactivate the S3 entries:
+### Step 4 — Check model health
 ```bash
-source .venv/bin/activate && export $(grep -v '^#' .env | xargs)
-python3 << 'PYEOF'
+flask health-report
+```
+✅ Expected: `=== Active ML Models ===` section shows models < 1 day old, no `<-- STALE` flags.
+
+---
+
+## Monitor Calibration After Retrain
+
+Over the following week, watch calibration drift:
+```bash
+flask health-report --days 7
+```
+
+Target thresholds:
+- `avg_err` between -1.0 and +1.0: no action
+- `avg_err` > +1.0 (`<-- WATCH`): consider bias correction
+- `avg_err` > +2.0 (`<-- DRIFT`): bias correction or retrain with more data
+
+Bias corrections live in `app/services/projection_engine.py`:
+- `COMBO_PROP_BIAS_CORRECTION` — PRA and combo props (currently +3.2)
+- `SINGLE_STAT_BIAS_CORRECTION` — per stat type corrections (assists +0.5, rebounds +0.3)
+
+---
+
+## Full Calibration Report
+```bash
+flask evaluate-calibration --days 14
+```
+Breaks down projection accuracy by stat type over the last N days.
+
+---
+
+## When to Retrain
+
+| Trigger | Action |
+|---------|--------|
+| `health-report` shows STALE models (> 14 days) | `flask retrain --force` |
+| `avg_err` > 2.0 on any stat type | Retrain, then update bias corrections if drift persists |
+| `FEATURE_KEYS` changed in `ml_feature_builder.py` | Retrain immediately — mismatch causes silent errors |
+| New season data available (significant new game logs) | Retrain for updated player baselines |
+
+---
+
+## Feature Engineering Notes
+
+**CRITICAL:** `FEATURE_KEYS` in `ml_feature_builder.py` must be identical between training and inference. If you add or remove features:
+
+1. Update `FEATURE_KEYS` in `ml_feature_builder.py`
+2. Run `flask retrain --force` immediately
+3. Verify `flask health-report` shows fresh models
+
+```bash
+grep -n "FEATURE_KEYS" app/services/ml_feature_builder.py
+```
+Currently 37 features + 2 volatility features for Model 2 (`minutes_volatility`, `stat_attempts_volatility`).
+
+---
+
+## Staleness Check
+| Config File | Affects Steps |
+|-------------|---------------|
+| `app/services/ml_feature_builder.py` | Step 2 (FEATURE_KEYS must match between train and inference) |
+| `app/services/ml_model.py` | Step 2 (training logic) |
+| `.env` | All steps (DATABASE_URL must point to a DB with PlayerGameLog data) |
+
+---
+
+## Archived: S3 Model Storage (formerly used with Railway)
+
+> When `MODEL_STORAGE=s3` was active (Railway production), models were stored in S3 and Railway
+> needed S3 entries reactivated after a local retrain. This is no longer needed — `MODEL_STORAGE=local`
+> is the current default. The reactivation script is preserved here for reference.
+
+```python
+# Reactivate S3 entries after local retrain (only needed if MODEL_STORAGE=s3)
 from app import create_app, db
 from app.models import ModelMetadata
+from sqlalchemy import func
 
 app = create_app()
 with app.app_context():
-    # Deactivate local-path entries (just created)
     local = ModelMetadata.query.filter(
         ModelMetadata.is_active == True,
         ModelMetadata.file_path.like('app/ml_models/%')
@@ -92,8 +149,6 @@ with app.app_context():
         m.is_active = False
         print(f"Deactivated local: {m.model_name} {m.version}")
 
-    # Reactivate the most recent S3 entry per model_name
-    from sqlalchemy import func
     s3_latest = (
         db.session.query(
             ModelMetadata.model_name,
@@ -104,47 +159,10 @@ with app.app_context():
         .all()
     )
     for model_name, latest_ts in s3_latest:
-        m = ModelMetadata.query.filter_by(
-            model_name=model_name, created_at=latest_ts
-        ).first()
+        m = ModelMetadata.query.filter_by(model_name=model_name, created_at=latest_ts).first()
         if m:
             m.is_active = True
             print(f"Activated S3: {m.model_name} {m.version} {m.file_path}")
 
     db.session.commit()
-    print("Done.")
-PYEOF
 ```
-✅ Expected: Each model_name has exactly one active S3 entry.
-
-### Step 5 — Verify Railway will use S3 models (1 min)
-```bash
-flask health-report | grep -A 20 "Active ML Models"
-```
-✅ Expected: All models show `val_acc` > 0, age < 1 day, no `<-- STALE`.
-
----
-
-## After Retrain: Monitor Calibration
-
-Over the following week, watch the health-report drift section:
-```bash
-flask health-report --days 7
-```
-Target thresholds:
-- `avg_err` between -1.0 and +1.0: no action
-- `avg_err` > +1.0 (`<-- WATCH`): consider bias correction
-- `avg_err` > +2.0 (`<-- DRIFT`): bias correction or retrain with more data
-
-Bias corrections live in `app/services/projection_engine.py`:
-- `COMBO_PROP_BIAS_CORRECTION` — PRA and combo props
-- `SINGLE_STAT_BIAS_CORRECTION` — per stat type corrections
-
----
-
-## Staleness Check
-| Config File | Affects Steps |
-|-------------|---------------|
-| `app/services/ml_feature_builder.py` | Step 2 (FEATURE_KEYS must match between train and inference) |
-| `app/services/ml_model.py` | Step 2 (training logic) |
-| `.env` | All steps (DB_URL, S3 credentials) |

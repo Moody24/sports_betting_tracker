@@ -1,3 +1,10 @@
+# Deployment Runbook — Edge Tracker (INACTIVE)
+
+> ⚠️ **Railway deployment is currently inactive.** This runbook is preserved as a reference.
+> For local development, see [`README.md`](../../README.md).
+
+---
+
 # Deployment Runbook — Edge Tracker
 **Stack:** Flask + SQLAlchemy + XGBoost · Neon PostgreSQL · Railway
 **Last verified:** 2026-03-22
