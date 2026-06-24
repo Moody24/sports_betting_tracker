@@ -101,7 +101,6 @@ class ProjectionEngine:
         team_name: str = '',
         is_home: bool = True,
         game_total_line: float = 0.0,
-        line_delta: float = 0.0,
     ) -> dict:
         """Generate a projection for a single player-stat combination.
 
@@ -119,7 +118,7 @@ class ProjectionEngine:
             str(opponent_name).strip().lower(),
             str(team_name).strip().lower(),
             bool(is_home),
-            float(game_total_line),
+            float(game_total_line or 0.0),
         )
         if cache_key in self._projection_cache:
             return deepcopy(self._projection_cache[cache_key])
@@ -304,29 +303,27 @@ class ProjectionEngine:
 
         projection_source = 'heuristic'
         if self._use_ml_projections() and games_played >= 10 and prop_type in PROP_STAT_KEY:
-            # Build matchup string so Phase 1 opponent features are populated
-            _current_matchup = ''
-            if team_name and opponent_name:
-                _sep = 'vs.' if is_home else '@'
-                _current_matchup = f"{team_name} {_sep} {opponent_name}"
-
-            # Fetch defense lookup once per engine instance (cached)
-            _defense_lookup = self._context_cache.get('_defense_lookup')
+            # Build a matchup string from team/opponent names to enable opp history.
+            # Format mirrors PlayerGameLog.matchup: "TEAM vs. OPP" (home) or "TEAM @ OPP".
+            from app.services.ml_model import _build_defense_lookup as _get_def_lookup
+            _defense_lookup = self._context_cache.get('__defense_lookup__')
             if _defense_lookup is None:
                 try:
-                    from app.services.ml_model import _build_defense_lookup
-                    _defense_lookup = _build_defense_lookup()
+                    _defense_lookup = _get_def_lookup()
                 except Exception:
-                    logger.warning("Defense lookup failed — projections will run without defensive context", exc_info=True)
                     _defense_lookup = {}
-                self._context_cache['_defense_lookup'] = _defense_lookup
+                self._context_cache['__defense_lookup__'] = _defense_lookup
+
+            _current_matchup = ''
+            if team_name and opponent_name:
+                _sep = ' vs. ' if is_home else ' @ '
+                _current_matchup = f"{team_name}{_sep}{opponent_name}"
 
             ml_features = self._build_ml_features(
                 logs, stat_key, is_home,
                 current_matchup=_current_matchup,
                 game_total_line=game_total_line,
                 defense_lookup=_defense_lookup,
-                line_delta=line_delta,
             )
             if ml_features:
                 try:
@@ -438,7 +435,6 @@ class ProjectionEngine:
         current_matchup: str = '',
         game_total_line: float = 0.0,
         defense_lookup: dict = None,
-        line_delta: float = 0.0,
     ) -> dict:
         if len(logs) < 10:
             return {}
@@ -450,6 +446,17 @@ class ProjectionEngine:
         next_game_date = (sorted_dates[-1] + __import__('datetime').timedelta(days=1)) if sorted_dates else None
 
         usage_features = self._compute_team_usage_features(logs)
+
+        # Approximate next-game date: one day after the most recent log.
+        import datetime as _dt
+        last_date = None
+        for lg in reversed(logs):
+            d = getattr(lg, 'game_date', None)
+            if d is not None:
+                last_date = d
+                break
+        next_game_date = (last_date + _dt.timedelta(days=1)) if last_date else None
+
         return build_ml_features_from_history(
             prior_logs=logs,
             current_is_home=is_home,
@@ -459,8 +466,7 @@ class ProjectionEngine:
             current_game_date=next_game_date,
             current_matchup=current_matchup,
             game_total_line=game_total_line,
-            defense_lookup=defense_lookup or {},
-            line_delta=line_delta,
+            defense_lookup=defense_lookup,
         )
 
     def _compute_team_usage_features(self, logs: list) -> dict:

@@ -15,7 +15,7 @@ from datetime import datetime, timezone, date as date_type
 
 from app import db
 from app.config_display import PROP_STAT_KEY
-from app.models import ModelMetadata, PlayerGameLog, TeamDefenseSnapshot, GameSnapshot, OddsSnapshot
+from app.models import ModelMetadata, PlayerGameLog, TeamDefenseSnapshot
 from app.services.model_storage import materialize_model_artifact, persist_model_artifact
 from app.services.ml_feature_builder import build_ml_features_from_history, build_team_game_aggregates
 
@@ -50,89 +50,36 @@ def _ensure_model_dir():
 
 
 def _build_defense_lookup() -> dict:
-    """Pre-fetch TeamDefenseSnapshot into {team_abbr: {field: value}} dict.
+    """Pre-fetch all team defense snapshots into a lookup dict keyed by ABBR.
 
-    Only the most-recent snapshot per team is kept.  Falls back to team_name
-    for teams that lack an abbreviation.
+    Uses the most recent snapshot per team so training rows reference current
+    season defensive ratings rather than stale ones.
+    Returns {TEAM_ABBR_UPPER: {def_rating, pace, opp_pts_pg, …}}.
     """
-    rows = TeamDefenseSnapshot.query.order_by(TeamDefenseSnapshot.snapshot_date.desc()).all()
+    from app.models import TeamDefenseSnapshot
+
     lookup: dict = {}
-    for row in rows:
-        key = (row.team_abbr or '').strip().upper() or row.team_name
-        if not key or key in lookup:
-            continue  # keep the first (most recent) snapshot per team
-        lookup[key] = {
-            'def_rating':  row.def_rating,
-            'pace':        row.pace,
-            'opp_pts_pg':  row.opp_pts_pg,
-            'opp_reb_pg':  row.opp_reb_pg,
-            'opp_ast_pg':  row.opp_ast_pg,
-            'opp_3pm_pg':  row.opp_3pm_pg,
-            'opp_stl_pg':  row.opp_stl_pg,
-            'opp_blk_pg':  row.opp_blk_pg,
-            # store full name so game-total lookup can cross-reference
-            '_team_name':  row.team_name,
+    snaps = (
+        TeamDefenseSnapshot.query
+        .order_by(TeamDefenseSnapshot.snapshot_date.desc())
+        .all()
+    )
+    for snap in snaps:
+        abbr = (snap.team_abbr or '').strip().upper()
+        if not abbr or abbr in lookup:
+            continue
+        lookup[abbr] = {
+            'def_rating': float(snap.def_rating or 0.0),
+            'pace': float(snap.pace or 0.0),
+            'opp_pts_pg': float(snap.opp_pts_pg or 0.0),
+            'opp_reb_pg': float(snap.opp_reb_pg or 0.0),
+            'opp_ast_pg': float(snap.opp_ast_pg or 0.0),
+            'opp_3pm_pg': float(snap.opp_3pm_pg or 0.0),
+            'opp_stl_pg': float(snap.opp_stl_pg or 0.0),
+            'opp_blk_pg': float(snap.opp_blk_pg or 0.0),
         }
     return lookup
 
-
-def _build_game_total_lookup(defense_lookup: dict) -> dict:
-    """Pre-fetch GameSnapshot O/U totals into {(game_date, team_abbr): ou_line}.
-
-    Uses defense_lookup to map team full-names → abbreviations for the key.
-    """
-    # Build reverse map: normalised team name → abbr
-    name_to_abbr: dict = {}
-    for abbr, info in defense_lookup.items():
-        tname = (info.get('_team_name') or '').strip().lower()
-        if tname:
-            name_to_abbr[tname] = abbr
-
-    rows = GameSnapshot.query.filter(GameSnapshot.over_under_line.isnot(None)).all()
-    lookup: dict = {}
-    for row in rows:
-        ou = row.over_under_line
-        if not ou:
-            continue
-        home = (row.home_team or '').strip().lower()
-        away = (row.away_team or '').strip().lower()
-        gdate = row.game_date
-        for tname in (home, away):
-            abbr = name_to_abbr.get(tname)
-            if abbr and gdate:
-                lookup[(gdate, abbr)] = float(ou)
-    return lookup
-
-
-def _build_odds_snapshot_lookup(stat_type: str) -> dict:
-    """Build line-movement lookup from OddsSnapshot for historical training rows.
-
-    Returns {(player_name_lower, stat_type, game_date): line_delta} where
-    line_delta = last_line - first_line for that player/market/date.
-    Only dates with 2+ snapshots (i.e. a line actually moved) produce entries.
-    """
-    rows = (
-        OddsSnapshot.query
-        .filter(OddsSnapshot.market == stat_type)
-        .filter(OddsSnapshot.line.isnot(None))
-        .order_by(OddsSnapshot.game_date, OddsSnapshot.player_name, OddsSnapshot.snapped_at)
-        .all()
-    )
-    # Group by (player_name_lower, game_date) and track first/last line seen.
-    groups: dict = {}
-    for row in rows:
-        key = ((row.player_name or '').strip().lower(), row.game_date)
-        if key not in groups:
-            groups[key] = {'first': row.line, 'last': row.line}
-        else:
-            groups[key]['last'] = row.line
-
-    lookup: dict = {}
-    for (player_lower, gdate), vals in groups.items():
-        delta = float(vals['last'] or 0.0) - float(vals['first'] or 0.0)
-        if delta != 0.0:  # only store when line actually moved
-            lookup[(player_lower, stat_type, gdate)] = delta
-    return lookup
 
 
 def _check_training_data_quality(all_logs: list) -> dict:
@@ -196,6 +143,51 @@ def check_defense_snapshot_staleness() -> dict:
     return {"stale": stale, "days_old": days_old, "latest_date": latest.snapshot_date}
 
 
+def _build_game_total_lookup() -> dict:
+    """Build a {(game_date, team_abbr_upper): over_under_line} lookup.
+
+    Requires a name → abbr mapping from TeamDefenseSnapshot to correlate
+    GameSnapshot team names (e.g. 'Los Angeles Lakers') with the abbreviations
+    stored in PlayerGameLog.team_abbr (e.g. 'LAL').
+    """
+    from app.models import GameSnapshot, TeamDefenseSnapshot
+
+    # Build name-fragment → abbr mapping from defense snapshots.
+    name_to_abbr: dict = {}
+    for snap in TeamDefenseSnapshot.query.all():
+        if snap.team_name and snap.team_abbr:
+            name_to_abbr[snap.team_name.lower()] = snap.team_abbr.strip().upper()
+
+    def _abbr_for(team_name: str) -> str:
+        if not team_name:
+            return ''
+        name_lower = team_name.lower()
+        # Exact match first
+        if name_lower in name_to_abbr:
+            return name_to_abbr[name_lower]
+        # Substring match (handles minor variants)
+        for stored_name, abbr in name_to_abbr.items():
+            if stored_name in name_lower or name_lower in stored_name:
+                return abbr
+        return ''
+
+    lookup: dict = {}
+    snaps = (
+        GameSnapshot.query
+        .filter(GameSnapshot.over_under_line.isnot(None))
+        .all()
+    )
+    for snap in snaps:
+        line = float(snap.over_under_line)
+        home_abbr = _abbr_for(snap.home_team or '')
+        away_abbr = _abbr_for(snap.away_team or '')
+        if home_abbr:
+            lookup[(snap.game_date, home_abbr)] = line
+        if away_abbr:
+            lookup[(snap.game_date, away_abbr)] = line
+    return lookup
+
+
 def _build_training_rows(stat_type: str):
     """Build dated training rows for walk-forward validation."""
     stat_key = STAT_KEY_MAP.get(stat_type, 'pts')
@@ -227,11 +219,9 @@ def _build_training_rows(stat_type: str):
 
     team_totals, team_counts = build_team_game_aggregates(all_logs)
 
-    # Phase 1.1: pre-build context lookups once to avoid per-row DB queries
+    # Phase 1: pre-fetch context lookups once (not per row)
     defense_lookup = _build_defense_lookup()
-    game_total_lookup = _build_game_total_lookup(defense_lookup)
-    # Phase 2: line movement — only available for recent rows; older rows get 0.0
-    odds_snapshot_lookup = _build_odds_snapshot_lookup(stat_type)
+    game_total_lookup = _build_game_total_lookup()
 
     rows = []
 
@@ -245,14 +235,9 @@ def _build_training_rows(stat_type: str):
             current = logs[i]
             target = float(getattr(current, stat_key, 0.0) or 0.0)
 
-            # Phase 1.1 context for this specific game row
-            team_abbr = (current.team_abbr or '').strip().upper()
-            ou_line = game_total_lookup.get((current.game_date, team_abbr), 0.0)
-
-            player_lower = (current.player_name or '').strip().lower()
-            line_delta = odds_snapshot_lookup.get(
-                (player_lower, stat_type, current.game_date), 0.0
-            )
+            # Phase 1: resolve per-row context
+            team_abbr = (getattr(current, 'team_abbr', '') or '').strip().upper()
+            game_total = game_total_lookup.get((current.game_date, team_abbr), 0.0)
 
             features = build_ml_features_from_history(
                 prior_logs=prior,
@@ -262,9 +247,8 @@ def _build_training_rows(stat_type: str):
                 team_counts=team_counts,
                 current_game_date=current.game_date,
                 current_matchup=current.matchup or '',
-                game_total_line=ou_line,
+                game_total_line=game_total,
                 defense_lookup=defense_lookup,
-                line_delta=line_delta,
             )
             rows.append((current.game_date, str(pid), features, target))
 

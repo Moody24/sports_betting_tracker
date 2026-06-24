@@ -131,7 +131,6 @@ class ValueDetector:
         team_name: str = '',
         is_home: bool = True,
         game_id: str = '',
-        line_delta: float = 0.0,
     ) -> dict:
         """Score a single player prop for value.
 
@@ -151,7 +150,6 @@ class ValueDetector:
         """
         proj = self.engine.project_stat(
             player_name, prop_type, opponent_name, team_name, is_home,
-            line_delta=line_delta,
         )
 
         projection = proj['projection']
@@ -412,34 +410,6 @@ class ValueDetector:
         player_team_map = self._build_player_team_map(all_player_names)
         logger.info("PERF player_team_map: players=%d elapsed=%.2fs", len(player_team_map), _time.perf_counter() - _t_team)
 
-        # Pre-fetch today's line movement from OddsSnapshot (main thread — safe DB access).
-        # Lookup key: (player_name_lower, market) -> line_delta
-        _odds_delta: dict = {}
-        try:
-            from app.models import OddsSnapshot
-            _snap_today = datetime.now(ZoneInfo("America/New_York")).date()
-            _snap_rows = (
-                OddsSnapshot.query
-                .filter(OddsSnapshot.game_date == _snap_today)
-                .filter(OddsSnapshot.line.isnot(None))
-                .order_by(OddsSnapshot.player_name, OddsSnapshot.market, OddsSnapshot.snapped_at)
-                .all()
-            )
-            _snap_groups: dict = {}
-            for _r in _snap_rows:
-                _k = (((_r.player_name or '').strip().lower()), (_r.market or ''))
-                if _k not in _snap_groups:
-                    _snap_groups[_k] = {'first': _r.line, 'last': _r.line}
-                else:
-                    _snap_groups[_k]['last'] = _r.line
-            for _k, _v in _snap_groups.items():
-                delta = float(_v['last'] or 0.0) - float(_v['first'] or 0.0)
-                if delta != 0.0:
-                    _odds_delta[_k] = delta
-            logger.info("PERF odds_delta: %d moving lines for %s", len(_odds_delta), _snap_today)
-        except Exception as exc:
-            logger.debug("OddsSnapshot line delta pre-fetch failed: %s", exc)
-
         _t_score = _time.perf_counter()
         for game, props in game_props_payloads:
             espn_id = game.get('espn_id', '')
@@ -471,7 +441,6 @@ class ValueDetector:
                         player_team_map=player_team_map,
                     )
 
-                    _ld = _odds_delta.get(((player or '').strip().lower(), market_key), 0.0)
                     score = self.score_prop(
                         player_name=player,
                         prop_type=market_key,
@@ -482,7 +451,6 @@ class ValueDetector:
                         team_name=team_name,
                         is_home=is_home,
                         game_id=espn_id,
-                        line_delta=_ld,
                     )
 
                     # Add game context to score

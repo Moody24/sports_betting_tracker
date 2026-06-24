@@ -4025,12 +4025,12 @@ class TestSchedulerDriftJob(BaseTestCase):
         self.assertIn('market_coverage_audit', fake.jobs)
 
 
-class Phase1FeatureBuilderTest(BaseTestCase):
+class Phase1Dot1FeatureBuilderTest(BaseTestCase):
     """Tests for the Phase 1.1 expanded feature engineering additions.
 
     Covers:
     - extract_opp_abbr (home and away formats)
-    - compute_days_rest_from_logs
+    - compute_days_rest
     - compute_schedule_density
     - compute_opp_history
     - FEATURE_KEYS completeness
@@ -4091,28 +4091,28 @@ class Phase1FeatureBuilderTest(BaseTestCase):
         self.assertEqual(extract_opp_abbr('LALBOS'), '')
 
     # ------------------------------------------------------------------
-    # compute_days_rest_from_logs
+    # compute_days_rest
     # ------------------------------------------------------------------
 
     def test_days_rest_normal(self):
-        from app.services.ml_feature_builder import compute_days_rest_from_logs
+        from app.services.ml_feature_builder import compute_days_rest
         logs = [self._make_log(game_date=date(2026, 1, 10))]
-        self.assertEqual(compute_days_rest_from_logs(logs, date(2026, 1, 12)), 2.0)
+        self.assertEqual(compute_days_rest(logs, date(2026, 1, 12)), 2.0)
 
     def test_days_rest_back_to_back(self):
-        from app.services.ml_feature_builder import compute_days_rest_from_logs
+        from app.services.ml_feature_builder import compute_days_rest
         logs = [self._make_log(game_date=date(2026, 1, 10))]
-        self.assertEqual(compute_days_rest_from_logs(logs, date(2026, 1, 11)), 1.0)
+        self.assertEqual(compute_days_rest(logs, date(2026, 1, 11)), 1.0)
 
     def test_days_rest_no_date(self):
-        from app.services.ml_feature_builder import compute_days_rest_from_logs
+        from app.services.ml_feature_builder import compute_days_rest
         # current_game_date=None → default 3.0
-        self.assertEqual(compute_days_rest_from_logs([], None), 3.0)
+        self.assertEqual(compute_days_rest([], None), 3.0)
 
     def test_days_rest_no_logs(self):
-        from app.services.ml_feature_builder import compute_days_rest_from_logs
+        from app.services.ml_feature_builder import compute_days_rest
         # no logs → default 3.0
-        self.assertEqual(compute_days_rest_from_logs([], date(2026, 1, 15)), 3.0)
+        self.assertEqual(compute_days_rest([], date(2026, 1, 15)), 3.0)
 
     # ------------------------------------------------------------------
     # compute_schedule_density
@@ -4167,7 +4167,7 @@ class Phase1FeatureBuilderTest(BaseTestCase):
 
     def test_feature_keys_count(self):
         from app.services.ml_feature_builder import FEATURE_KEYS
-        self.assertEqual(len(FEATURE_KEYS), 37, "Expected 37 feature keys (21 original + 9 Phase 1 + 7 Phase 2)")
+        self.assertEqual(len(FEATURE_KEYS), 30, "Expected 30 feature keys (21 original + 9 Phase 1)")
 
     def test_phase1_keys_present(self):
         from app.services.ml_feature_builder import FEATURE_KEYS
@@ -4454,6 +4454,326 @@ class TestComputeBetOutcome(unittest.TestCase):
         from app.models import Outcome
         result = self.fn('under', 25.5, 26.0)
         self.assertEqual(result, Outcome.LOSE.value)
+
+
+# ---------------------------------------------------------------------------
+# Phase 1.1: Feature engineering tests
+# ---------------------------------------------------------------------------
+
+
+class Phase1FeatureBuilderTest(BaseTestCase):
+    """Tests for the 9 new Phase 1 features in ml_feature_builder."""
+
+    # ── extract_opp_abbr ─────────────────────────────────────────────────────
+
+    def test_extract_opp_abbr_home_format(self):
+        from app.services.ml_feature_builder import extract_opp_abbr
+        self.assertEqual(extract_opp_abbr('LAL vs. BOS'), 'BOS')
+
+    def test_extract_opp_abbr_away_format(self):
+        from app.services.ml_feature_builder import extract_opp_abbr
+        self.assertEqual(extract_opp_abbr('LAL @ MIA'), 'MIA')
+
+    def test_extract_opp_abbr_empty(self):
+        from app.services.ml_feature_builder import extract_opp_abbr
+        self.assertEqual(extract_opp_abbr(''), '')
+
+    def test_extract_opp_abbr_unrecognised(self):
+        from app.services.ml_feature_builder import extract_opp_abbr
+        self.assertEqual(extract_opp_abbr('no separator here'), '')
+
+    # ── compute_days_rest ────────────────────────────────────────────────────
+
+    def test_days_rest_one_day(self):
+        from app.services.ml_feature_builder import compute_days_rest
+        from types import SimpleNamespace
+        log = SimpleNamespace(game_date=date(2026, 1, 1))
+        result = compute_days_rest([log], date(2026, 1, 2))
+        self.assertEqual(result, 1.0)
+
+    def test_days_rest_back_to_back(self):
+        from app.services.ml_feature_builder import compute_days_rest
+        from types import SimpleNamespace
+        log = SimpleNamespace(game_date=date(2026, 3, 5))
+        result = compute_days_rest([log], date(2026, 3, 6))
+        self.assertEqual(result, 1.0)
+
+    def test_days_rest_no_prior(self):
+        from app.services.ml_feature_builder import compute_days_rest
+        result = compute_days_rest([], date(2026, 1, 10))
+        self.assertEqual(result, 3.0)
+
+    def test_days_rest_no_current_date(self):
+        from app.services.ml_feature_builder import compute_days_rest
+        from types import SimpleNamespace
+        log = SimpleNamespace(game_date=date(2026, 1, 1))
+        result = compute_days_rest([log], None)
+        self.assertEqual(result, 3.0)
+
+    # ── compute_schedule_density ─────────────────────────────────────────────
+
+    def test_schedule_density_several_games(self):
+        from app.services.ml_feature_builder import compute_schedule_density
+        from types import SimpleNamespace
+        # 4 games in the 7 days before Jan 8
+        logs = [SimpleNamespace(game_date=date(2026, 1, i)) for i in range(1, 8)]
+        result = compute_schedule_density(logs, date(2026, 1, 8), window_days=7)
+        self.assertEqual(result, 7)
+
+    def test_schedule_density_none_in_window(self):
+        from app.services.ml_feature_builder import compute_schedule_density
+        from types import SimpleNamespace
+        logs = [SimpleNamespace(game_date=date(2026, 1, 1))]
+        result = compute_schedule_density(logs, date(2026, 2, 1), window_days=7)
+        self.assertEqual(result, 0)
+
+    def test_schedule_density_no_current_date(self):
+        from app.services.ml_feature_builder import compute_schedule_density
+        from types import SimpleNamespace
+        logs = [SimpleNamespace(game_date=date(2026, 1, 1))]
+        result = compute_schedule_density(logs, None)
+        self.assertEqual(result, 0)
+
+    # ── compute_opp_history ──────────────────────────────────────────────────
+
+    def test_opp_history_with_matching_games(self):
+        from app.services.ml_feature_builder import compute_opp_history
+        from types import SimpleNamespace
+        # 3 games vs BOS with pts values 20, 25, 30 → avg 25
+        logs = [
+            SimpleNamespace(matchup='LAL vs. BOS', pts=20.0),
+            SimpleNamespace(matchup='LAL vs. BOS', pts=25.0),
+            SimpleNamespace(matchup='LAL vs. BOS', pts=30.0),
+            SimpleNamespace(matchup='LAL @ MIA', pts=10.0),  # different opp
+        ]
+        avg, count = compute_opp_history(logs, 'BOS', 'pts')
+        self.assertAlmostEqual(avg, 25.0)
+        self.assertEqual(count, 3)
+
+    def test_opp_history_no_matching_games(self):
+        from app.services.ml_feature_builder import compute_opp_history
+        from types import SimpleNamespace
+        logs = [SimpleNamespace(matchup='LAL @ MIA', pts=20.0)]
+        avg, count = compute_opp_history(logs, 'BOS', 'pts')
+        self.assertEqual(avg, 0.0)
+        self.assertEqual(count, 0)
+
+    def test_opp_history_empty_opp_abbr(self):
+        from app.services.ml_feature_builder import compute_opp_history
+        from types import SimpleNamespace
+        logs = [SimpleNamespace(matchup='LAL vs. BOS', pts=20.0)]
+        avg, count = compute_opp_history(logs, '', 'pts')
+        self.assertEqual(count, 0)
+
+    # ── FEATURE_KEYS completeness ─────────────────────────────────────────────
+
+    def test_feature_keys_contains_phase1_features(self):
+        from app.services.ml_feature_builder import FEATURE_KEYS
+        phase1_keys = [
+            'days_rest', 'back_to_back', 'games_last_7_days',
+            'opp_hist_avg_stat', 'opp_hist_games',
+            'game_total_line',
+            'opp_def_rating', 'opp_pace', 'opp_stat_allowed',
+        ]
+        for key in phase1_keys:
+            self.assertIn(key, FEATURE_KEYS, f"Missing Phase 1 key: {key}")
+
+    def test_feature_keys_total_count(self):
+        from app.services.ml_feature_builder import FEATURE_KEYS
+        # 21 original + 9 Phase 1 = 30 total
+        self.assertEqual(len(FEATURE_KEYS), 30)
+
+    # ── build_ml_features_from_history with Phase 1 params ───────────────────
+
+    def test_build_features_includes_phase1_keys(self):
+        from app.services.ml_feature_builder import build_ml_features_from_history, FEATURE_KEYS
+        with self.app.app_context():
+            _seed_player_logs(count=20, player_id='p1_phase1', player_name='Phase Player')
+            from app.services.stats_service import get_cached_logs
+            logs = get_cached_logs('p1_phase1', last_n=82)
+            features = build_ml_features_from_history(
+                prior_logs=logs,
+                current_is_home=True,
+                stat_key='pts',
+                current_game_date=date(2026, 2, 1),
+                current_matchup='LAL vs. BOS',
+                game_total_line=225.5,
+            )
+        for key in FEATURE_KEYS:
+            self.assertIn(key, features, f"Missing key in output: {key}")
+
+    def test_build_features_days_rest_populated(self):
+        from app.services.ml_feature_builder import build_ml_features_from_history
+        with self.app.app_context():
+            _seed_player_logs(count=15, player_id='p2_phase1', player_name='Rest Player')
+            from app.services.stats_service import get_cached_logs
+            logs = get_cached_logs('p2_phase1', last_n=82)
+            # Most recent seeded log is Jan 14 (0-indexed day 14)
+            features = build_ml_features_from_history(
+                prior_logs=logs,
+                current_is_home=True,
+                stat_key='pts',
+                current_game_date=date(2026, 1, 16),
+            )
+        # Jan 15 was last seeded game, Jan 16 is current → 1 day rest → back_to_back
+        self.assertGreaterEqual(features['days_rest'], 0.0)
+        self.assertIn(features['back_to_back'], [0.0, 1.0])
+
+    def test_build_features_opp_history_from_matchup(self):
+        from app.services.ml_feature_builder import build_ml_features_from_history
+        with self.app.app_context():
+            # _seed_player_logs alternates LAL vs. BOS / LAL @ MIA matchups
+            _seed_player_logs(count=20, player_id='p3_phase1', player_name='History Player')
+            from app.services.stats_service import get_cached_logs
+            logs = get_cached_logs('p3_phase1', last_n=82)
+            features = build_ml_features_from_history(
+                prior_logs=logs,
+                current_is_home=True,
+                stat_key='pts',
+                current_matchup='LAL vs. BOS',
+            )
+        # Should have found some BOS games in the log
+        self.assertGreater(features['opp_hist_games'], 0)
+        self.assertGreater(features['opp_hist_avg_stat'], 0.0)
+
+    def test_build_features_game_total_line_stored(self):
+        from app.services.ml_feature_builder import build_ml_features_from_history
+        with self.app.app_context():
+            _seed_player_logs(count=12, player_id='p4_phase1', player_name='Total Player')
+            from app.services.stats_service import get_cached_logs
+            logs = get_cached_logs('p4_phase1', last_n=82)
+            features = build_ml_features_from_history(
+                prior_logs=logs,
+                current_is_home=True,
+                stat_key='pts',
+                game_total_line=228.5,
+            )
+        self.assertAlmostEqual(features['game_total_line'], 228.5)
+
+    def test_build_features_defense_lookup_populates_def_features(self):
+        from app.services.ml_feature_builder import build_ml_features_from_history
+        with self.app.app_context():
+            _seed_player_logs(count=15, player_id='p5_phase1', player_name='Defense Player')
+            from app.services.stats_service import get_cached_logs
+            logs = get_cached_logs('p5_phase1', last_n=82)
+            defense_lookup = {
+                'BOS': {
+                    'def_rating': 108.5,
+                    'pace': 98.2,
+                    'opp_pts_pg': 109.0,
+                    'opp_reb_pg': 42.0,
+                    'opp_ast_pg': 24.0,
+                    'opp_3pm_pg': 11.0,
+                    'opp_stl_pg': 7.0,
+                    'opp_blk_pg': 4.5,
+                }
+            }
+            features = build_ml_features_from_history(
+                prior_logs=logs,
+                current_is_home=True,
+                stat_key='pts',
+                current_matchup='LAL vs. BOS',
+                defense_lookup=defense_lookup,
+            )
+        self.assertAlmostEqual(features['opp_def_rating'], 108.5)
+        self.assertAlmostEqual(features['opp_pace'], 98.2)
+        self.assertAlmostEqual(features['opp_stat_allowed'], 109.0)  # pts → opp_pts_pg
+
+    def test_build_features_defense_lookup_unknown_opp_zeroes(self):
+        from app.services.ml_feature_builder import build_ml_features_from_history
+        with self.app.app_context():
+            _seed_player_logs(count=12, player_id='p6_phase1', player_name='Unknown Opp')
+            from app.services.stats_service import get_cached_logs
+            logs = get_cached_logs('p6_phase1', last_n=82)
+            features = build_ml_features_from_history(
+                prior_logs=logs,
+                current_is_home=True,
+                stat_key='pts',
+                current_matchup='LAL vs. BOS',
+                defense_lookup={'DEN': {'def_rating': 112.0, 'pace': 102.0}},
+            )
+        # BOS not in lookup → should default to 0.0
+        self.assertEqual(features['opp_def_rating'], 0.0)
+        self.assertEqual(features['opp_pace'], 0.0)
+
+    def test_build_features_no_phase1_params_all_zero(self):
+        """Backward-compat: calling without Phase 1 params returns valid dict with zero defaults."""
+        from app.services.ml_feature_builder import build_ml_features_from_history, FEATURE_KEYS
+        with self.app.app_context():
+            _seed_player_logs(count=15, player_id='p7_phase1', player_name='Compat Player')
+            from app.services.stats_service import get_cached_logs
+            logs = get_cached_logs('p7_phase1', last_n=82)
+            features = build_ml_features_from_history(logs, True, 'pts')
+        # All FEATURE_KEYS must still be present
+        for key in FEATURE_KEYS:
+            self.assertIn(key, features)
+        # Phase 1 contextual fields default to 0 / neutral when not provided
+        self.assertEqual(features['opp_hist_games'], 0.0)
+        self.assertEqual(features['game_total_line'], 0.0)
+        self.assertEqual(features['opp_def_rating'], 0.0)
+        self.assertEqual(features['days_rest'], 3.0)  # neutral default
+        self.assertEqual(features['back_to_back'], 0.0)
+
+    # ── ml_model training pipeline ───────────────────────────────────────────
+
+    def test_build_defense_lookup_returns_dict(self):
+        from app.services.ml_model import _build_defense_lookup
+        with self.app.app_context():
+            _seed_defense(team_name='Boston Celtics', team_abbr='BOS',
+                          opp_pts=108.0, pace=98.5, def_rating=106.5)
+            result = _build_defense_lookup()
+        self.assertIsInstance(result, dict)
+        self.assertIn('BOS', result)
+        self.assertAlmostEqual(result['BOS']['def_rating'], 106.5)
+        self.assertAlmostEqual(result['BOS']['pace'], 98.5)
+        self.assertAlmostEqual(result['BOS']['opp_pts_pg'], 108.0)
+
+    def test_build_defense_lookup_empty_db(self):
+        from app.services.ml_model import _build_defense_lookup
+        with self.app.app_context():
+            result = _build_defense_lookup()
+        self.assertIsInstance(result, dict)
+
+    def test_build_game_total_lookup_returns_dict(self):
+        from app.services.ml_model import _build_game_total_lookup
+        with self.app.app_context():
+            result = _build_game_total_lookup()
+        self.assertIsInstance(result, dict)
+
+    # ── projection_engine inference plumbing ─────────────────────────────────
+
+    def test_project_stat_new_signature_accepted(self):
+        """project_stat accepts game_total_line without error."""
+        from app.services.projection_engine import ProjectionEngine
+        with self.app.app_context():
+            _seed_player_logs(count=20, player_id='p8_phase1', player_name='PE Phase1')
+            engine = ProjectionEngine()
+            result = engine.project_stat(
+                'PE Phase1', 'player_points',
+                opponent_name='Boston Celtics',
+                team_name='LAL',
+                is_home=True,
+                game_total_line=225.0,
+            )
+        self.assertIn('projection', result)
+        self.assertGreaterEqual(result['projection'], 0)
+
+    def test_build_ml_features_with_matchup_and_total(self):
+        """_build_ml_features passes new params without raising."""
+        from app.services.projection_engine import ProjectionEngine
+        with self.app.app_context():
+            _seed_player_logs(count=20, player_id='p9_phase1', player_name='ML Phase1')
+            from app.services.stats_service import get_cached_logs
+            logs = get_cached_logs('p9_phase1', last_n=82)
+            engine = ProjectionEngine()
+            features = engine._build_ml_features(
+                logs, 'pts', True,
+                current_matchup='LAL vs. BOS',
+                game_total_line=230.0,
+            )
+        self.assertIn('game_total_line', features)
+        self.assertAlmostEqual(features['game_total_line'], 230.0)
+        self.assertIn('opp_hist_games', features)
 
 
 if __name__ == '__main__':
