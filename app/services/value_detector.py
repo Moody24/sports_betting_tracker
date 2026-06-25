@@ -9,7 +9,7 @@ import logging
 import math
 import time as _time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
+from datetime import date as _date, datetime
 from itertools import combinations
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -131,6 +131,7 @@ class ValueDetector:
         team_name: str = '',
         is_home: bool = True,
         game_id: str = '',
+        game_date: Optional[_date] = None,
     ) -> dict:
         """Score a single player prop for value.
 
@@ -150,6 +151,7 @@ class ValueDetector:
         """
         proj = self.engine.project_stat(
             player_name, prop_type, opponent_name, team_name, is_home,
+            game_date=game_date,
         )
 
         projection = proj['projection']
@@ -441,6 +443,14 @@ class ValueDetector:
                         player_team_map=player_team_map,
                     )
 
+                    _start_time_str = game.get('start_time', '')[:10]
+                    try:
+                        _game_date: Optional[_date] = (
+                            _date.fromisoformat(_start_time_str) if _start_time_str else None
+                        )
+                    except ValueError:
+                        _game_date = None
+
                     score = self.score_prop(
                         player_name=player,
                         prop_type=market_key,
@@ -451,12 +461,13 @@ class ValueDetector:
                         team_name=team_name,
                         is_home=is_home,
                         game_id=espn_id,
+                        game_date=_game_date,
                     )
 
                     # Add game context to score
                     score['home_team'] = home_team
                     score['away_team'] = away_team
-                    score['match_date'] = game.get('start_time', '')[:10]
+                    score['match_date'] = _start_time_str
 
                     all_scores.append(score)
 

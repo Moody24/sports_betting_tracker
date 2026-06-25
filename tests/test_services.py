@@ -1337,7 +1337,7 @@ class TestProjectionEngine(BaseTestCase):
             self._setup_engine_data()
             engine = ProjectionEngine()
             with patch.object(engine, 'project_stat') as mock_project:
-                def side_effect(player_name, prop_type, opponent_name='', team_name='', is_home=True):
+                def side_effect(player_name, prop_type, opponent_name='', team_name='', is_home=True, game_date=None, **kwargs):
                     if prop_type == 'player_points_rebounds_assists':
                         return ProjectionEngine.project_stat(engine, player_name, prop_type, opponent_name, team_name, is_home)
                     mapping = {
