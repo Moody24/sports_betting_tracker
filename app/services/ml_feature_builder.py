@@ -329,4 +329,8 @@ def build_ml_features_from_history(
     features['opp_pace'] = opp_pace
     features['opp_stat_allowed'] = opp_stat_allowed
 
+    assert list(features.keys()) == FEATURE_KEYS, (
+        f"Feature key mismatch: got {list(features.keys())}, expected {FEATURE_KEYS}"
+    )
+
     return features
