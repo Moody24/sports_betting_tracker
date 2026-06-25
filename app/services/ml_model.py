@@ -526,6 +526,9 @@ def predict_stat(stat_type: str, features: dict) -> float:
 
     try:
         import numpy as np
+        missing = [k for k in feature_names if k not in features]
+        if missing:
+            logger.warning("Missing features at inference — zero-filled: %s", missing)
         X = np.array([[features.get(k, 0) for k in feature_names]])
         prediction = float(model.predict(X)[0])
         return round(prediction, 1)

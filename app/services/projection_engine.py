@@ -378,7 +378,8 @@ class ProjectionEngine:
         if len(logs) < 10:
             return 0.0
 
-        recent_vals = [getattr(lg, stat_key, 0) or 0 for lg in logs[:last_n]]
+        logs = sorted(logs, key=lambda x: (getattr(x, 'game_date', None) is None, getattr(x, 'game_date', None) or _date.min))
+        recent_vals = [getattr(lg, stat_key, 0) or 0 for lg in logs[-last_n:]]
         all_vals = [getattr(lg, stat_key, 0) or 0 for lg in logs]
 
         if not recent_vals or not all_vals:
