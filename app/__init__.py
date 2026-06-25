@@ -29,7 +29,7 @@ login_manager = LoginManager()
 csrf = CSRFProtect()
 limiter = Limiter(
     key_func=get_remote_address,
-    default_limits=[],
+    default_limits=["200 per hour", "50 per minute"],
     storage_uri=os.getenv('RATELIMIT_STORAGE_URI', 'memory://'),
 )
 
@@ -105,6 +105,15 @@ def create_app(testing=False):
     login_manager.init_app(app)
     csrf.init_app(app)
     limiter.init_app(app)
+
+    web_concurrency = int(os.environ.get("WEB_CONCURRENCY", 1))
+    storage_uri = app.config.get("RATELIMIT_STORAGE_URI", "memory://")
+    if web_concurrency > 1 and storage_uri.startswith("memory://"):
+        app.logger.warning(
+            "RATELIMIT_STORAGE_URI is 'memory://' with WEB_CONCURRENCY=%d — "
+            "rate limits are per-worker and NOT shared across processes.",
+            web_concurrency,
+        )
 
     login_manager.login_view = 'auth.login'
     login_manager.login_message_category = 'info'

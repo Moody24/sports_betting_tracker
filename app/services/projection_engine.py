@@ -9,6 +9,8 @@ import math
 import os
 import time as _time
 from copy import deepcopy
+from datetime import date as _date, timedelta
+from typing import Optional
 
 from app.models import PlayerGameLog
 from app.services.stats_service import (
@@ -101,6 +103,7 @@ class ProjectionEngine:
         team_name: str = '',
         is_home: bool = True,
         game_total_line: float = 0.0,
+        game_date: Optional[_date] = None,
     ) -> dict:
         """Generate a projection for a single player-stat combination.
 
@@ -119,6 +122,7 @@ class ProjectionEngine:
             str(team_name).strip().lower(),
             bool(is_home),
             float(game_total_line or 0.0),
+            game_date,
         )
         if cache_key in self._projection_cache:
             return deepcopy(self._projection_cache[cache_key])
@@ -132,6 +136,7 @@ class ProjectionEngine:
                     opponent_name,
                     team_name,
                     is_home,
+                    game_date=game_date,
                 )
                 for component in components
             }
@@ -324,6 +329,7 @@ class ProjectionEngine:
                 current_matchup=_current_matchup,
                 game_total_line=game_total_line,
                 defense_lookup=_defense_lookup,
+                game_date=game_date,
             )
             if ml_features:
                 try:
@@ -435,27 +441,24 @@ class ProjectionEngine:
         current_matchup: str = '',
         game_total_line: float = 0.0,
         defense_lookup: dict = None,
+        game_date: Optional[_date] = None,
     ) -> dict:
         if len(logs) < 10:
             return {}
 
-        # Infer next game date as last-log-date + 1 day (best available at inference time)
-        sorted_dates = sorted(
-            (getattr(g, 'game_date', None) for g in logs if getattr(g, 'game_date', None)),
-        )
-        next_game_date = (sorted_dates[-1] + __import__('datetime').timedelta(days=1)) if sorted_dates else None
+        if game_date is None:
+            # Caller did not supply the real scheduled date — fall back to the
+            # last-log-date + 1 day approximation so existing call sites
+            # (analysis routes, CLI) continue to work unchanged.
+            last_date = None
+            for lg in reversed(logs):
+                d = getattr(lg, 'game_date', None)
+                if d is not None:
+                    last_date = d
+                    break
+            game_date = (last_date + timedelta(days=1)) if last_date else None
 
         usage_features = self._compute_team_usage_features(logs)
-
-        # Approximate next-game date: one day after the most recent log.
-        import datetime as _dt
-        last_date = None
-        for lg in reversed(logs):
-            d = getattr(lg, 'game_date', None)
-            if d is not None:
-                last_date = d
-                break
-        next_game_date = (last_date + _dt.timedelta(days=1)) if last_date else None
 
         return build_ml_features_from_history(
             prior_logs=logs,
@@ -463,7 +466,7 @@ class ProjectionEngine:
             stat_key=stat_key,
             team_totals=usage_features['team_totals'],
             team_counts=usage_features['team_counts'],
-            current_game_date=next_game_date,
+            current_game_date=game_date,
             current_matchup=current_matchup,
             game_total_line=game_total_line,
             defense_lookup=defense_lookup,
@@ -510,6 +513,7 @@ class ProjectionEngine:
         opponent_name: str = '',
         team_name: str = '',
         is_home: bool = True,
+        game_date: Optional[_date] = None,
     ) -> dict:
         """Project all stat types for a player.
 
@@ -519,5 +523,6 @@ class ProjectionEngine:
         for prop_type in tuple(PROP_STAT_KEY) + tuple(COMBO_PROP_COMPONENTS):
             results[prop_type] = self.project_stat(
                 player_name, prop_type, opponent_name, team_name, is_home,
+                game_date=game_date,
             )
         return results

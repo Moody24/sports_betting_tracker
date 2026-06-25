@@ -252,6 +252,8 @@ def manual_parlay():
 
     legs = data.get("legs", [])
     outcome = data.get("outcome", Outcome.PENDING.value)
+    if outcome != Outcome.PENDING.value:
+        return jsonify({"success": False, "message": "New bets must be PENDING"}), 400
 
     if not legs:
         return jsonify({"error": "Add at least one leg"}), 400
@@ -296,7 +298,11 @@ def manual_parlay():
             try:
                 prop_line = float(leg["prop_line"])
             except (ValueError, TypeError):
-                pass
+                errors.append(f"Leg {i + 1}: prop_line must be a number")
+                continue
+            if not (-50 < prop_line < 100):
+                errors.append(f"Leg {i + 1}: prop_line out of range (-50, 100)")
+                continue
 
         ou_line = None
         if bet_type in (BetType.OVER.value, BetType.UNDER.value) and not player_name:
@@ -310,9 +316,13 @@ def manual_parlay():
         if leg_odds not in (None, ""):
             try:
                 parsed_odds = int(leg_odds)
-                if parsed_odds == 0:
-                    parsed_odds = None
             except (TypeError, ValueError):
+                errors.append(f"Leg {i + 1}: american_odds must be an integer")
+                continue
+            if not (-5000 <= parsed_odds <= 5000):
+                errors.append(f"Leg {i + 1}: american_odds out of range (-5000, 5000)")
+                continue
+            if parsed_odds == 0:
                 parsed_odds = None
 
         bet_obj = Bet(
