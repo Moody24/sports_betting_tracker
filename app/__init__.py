@@ -6,7 +6,7 @@ import sys
 from time import perf_counter
 from datetime import datetime, timezone
 
-from flask import Flask, g, render_template
+from flask import Flask, g, render_template, request
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_login import LoginManager, current_user
@@ -30,7 +30,6 @@ csrf = CSRFProtect()
 limiter = Limiter(
     key_func=get_remote_address,
     default_limits=["200 per hour", "50 per minute"],
-    storage_uri=os.getenv('RATELIMIT_STORAGE_URI', 'memory://'),
 )
 
 
@@ -100,6 +99,7 @@ def create_app(testing=False):
     app.config['SQLALCHEMY_ENGINE_OPTIONS'] = engine_options
     app.config['WTF_CSRF_ENABLED'] = True
     app.config['RATELIMIT_ENABLED'] = os.getenv('RATELIMIT_ENABLED', 'true').lower() == 'true'
+    app.config['RATELIMIT_STORAGE_URI'] = os.getenv('RATELIMIT_STORAGE_URI', 'memory://')
     app.config['SESSION_COOKIE_HTTPONLY'] = True
     app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
     # In production behind HTTPS (Railway), cookies must be Secure.
@@ -147,6 +147,8 @@ def create_app(testing=False):
 
     @app.context_processor
     def inject_user():
+        if request.endpoint in ('health', 'ready', 'healthcheck', None):
+            return {}
         return {
             'current_user': current_user,
             'current_year': datetime.now(timezone.utc).year,
@@ -164,6 +166,7 @@ def create_app(testing=False):
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['X-Frame-Options'] = 'SAMEORIGIN'
         response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+        # unsafe-inline required for Jinja2 inline scripts; no user-controlled content in script-src
         response.headers['Content-Security-Policy'] = (
             "default-src 'self'; "
             "script-src 'self' https://cdn.jsdelivr.net; "
@@ -173,6 +176,8 @@ def create_app(testing=False):
             "connect-src 'self'; "
             "frame-ancestors 'none';"
         )
+        if not app.debug:
+            response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
         return response
 
     @app.before_request

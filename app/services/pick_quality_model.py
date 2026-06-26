@@ -284,7 +284,7 @@ def train_pick_quality_model(user_id: int | None = None) -> dict:
         from sklearn.calibration import CalibratedClassifierCV
         # Isotonic regression overfits with small calibration sets (scikit-learn docs).
         # Use sigmoid (Platt scaling) unless we have a large enough calibration set.
-        # Note: cv='prefit' is deprecated in newer scikit-learn — revisit when upgrading.
+        # cv='prefit': calibration uses the same data as training — monitor for overfit if cal set < 200 samples
         method = 'isotonic' if len(X_val) >= 1000 else 'sigmoid'
         calibrated = CalibratedClassifierCV(model, method=method, cv='prefit')
         calibrated.fit(X_val, y_val)
