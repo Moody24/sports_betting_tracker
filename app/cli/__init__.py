@@ -2,13 +2,13 @@
 
 import logging
 from datetime import datetime, timezone, timedelta
-from zoneinfo import ZoneInfo
 
 from app import db
 from app.models import Bet, PickContext
+from app.utils.time_helpers import ET
 
 logger = logging.getLogger(__name__)
-APP_TIMEZONE = ZoneInfo("America/New_York")
+APP_TIMEZONE = ET
 
 BACKFILL_COMMIT_BATCH = 300
 MAX_FETCH_FAILURES = 3

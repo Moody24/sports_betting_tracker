@@ -18,6 +18,7 @@ from app.config_display import PROP_STAT_KEY
 from app.models import ModelMetadata, PlayerGameLog, TeamDefenseSnapshot
 from app.services.model_storage import materialize_model_artifact, persist_model_artifact
 from app.services.ml_feature_builder import build_ml_features_from_history, build_team_game_aggregates
+from app.utils.time_helpers import ET
 
 logger = logging.getLogger(__name__)
 
@@ -121,8 +122,6 @@ def check_defense_snapshot_staleness() -> dict:
     Returns dict with keys ``stale`` (bool), ``days_old`` (int or None),
     ``latest_date`` (date or None).
     """
-    from zoneinfo import ZoneInfo
-
     latest = (
         TeamDefenseSnapshot.query
         .order_by(TeamDefenseSnapshot.snapshot_date.desc())
@@ -132,7 +131,7 @@ def check_defense_snapshot_staleness() -> dict:
     if latest is None:
         return {"stale": True, "days_old": None, "latest_date": None}
 
-    today = datetime.now(ZoneInfo("America/New_York")).date()
+    today = datetime.now(ET).date()
     days_old = (today - latest.snapshot_date).days
     stale = days_old > 7
     if stale:

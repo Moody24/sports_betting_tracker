@@ -7,16 +7,15 @@ engine's matchup adjustment calculations.
 import logging
 import time
 from datetime import datetime, timezone, date as date_type
-from zoneinfo import ZoneInfo
 
 from app.config_display import STAT_KEY_TO_OPP_ALLOWED, PROP_TO_OPP_ALLOWED
-from app.utils.time_helpers import et_today
+from app.utils.time_helpers import et_today, ET
 
 from app import db
 from app.models import TeamDefenseSnapshot
 
 logger = logging.getLogger(__name__)
-APP_TIMEZONE = ZoneInfo("America/New_York")
+APP_TIMEZONE = ET
 
 _NBA_API_DELAY = 0.6
 

@@ -12,7 +12,8 @@ import random
 import secrets
 import tempfile
 from datetime import datetime, timezone, timedelta, time as dt_time
-from zoneinfo import ZoneInfo
+
+from app.utils.time_helpers import ET
 
 try:
     from apscheduler.schedulers.background import BackgroundScheduler
@@ -23,7 +24,7 @@ except ModuleNotFoundError:  # pragma: no cover - handled in environments withou
 
 logger = logging.getLogger(__name__)
 
-APP_TIMEZONE = "US/Eastern"
+APP_TIMEZONE = "America/New_York"
 AUTO_PICK_MAX_TOTAL = int(os.getenv('AUTO_PICK_MAX_TOTAL', '50'))
 AUTO_PICK_MIN_EDGE_STRAIGHT = float(os.getenv('AUTO_PICK_MIN_EDGE_STRAIGHT', '0.15'))
 AUTO_PICK_MIN_EDGE_2LEG = float(os.getenv('AUTO_PICK_MIN_EDGE_2LEG', '0.15'))
@@ -412,7 +413,7 @@ def generate_daily_auto_picks():
 
     app = _get_app()
     with app.app_context():
-        today = datetime.now(ZoneInfo("America/New_York")).date()
+        today = datetime.now(ET).date()
         day_start = datetime.combine(today, dt_time.min)
         day_end = day_start + timedelta(days=1)
 
@@ -803,24 +804,30 @@ def resolve_and_grade():
         for bet_obj, outcome, actual_value in resolved:
             bet_obj.outcome = outcome
             bet_obj.actual_total = actual_value
-        db.session.commit()
         logger.info("Graded %d bets", len(resolved))
 
-        # Generate postmortems for newly settled player-prop legs
+        # Generate postmortems for newly settled player-prop legs.
+        # Each postmortem is wrapped in a savepoint so a single failure
+        # rolls back only that write without aborting the outer transaction.
         from app.services.postmortem_service import create_or_update_postmortem
         pm_count = 0
         for bet_obj, _outcome, _val in resolved:
             try:
+                sp = db.session.begin_nested()
                 result = create_or_update_postmortem(bet_obj)
                 if result is not None:
                     pm_count += 1
+                sp.commit()
             except Exception as exc:
+                sp.rollback()
                 logger.warning("Postmortem error for bet_id=%s: %s", bet_obj.id, exc)
         if pm_count:
             logger.info("Created/updated %d postmortems", pm_count)
 
         # Mark any final-game snapshots as is_final so NBA Today shows them.
+        # Wrapped in a savepoint so snapshot failures don't abort the bet/postmortem writes.
         try:
+            sp_snap = db.session.begin_nested()
             scoreboards = fetch_espn_scoreboard()
             for game in scoreboards:
                 if game.get('status') != _STATUS_FINAL:
@@ -830,9 +837,13 @@ def resolve_and_grade():
                     snap.is_final = True
                     snap.home_score = game['home']['score']
                     snap.away_score = game['away']['score']
-            db.session.commit()
+            sp_snap.commit()
         except Exception as exc:
+            sp_snap.rollback()
             logger.warning("Snapshot final-mark failed: %s", exc)
+
+        # Single outer commit persists all writes atomically.
+        db.session.commit()
 
 
 def retrain_models():
@@ -1069,7 +1080,7 @@ def run_recent_snapshot_backfill_job():
 
         lookback_days = int(os.getenv('GAME_SNAPSHOT_BACKFILL_DAYS', '45'))
         sleep_seconds = float(os.getenv('GAME_SNAPSHOT_BACKFILL_SLEEP', '0.05'))
-        end_date = datetime.now(ZoneInfo("America/New_York")).date()
+        end_date = datetime.now(ET).date()
         start_date = end_date - timedelta(days=max(1, lookback_days))
         result = backfill_game_snapshots(
             start_date=start_date,
@@ -1092,7 +1103,7 @@ def run_market_coverage_audit_job():
         train_days = int(os.getenv('MARKET_COVERAGE_TRAIN_DAYS', '60'))
         test_days = int(os.getenv('MARKET_COVERAGE_TEST_DAYS', '14'))
         step_days = int(os.getenv('MARKET_COVERAGE_STEP_DAYS', '14'))
-        cutoff = datetime.now(ZoneInfo("America/New_York")).date() - timedelta(days=days)
+        cutoff = datetime.now(ET).date() - timedelta(days=days)
 
         usable_count = (
             db.session.query(GameSnapshot.id)
@@ -1130,7 +1141,7 @@ def run_historical_odds_ingest_job():
         lookback_days = int(os.getenv('HISTORICAL_ODDS_INGEST_DAYS', '120'))
         sleep_seconds = float(os.getenv('HISTORICAL_ODDS_INGEST_SLEEP', '0.05'))
         force = os.getenv('HISTORICAL_ODDS_INGEST_FORCE', 'false').strip().lower() in ('1', 'true', 'yes', 'on')
-        end_date = datetime.now(ZoneInfo("America/New_York")).date()
+        end_date = datetime.now(ET).date()
         start_date = end_date - timedelta(days=max(1, lookback_days))
         result = ingest_historical_market_odds(
             start_date=start_date,
@@ -1229,7 +1240,7 @@ def init_scheduler(app):
     )
     scheduler.add_job(
         lambda: _log_job('injury_am', refresh_injury_reports),
-        CronTrigger(hour=10, minute=0, timezone=APP_TIMEZONE),
+        CronTrigger(hour=10, minute=5, timezone=APP_TIMEZONE),
         id='injury_am',
         replace_existing=True,
     )
