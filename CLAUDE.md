@@ -27,6 +27,7 @@ source .venv/bin/activate && bandit -q -r app -x tests -ll
 ## Key Conventions
 - All dates/times use **ET** (`ZoneInfo("America/New_York")`) — critical for freshness checks and snapshot reads/writes
 - `_is_non_server_invocation()` in `app/__init__.py` guards scheduler startup — never start APScheduler in pytest/alembic/CLI contexts
+- Scheduler has 17 registered jobs as of 2026-06-26
 - ML model artifacts (`app/ml_models/*.json`) are gitignored — regenerate with `flask retrain --force`
 
 ## Skills (load on demand)
