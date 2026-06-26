@@ -248,7 +248,7 @@ def manual_parlay():
     """Place a manually-built parlay from the bet builder."""
     data = request.get_json(silent=True)
     if not data:
-        return jsonify({"error": "Invalid request"}), 400
+        return jsonify({"success": False, "message": "Invalid request"}), 400
 
     legs = data.get("legs", [])
     outcome = data.get("outcome", Outcome.PENDING.value)
@@ -256,14 +256,14 @@ def manual_parlay():
         return jsonify({"success": False, "message": "New bets must be PENDING"}), 400
 
     if not legs:
-        return jsonify({"error": "Add at least one leg"}), 400
+        return jsonify({"success": False, "message": "Add at least one leg"}), 400
 
     try:
         stake = float(data.get("stake") or 0)
     except (TypeError, ValueError):
-        return jsonify({"error": "Stake must be a number"}), 400
+        return jsonify({"success": False, "message": "Stake must be a number"}), 400
     if stake <= 0:
-        return jsonify({"error": "Stake must be greater than zero"}), 400
+        return jsonify({"success": False, "message": "Stake must be greater than zero"}), 400
 
     units_val = None
     if data.get("units") is not None:
@@ -350,7 +350,7 @@ def manual_parlay():
 
     if errors:
         db.session.rollback()
-        return jsonify({"error": "; ".join(errors)}), 400
+        return jsonify({"success": False, "message": "; ".join(errors)}), 400
 
     db.session.flush()
     detector = ValueDetector(ProjectionEngine())
@@ -380,15 +380,15 @@ def manual_parlay():
 def ocr_screenshot():
     """Accept a PNG/JPG screenshot, OCR it, and return parsed bet fields as JSON."""
     if 'screenshot' not in request.files:
-        return jsonify({'error': 'No file provided'}), 400
+        return jsonify({"success": False, "message": "No file provided"}), 400
 
     file = request.files['screenshot']
     if not file or not file.filename:
-        return jsonify({'error': 'No file selected'}), 400
+        return jsonify({"success": False, "message": "No file selected"}), 400
 
     allowed_ext = ('.png', '.jpg', '.jpeg', '.webp', '.bmp')
     if not file.filename.lower().endswith(allowed_ext):
-        return jsonify({'error': 'Only PNG/JPG/WEBP images are supported'}), 400
+        return jsonify({"success": False, "message": "Only PNG/JPG/WEBP images are supported"}), 400
 
     allowed_mimetypes = {'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'application/pdf'}
     if file.content_type not in allowed_mimetypes:
@@ -399,7 +399,8 @@ def ocr_screenshot():
         import pytesseract
     except ImportError:
         return jsonify({
-            'error': (
+            "success": False,
+            "message": (
                 'OCR requires pytesseract + Pillow. '
                 'Run: pip install pytesseract Pillow  '
                 'and install the tesseract-ocr system package.'
@@ -424,4 +425,4 @@ def ocr_screenshot():
 
     except Exception as exc:
         logger.error("OCR processing failed: %s", exc)
-        return jsonify({'error': 'OCR processing failed. Please try a clearer image.'}), 500
+        return jsonify({"success": False, "message": "OCR processing failed. Please try a clearer image."}), 500

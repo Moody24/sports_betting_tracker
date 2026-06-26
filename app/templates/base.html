@@ -201,5 +201,14 @@
       toast.addEventListener('animationend', function() { toast.remove(); }, { once: true });
     }
   </script>
+  <script>
+    // Clear parlay queue from storage on logout to avoid stale state for the next session
+    document.querySelectorAll('form[action*="logout"]').forEach(function(form) {
+      form.addEventListener('submit', function() {
+        localStorage.removeItem('parlayQueue');
+        sessionStorage.removeItem('parlayQueue');
+      });
+    });
+  </script>
 </body>
 </html>

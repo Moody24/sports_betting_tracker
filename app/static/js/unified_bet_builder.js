@@ -844,7 +844,8 @@
   });
 
   // Keep odds current while user is on the page.
-  setInterval(function () {
+  const _oddsRefreshInterval = setInterval(function () {
     refreshData(false);
   }, 60000);
+  void _oddsRefreshInterval; // stored to prevent unintended GC and allow future clearInterval
 })();

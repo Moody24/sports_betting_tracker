@@ -1201,6 +1201,30 @@ def _update_final_snapshots():
             logger.warning("Snapshot final-mark failed: %s", exc)
 
 
+def _watchdog_check_stale_jobs():
+    """Log a warning for any scheduled job that hasn't run in 2x its expected interval."""
+    from datetime import timezone as _tz
+    now = datetime.now(tz=_tz.utc)
+    app = _get_app()
+    with app.app_context():
+        from app.models import JobLog
+        logs = JobLog.query.order_by(JobLog.job_name, JobLog.created_at.desc()).all()
+        seen = {}
+        for log in logs:
+            if log.job_name not in seen:
+                seen[log.job_name] = log.created_at
+        if scheduler is None:
+            return
+        for job in scheduler.get_jobs():
+            last_run = seen.get(job.id)
+            if last_run and hasattr(job, 'trigger'):
+                last_run_utc = last_run.replace(tzinfo=_tz.utc) if last_run.tzinfo is None else last_run
+                if (now - last_run_utc).total_seconds() > 3600:
+                    logger.warning(
+                        "Stale job detected: %s last ran at %s", job.id, last_run
+                    )
+
+
 def init_scheduler(app):
     """Register all scheduled jobs.  Called once from create_app()."""
     global _scheduler_app
@@ -1349,6 +1373,14 @@ def init_scheduler(app):
         lambda: _log_job('snapshot_props_odds', snapshot_props_odds),
         CronTrigger(hour='8,10,12,14,16,18,20,22', timezone=APP_TIMEZONE),
         id='snapshot_props_odds',
+        replace_existing=True,
+    )
+
+    # Watchdog: warn if any scheduled job hasn't run in over 60 minutes (every 30 min)
+    scheduler.add_job(
+        _watchdog_check_stale_jobs,
+        trigger=CronTrigger(minute='*/30', timezone=APP_TIMEZONE),
+        id='watchdog_stale_jobs',
         replace_existing=True,
     )
 

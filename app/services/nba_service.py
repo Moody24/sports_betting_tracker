@@ -1,7 +1,9 @@
 import logging
 import os
+import re
 import time as _time
 from datetime import datetime, timezone, timedelta, date as date_type
+from difflib import SequenceMatcher
 from typing import Optional
 
 import requests
@@ -1300,3 +1302,181 @@ class NBAService(SportService):
 
 # Register so other code can do  get_sport_service("nba")
 SPORT_REGISTRY["nba"] = NBAService()
+
+
+# ── Card progress helpers (extracted from routes/nba_live.py) ─────────────
+
+def _normalize_player_name(value: str) -> str:
+    """Normalise a player name for fuzzy matching."""
+    return re.sub(r'[^a-z0-9]+', ' ', (value or '').lower()).strip()
+
+
+def _extract_prop_boxscore_from_summary(summary_data: dict) -> dict:
+    """Extract prop-relevant player stats from ESPN summary payload."""
+    stat_column_map = PROP_ESPN_COLUMN
+    player_stats: dict = {}
+    for team_block in summary_data.get("boxscore", {}).get("players", []):
+        for stat_block in team_block.get("statistics", []):
+            column_names: list[str] = stat_block.get("names", [])
+            for athlete in stat_block.get("athletes", []):
+                name = athlete.get("athlete", {}).get("displayName", "")
+                if not name:
+                    continue
+                raw_stats: list[str] = athlete.get("stats", [])
+                entry: dict = {}
+                for prop_type, col_header in stat_column_map.items():
+                    if col_header not in column_names:
+                        continue
+                    idx = column_names.index(col_header)
+                    if idx >= len(raw_stats):
+                        continue
+                    raw = raw_stats[idx]
+                    if "-" in str(raw):
+                        raw = str(raw).split("-")[0]
+                    try:
+                        entry[prop_type] = float(raw)
+                    except (ValueError, TypeError):
+                        continue
+                if entry:
+                    entry["player_points_rebounds_assists"] = (
+                        float(entry.get("player_points", 0) or 0)
+                        + float(entry.get("player_rebounds", 0) or 0)
+                        + float(entry.get("player_assists", 0) or 0)
+                    )
+                    player_stats[name] = entry
+    return player_stats
+
+
+def _clock_str_to_seconds(clock_value: str) -> int:
+    if not clock_value or ':' not in str(clock_value):
+        return 0
+    parts = str(clock_value).split(':')
+    if len(parts) != 2:
+        return 0
+    try:
+        return int(parts[0]) * 60 + int(parts[1])
+    except (TypeError, ValueError):
+        return 0
+
+
+def _estimate_game_elapsed_ratio(period, clock: str, game_state: str) -> float:
+    total_seconds = 48 * 60
+    if game_state == 'final':
+        return 1.0
+    if game_state == 'pregame':
+        return 0.0
+    p = max(1, int(period or 1))
+    period_elapsed = 12 * 60 - _clock_str_to_seconds(clock)
+    elapsed = (p - 1) * 12 * 60 + max(0, min(12 * 60, period_elapsed))
+    return max(0.0, min(1.0, elapsed / total_seconds))
+
+
+def derive_game_status_from_summary(summary_data: dict) -> dict:
+    """Derive game status fields from an ESPN summary payload."""
+    status_type = (
+        summary_data.get('header', {})
+        .get('competitions', [{}])[0]
+        .get('status', {})
+        .get('type', {})
+    )
+    short_detail = status_type.get('shortDetail', '')
+    detail = status_type.get('detail') or status_type.get('description') or short_detail or 'Status unavailable'
+    status_name = (status_type.get('name') or '').upper()
+    status_text = f"{status_name}: {detail}".strip(': ').strip()
+    period = int(status_type.get('period') or 0) if str(status_type.get('period') or '').isdigit() else 0
+    clock = status_type.get('displayClock') or ''
+
+    if status_name in {'STATUS_FINAL', 'FINAL'}:
+        game_state = 'final'
+    elif status_name in {'STATUS_SCHEDULED', 'STATUS_PRE'}:
+        game_state = 'pregame'
+    elif 'HALFTIME' in status_name:
+        game_state = 'halftime'
+    else:
+        game_state = 'live'
+
+    elapsed_ratio = _estimate_game_elapsed_ratio(period, clock, game_state)
+    return {
+        'status_text': status_text,
+        'period': period,
+        'clock': clock,
+        'game_state': game_state,
+        'elapsed_ratio': elapsed_ratio,
+    }
+
+
+def resolve_card_progress(
+    espn_id: str, player_name: str, prop_type: str, line: float,
+    bet_type: str, summary_data: dict,
+) -> dict:
+    """Derive the progress payload for one player-prop from a pre-fetched ESPN summary.
+
+    Extracted from ``app.routes.nba_live`` so it can be reused by other services.
+    """
+    from app.utils import safe_float  # local import to avoid circular dependency at module load
+
+    boxscore = _extract_prop_boxscore_from_summary(summary_data)
+    if not boxscore:
+        return {'ok': False, 'status': 'game_not_started', 'error': 'No boxscore data available yet'}
+
+    target = _normalize_player_name(player_name)
+    best_name = None
+    best_stats = None
+    best_score = 0.0
+    for candidate_name, stats in boxscore.items():
+        candidate_norm = _normalize_player_name(candidate_name)
+        if not candidate_norm:
+            continue
+        score = SequenceMatcher(None, target, candidate_norm).ratio()
+        if target == candidate_norm:
+            score = 1.0
+        elif (
+            len(target) >= 8 and len(candidate_norm) >= 8
+            and (target in candidate_norm or candidate_norm in target)
+        ):
+            score = max(score, 0.92)
+        if score > best_score:
+            best_score = score
+            best_name = candidate_name
+            best_stats = stats
+
+    if best_name is None or best_score < 0.85:
+        return {'ok': False, 'error': f'Player not found in boxscore for {player_name}'}
+
+    stat_val = None if not best_stats else best_stats.get(prop_type)
+    if stat_val is None:
+        return {'ok': False, 'error': f'Stat {prop_type} unavailable for {best_name}', 'player': best_name}
+
+    status_meta = derive_game_status_from_summary(summary_data)
+    current_stat = safe_float(stat_val, 0.0)
+    elapsed_ratio = status_meta['elapsed_ratio']
+    projected_final = current_stat if elapsed_ratio <= 0 else current_stat / max(elapsed_ratio, 0.01)
+    progress_pct = 0.0
+    delta_to_line = current_stat - line
+    if line > 0:
+        progress_pct = max(0.0, min(200.0, (current_stat / line) * 100.0))
+
+    on_track = None
+    if line > 0 and bet_type in (BetType.OVER.value, BetType.UNDER.value):
+        on_track = projected_final >= line if bet_type == BetType.OVER.value else projected_final <= line
+
+    return {
+        'ok': True,
+        'player': best_name,
+        'prop_type': prop_type,
+        'bet_type': bet_type,
+        'line': line,
+        'current_stat': round(current_stat, 2),
+        'stat': round(current_stat, 2),
+        'status_text': status_meta['status_text'],
+        'status': status_meta['status_text'],
+        'period': status_meta['period'],
+        'clock': status_meta['clock'],
+        'game_state': status_meta['game_state'],
+        'elapsed_ratio': round(elapsed_ratio, 4),
+        'projected_final': round(projected_final, 2),
+        'progress_pct': round(progress_pct, 1),
+        'delta_to_line': round(delta_to_line, 2),
+        'on_track': on_track,
+        'match_score': round(best_score, 3),
+    }

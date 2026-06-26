@@ -159,7 +159,18 @@
     });
 
     pollBatch(cards);
-    setInterval(() => pollBatch(cards), 30000);
+    const _pollInterval = setInterval(() => pollBatch(cards), 30000);
+    // Stop polling once all tracked cards report a final game state
+    function _checkAllFinal() {
+      const allFinal = cards.every(
+        (card) => card.dataset.gameState === 'final' || card.dataset.gameState === 'STATUS_FINAL'
+      );
+      if (allFinal) {
+        clearInterval(_pollInterval);
+      }
+    }
+    const _finalCheckInterval = setInterval(_checkAllFinal, 30000);
+    void _finalCheckInterval; // retained for GC clarity
   }
 
   document.querySelectorAll('.parlay-toggle-btn').forEach(function (btn) {

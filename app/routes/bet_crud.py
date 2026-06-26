@@ -480,11 +480,16 @@ def grade_bet(bet_id):
         flash('Invalid outcome.', 'danger')
         return redirect(request.referrer or url_for('bet.place_bet'))
     bet_obj.outcome = outcome
-    db.session.commit()
     try:
-        create_or_update_postmortem(bet_obj)
-    except Exception:
-        logger.exception("Postmortem failed for manually graded bet_id=%s", bet_obj.id)
+        sp = db.session.begin_nested()
+        try:
+            create_or_update_postmortem(bet_obj)
+            sp.commit()
+        except Exception:
+            sp.rollback()
+            logger.exception("Postmortem failed for manually graded bet_id=%s", bet_obj.id)
+    finally:
+        db.session.commit()
     flash(f'Bet graded as {outcome}.', 'success')
     return redirect(request.referrer or url_for('bet.place_bet'))
 
