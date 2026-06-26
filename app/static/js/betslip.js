@@ -234,7 +234,9 @@
       html += '</div>';
     });
 
-    container.innerHTML = html;
+    var parser = new DOMParser();
+    var doc = parser.parseFromString(html, 'text/html');
+    container.replaceChildren.apply(container, Array.from(doc.body.childNodes));
     container.querySelectorAll('.prop-btn').forEach(function (b) {
       b.addEventListener('click', function () { handlePropClick(b); });
     });
@@ -328,7 +330,9 @@
       html += '  </div>';
       html += '</div>';
     });
-    slipLegsEl.innerHTML = html;
+    var _slipParser = new DOMParser();
+    var _slipDoc = _slipParser.parseFromString(html, 'text/html');
+    slipLegsEl.replaceChildren.apply(slipLegsEl, Array.from(_slipDoc.body.childNodes));
 
     slipLegsEl.querySelectorAll('.slip-remove').forEach(function (btn) {
       btn.addEventListener('click', function () {

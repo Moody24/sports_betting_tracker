@@ -22,6 +22,7 @@ from app.services.nba_service import (
     fetch_player_props_for_event,
     resolve_pending_bets,
     get_player_props,
+    resolve_card_progress as _resolve_card_progress,
     ESPN_SUMMARY_URL,
     APP_TIMEZONE as NBA_APP_TIMEZONE,
 )
@@ -220,78 +221,6 @@ def _get_game_summary(espn_id: str, now_monotonic: float) -> dict:
         data = {}
     _GAME_SUMMARY_CACHE[espn_id] = {'data': data, 'expires_at': now_monotonic + _GAME_SUMMARY_TTL}
     return data
-
-
-def _resolve_card_progress(
-    espn_id: str, player_name: str, prop_type: str, line: float,
-    bet_type: str, summary_data: dict,
-) -> dict:
-    """Derive the progress payload for one player-prop from a pre-fetched ESPN summary."""
-    boxscore = _extract_prop_boxscore(summary_data)
-    if not boxscore:
-        return {'ok': False, 'status': 'game_not_started', 'error': 'No boxscore data available yet'}
-
-    target = _normalize_name(player_name)
-    best_name = None
-    best_stats = None
-    best_score = 0.0
-    for candidate_name, stats in boxscore.items():
-        candidate_norm = _normalize_name(candidate_name)
-        if not candidate_norm:
-            continue
-        score = SequenceMatcher(None, target, candidate_norm).ratio()
-        if target == candidate_norm:
-            score = 1.0
-        elif (
-            len(target) >= 8 and len(candidate_norm) >= 8
-            and (target in candidate_norm or candidate_norm in target)
-        ):
-            score = max(score, 0.92)
-        if score > best_score:
-            best_score = score
-            best_name = candidate_name
-            best_stats = stats
-
-    if best_name is None or best_score < 0.85:
-        return {'ok': False, 'error': f'Player not found in boxscore for {player_name}'}
-
-    stat_val = None if not best_stats else best_stats.get(prop_type)
-    if stat_val is None:
-        return {'ok': False, 'error': f'Stat {prop_type} unavailable for {best_name}', 'player': best_name}
-
-    status_meta = _derive_game_status(summary_data)
-    current_stat = safe_float(stat_val, 0.0)
-    elapsed_ratio = status_meta['elapsed_ratio']
-    projected_final = current_stat if elapsed_ratio <= 0 else current_stat / max(elapsed_ratio, 0.01)
-    progress_pct = 0.0
-    delta_to_line = current_stat - line
-    if line > 0:
-        progress_pct = max(0.0, min(200.0, (current_stat / line) * 100.0))
-
-    on_track = None
-    if line > 0 and bet_type in (BetType.OVER.value, BetType.UNDER.value):
-        on_track = projected_final >= line if bet_type == BetType.OVER.value else projected_final <= line
-
-    return {
-        'ok': True,
-        'player': best_name,
-        'prop_type': prop_type,
-        'bet_type': bet_type,
-        'line': line,
-        'current_stat': round(current_stat, 2),
-        'stat': round(current_stat, 2),
-        'status_text': status_meta['status_text'],
-        'status': status_meta['status_text'],
-        'period': status_meta['period'],
-        'clock': status_meta['clock'],
-        'game_state': status_meta['game_state'],
-        'elapsed_ratio': round(elapsed_ratio, 4),
-        'projected_final': round(projected_final, 2),
-        'progress_pct': round(progress_pct, 1),
-        'delta_to_line': round(delta_to_line, 2),
-        'on_track': on_track,
-        'match_score': round(best_score, 3),
-    }
 
 
 # ── Routes ────────────────────────────────────────────────────────────────
@@ -592,20 +521,20 @@ def nba_place_bets():
     """Place one or more prop bets from the bet slip."""
     data = request.get_json(silent=True)
     if not data:
-        return jsonify({"error": "Invalid request"}), 400
+        return jsonify({"success": False, "message": "Invalid request"}), 400
 
     legs = data.get("legs", [])
     is_parlay = bool(data.get("is_parlay", False))
 
     if not legs:
-        return jsonify({"error": "No selections provided"}), 400
+        return jsonify({"success": False, "message": "No selections provided"}), 400
 
     try:
         stake = float(data.get("stake") or 0)
     except (TypeError, ValueError):
-        return jsonify({"error": "Stake must be a number"}), 400
+        return jsonify({"success": False, "message": "Stake must be a number"}), 400
     if stake <= 0:
-        return jsonify({"error": "Stake must be greater than zero"}), 400
+        return jsonify({"success": False, "message": "Stake must be greater than zero"}), 400
 
     units_payload = data.get("units")
     units_val = None
@@ -692,7 +621,7 @@ def nba_place_bets():
 
     if errors:
         db.session.rollback()
-        return jsonify({"error": "; ".join(errors)}), 400
+        return jsonify({"success": False, "message": "; ".join(errors)}), 400
 
     db.session.flush()
     detector = ValueDetector(ProjectionEngine())

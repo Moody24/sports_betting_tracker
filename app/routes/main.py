@@ -22,12 +22,40 @@ def _get_model2_probe() -> dict:
 @main.route('/ready')
 def ready():
     """Readiness endpoint that verifies dependencies like the database."""
+    from datetime import datetime, timezone
+    from app.models import TeamDefenseSnapshot
     try:
         db.session.execute(text('SELECT 1'))
-        return jsonify(status='healthy', database='connected'), 200
     except Exception as exc:
         logger.error('Health check failed: %s', exc)
         return jsonify(status='unhealthy', database='disconnected'), 503
+
+    # Staleness check for defense data
+    defense_age_hours = None
+    defense_data_stale = True
+    try:
+        latest_defense = (
+            TeamDefenseSnapshot.query
+            .order_by(TeamDefenseSnapshot.fetched_at.desc())
+            .first()
+        )
+        if latest_defense and latest_defense.fetched_at:
+            fetched = latest_defense.fetched_at
+            if fetched.tzinfo is None:
+                fetched = fetched.replace(tzinfo=timezone.utc)
+            defense_age_hours = round(
+                (datetime.now(timezone.utc) - fetched).total_seconds() / 3600, 2
+            )
+            defense_data_stale = defense_age_hours > 24
+    except Exception as exc:
+        logger.warning('Defense staleness check failed: %s', exc)
+
+    return jsonify(
+        status='healthy',
+        database='connected',
+        defense_data_age_hours=defense_age_hours,
+        defense_data_stale=defense_data_stale,
+    ), 200
 
 
 @main.route('/ready/model2')
