@@ -12,12 +12,12 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date as _date, datetime
 from itertools import combinations
 from typing import Optional
-from zoneinfo import ZoneInfo
 
 from app.models import PlayerGameLog
 from app.services.pick_quality_model import predict_pick_quality
 from app.services.projection_engine import ProjectionEngine
 from app.services.feature_engine import build_pick_context_features
+from app.utils.time_helpers import ET
 from app.services.context_service import is_player_available
 from app.services.stats_service import find_player_id, get_cached_logs
 from app.utils.odds import american_from_decimal, decimal_odds, implied_prob
@@ -370,7 +370,7 @@ class ValueDetector:
         # For any game that returned empty props (e.g. 429 rate limit), try the cached
         # GameSnapshot.props_json written by the scheduler's prefetch job.
         from app.models import GameSnapshot
-        today = datetime.now(ZoneInfo("America/New_York")).date()
+        today = datetime.now(ET).date()
         empty_espn_ids = [g.get('espn_id', '') for g, p in raw_results if not p and g.get('espn_id')]
         if empty_espn_ids:
             snaps = {

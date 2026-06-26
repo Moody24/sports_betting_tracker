@@ -8,16 +8,15 @@ import logging
 import time as _time
 from datetime import date as date_type, timedelta
 from typing import Optional
-from zoneinfo import ZoneInfo
 
 import requests
 
 from app import db
 from app.models import InjuryReport
-from app.utils.time_helpers import et_today
+from app.utils.time_helpers import et_today, ET
 
 logger = logging.getLogger(__name__)
-APP_TIMEZONE = ZoneInfo("America/New_York")
+APP_TIMEZONE = ET
 
 # ── Module-level scoreboard cache (process-scoped) ────────────────────────
 # Past-date scoreboards never change, so we cache them indefinitely.

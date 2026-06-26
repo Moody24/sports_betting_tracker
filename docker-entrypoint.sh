@@ -13,10 +13,9 @@ with app.app_context():
     upgrade(directory="migrations")'
 if command -v timeout >/dev/null 2>&1; then
   timeout "${MIGRATION_MAX_SECONDS}"s python -c "${MIGRATE_CMD}" \
-    || echo "WARNING: DB migration failed/timed out — continuing startup"
+    || { RC=$?; [ $RC -eq 124 ] && echo "WARNING: Migration timed out after ${MIGRATION_MAX_SECONDS}s — proceeding" || exit $RC; }
 else
-  python -c "${MIGRATE_CMD}" \
-    || echo "WARNING: DB migration failed — continuing startup"
+  python -c "${MIGRATE_CMD}"
 fi
 
 exec gunicorn --config gunicorn.conf.py run:app

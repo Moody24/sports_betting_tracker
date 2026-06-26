@@ -554,9 +554,9 @@ def cli_prod_readiness():
     - DB index coverage (key composite indexes present)
     """
     import os
-    from zoneinfo import ZoneInfo
+    from app.utils.time_helpers import ET
 
-    now_et = datetime.now(ZoneInfo("America/New_York"))
+    now_et = datetime.now(ET)
     today = now_et.date()
 
     click.echo('=== Production Readiness Report ===')

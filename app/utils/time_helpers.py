@@ -3,7 +3,8 @@
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
-_ET = ZoneInfo("America/New_York")
+ET = ZoneInfo("America/New_York")
+_ET = ET  # backward-compat alias
 
 
 def et_now() -> datetime:

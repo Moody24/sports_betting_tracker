@@ -3,7 +3,6 @@ import os
 import time as _time
 from datetime import datetime, timezone, timedelta, date as date_type
 from typing import Optional
-from zoneinfo import ZoneInfo
 
 import requests
 
@@ -11,10 +10,10 @@ from app.config_display import PROP_ESPN_COLUMN, SUPPORTED_PROP_MARKETS
 from app.enums import BetType, Outcome
 from app.services.base import SportService, SPORT_REGISTRY
 from app.utils.odds import american_to_decimal
-from app.utils.time_helpers import et_date_str
+from app.utils.time_helpers import et_date_str, ET
 
 logger = logging.getLogger(__name__)
-APP_TIMEZONE = ZoneInfo("America/New_York")
+APP_TIMEZONE = ET
 
 ESPN_SCOREBOARD_URL = (
     "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard"

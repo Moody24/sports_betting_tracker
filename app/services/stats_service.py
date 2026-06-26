@@ -10,7 +10,6 @@ import time
 from datetime import datetime, timezone, timedelta, date as date_type
 from difflib import SequenceMatcher
 from typing import Optional
-from zoneinfo import ZoneInfo
 
 import requests
 from sqlalchemy.exc import IntegrityError
@@ -20,12 +19,13 @@ from app import db
 from app.models import PlayerGameLog
 from app.utils import safe_float
 from app.services.nba_service import ESPN_SUMMARY_URL, fetch_espn_scoreboard
+from app.utils.time_helpers import ET
 
 logger = logging.getLogger(__name__)
 
 # Rate-limit delay between NBA API calls (seconds)
 _NBA_API_DELAY = 0.6
-APP_TIMEZONE = ZoneInfo("America/New_York")
+APP_TIMEZONE = ET
 
 
 class PlayerNameResolver:
