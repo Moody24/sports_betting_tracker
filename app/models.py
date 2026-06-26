@@ -140,6 +140,8 @@ class Bet(db.Model):
 
     __table_args__ = (
         Index('ix_bet_user_outcome', 'user_id', 'outcome'),
+        Index('ix_bet_user_created_at', 'user_id', 'created_at'),
+        Index('ix_bet_external_game_id', 'external_game_id'),
     )
     bonus_multiplier = db.Column(db.Float, nullable=False, default=1.0)
     notes = db.Column(db.Text, nullable=True)
@@ -457,6 +459,7 @@ class PlayerGameLog(db.Model):
     __table_args__ = (
         UniqueConstraint('player_id', 'game_date', name='uq_player_game_date'),
         Index('ix_player_game_log_player_date', 'player_name', 'game_date'),
+        Index('ix_player_game_log_cache_expires', 'cache_expires'),
     )
 
     def __repr__(self) -> str:
@@ -575,6 +578,10 @@ class JobLog(db.Model):
     finished_at = db.Column(db.DateTime, nullable=True)
     status = db.Column(db.String(20), nullable=False, default='running')
     message = db.Column(db.Text, nullable=True)
+
+    __table_args__ = (
+        Index('ix_job_log_job_name', 'job_name'),
+    )
 
     def __repr__(self) -> str:
         return f"<JobLog {self.job_name} {self.status}>"
