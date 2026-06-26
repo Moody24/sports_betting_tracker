@@ -61,6 +61,7 @@ COMBO_PROP_BIAS_CORRECTION = {
 SINGLE_STAT_BIAS_CORRECTION = {
     'player_assists': 0.5,
     'player_rebounds': 0.3,
+    # revisit threshold when N > 80 — current value calibrated on small sample
 }
 
 

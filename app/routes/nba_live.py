@@ -448,6 +448,8 @@ def nba_upcoming_games():
 @login_required
 def nba_props(espn_id):
     """Return player props for a game as JSON and persist them to snapshot."""
+    if not re.match(r'^[A-Za-z0-9_-]+$', str(espn_id)):
+        return jsonify({"success": False, "message": "Invalid espn_id format"}), 400
     today = datetime.now(NBA_APP_TIMEZONE).date()
     snap = GameSnapshot.query.filter_by(espn_id=espn_id, game_date=today).first()
     if snap and snap.props_json:
@@ -467,6 +469,8 @@ def nba_props(espn_id):
 
 @login_required
 def nba_prop_progress(espn_id):
+    if not re.match(r'^[A-Za-z0-9_-]+$', str(espn_id)):
+        return jsonify({"success": False, "message": "Invalid espn_id format"}), 400
     player_name = (request.args.get('player') or '').strip()
     prop_type = (request.args.get('prop_type') or '').strip()
     if not player_name or not prop_type:

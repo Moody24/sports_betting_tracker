@@ -390,6 +390,10 @@ def ocr_screenshot():
     if not file.filename.lower().endswith(allowed_ext):
         return jsonify({'error': 'Only PNG/JPG/WEBP images are supported'}), 400
 
+    allowed_mimetypes = {'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'application/pdf'}
+    if file.content_type not in allowed_mimetypes:
+        return jsonify({"success": False, "message": "Invalid file type"}), 400
+
     try:
         from PIL import Image
         import pytesseract
