@@ -29,16 +29,15 @@ def make_bet(user_id, **kwargs):
 class BaseTestCase(unittest.TestCase):
     def setUp(self):
         self.app = create_app(testing=True)
-        self.app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
         self.app.config["WTF_CSRF_ENABLED"] = False
         self.client = self.app.test_client()
         with self.app.app_context():
+            db.drop_all()
             db.create_all()
 
     def tearDown(self):
         with self.app.app_context():
             db.session.remove()
-            db.drop_all()
 
     def register_and_login(
         self,
