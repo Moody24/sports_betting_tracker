@@ -67,6 +67,15 @@ def create_app(testing=False):
     # Railway Postgres URLs may start with postgres:// — SQLAlchemy 2.x requires postgresql://
     if db_url.startswith('postgres://'):
         db_url = db_url.replace('postgres://', 'postgresql://', 1)
+    # In testing mode, use a named shared-cache in-memory SQLite database.
+    # Using ?cache=shared with a file URI means all connections (including
+    # new ones after engine.dispose()) share the same in-memory database,
+    # providing test isolation without StaticPool. StaticPool was previously
+    # used here but is incompatible with services that call db.engine.dispose()
+    # (e.g. ml_model.train_model), which permanently destroys StaticPool's
+    # single underlying connection, leaving subsequent queries with an empty DB.
+    if testing:
+        db_url = 'sqlite:///file:edge_tracker_testdb?mode=memory&cache=shared&uri=true'
     app.config['SQLALCHEMY_DATABASE_URI'] = db_url
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024  # 10 MB
@@ -77,13 +86,17 @@ def create_app(testing=False):
         'pool_timeout': 30,
     }
     # pool_size / max_overflow only apply to QueuePool (PostgreSQL).
-    # SQLite (sqlite:///:memory: used in tests) uses StaticPool — passing
-    # these params would give each pool connection a separate in-memory DB,
-    # breaking test isolation.
+    # SQLite (file-based or in-memory URI) does not support these options.
     if not db_url.startswith('sqlite'):
         base_pool_opts['pool_size'] = int(os.getenv('DB_POOL_SIZE', '2'))
         base_pool_opts['max_overflow'] = int(os.getenv('DB_MAX_OVERFLOW', '3'))
-    engine_options.update(base_pool_opts)
+        engine_options.update(base_pool_opts)
+    elif db_url.startswith('sqlite:///file:') and 'cache=shared' in db_url:
+        # Shared-cache in-memory SQLite: allow cross-thread access.
+        engine_options.update({'connect_args': {'check_same_thread': False}})
+    else:
+        # File-based SQLite: use default pool settings without pool_size.
+        engine_options.update(base_pool_opts)
     app.config['SQLALCHEMY_ENGINE_OPTIONS'] = engine_options
     app.config['WTF_CSRF_ENABLED'] = True
     app.config['RATELIMIT_ENABLED'] = os.getenv('RATELIMIT_ENABLED', 'true').lower() == 'true'
