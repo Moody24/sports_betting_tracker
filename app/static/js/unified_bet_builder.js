@@ -915,11 +915,10 @@
     var n = slip.length;
     var k = parseInt(rrSizeEl.value, 10);
     var stake = parseFloat((stakeEl || {}).value || '') || 0;
-    if (!k || !stake) { rrSummary.textContent = 'Enter stake to see totals.'; return; }
+    if (!k || !stake) { rrSummary.textContent = 'Select size to preview combinations.'; return; }
     var combos = comb(n, k);
-    var total = (combos * stake).toFixed(2);
     rrSummary.textContent =
-      combos + ' combinations · $' + stake.toFixed(2) + ' per combo · $' + total + ' total';
+      combos + ' combinations of ' + k + ' · Preview only — bets recorded as tagged group';
   }
 
   if (rrToggle) {

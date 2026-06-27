@@ -1842,6 +1842,10 @@ a:hover {
   }
 }
 
+@media (max-width: 1199.98px) and (min-width: 576px) {
+  .kpi-value { font-size: 2.0rem; }
+}
+
 @media (max-width: 575.98px) {
   .topbar h2 { font-size: 1.25rem; }
   .topbar-subtitle { font-size: 0.73rem; }
