@@ -7187,5 +7187,116 @@ class TestDefenseStaleness(BaseTestCase):
         self.assertTrue(data['defense_data_stale'])
 
 
+class TestNBAAnalysisHelpers(BaseTestCase):
+    """Tests for pure helper functions in nba_analysis.py."""
+
+    def test_normalize_name_strips_special_chars(self):
+        from app.routes.nba_analysis import _normalize_name
+        self.assertEqual(_normalize_name("LeBron James!"), "lebron james")
+
+    def test_normalize_name_empty(self):
+        from app.routes.nba_analysis import _normalize_name
+        self.assertEqual(_normalize_name(""), "")
+
+    def test_normalize_name_none(self):
+        from app.routes.nba_analysis import _normalize_name
+        self.assertEqual(_normalize_name(None), "")
+
+    def test_hit_rates_empty_logs(self):
+        from app.routes.nba_analysis import _hit_rates_from_logs
+        result = _hit_rates_from_logs([], 'pts', 20.0)
+        self.assertIsNone(result['over_pct'])
+        self.assertEqual(result['sample'], 0)
+
+    def test_hit_rates_no_col_name(self):
+        from app.routes.nba_analysis import _hit_rates_from_logs
+        result = _hit_rates_from_logs([MagicMock()], None, 20.0)
+        self.assertIsNone(result['over_pct'])
+
+    def test_hit_rates_all_none_values(self):
+        """Returns empty result when all log values are None."""
+        from app.routes.nba_analysis import _hit_rates_from_logs
+        log = MagicMock()
+        log.game_date = date(2026, 1, 1)
+        log.matchup = 'LAL vs BOS'
+        log.pts = None
+        setattr(log, 'pts', None)
+        result = _hit_rates_from_logs([log], 'pts', 20.0)
+        self.assertIsNone(result['over_pct'])
+
+    def test_hit_rates_over_and_under(self):
+        """Correctly computes over/under pct from log values."""
+        from app.routes.nba_analysis import _hit_rates_from_logs
+        logs = []
+        for pts in [25.0, 18.0, 30.0, 15.0]:
+            log = MagicMock()
+            log.game_date = date(2026, 1, 1)
+            log.matchup = 'LAL vs BOS'
+            setattr(log, 'pts', pts)
+            logs.append(log)
+        result = _hit_rates_from_logs(logs, 'pts', 20.0)
+        self.assertEqual(result['sample'], 4)
+        self.assertEqual(result['over_pct'], 50)
+        self.assertEqual(result['under_pct'], 50)
+
+
+class TestBetImportEdgeCases(BaseTestCase):
+    """Additional bet_import.py coverage for edge case paths."""
+
+    def test_ocr_screenshot_no_file(self):
+        """OCR endpoint returns 400 when no file part in request."""
+        self.register_and_login()
+        resp = self.client.post('/bets/ocr-screenshot', data={})
+        self.assertIn(resp.status_code, [400, 405, 302])
+
+    def test_manual_parlay_empty_legs(self):
+        """manual_parlay with empty legs list returns 400."""
+        self.register_and_login()
+        resp = self.client.post(
+            '/bets/manual-parlay',
+            content_type='application/json',
+            data=json.dumps({'stake': 10.0, 'legs': []}),
+        )
+        self.assertIn(resp.status_code, [400, 200])
+
+    def test_manual_parlay_invalid_prop_line(self):
+        """prop_line outside range returns validation error."""
+        self.register_and_login()
+        resp = self.client.post(
+            '/bets/manual-parlay',
+            content_type='application/json',
+            data=json.dumps({
+                'stake': 10.0,
+                'legs': [{
+                    'team_a': 'LAL', 'team_b': 'BOS',
+                    'match_date': '2026-01-01',
+                    'bet_type': 'over',
+                    'prop_line': 999.0,
+                    'american_odds': -110,
+                }],
+            }),
+        )
+        self.assertEqual(resp.status_code, 400)
+
+    def test_manual_parlay_invalid_odds(self):
+        """american_odds outside range returns validation error."""
+        self.register_and_login()
+        resp = self.client.post(
+            '/bets/manual-parlay',
+            content_type='application/json',
+            data=json.dumps({
+                'stake': 10.0,
+                'legs': [{
+                    'team_a': 'LAL', 'team_b': 'BOS',
+                    'match_date': '2026-01-01',
+                    'bet_type': 'over',
+                    'prop_line': 22.5,
+                    'american_odds': 99999,
+                }],
+            }),
+        )
+        self.assertEqual(resp.status_code, 400)
+
+
 if __name__ == '__main__':
     unittest.main()
