@@ -5,7 +5,6 @@ import logging
 import re
 import time
 from datetime import datetime, timedelta
-from difflib import SequenceMatcher
 
 from flask import render_template, redirect, url_for, flash, request, jsonify, current_app
 from flask_login import login_required, current_user
