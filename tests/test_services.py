@@ -7056,7 +7056,7 @@ class TestWatchdogStaleJobs(BaseTestCase):
             log = JobLog(
                 job_name='test_job',
                 status='success',
-                created_at=datetime.now(timezone.utc),
+                started_at=datetime.now(timezone.utc).replace(tzinfo=None),
             )
             db.session.add(log)
             db.session.commit()
@@ -7079,7 +7079,7 @@ class TestWatchdogStaleJobs(BaseTestCase):
             log = JobLog(
                 job_name='stale_job',
                 status='success',
-                created_at=stale_time.replace(tzinfo=None),
+                started_at=stale_time.replace(tzinfo=None),
             )
             db.session.add(log)
             db.session.commit()

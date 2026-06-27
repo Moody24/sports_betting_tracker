@@ -1208,11 +1208,11 @@ def _watchdog_check_stale_jobs():
     app = _get_app()
     with app.app_context():
         from app.models import JobLog
-        logs = JobLog.query.order_by(JobLog.job_name, JobLog.created_at.desc()).all()
+        logs = JobLog.query.order_by(JobLog.job_name, JobLog.started_at.desc()).all()
         seen = {}
         for log in logs:
             if log.job_name not in seen:
-                seen[log.job_name] = log.created_at
+                seen[log.job_name] = log.started_at
         if scheduler is None:
             return
         for job in scheduler.get_jobs():
