@@ -7124,7 +7124,7 @@ class TestResolveCardProgress(BaseTestCase):
         with patch('app.services.nba_service._extract_prop_boxscore_from_summary',
                    return_value={'Anthony Davis': {'player_points': 20}}):
             with patch('app.services.nba_service.derive_game_status_from_summary',
-                       return_value={'elapsed_ratio': 0.5, 'status_text': 'Q3 5:30'}):
+                       return_value={'elapsed_ratio': 0.5, 'status_text': 'Q3 5:30', 'period': 3, 'clock': '5:30', 'final': False}):
                 result = resolve_card_progress(
                     'abc123', 'Nonexistent Player', 'player_points', 20.5, 'over', summary
                 )
@@ -7136,7 +7136,7 @@ class TestResolveCardProgress(BaseTestCase):
         with patch('app.services.nba_service._extract_prop_boxscore_from_summary',
                    return_value={'LeBron James': {'player_points': 22}}):
             with patch('app.services.nba_service.derive_game_status_from_summary',
-                       return_value={'elapsed_ratio': 0.5, 'status_text': 'Q3 5:30'}):
+                       return_value={'elapsed_ratio': 0.5, 'status_text': 'Q3 5:30', 'period': 3, 'clock': '5:30', 'final': False}):
                 result = resolve_card_progress(
                     'abc123', 'LeBron James', 'player_rebounds', 7.5, 'over', {}
                 )
@@ -7148,7 +7148,7 @@ class TestResolveCardProgress(BaseTestCase):
         with patch('app.services.nba_service._extract_prop_boxscore_from_summary',
                    return_value={'LeBron James': {'player_points': 16}}):
             with patch('app.services.nba_service.derive_game_status_from_summary',
-                       return_value={'elapsed_ratio': 0.5, 'status_text': 'Q3 5:30'}):
+                       return_value={'elapsed_ratio': 0.5, 'status_text': 'Q3 5:30', 'period': 3, 'clock': '5:30', 'final': False}):
                 result = resolve_card_progress(
                     'abc123', 'LeBron James', 'player_points', 22.5, 'over', {}
                 )
@@ -7162,7 +7162,7 @@ class TestResolveCardProgress(BaseTestCase):
         with patch('app.services.nba_service._extract_prop_boxscore_from_summary',
                    return_value={'LeBron James': {'player_points': 8}}):
             with patch('app.services.nba_service.derive_game_status_from_summary',
-                       return_value={'elapsed_ratio': 0.5, 'status_text': 'Q3 5:30'}):
+                       return_value={'elapsed_ratio': 0.5, 'status_text': 'Q3 5:30', 'period': 3, 'clock': '5:30', 'final': False}):
                 result = resolve_card_progress(
                     'abc123', 'LeBron James', 'player_points', 22.5, 'under', {}
                 )
