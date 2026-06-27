@@ -1,7 +1,8 @@
 """Tests for the main blueprint (home, dashboard)."""
 
 from app import db
-from app.models import User
+from app.models import Bet, User
+from app.enums import Outcome
 
 from tests.helpers import BaseTestCase, make_bet
 
@@ -138,3 +139,26 @@ class TestMainRoutes(BaseTestCase):
     def test_ux_telemetry_rejects_missing_event(self):
         resp = self.client.post('/telemetry/ux', json={'page': '/nba/today'})
         self.assertEqual(resp.status_code, 400)
+
+
+class TestDashboardResolvedBets(BaseTestCase):
+    def test_dashboard_passes_resolved_bets(self):
+        user_id = self.register_and_login()
+        with self.app.app_context():
+            for outcome in [Outcome.WIN.value, Outcome.LOSE.value, Outcome.PUSH.value]:
+                b = make_bet(user_id, outcome=outcome, american_odds=-110)
+                db.session.add(b)
+            db.session.commit()
+        resp = self.client.get('/dashboard')
+        self.assertEqual(resp.status_code, 200)
+        # Ribbon dots should appear
+        self.assertIn(b'results-ribbon', resp.data)
+
+    def test_dashboard_has_no_chart_canvas(self):
+        self.register_and_login()
+        resp = self.client.get('/dashboard')
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotIn(b'winRateDonut', resp.data)
+        self.assertNotIn(b'unitsByDayChart', resp.data)
+        self.assertNotIn(b'cumulativePLChart', resp.data)
+        self.assertNotIn(b'chart.js', resp.data)

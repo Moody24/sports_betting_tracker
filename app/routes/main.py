@@ -219,6 +219,9 @@ def dashboard():
         'current_streak': current_streak,
     }
 
+    # ── Last 30 resolved bets for sparkline / ribbon (oldest first) ──
+    resolved_bets = list(reversed(graded_bets[:30]))
+
     # ── Today's top plays (cached to avoid blocking page loads) ───────
     top_plays, best_parlay = _get_cached_plays()
 
@@ -232,6 +235,7 @@ def dashboard():
         cumul_values=cumul_values,
         top_plays=top_plays,
         best_parlay=best_parlay,
+        resolved_bets=resolved_bets,
     )
 
 
