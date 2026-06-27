@@ -84,7 +84,7 @@
 
 {%- if resolved_bets %}
 <div class="results-ribbon mb-3 fade-up" aria-label="Last {{ resolved_bets | length }} results">
-  {%- for b in resolved_bets %}
+  {%- for b in resolved_bets[-20:] %}
     {%- if b.outcome == 'win' %}
       {%- set dot_color = '#F5A623' %}
     {%- elif b.outcome == 'lose' %}
