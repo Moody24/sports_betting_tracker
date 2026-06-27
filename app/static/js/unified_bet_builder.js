@@ -426,6 +426,7 @@
     });
 
     updateModeBadge();
+    updateRrSection();
     updatePayoutPreview();
   }
 
@@ -681,12 +682,24 @@
     fetch(PLACE_BETS_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF_TOKEN },
-      body: JSON.stringify({
-        stake: stake,
-        units: units,
-        is_parlay: slip.length > 1,
-        legs: slip,
-      }),
+      body: (function() {
+        if (rrActive && slip.length >= 3) {
+          var k = parseInt((rrSizeEl || {}).value || '2', 10);
+          return JSON.stringify({
+            stake: stake,
+            units: units,
+            is_parlay: true,
+            legs: slip,
+            round_robin: { size: k },
+          });
+        }
+        return JSON.stringify({
+          stake: stake,
+          units: units,
+          is_parlay: slip.length > 1,
+          legs: slip,
+        });
+      }()),
     })
       .then(function (r) { return r.json(); })
       .then(function (data) {
@@ -850,4 +863,80 @@
   window.addEventListener('beforeunload', function() {
     clearInterval(_oddsRefreshInterval);
   });
+
+  // ── Round Robin ────────────────────────────────────────────────
+  var rrSection  = document.getElementById('ub-rr-section');
+  var rrToggle   = document.getElementById('ub-rr-toggle');
+  var rrConfig   = document.getElementById('ub-rr-config');
+  var rrSizeEl   = document.getElementById('ub-rr-size');
+  var rrSummary  = document.getElementById('ub-rr-summary');
+  var rrActive   = false;
+
+  function comb(n, k) {
+    if (k < 0 || k > n) return 0;
+    if (k === 0 || k === n) return 1;
+    var result = 1;
+    for (var i = 0; i < k; i++) {
+      result = result * (n - i) / (i + 1);
+    }
+    return Math.round(result);
+  }
+
+  function updateRrSection() {
+    if (!rrSection) return;
+    if (slip.length >= 3) {
+      rrSection.classList.remove('d-none');
+    } else {
+      rrSection.classList.add('d-none');
+      deactivateRr();
+    }
+  }
+
+  function deactivateRr() {
+    rrActive = false;
+    if (rrToggle) { rrToggle.classList.remove('active'); }
+    if (rrConfig) { rrConfig.classList.add('d-none'); }
+  }
+
+  function populateRrSizes() {
+    if (!rrSizeEl) return;
+    rrSizeEl.innerHTML = '';
+    var n = slip.length;
+    for (var k = 2; k <= n - 1; k++) {
+      var opt = document.createElement('option');
+      opt.value = k;
+      opt.textContent = k + '-team RR (' + comb(n, k) + ' combos)';
+      rrSizeEl.appendChild(opt);
+    }
+  }
+
+  function updateRrSummary() {
+    if (!rrSummary || !rrSizeEl) return;
+    var n = slip.length;
+    var k = parseInt(rrSizeEl.value, 10);
+    var stake = parseFloat((stakeEl || {}).value || '') || 0;
+    if (!k || !stake) { rrSummary.textContent = 'Select size to preview combinations.'; return; }
+    var combos = comb(n, k);
+    rrSummary.textContent =
+      combos + ' combinations of ' + k + ' · Preview only — bets recorded as tagged group';
+  }
+
+  if (rrToggle) {
+    rrToggle.addEventListener('click', function () {
+      if (rrActive) {
+        deactivateRr();
+      } else {
+        rrActive = true;
+        rrToggle.classList.add('active');
+        populateRrSizes();
+        updateRrSummary();
+        if (rrConfig) rrConfig.classList.remove('d-none');
+      }
+    });
+  }
+  if (rrSizeEl) {
+    rrSizeEl.addEventListener('change', updateRrSummary);
+  }
+  // Re-run summary when stake changes (stakeEl already has an input listener, add second)
+  if (stakeEl) stakeEl.addEventListener('input', updateRrSummary);
 })();

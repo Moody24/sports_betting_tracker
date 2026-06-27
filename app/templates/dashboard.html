@@ -34,6 +34,24 @@
         <i class="bi bi-arrow-{{ 'up' if stats.roi >= 0 else 'down' }}-short"></i>
         Return on investment
       </div>
+      {%- if resolved_bets | length >= 2 %}
+      {%- set pl_values = [] %}
+      {%- for b in resolved_bets %}
+        {%- set _ = pl_values.append(b.profit_loss()) %}
+      {%- endfor %}
+      {%- set min_pl = pl_values | min %}
+      {%- set max_pl = pl_values | max %}
+      {%- set pl_range = (max_pl - min_pl) if (max_pl - min_pl) > 0 else 1 %}
+      {%- set pts = [] %}
+      {%- for i in range(pl_values | length) %}
+        {%- set x = (i / ((pl_values | length) - 1) * 110) | round(1) %}
+        {%- set y = (28 - ((pl_values[i] - min_pl) / pl_range * 24)) | round(1) %}
+        {%- set _ = pts.append(x ~ "," ~ y) %}
+      {%- endfor %}
+      <svg class="kpi-sparkline" viewBox="0 0 110 32" aria-hidden="true" preserveAspectRatio="none">
+        <polyline points="{{ pts | join(' ') }}"/>
+      </svg>
+      {%- endif %}
     </div>
   </div>
   <div class="col-sm-6 col-xl-2 fade-up fade-up-4">
@@ -63,6 +81,23 @@
     </div>
   </div>
 </div>
+
+{%- if resolved_bets %}
+<div class="results-ribbon mb-3 fade-up" aria-label="Last {{ resolved_bets | length }} results">
+  {%- for b in resolved_bets[-20:] %}
+    {%- if b.outcome == 'win' %}
+      {%- set dot_color = '#F5A623' %}
+    {%- elif b.outcome == 'lose' %}
+      {%- set dot_color = '#8B3A3A' %}
+    {%- else %}
+      {%- set dot_color = '#555' %}
+    {%- endif %}
+  <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+    <circle cx="5" cy="5" r="4.5" fill="{{ dot_color }}"/>
+  </svg>
+  {%- endfor %}
+</div>
+{%- endif %}
 
 <details class="card-soft mb-4 fade-up fade-up-7">
   <summary class="p-3 d-flex justify-content-between align-items-center dash-settings-summary">
@@ -95,68 +130,6 @@
     </form>
   </div>
 </details>
-
-<div class="row g-3 mb-4 fade-up fade-up-8">
-  <div class="col-lg-4">
-    <div class="card-soft p-3 h-100 d-flex flex-column">
-      <h3 class="h6 mb-3">Win Rate</h3>
-      <div class="d-flex align-items-center gap-3 flex-grow-1">
-        <div class="donut-wrap">
-          <canvas id="winRateDonut" aria-label="Win rate" role="img"></canvas>
-          <div class="donut-center">
-            <span class="donut-pct" id="donutPct">{{ '%.0f'|format(stats.win_pct) if (stats.wins + stats.losses) > 0 else '—' }}</span>
-            <span class="donut-sub">{{ 'Win Rate' if (stats.wins + stats.losses) > 0 else 'No graded bets' }}</span>
-          </div>
-        </div>
-        <div class="vstack gap-2 small">
-          <div class="d-flex align-items-center gap-2">
-            <span class="stat-dot stat-dot-win"></span>
-            <span class="text-secondary">Wins</span>
-            <span class="ms-auto fw-semibold text-success">{{ stats.wins if stats.wins is defined else '—' }}</span>
-          </div>
-          <div class="d-flex align-items-center gap-2">
-            <span class="stat-dot stat-dot-loss"></span>
-            <span class="text-secondary">Losses</span>
-            <span class="ms-auto fw-semibold text-danger">{{ stats.losses if stats.losses is defined else '—' }}</span>
-          </div>
-          <div class="d-flex align-items-center gap-2">
-            <span class="stat-dot stat-dot-push"></span>
-            <span class="text-secondary">Pushes</span>
-            <span class="ms-auto fw-semibold text-warning-emphasis">{{ stats.pushes if stats.pushes is defined else '—' }}</span>
-          </div>
-          <div class="d-flex align-items-center gap-2">
-            <span class="stat-dot stat-dot-pending"></span>
-            <span class="text-secondary">Pending</span>
-            <span class="ms-auto fw-semibold text-info">{{ stats.pending if stats.pending is defined else '—' }}</span>
-          </div>
-          <div class="donut-meta text-secondary">Based on {{ stats.wins + stats.losses }} graded bets</div>
-        </div>
-      </div>
-    </div>
-  </div>
-  <div class="col-lg-4">
-    <div class="card-soft chart-card p-3 h-100">
-      <div class="d-flex justify-content-between align-items-center mb-2">
-        <h3 class="h6 mb-0">P/L by Day</h3>
-        <span class="text-secondary small">Last 7 Entries</span>
-      </div>
-      <div class="chart-area">
-        <canvas id="unitsByDayChart" aria-label="P/L by day" role="img"></canvas>
-      </div>
-    </div>
-  </div>
-  <div class="col-lg-4">
-    <div class="card-soft chart-card p-3 h-100">
-      <div class="d-flex justify-content-between align-items-center mb-2">
-        <h3 class="h6 mb-0">Cumulative P/L</h3>
-        <span class="text-secondary small">All-time</span>
-      </div>
-      <div class="chart-area">
-        <canvas id="cumulativePLChart" aria-label="Cumulative profit/loss" role="img"></canvas>
-      </div>
-    </div>
-  </div>
-</div>
 
 {# ── Today's Top Plays ────────────────────────────────────── #}
 {% if top_plays %}
@@ -326,129 +299,3 @@
 </div>
 {% endblock %}
 
-{% block scripts %}
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-<script>
-  // Win-rate donut chart
-  (function() {
-    var ctx = document.getElementById('winRateDonut');
-    if (!ctx) return;
-    var wins    = {{ stats.wins if stats.wins is defined else 0 }};
-    var losses  = {{ stats.losses if stats.losses is defined else 0 }};
-    var graded = wins + losses;
-    var hasData = graded > 0;
-    new Chart(ctx, {
-      type: 'doughnut',
-      data: {
-        labels: hasData ? ['Wins', 'Losses'] : ['No graded bets'],
-        datasets: [{
-          data: hasData ? [wins, losses] : [1],
-          backgroundColor: hasData
-            ? ['rgba(47,201,143,.75)', 'rgba(255,107,122,.65)']
-            : ['rgba(148,163,184,.22)'],
-          borderColor: hasData
-            ? ['rgba(47,201,143,.9)', 'rgba(255,107,122,.9)']
-            : ['rgba(148,163,184,.35)'],
-          borderWidth: 1.5,
-          hoverOffset: 4,
-        }]
-      },
-      options: {
-        cutout: '72%',
-        maintainAspectRatio: false,
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            enabled: hasData,
-            callbacks: {
-              label: function(tip) {
-                var value = tip.parsed || 0;
-                var pct = graded ? ((value / graded) * 100).toFixed(1) : '0.0';
-                return tip.label + ': ' + value + ' (' + pct + '%)';
-              }
-            }
-          }
-        },
-        animation: { animateRotate: true, duration: 600 }
-      }
-    });
-  })();
-
-  const chartDefaults = {
-    maintainAspectRatio: false,
-    plugins: { legend: { display: false } },
-    scales: {
-      x: { ticks: { color: '#9ba7c2' }, grid: { color: 'rgba(255,255,255,.06)' } },
-      y: { ticks: { color: '#9ba7c2' }, grid: { color: 'rgba(255,255,255,.06)' } }
-    }
-  };
-
-  // P/L by Day chart
-  const labels = {{ chart_labels|tojson }};
-  const values = {{ chart_values|tojson }};
-  const ctx = document.getElementById('unitsByDayChart');
-  if (ctx) {
-    new Chart(ctx, {
-      type: 'bar',
-      data: {
-        labels,
-        datasets: [{
-          label: 'P/L',
-          data: values,
-          backgroundColor: values.map(v => v >= 0 ? 'rgba(34,197,94,.55)' : 'rgba(239,68,68,.55)'),
-          borderColor:      values.map(v => v >= 0 ? 'rgba(34,197,94,.9)'  : 'rgba(239,68,68,.9)'),
-          borderWidth: 1,
-          borderRadius: 3,
-        }]
-      },
-      options: chartDefaults,
-    });
-  }
-
-  // Cumulative P/L chart
-  const cumulLabels = {{ cumul_labels|tojson }};
-  const cumulValues = {{ cumul_values|tojson }};
-  const ctx2 = document.getElementById('cumulativePLChart');
-  if (ctx2) {
-    const lastVal = cumulValues.length ? cumulValues[cumulValues.length - 1] : 0;
-    const lineColor = lastVal >= 0 ? '#22c55e' : '#ef4444';
-    const fillColor = lastVal >= 0 ? 'rgba(34,197,94,.15)' : 'rgba(239,68,68,.15)';
-    new Chart(ctx2, {
-      type: 'line',
-      data: {
-        labels: cumulLabels,
-        datasets: [{
-          label: 'Cumulative P/L',
-          data: cumulValues,
-          borderColor: lineColor,
-          backgroundColor: fillColor,
-          tension: .3,
-          pointRadius: 2,
-          fill: true,
-        }]
-      },
-      options: {
-        ...chartDefaults,
-        plugins: {
-          ...chartDefaults.plugins,
-          tooltip: {
-            callbacks: {
-              label: ctx => `$${ctx.parsed.y >= 0 ? '+' : ''}${ctx.parsed.y.toFixed(2)}`
-            }
-          }
-        },
-        scales: {
-          ...chartDefaults.scales,
-          y: {
-            ...chartDefaults.scales.y,
-            ticks: {
-              ...chartDefaults.scales.y.ticks,
-              callback: v => `$${v >= 0 ? '+' : ''}${v}`
-            }
-          }
-        }
-      }
-    });
-  }
-</script>
-{% endblock %}

@@ -145,6 +145,8 @@ class Bet(db.Model):
     )
     bonus_multiplier = db.Column(db.Float, nullable=False, default=1.0)
     notes = db.Column(db.Text, nullable=True)
+    round_robin_size = db.Column(db.Integer, nullable=True)
+    parlay_group_id = db.Column(db.String(40), nullable=True, index=True)
     created_at = db.Column(
         db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
     )
