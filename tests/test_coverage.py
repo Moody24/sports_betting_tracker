@@ -158,7 +158,7 @@ class TestCoverageGap(BaseTestCase):
             },
         )
         self.assertEqual(resp.status_code, 400)
-        self.assertIn("team_a", json.loads(resp.data)["error"])
+        self.assertIn("team_a", json.loads(resp.data)["message"])
 
     # ── bet route: parlay grouping in bet list ────────────────────────
 

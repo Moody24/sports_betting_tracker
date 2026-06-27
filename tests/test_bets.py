@@ -859,7 +859,7 @@ class TestBetRoutes(BaseTestCase):
             data=json.dumps(payload),
         )
         self.assertEqual(resp.status_code, 400)
-        self.assertIn("team_a", json.loads(resp.data)["error"])
+        self.assertIn("team_a", json.loads(resp.data)["message"])
 
     def test_place_bets_invalid_stake_string(self):
         """Non-numeric stake returns 400."""
@@ -874,7 +874,7 @@ class TestBetRoutes(BaseTestCase):
             }),
         )
         self.assertEqual(resp.status_code, 400)
-        self.assertIn("number", json.loads(resp.data)["error"])
+        self.assertIn("number", json.loads(resp.data)["message"])
 
     def test_new_bet_form_invalid_match_date_silently_ignored(self):
         """Malformed match_date query param falls back gracefully."""
