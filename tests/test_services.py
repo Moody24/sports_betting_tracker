@@ -7036,5 +7036,156 @@ class TestModelStorageFunctions(BaseTestCase):
         self.assertEqual(key, 'prod/models/player_points.json')
 
 
+class TestWatchdogStaleJobs(BaseTestCase):
+    """Tests for _watchdog_check_stale_jobs added in INFO Batch 2."""
+
+    def test_watchdog_no_jobs_no_error(self):
+        """Watchdog runs cleanly when no JobLog records exist."""
+        from app.services.scheduler import _watchdog_check_stale_jobs
+        with self.app.app_context():
+            with patch('app.services.scheduler.scheduler') as mock_sched:
+                mock_sched.get_jobs.return_value = []
+                with patch('app.services.scheduler._get_app', return_value=self.app):
+                    _watchdog_check_stale_jobs()
+
+    def test_watchdog_recent_job_no_warning(self):
+        """Watchdog does not warn when job ran within the last hour."""
+        from app.services.scheduler import _watchdog_check_stale_jobs
+        from app.models import JobLog
+        with self.app.app_context():
+            log = JobLog(
+                job_name='test_job',
+                status='success',
+                created_at=datetime.now(timezone.utc),
+            )
+            db.session.add(log)
+            db.session.commit()
+            mock_job = MagicMock()
+            mock_job.id = 'test_job'
+            mock_job.trigger = MagicMock()
+            with patch('app.services.scheduler.scheduler') as mock_sched:
+                mock_sched.get_jobs.return_value = [mock_job]
+                with patch('app.services.scheduler._get_app', return_value=self.app):
+                    with patch('app.services.scheduler.logger') as mock_logger:
+                        _watchdog_check_stale_jobs()
+                        mock_logger.warning.assert_not_called()
+
+    def test_watchdog_stale_job_logs_warning(self):
+        """Watchdog logs a warning when job last ran over an hour ago."""
+        from app.services.scheduler import _watchdog_check_stale_jobs
+        from app.models import JobLog
+        with self.app.app_context():
+            stale_time = datetime.now(timezone.utc) - timedelta(hours=2)
+            log = JobLog(
+                job_name='stale_job',
+                status='success',
+                created_at=stale_time.replace(tzinfo=None),
+            )
+            db.session.add(log)
+            db.session.commit()
+            mock_job = MagicMock()
+            mock_job.id = 'stale_job'
+            mock_job.trigger = MagicMock()
+            with patch('app.services.scheduler.scheduler') as mock_sched:
+                mock_sched.get_jobs.return_value = [mock_job]
+                with patch('app.services.scheduler._get_app', return_value=self.app):
+                    with patch('app.services.scheduler.logger') as mock_logger:
+                        _watchdog_check_stale_jobs()
+                        mock_logger.warning.assert_called_once()
+                        call_args = mock_logger.warning.call_args[0]
+                        self.assertIn('stale_job', call_args[1])
+
+
+class TestResolveCardProgress(BaseTestCase):
+    """Tests for resolve_card_progress extracted to nba_service in INFO Batch 2."""
+
+    def _make_summary(self, player_name='LeBron James', pts=22, status='in_progress'):
+        return {
+            'boxscore': {
+                player_name: {'player_points': pts, 'player_rebounds': 7, 'player_assists': 5}
+            },
+            'game_status': status,
+            'period': 3,
+            'clock': '5:30',
+        }
+
+    def test_resolve_card_no_boxscore_returns_not_ok(self):
+        """Returns ok=False when summary has no boxscore."""
+        from app.services.nba_service import resolve_card_progress
+        result = resolve_card_progress(
+            'abc123', 'LeBron James', 'player_points', 22.5, 'over', {}
+        )
+        self.assertFalse(result['ok'])
+
+    def test_resolve_card_player_not_found(self):
+        """Returns ok=False when player name doesn't match boxscore."""
+        from app.services.nba_service import resolve_card_progress
+        summary = self._make_summary(player_name='Anthony Davis')
+        with patch('app.services.nba_service._extract_prop_boxscore_from_summary',
+                   return_value={'Anthony Davis': {'player_points': 20}}):
+            with patch('app.services.nba_service.derive_game_status_from_summary',
+                       return_value={'elapsed_ratio': 0.5, 'status_text': 'Q3 5:30'}):
+                result = resolve_card_progress(
+                    'abc123', 'Nonexistent Player', 'player_points', 20.5, 'over', summary
+                )
+        self.assertFalse(result['ok'])
+
+    def test_resolve_card_stat_unavailable(self):
+        """Returns ok=False when requested stat not in boxscore for player."""
+        from app.services.nba_service import resolve_card_progress
+        with patch('app.services.nba_service._extract_prop_boxscore_from_summary',
+                   return_value={'LeBron James': {'player_points': 22}}):
+            with patch('app.services.nba_service.derive_game_status_from_summary',
+                       return_value={'elapsed_ratio': 0.5, 'status_text': 'Q3 5:30'}):
+                result = resolve_card_progress(
+                    'abc123', 'LeBron James', 'player_rebounds', 7.5, 'over', {}
+                )
+        self.assertFalse(result['ok'])
+
+    def test_resolve_card_success_over(self):
+        """Returns ok=True with on_track=True when projected over line."""
+        from app.services.nba_service import resolve_card_progress
+        with patch('app.services.nba_service._extract_prop_boxscore_from_summary',
+                   return_value={'LeBron James': {'player_points': 16}}):
+            with patch('app.services.nba_service.derive_game_status_from_summary',
+                       return_value={'elapsed_ratio': 0.5, 'status_text': 'Q3 5:30'}):
+                result = resolve_card_progress(
+                    'abc123', 'LeBron James', 'player_points', 22.5, 'over', {}
+                )
+        self.assertTrue(result['ok'])
+        self.assertEqual(result['player'], 'LeBron James')
+        self.assertEqual(result['current_stat'], 16.0)
+
+    def test_resolve_card_under_on_track(self):
+        """on_track=True when projected under line for UNDER bet."""
+        from app.services.nba_service import resolve_card_progress
+        with patch('app.services.nba_service._extract_prop_boxscore_from_summary',
+                   return_value={'LeBron James': {'player_points': 8}}):
+            with patch('app.services.nba_service.derive_game_status_from_summary',
+                       return_value={'elapsed_ratio': 0.5, 'status_text': 'Q3 5:30'}):
+                result = resolve_card_progress(
+                    'abc123', 'LeBron James', 'player_points', 22.5, 'under', {}
+                )
+        self.assertTrue(result['ok'])
+        self.assertTrue(result['on_track'])
+
+
+class TestDefenseStaleness(BaseTestCase):
+    """Tests for defense staleness fields added to /ready in INFO Batch 2."""
+
+    def test_ready_includes_defense_staleness(self):
+        """/ready response includes defense_data_age_hours and defense_data_stale."""
+        resp = self.client.get('/ready')
+        self.assertIn(resp.status_code, [200, 503])
+        data = json.loads(resp.data)
+        self.assertIn('defense_data_stale', data)
+
+    def test_ready_defense_stale_when_no_data(self):
+        """defense_data_stale=True when no TeamDefenseSnapshot rows exist."""
+        resp = self.client.get('/ready')
+        data = json.loads(resp.data)
+        self.assertTrue(data['defense_data_stale'])
+
+
 if __name__ == '__main__':
     unittest.main()
