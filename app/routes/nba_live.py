@@ -526,6 +526,14 @@ def nba_place_bets():
     legs = data.get("legs", [])
     is_parlay = bool(data.get("is_parlay", False))
 
+    rr_payload = data.get("round_robin")
+    rr_size = None
+    if rr_payload and isinstance(rr_payload, dict):
+        try:
+            rr_size = int(rr_payload.get("size") or 0) or None
+        except (TypeError, ValueError):
+            rr_size = None
+
     if not legs:
         return jsonify({"success": False, "message": "No selections provided"}), 400
 
@@ -615,6 +623,8 @@ def nba_place_bets():
             parlay_id=parlay_id,
             source=BetSource.NBA_PROPS.value,
             bonus_multiplier=bonus_mult,
+            round_robin_size=rr_size,
+            parlay_group_id=None,  # set below for RR bets
         )
         db.session.add(bet_obj)
         created.append(bet_obj)
@@ -622,6 +632,12 @@ def nba_place_bets():
     if errors:
         db.session.rollback()
         return jsonify({"success": False, "message": "; ".join(errors)}), 400
+
+    if rr_size and len(created) >= rr_size:
+        import uuid
+        rr_group_id = str(uuid.uuid4())[:40]
+        for leg_obj in created:
+            leg_obj.parlay_group_id = rr_group_id
 
     db.session.flush()
     detector = ValueDetector(ProjectionEngine())

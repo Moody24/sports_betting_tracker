@@ -1291,3 +1291,59 @@ class TestBetRoutes(BaseTestCase):
             db.session.commit()
         resp = self.client.get('/bets')
         self.assertIn(b'aria-controls="parlay-legs-p123"', resp.data)
+
+
+class TestRoundRobinSlip(BaseTestCase):
+    def _place_rr(self, n_legs=3, rr_size=2):
+        self.register_and_login()
+        legs = []
+        for i in range(n_legs):
+            legs.append({
+                "team_a": f"Team{i}A",
+                "team_b": f"Team{i}B",
+                "match_date": "2026-07-01",
+                "game_id": f"game{i}",
+                "bet_type": "moneyline",
+                "player_name": None,
+                "prop_type": None,
+                "prop_line": None,
+                "over_under_line": None,
+                "picked_team": f"Team{i}A",
+                "american_odds": -110,
+            })
+        payload = {
+            "stake": 25.0,
+            "units": 1.0,
+            "is_parlay": True,
+            "legs": legs,
+            "round_robin": {"size": rr_size},
+        }
+        return self.client.post(
+            "/nba/place-bets",
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+
+    def test_round_robin_submission_succeeds(self):
+        resp = self._place_rr(n_legs=3, rr_size=2)
+        self.assertEqual(resp.status_code, 200)
+        data = json.loads(resp.data)
+        self.assertTrue(data["success"])
+
+    def test_round_robin_sets_round_robin_size(self):
+        self._place_rr(n_legs=3, rr_size=2)
+        with self.app.app_context():
+            from app.models import Bet
+            bets = Bet.query.all()
+            self.assertTrue(len(bets) == 3)
+            for b in bets:
+                self.assertEqual(b.round_robin_size, 2)
+
+    def test_round_robin_sets_parlay_group_id(self):
+        self._place_rr(n_legs=3, rr_size=2)
+        with self.app.app_context():
+            from app.models import Bet
+            bets = Bet.query.all()
+            group_ids = {b.parlay_group_id for b in bets}
+            self.assertEqual(len(group_ids), 1)
+            self.assertIsNotNone(list(group_ids)[0])
