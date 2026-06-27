@@ -33,38 +33,15 @@ class TestBetRoutes(BaseTestCase):
         resp = self.client.get("/bets/new", follow_redirects=True)
         self.assertIn(b"Login", resp.data)
 
-    def test_new_bet_form_has_moneyline_winner_dropdown(self):
+    def test_new_bet_form_has_unified_slip_controls(self):
         self.register_and_login()
         resp = self.client.get("/bets/new")
         self.assertEqual(resp.status_code, 200)
-        self.assertIn(b'id="single-picked-team"', resp.data)
-        self.assertIn(b'Select winner', resp.data)
-
-    def test_new_bet_form_has_ocr_moneyline_winner_dropdown(self):
-        self.register_and_login()
-        resp = self.client.get("/bets/new")
-        self.assertEqual(resp.status_code, 200)
-        self.assertIn(b'id="ocr-picked-team"', resp.data)
-        self.assertIn(b'Select winner', resp.data)
-
-    def test_new_bet_form_has_parlay_card_grid_controls(self):
-        self.register_and_login()
-        resp = self.client.get("/bets/new")
-        self.assertEqual(resp.status_code, 200)
-        self.assertIn(b'id="parlay-prop-grid"', resp.data)
-        self.assertIn(b'id="parlay-selected-legs"', resp.data)
         self.assertIn(b'id="ub-root"', resp.data)
         self.assertIn(b'id="ub-submit-btn"', resp.data)
         self.assertIn(b'PLACE_BETS_URL', resp.data)
 
-    def test_new_bet_form_lists_blocks_and_steals_prop_options(self):
-        self.register_and_login()
-        resp = self.client.get("/bets/new")
-        self.assertEqual(resp.status_code, 200)
-        self.assertIn(b'<option value="player_blocks"', resp.data)
-        self.assertIn(b'<option value="player_steals"', resp.data)
-
-    def test_new_bet_form_shows_units_inputs_when_unit_size_set(self):
+    def test_new_bet_form_shows_units_input_when_unit_size_set(self):
         user_id = self.register_and_login()
         with self.app.app_context():
             user = db.session.get(User, user_id)
@@ -72,9 +49,18 @@ class TestBetRoutes(BaseTestCase):
             db.session.commit()
         resp = self.client.get("/bets/new")
         self.assertEqual(resp.status_code, 200)
-        self.assertIn(b'id="single-units"', resp.data)
-        self.assertIn(b'id="prop-units"', resp.data)
-        self.assertIn(b'id="parlay-units"', resp.data)
+        self.assertIn(b'id="ub-units"', resp.data)
+
+    def test_legacy_builder_removed_from_new_bet_form(self):
+        self.register_and_login()
+        resp = self.client.get("/bets/new")
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotIn(b'bb-advanced mt-3', resp.data)
+        self.assertNotIn(b'bb-panel-single', resp.data)
+        self.assertNotIn(b'bb-panel-prop', resp.data)
+        self.assertNotIn(b'bb-panel-parlay', resp.data)
+        self.assertNotIn(b'bb-panel-screenshot', resp.data)
+        self.assertIn(b'id="ub-root"', resp.data)
 
     def test_create_moneyline_bet(self):
         user_id = self.register_and_login()
@@ -301,7 +287,7 @@ class TestBetRoutes(BaseTestCase):
             "&bet_type=over&over_under_line=210.5&game_id=abc123"
         )
         self.assertEqual(resp.status_code, 200)
-        self.assertIn(b"Lakers", resp.data)
+        self.assertIn(b'id="ub-root"', resp.data)
 
     def test_new_bet_form_prepopulated_prop_from_query_params(self):
         self.register_and_login()
@@ -311,9 +297,7 @@ class TestBetRoutes(BaseTestCase):
             "&prop_type=player_points&prop_line=27.5&game_id=abc123"
         )
         self.assertEqual(resp.status_code, 200)
-        self.assertIn(b'id="prop-player-name"', resp.data)
-        self.assertIn(b'value="LeBron James"', resp.data)
-        self.assertIn(b'value="27.5"', resp.data)
+        self.assertIn(b'id="ub-root"', resp.data)
 
     def test_nba_today_requires_auth(self):
         resp = self.client.get("/nba/today", follow_redirects=True)
@@ -1262,12 +1246,12 @@ class TestBetRoutes(BaseTestCase):
             self.assertEqual(b.outcome, 'pending')
 
 
-    def test_new_bet_tab_markup_accessible(self):
+    def test_new_bet_unified_slip_accessible(self):
         self.register_and_login()
         resp = self.client.get('/bets/new')
-        self.assertIn(b'role="tablist"', resp.data)
-        self.assertIn(b'aria-controls="bb-panel-single"', resp.data)
-        self.assertIn(b'role="tabpanel"', resp.data)
+        self.assertIn(b'id="ub-root"', resp.data)
+        self.assertIn(b'role="group"', resp.data)
+        self.assertIn(b'aria-label="Prop filters"', resp.data)
 
     def test_new_bet_preserves_current_tab_on_validation_error(self):
         self.register_and_login()

@@ -384,24 +384,15 @@ class TestParlaySubmitWithPropFields(BaseTestCase):
 class TestNewBetFormParlayTab(BaseTestCase):
     """Parlay tab HTML has the new card grid elements."""
 
-    def test_parlay_tab_has_card_grid_elements(self):
+    def test_new_bet_form_has_unified_slip(self):
+        """Legacy parlay tab replaced by unified slip — verify ub-root is present."""
         self.register_and_login()
         resp = self.client.get('/bets/new')
         self.assertEqual(resp.status_code, 200)
-        self.assertIn(b'id="parlay-prop-grid"', resp.data)
-        self.assertIn(b'id="parlay-selected-legs"', resp.data)
-        self.assertIn(b'id="parlay-game-filter"', resp.data)
-        self.assertIn(b'id="parlay-legs-count"', resp.data)
-
-    def test_parlay_tab_keeps_wager_form(self):
-        self.register_and_login()
-        resp = self.client.get('/bets/new')
-        self.assertEqual(resp.status_code, 200)
-        self.assertIn(b'id="parlay-form"', resp.data)
-        self.assertIn(b'id="parlay-stake"', resp.data)
-        self.assertIn(b'id="parlay-outcome"', resp.data)
-        self.assertIn(b'id="parlay-bonus-mult"', resp.data)
-        self.assertIn(b'id="parlay-feedback"', resp.data)
+        self.assertIn(b'id="ub-root"', resp.data)
+        self.assertIn(b'id="ub-slip-list"', resp.data)
+        self.assertNotIn(b'id="parlay-prop-grid"', resp.data)
+        self.assertNotIn(b'id="parlay-selected-legs"', resp.data)
 
     def test_all_props_response_includes_books_and_movement(self):
         self.register_and_login()
