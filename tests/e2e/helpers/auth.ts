@@ -1,7 +1,7 @@
 import { expect, Page } from '@playwright/test';
 
 export async function registerAndLogin(page: Page): Promise<{ username: string; password: string }> {
-  const stamp = Date.now();
+  const stamp = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const username = `e2e_user_${stamp}`;
   const password = 'password123';
   const email = `${username}@example.com`;

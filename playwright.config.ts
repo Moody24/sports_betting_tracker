@@ -16,7 +16,7 @@ export default defineConfig({
   timeout: 60_000,
   fullyParallel: false,
   retries: process.env.CI ? 0 : 0,
-  workers: process.env.CI ? 2 : undefined,
+  workers: process.env.CI ? 1 : undefined,
   reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : [['list'], ['html', { open: 'never' }]],
   expect: {
     timeout: 10_000,
