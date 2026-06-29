@@ -101,9 +101,9 @@
         </div>
         {% if current_user.is_authenticated %}
         <div class="dropdown">
-          <button class="user-btn dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+          <button class="user-btn dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" aria-label="{{ current_user.username }}">
             <i class="bi bi-person-circle"></i>
-            <span class="d-none d-sm-inline">{{ current_user.username }}</span>
+            <span class="d-none d-sm-inline" aria-hidden="true">{{ current_user.username }}</span>
           </button>
           <ul class="dropdown-menu dropdown-menu-end">
             <li class="px-3 py-2 border-bottom user-menu-header">

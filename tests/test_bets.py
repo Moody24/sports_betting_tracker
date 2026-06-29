@@ -33,38 +33,15 @@ class TestBetRoutes(BaseTestCase):
         resp = self.client.get("/bets/new", follow_redirects=True)
         self.assertIn(b"Login", resp.data)
 
-    def test_new_bet_form_has_moneyline_winner_dropdown(self):
+    def test_new_bet_form_has_unified_slip_controls(self):
         self.register_and_login()
         resp = self.client.get("/bets/new")
         self.assertEqual(resp.status_code, 200)
-        self.assertIn(b'id="single-picked-team"', resp.data)
-        self.assertIn(b'Select winner', resp.data)
-
-    def test_new_bet_form_has_ocr_moneyline_winner_dropdown(self):
-        self.register_and_login()
-        resp = self.client.get("/bets/new")
-        self.assertEqual(resp.status_code, 200)
-        self.assertIn(b'id="ocr-picked-team"', resp.data)
-        self.assertIn(b'Select winner', resp.data)
-
-    def test_new_bet_form_has_parlay_card_grid_controls(self):
-        self.register_and_login()
-        resp = self.client.get("/bets/new")
-        self.assertEqual(resp.status_code, 200)
-        self.assertIn(b'id="parlay-prop-grid"', resp.data)
-        self.assertIn(b'id="parlay-selected-legs"', resp.data)
         self.assertIn(b'id="ub-root"', resp.data)
         self.assertIn(b'id="ub-submit-btn"', resp.data)
         self.assertIn(b'PLACE_BETS_URL', resp.data)
 
-    def test_new_bet_form_lists_blocks_and_steals_prop_options(self):
-        self.register_and_login()
-        resp = self.client.get("/bets/new")
-        self.assertEqual(resp.status_code, 200)
-        self.assertIn(b'<option value="player_blocks"', resp.data)
-        self.assertIn(b'<option value="player_steals"', resp.data)
-
-    def test_new_bet_form_shows_units_inputs_when_unit_size_set(self):
+    def test_new_bet_form_shows_units_input_when_unit_size_set(self):
         user_id = self.register_and_login()
         with self.app.app_context():
             user = db.session.get(User, user_id)
@@ -72,9 +49,18 @@ class TestBetRoutes(BaseTestCase):
             db.session.commit()
         resp = self.client.get("/bets/new")
         self.assertEqual(resp.status_code, 200)
-        self.assertIn(b'id="single-units"', resp.data)
-        self.assertIn(b'id="prop-units"', resp.data)
-        self.assertIn(b'id="parlay-units"', resp.data)
+        self.assertIn(b'id="ub-units"', resp.data)
+
+    def test_legacy_builder_removed_from_new_bet_form(self):
+        self.register_and_login()
+        resp = self.client.get("/bets/new")
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotIn(b'bb-advanced mt-3', resp.data)
+        self.assertNotIn(b'bb-panel-single', resp.data)
+        self.assertNotIn(b'bb-panel-prop', resp.data)
+        self.assertNotIn(b'bb-panel-parlay', resp.data)
+        self.assertNotIn(b'bb-panel-screenshot', resp.data)
+        self.assertIn(b'id="ub-root"', resp.data)
 
     def test_create_moneyline_bet(self):
         user_id = self.register_and_login()
@@ -301,7 +287,7 @@ class TestBetRoutes(BaseTestCase):
             "&bet_type=over&over_under_line=210.5&game_id=abc123"
         )
         self.assertEqual(resp.status_code, 200)
-        self.assertIn(b"Lakers", resp.data)
+        self.assertIn(b'id="ub-root"', resp.data)
 
     def test_new_bet_form_prepopulated_prop_from_query_params(self):
         self.register_and_login()
@@ -311,9 +297,7 @@ class TestBetRoutes(BaseTestCase):
             "&prop_type=player_points&prop_line=27.5&game_id=abc123"
         )
         self.assertEqual(resp.status_code, 200)
-        self.assertIn(b'id="prop-player-name"', resp.data)
-        self.assertIn(b'value="LeBron James"', resp.data)
-        self.assertIn(b'value="27.5"', resp.data)
+        self.assertIn(b'id="ub-root"', resp.data)
 
     def test_nba_today_requires_auth(self):
         resp = self.client.get("/nba/today", follow_redirects=True)
@@ -875,7 +859,7 @@ class TestBetRoutes(BaseTestCase):
             data=json.dumps(payload),
         )
         self.assertEqual(resp.status_code, 400)
-        self.assertIn("team_a", json.loads(resp.data)["error"])
+        self.assertIn("team_a", json.loads(resp.data)["message"])
 
     def test_place_bets_invalid_stake_string(self):
         """Non-numeric stake returns 400."""
@@ -890,7 +874,7 @@ class TestBetRoutes(BaseTestCase):
             }),
         )
         self.assertEqual(resp.status_code, 400)
-        self.assertIn("number", json.loads(resp.data)["error"])
+        self.assertIn("number", json.loads(resp.data)["message"])
 
     def test_new_bet_form_invalid_match_date_silently_ignored(self):
         """Malformed match_date query param falls back gracefully."""
@@ -1262,12 +1246,12 @@ class TestBetRoutes(BaseTestCase):
             self.assertEqual(b.outcome, 'pending')
 
 
-    def test_new_bet_tab_markup_accessible(self):
+    def test_new_bet_unified_slip_accessible(self):
         self.register_and_login()
         resp = self.client.get('/bets/new')
-        self.assertIn(b'role="tablist"', resp.data)
-        self.assertIn(b'aria-controls="bb-panel-single"', resp.data)
-        self.assertIn(b'role="tabpanel"', resp.data)
+        self.assertIn(b'id="ub-root"', resp.data)
+        self.assertIn(b'role="group"', resp.data)
+        self.assertIn(b'aria-label="Prop filters"', resp.data)
 
     def test_new_bet_preserves_current_tab_on_validation_error(self):
         self.register_and_login()
@@ -1307,3 +1291,59 @@ class TestBetRoutes(BaseTestCase):
             db.session.commit()
         resp = self.client.get('/bets')
         self.assertIn(b'aria-controls="parlay-legs-p123"', resp.data)
+
+
+class TestRoundRobinSlip(BaseTestCase):
+    def _place_rr(self, n_legs=3, rr_size=2):
+        self.register_and_login()
+        legs = []
+        for i in range(n_legs):
+            legs.append({
+                "team_a": f"Team{i}A",
+                "team_b": f"Team{i}B",
+                "match_date": "2026-07-01",
+                "game_id": f"game{i}",
+                "bet_type": "moneyline",
+                "player_name": None,
+                "prop_type": None,
+                "prop_line": None,
+                "over_under_line": None,
+                "picked_team": f"Team{i}A",
+                "american_odds": -110,
+            })
+        payload = {
+            "stake": 25.0,
+            "units": 1.0,
+            "is_parlay": True,
+            "legs": legs,
+            "round_robin": {"size": rr_size},
+        }
+        return self.client.post(
+            "/nba/place-bets",
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+
+    def test_round_robin_submission_succeeds(self):
+        resp = self._place_rr(n_legs=3, rr_size=2)
+        self.assertEqual(resp.status_code, 200)
+        data = json.loads(resp.data)
+        self.assertTrue(data["success"])
+
+    def test_round_robin_sets_round_robin_size(self):
+        self._place_rr(n_legs=3, rr_size=2)
+        with self.app.app_context():
+            from app.models import Bet
+            bets = Bet.query.all()
+            self.assertTrue(len(bets) == 3)
+            for b in bets:
+                self.assertEqual(b.round_robin_size, 2)
+
+    def test_round_robin_sets_parlay_group_id(self):
+        self._place_rr(n_legs=3, rr_size=2)
+        with self.app.app_context():
+            from app.models import Bet
+            bets = Bet.query.all()
+            group_ids = {b.parlay_group_id for b in bets}
+            self.assertEqual(len(group_ids), 1)
+            self.assertIsNotNone(list(group_ids)[0])
