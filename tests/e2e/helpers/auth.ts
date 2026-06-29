@@ -11,12 +11,12 @@ export async function registerAndLogin(page: Page): Promise<{ username: string; 
   await page.locator('#email').fill(email);
   await page.locator('#password').fill(password);
   await page.locator('#confirm_password').fill(password);
-  await page.locator('form button[type="submit"]').click();
+  await page.locator('form [type="submit"]').click();
   await expect(page).toHaveURL(/\/auth\/login/);
 
   await page.locator('#username').fill(username);
   await page.locator('#password').fill(password);
-  await page.locator('form button[type="submit"]').click();
+  await page.locator('form [type="submit"]').click();
   await expect(page).toHaveURL(/\/$/);
   await expect(page.locator('text=Login successful')).toBeVisible();
 
