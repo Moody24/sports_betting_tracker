@@ -28,9 +28,16 @@ class BudgetExhaustedError(requests.RequestException):
 class APIBudgetManager:
     def __init__(self, floor: Optional[int] = None):
         self._remaining: Optional[float] = None
-        self._floor = floor if floor is not None else int(
-            os.getenv('ODDS_API_BUDGET_FLOOR', '25')
-        )
+        if floor is not None:
+            self._floor = floor
+        else:
+            try:
+                self._floor = int(os.getenv('ODDS_API_BUDGET_FLOOR', '25'))
+            except (TypeError, ValueError):
+                logger.warning(
+                    "ODDS_API_BUDGET_FLOOR env var invalid or non-numeric; using default floor 25"
+                )
+                self._floor = 25
         self._lock = threading.Lock()
 
     @property

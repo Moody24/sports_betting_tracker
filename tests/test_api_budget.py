@@ -60,3 +60,17 @@ class TestAPIBudgetManager(BaseTestCase):
         import requests
         from app.services.api_budget import BudgetExhaustedError
         self.assertTrue(issubclass(BudgetExhaustedError, requests.RequestException))
+
+    @patch.dict('os.environ', {'ODDS_API_BUDGET_FLOOR': 'garbage'})
+    def test_invalid_floor_env_var_falls_back_to_default(self):
+        """Non-numeric ODDS_API_BUDGET_FLOOR falls back to 25 and logs warning."""
+        from app.services.api_budget import APIBudgetManager
+        with patch('app.services.api_budget.logger') as mock_logger:
+            mgr = APIBudgetManager()
+            self.assertEqual(mgr._floor, 25)
+            mock_logger.warning.assert_called_once()
+        # Verify behavior with the default floor of 25
+        mgr.record_headers({'x-requests-remaining': '10'})
+        self.assertFalse(mgr.can_spend())
+        mgr.record_headers({'x-requests-remaining': '30'})
+        self.assertTrue(mgr.can_spend())
