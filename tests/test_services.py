@@ -7253,7 +7253,7 @@ class TestBetImportEdgeCases(BaseTestCase):
         """manual_parlay with empty legs list returns 400."""
         self.register_and_login()
         resp = self.client.post(
-            '/bets/manual-parlay',
+            '/bets/parlay',
             content_type='application/json',
             data=json.dumps({'stake': 10.0, 'legs': []}),
         )
@@ -7263,7 +7263,7 @@ class TestBetImportEdgeCases(BaseTestCase):
         """prop_line outside range returns validation error."""
         self.register_and_login()
         resp = self.client.post(
-            '/bets/manual-parlay',
+            '/bets/parlay',
             content_type='application/json',
             data=json.dumps({
                 'stake': 10.0,
@@ -7282,7 +7282,7 @@ class TestBetImportEdgeCases(BaseTestCase):
         """american_odds outside range returns validation error."""
         self.register_and_login()
         resp = self.client.post(
-            '/bets/manual-parlay',
+            '/bets/parlay',
             content_type='application/json',
             data=json.dumps({
                 'stake': 10.0,
