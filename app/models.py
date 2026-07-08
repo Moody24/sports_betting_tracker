@@ -468,6 +468,42 @@ class PlayerGameLog(db.Model):
         return f"<PlayerGameLog {self.player_name} {self.game_date}>"
 
 
+class HistoricalGameLog(db.Model):
+    """Permanent, sport-aware player game log used for model training.
+
+    Unlike ``PlayerGameLog`` (a pruned slate cache), rows here are never
+    deleted.  Common fields are real columns; per-sport stat payloads live
+    in the ``stats`` JSON column, keyed per ``SPORT_STAT_CONFIG``.
+    """
+
+    id = db.Column(db.Integer, primary_key=True)
+    sport = db.Column(db.String(10), nullable=False, default='nba', index=True)
+    player_id = db.Column(db.String(20), nullable=False)
+    player_name = db.Column(db.String(120), nullable=False)
+    team_abbr = db.Column(db.String(10), nullable=True)
+    opp_abbr = db.Column(db.String(10), nullable=True)
+    game_id = db.Column(db.String(30), nullable=False)
+    game_date = db.Column(db.Date, nullable=False)
+    season = db.Column(db.String(10), nullable=False)
+    home_away = db.Column(db.String(4), nullable=True)
+    win_loss = db.Column(db.String(1), nullable=True)
+    starter = db.Column(db.Boolean, nullable=True)
+    stats = db.Column(db.JSON, nullable=False, default=dict)
+    fetched_at = db.Column(
+        db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    __table_args__ = (
+        UniqueConstraint('sport', 'player_id', 'game_id',
+                         name='uq_hist_sport_player_game'),
+        Index('ix_hist_sport_player_date', 'sport', 'player_name', 'game_date'),
+        Index('ix_hist_sport_season', 'sport', 'season'),
+    )
+
+    def __repr__(self) -> str:
+        return f"<HistoricalGameLog {self.sport} {self.player_name} {self.game_date}>"
+
+
 class TeamDefenseSnapshot(db.Model):
     """Daily snapshot of a team's defensive profile."""
 
