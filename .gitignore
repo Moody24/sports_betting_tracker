@@ -31,3 +31,4 @@ venv310/
 
 instance.bak/
 tests/helpers.py.backup
+.claude/worktrees/
