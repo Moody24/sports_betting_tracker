@@ -168,5 +168,64 @@ def cli_backfill_logs(sport, seasons, season_type, sleep_seconds):
     click.echo(f"Done: {job.message}")
 
 
+def _fetch_advanced_boxscore_df(game_id: str):
+    """One nba_api call: advanced box score (USG_PCT, START_POSITION)."""
+    from nba_api.stats.endpoints import boxscoreadvancedv2
+    box = boxscoreadvancedv2.BoxScoreAdvancedV2(game_id=game_id, timeout=60)
+    return box.get_data_frames()[0]   # player-level frame
+
+
+@click.command('enrich-logs')
+@click.option('--sport', default='nba', show_default=True)
+@click.option('--limit', default=200, show_default=True, type=int,
+              help='Max games to enrich this run (chunkable).')
+@click.option('--sleep', 'sleep_seconds', default=0.8, show_default=True,
+              type=float)
+def cli_enrich_logs(sport, limit, sleep_seconds):
+    """Merge advanced box-score data (usage, starter) into HistoricalGameLog.
+
+    Rows with ``starter IS NULL`` are un-enriched; one API call per game.
+    """
+    if sport != 'nba':
+        raise click.BadParameter(f"sport '{sport}' not supported yet")
+
+    pending_games = [
+        gid for (gid,) in db.session.query(HistoricalGameLog.game_id)
+        .filter_by(sport=sport)
+        .filter(HistoricalGameLog.starter.is_(None))
+        .distinct().order_by(HistoricalGameLog.game_id)
+        .limit(limit)
+    ]
+    enriched = failed = 0
+    for gid in pending_games:
+        try:
+            df = _fetch_advanced_boxscore_df(gid)
+        except Exception as exc:
+            failed += 1
+            logger.warning("enrich-logs: game %s fetch failed: %s", gid, exc)
+            continue
+        by_player = {
+            str(rec.get('PLAYER_ID', '')): rec for rec in df.to_dict('records')
+        }
+        rows = HistoricalGameLog.query.filter_by(
+            sport=sport, game_id=gid).all()
+        for row in rows:
+            rec = by_player.get(row.player_id)
+            if rec is None:
+                continue
+            row.starter = bool(_safe_str(rec.get('START_POSITION')).strip())
+            new_stats = dict(row.stats or {})
+            new_stats['usage_pct'] = _safe_float(rec.get('USG_PCT'))
+            row.stats = new_stats   # reassign — JSON columns don't track mutation
+        db.session.commit()
+        enriched += 1
+        if sleep_seconds:
+            time.sleep(sleep_seconds)
+
+    click.echo(f"Enriched {enriched} games ({failed} failed, "
+               f"{len(pending_games)} attempted)")
+
+
 def register_history_commands(app):
     app.cli.add_command(cli_backfill_logs)
+    app.cli.add_command(cli_enrich_logs)

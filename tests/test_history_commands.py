@@ -139,3 +139,67 @@ class TestBackfillCommand(BaseTestCase):
             self.assertEqual(job.status, 'failed')
             self.assertIn('2025-26', job.message)
             self.assertIsNotNone(job.finished_at)
+
+
+class TestEnrichCommand(BaseTestCase):
+
+    def _seed_two_rows(self):
+        from app import db
+        from tests.test_historical_game_log import make_hist_row
+        with self.app.app_context():
+            db.session.add(make_hist_row(
+                player_id='2544', starter=None,
+                stats={'pts': 28.0, 'minutes': 36.0}))
+            db.session.add(make_hist_row(
+                player_id='1628369', player_name='Jayson Tatum',
+                team_abbr='BOS', opp_abbr='LAL', home_away='AWAY',
+                starter=None, stats={'pts': 33.0, 'minutes': 38.0}))
+            db.session.commit()
+
+    def _advanced_df(self):
+        return pd.DataFrame([
+            {'PLAYER_ID': 2544, 'START_POSITION': 'F', 'USG_PCT': 0.31},
+            {'PLAYER_ID': 1628369, 'START_POSITION': '', 'USG_PCT': 0.28},
+        ])
+
+    def _run(self, args):
+        runner = self.app.test_cli_runner()
+        return runner.invoke(args=['enrich-logs'] + args)
+
+    @patch('app.cli.history_commands._fetch_advanced_boxscore_df')
+    def test_enrich_sets_starter_and_usage(self, mock_fetch):
+        from app.models import HistoricalGameLog
+        self._seed_two_rows()
+        mock_fetch.return_value = self._advanced_df()
+        result = self._run(['--sport', 'nba', '--sleep', '0'])
+        self.assertEqual(result.exit_code, 0, result.output)
+        mock_fetch.assert_called_once_with('0022400123')
+        with self.app.app_context():
+            lebron = HistoricalGameLog.query.filter_by(player_id='2544').one()
+            self.assertTrue(lebron.starter)
+            self.assertAlmostEqual(lebron.stats['usage_pct'], 0.31)
+            self.assertEqual(lebron.stats['pts'], 28.0)   # payload preserved
+            tatum = HistoricalGameLog.query.filter_by(player_id='1628369').one()
+            self.assertFalse(tatum.starter)               # empty START_POSITION
+
+    @patch('app.cli.history_commands._fetch_advanced_boxscore_df')
+    def test_enrich_skips_already_enriched(self, mock_fetch):
+        self._seed_two_rows()
+        mock_fetch.return_value = self._advanced_df()
+        self._run(['--sport', 'nba', '--sleep', '0'])
+        mock_fetch.reset_mock()
+        self._run(['--sport', 'nba', '--sleep', '0'])
+        mock_fetch.assert_not_called()
+
+    @patch('app.cli.history_commands._fetch_advanced_boxscore_df')
+    def test_enrich_respects_limit(self, mock_fetch):
+        from app import db
+        from tests.test_historical_game_log import make_hist_row
+        self._seed_two_rows()
+        with self.app.app_context():
+            db.session.add(make_hist_row(
+                game_id='0022400999', starter=None, stats={'pts': 10.0}))
+            db.session.commit()
+        mock_fetch.return_value = self._advanced_df()
+        self._run(['--sport', 'nba', '--limit', '1', '--sleep', '0'])
+        self.assertEqual(mock_fetch.call_count, 1)
