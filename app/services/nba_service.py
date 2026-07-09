@@ -10,6 +10,7 @@ import requests
 
 from app.config_display import PROP_ESPN_COLUMN, SUPPORTED_PROP_MARKETS
 from app.enums import BetType, Outcome
+from app.services.api_budget import ODDS_BUDGET
 from app.services.base import SportService, SPORT_REGISTRY
 from app.utils.odds import american_to_decimal
 from app.utils.time_helpers import et_date_str, ET
@@ -191,7 +192,7 @@ def fetch_odds_combined() -> tuple:
         return {}, {}
 
     try:
-        resp = requests.get(
+        resp = ODDS_BUDGET.budgeted_get(
             ODDS_API_URL,
             params={
                 "apiKey": api_key,
@@ -549,7 +550,7 @@ def _fetch_historical_odds_for_date(target_date: date_type) -> tuple[list[dict],
     snap_ts = f"{target_date.isoformat()}T{snapshot_hour:02d}:00:00Z"
 
     try:
-        resp = requests.get(
+        resp = ODDS_BUDGET.budgeted_get(
             url,
             params={
                 "apiKey": api_key,
@@ -559,6 +560,7 @@ def _fetch_historical_odds_for_date(target_date: date_type) -> tuple[list[dict],
                 "date": snap_ts,
             },
             timeout=15,
+            critical=True,
         )
         resp.raise_for_status()
         payload = resp.json()
@@ -587,7 +589,7 @@ def _fetch_standard_odds_for_date_window(target_date: date_type) -> tuple[list[d
     end_utc = end_et.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
     try:
-        resp = requests.get(
+        resp = ODDS_BUDGET.budgeted_get(
             ODDS_API_URL,
             params={
                 "apiKey": api_key,
@@ -716,7 +718,7 @@ def fetch_odds_events() -> dict:
         return {}
 
     try:
-        resp = requests.get(
+        resp = ODDS_BUDGET.budgeted_get(
             ODDS_API_EVENTS_URL,
             params={"apiKey": api_key},
             timeout=10,
@@ -776,7 +778,7 @@ def _fetch_upcoming_games_odds(tomorrow) -> list[dict]:
     end_utc = end_et.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
     try:
-        resp = requests.get(
+        resp = ODDS_BUDGET.budgeted_get(
             ODDS_API_URL,
             params={
                 "apiKey": api_key,
@@ -919,7 +921,7 @@ def fetch_player_props_for_event(odds_event_id: str) -> dict:
 
     url = f"{ODDS_API_EVENTS_URL}{odds_event_id}/odds"
     try:
-        resp = requests.get(
+        resp = ODDS_BUDGET.budgeted_get(
             url,
             params={
                 "apiKey": api_key,
