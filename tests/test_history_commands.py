@@ -66,6 +66,13 @@ class TestRowsFromLeagueLog(BaseTestCase):
         self.assertEqual(tatum['home_away'], 'AWAY')
         self.assertEqual(tatum['opp_abbr'], 'LAL')
 
+    def test_float_player_ids_normalized(self):
+        from app.cli.history_commands import _rows_from_league_log
+        df = _league_log_df().astype({'PLAYER_ID': 'float64'})
+        rows = _rows_from_league_log(df, season='2025-26')
+        self.assertEqual(rows[0]['player_id'], '2544')
+        self.assertEqual(rows[1]['player_id'], '1628369')
+
     def test_nan_fields_do_not_leak_as_string_or_bypass_fallback(self):
         from app.cli.history_commands import _rows_from_league_log
         df = _league_log_df()
@@ -203,3 +210,39 @@ class TestEnrichCommand(BaseTestCase):
         mock_fetch.return_value = self._advanced_df()
         self._run(['--sport', 'nba', '--limit', '1', '--sleep', '0'])
         self.assertEqual(mock_fetch.call_count, 1)
+
+    @patch('app.cli.history_commands._fetch_advanced_boxscore_df')
+    def test_unmatched_player_marked_non_starter_not_refetched(
+            self, mock_fetch):
+        from app.models import HistoricalGameLog
+        self._seed_two_rows()
+        mock_fetch.return_value = pd.DataFrame([
+            {'PLAYER_ID': 2544, 'START_POSITION': 'F', 'USG_PCT': 0.31},
+        ])
+        result = self._run(['--sport', 'nba', '--sleep', '0'])
+        self.assertEqual(result.exit_code, 0, result.output)
+        with self.app.app_context():
+            tatum = HistoricalGameLog.query.filter_by(
+                player_id='1628369').one()
+            self.assertFalse(tatum.starter)             # terminal marker
+            self.assertNotIn('usage_pct', tatum.stats)  # no fabricated usage
+        self._run(['--sport', 'nba', '--sleep', '0'])
+        mock_fetch.assert_called_once()   # game did not re-enter the queue
+
+    @patch('app.cli.history_commands._fetch_advanced_boxscore_df')
+    def test_enrich_matches_float_player_ids(self, mock_fetch):
+        from app.models import HistoricalGameLog
+        self._seed_two_rows()
+        mock_fetch.return_value = pd.DataFrame([
+            {'PLAYER_ID': 2544.0, 'START_POSITION': 'F', 'USG_PCT': 0.31},
+            {'PLAYER_ID': 1628369.0, 'START_POSITION': '', 'USG_PCT': 0.28},
+        ])
+        result = self._run(['--sport', 'nba', '--sleep', '0'])
+        self.assertEqual(result.exit_code, 0, result.output)
+        with self.app.app_context():
+            lebron = HistoricalGameLog.query.filter_by(player_id='2544').one()
+            self.assertTrue(lebron.starter)
+            self.assertAlmostEqual(lebron.stats['usage_pct'], 0.31)
+            tatum = HistoricalGameLog.query.filter_by(
+                player_id='1628369').one()
+            self.assertFalse(tatum.starter)

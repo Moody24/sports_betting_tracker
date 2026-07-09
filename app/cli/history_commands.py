@@ -64,6 +64,27 @@ def _safe_str(value) -> str:
     return str(value)
 
 
+def _norm_player_id(value) -> str:
+    """Normalize a player-id value to a canonical string.
+
+    ``pandas`` upcasts an otherwise-integer column to ``float`` the moment
+    it contains a NaN, so the same NBA player id can arrive as ``2544``
+    (int) from one endpoint/frame and ``2544.0`` (float) from another.
+    Collapsing both to the same string keeps the backfill write path and
+    the enrich match path in agreement — otherwise enrich silently fails
+    to match rows it should, and a stuck game can never be enriched.
+    """
+    if value is None:
+        return ''
+    if isinstance(value, float):
+        if math.isnan(value):
+            return ''
+        if value.is_integer():
+            return str(int(value))
+        return str(value)
+    return str(value)
+
+
 def _fetch_league_log_df(season: str, season_type: str):
     """One nba_api call for a full season of player game logs."""
     from nba_api.stats.endpoints import leaguegamelog
@@ -86,7 +107,7 @@ def _rows_from_league_log(df, season: str) -> list[dict]:
             stats[key] = _safe_float(rec.get(col))
         rows.append(dict(
             sport='nba',
-            player_id=_safe_str(rec.get('PLAYER_ID')),
+            player_id=_norm_player_id(rec.get('PLAYER_ID')),
             player_name=_safe_str(rec.get('PLAYER_NAME')),
             team_abbr=_safe_str(rec.get('TEAM_ABBREVIATION')) or None,
             opp_abbr=extract_opp_abbr(matchup) or None,
@@ -123,49 +144,58 @@ def cli_backfill_logs(sport, seasons, season_type, sleep_seconds):
     inserted = skipped = 0
     errors: list[str] = []
 
-    for season in _recent_seasons(seasons):
-        try:
-            df = _fetch_league_log_df(season, season_type)
-        except Exception as exc:  # nba_api raises assorted exception types
-            errors.append(f"{season}: {exc}")
-            logger.error("backfill-logs: season %s fetch failed: %s",
-                         season, exc)
-            continue
+    try:
+        for season in _recent_seasons(seasons):
+            try:
+                df = _fetch_league_log_df(season, season_type)
+            except Exception as exc:  # nba_api raises assorted exception types
+                errors.append(f"{season}: {exc}")
+                logger.error("backfill-logs: season %s fetch failed: %s",
+                             season, exc)
+                continue
 
-        try:
-            existing = {
-                (pid, gid) for pid, gid in db.session.query(
-                    HistoricalGameLog.player_id, HistoricalGameLog.game_id,
-                ).filter_by(sport=sport, season=season)
-            }
-            batch = []
-            for kwargs in _rows_from_league_log(df, season):
-                if (kwargs['player_id'], kwargs['game_id']) in existing:
-                    skipped += 1
-                    continue
-                batch.append(HistoricalGameLog(**kwargs))
-            db.session.add_all(batch)
-            db.session.commit()
-            inserted += len(batch)
-            click.echo(
-                f"{season}: +{len(batch)} rows ({skipped} already present)")
-            if sleep_seconds:
-                time.sleep(sleep_seconds)
-        except Exception as exc:  # malformed rows, DB errors, etc.
-            db.session.rollback()
-            errors.append(f"{season}: {exc}")
-            logger.error("backfill-logs: season %s processing failed: %s",
-                         season, exc)
-            continue
-
-    job.finished_at = datetime.now(timezone.utc)
-    job.status = 'failed' if errors else 'success'
-    job.message = (
-        f"inserted={inserted} skipped={skipped}"
-        + (f" errors={'; '.join(errors)}" if errors else "")
-    )
-    db.session.commit()
-    click.echo(f"Done: {job.message}")
+            try:
+                existing = {
+                    (pid, gid) for pid, gid in db.session.query(
+                        HistoricalGameLog.player_id,
+                        HistoricalGameLog.game_id,
+                    ).filter_by(sport=sport, season=season)
+                }
+                batch = []
+                for kwargs in _rows_from_league_log(df, season):
+                    if (kwargs['player_id'], kwargs['game_id']) in existing:
+                        skipped += 1
+                        continue
+                    batch.append(HistoricalGameLog(**kwargs))
+                db.session.add_all(batch)
+                db.session.commit()
+                inserted += len(batch)
+                click.echo(
+                    f"{season}: +{len(batch)} rows ({skipped} already present)")
+                if sleep_seconds:
+                    time.sleep(sleep_seconds)
+            except Exception as exc:  # malformed rows, DB errors, etc.
+                db.session.rollback()
+                errors.append(f"{season}: {exc}")
+                logger.error("backfill-logs: season %s processing failed: %s",
+                             season, exc)
+                continue
+    except BaseException as exc:
+        # Ctrl-C during a sleep or an unexpected bug must still finalize the
+        # JobLog row — otherwise it sits at 'running' forever.
+        db.session.rollback()
+        errors.append(f"aborted: {exc}")
+        logger.error("backfill-logs: aborted mid-run: %s", exc)
+        raise
+    finally:
+        job.finished_at = datetime.now(timezone.utc)
+        job.status = 'failed' if errors else 'success'
+        job.message = (
+            f"inserted={inserted} skipped={skipped}"
+            + (f" errors={'; '.join(errors)}" if errors else "")
+        )
+        db.session.commit()
+        click.echo(f"Done: {job.message}")
 
 
 def _fetch_advanced_boxscore_df(game_id: str):
@@ -197,6 +227,7 @@ def cli_enrich_logs(sport, limit, sleep_seconds):
         .limit(limit)
     ]
     enriched = failed = 0
+    unmatched_games: list[str] = []
     for gid in pending_games:
         try:
             df = _fetch_advanced_boxscore_df(gid)
@@ -205,25 +236,40 @@ def cli_enrich_logs(sport, limit, sleep_seconds):
             logger.warning("enrich-logs: game %s fetch failed: %s", gid, exc)
             continue
         by_player = {
-            str(rec.get('PLAYER_ID', '')): rec for rec in df.to_dict('records')
+            _norm_player_id(rec.get('PLAYER_ID')): rec
+            for rec in df.to_dict('records')
         }
         rows = HistoricalGameLog.query.filter_by(
             sport=sport, game_id=gid).all()
+        updated = 0
         for row in rows:
             rec = by_player.get(row.player_id)
             if rec is None:
+                # Terminal marker: absent from the advanced box score means
+                # not a starter. Leaving NULL would put the game back in
+                # pending_games forever, burning one API call per run.
+                if row.starter is None:
+                    row.starter = False
                 continue
             row.starter = bool(_safe_str(rec.get('START_POSITION')).strip())
             new_stats = dict(row.stats or {})
             new_stats['usage_pct'] = _safe_float(rec.get('USG_PCT'))
             row.stats = new_stats   # reassign — JSON columns don't track mutation
+            updated += 1
         db.session.commit()
-        enriched += 1
+        if updated:
+            enriched += 1
+        else:
+            unmatched_games.append(gid)
         if sleep_seconds:
             time.sleep(sleep_seconds)
 
-    click.echo(f"Enriched {enriched} games ({failed} failed, "
+    summary = (f"Enriched {enriched} games ({failed} failed, "
                f"{len(pending_games)} attempted)")
+    if unmatched_games:
+        summary += (f"; {len(unmatched_games)} games had no matching "
+                    f"boxscore rows: {', '.join(unmatched_games)}")
+    click.echo(summary)
 
 
 def register_history_commands(app):
