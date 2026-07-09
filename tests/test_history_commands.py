@@ -66,6 +66,22 @@ class TestRowsFromLeagueLog(BaseTestCase):
         self.assertEqual(tatum['home_away'], 'AWAY')
         self.assertEqual(tatum['opp_abbr'], 'LAL')
 
+    def test_nan_fields_do_not_leak_as_string_or_bypass_fallback(self):
+        from app.cli.history_commands import _rows_from_league_log
+        df = _league_log_df()
+        df.loc[0, 'PLUS_MINUS'] = float('nan')
+        df.loc[0, 'TEAM_ABBREVIATION'] = float('nan')
+        df.loc[0, 'WL'] = float('nan')
+        rows = _rows_from_league_log(df, season='2025-26')
+        lebron = rows[0]
+        self.assertEqual(lebron['stats']['plus_minus'], 0.0)
+        self.assertIsNone(lebron['team_abbr'])
+        self.assertIsNone(lebron['win_loss'])
+        for value in lebron['stats'].values():
+            self.assertNotEqual(value, 'nan')
+        self.assertNotIn('nan', str(lebron['team_abbr']))
+        self.assertNotIn('nan', str(lebron['win_loss']))
+
 
 class TestBackfillCommand(BaseTestCase):
 
@@ -108,3 +124,18 @@ class TestBackfillCommand(BaseTestCase):
             job = JobLog.query.filter_by(job_name='backfill-logs').one()
             self.assertEqual(job.status, 'failed')
             self.assertIn('nba_api down', job.message)
+
+    @patch('app.cli.history_commands._fetch_league_log_df')
+    def test_malformed_game_date_marks_job_failed_not_stuck_running(
+            self, mock_fetch):
+        from app.models import JobLog
+        df = _league_log_df()
+        df.loc[0, 'GAME_DATE'] = 'not-a-date'
+        mock_fetch.return_value = df
+        result = self._run(['--sport', 'nba', '--seasons', '1', '--sleep', '0'])
+        self.assertEqual(result.exit_code, 0)  # command reports, doesn't crash
+        with self.app.app_context():
+            job = JobLog.query.filter_by(job_name='backfill-logs').one()
+            self.assertEqual(job.status, 'failed')
+            self.assertIn('2025-26', job.message)
+            self.assertIsNotNone(job.finished_at)

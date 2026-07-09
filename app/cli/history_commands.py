@@ -1,6 +1,7 @@
 """CLI commands for the permanent HistoricalGameLog store."""
 
 import logging
+import math
 import time
 from datetime import date, datetime, timezone
 
@@ -35,6 +36,34 @@ def _recent_seasons(n: int, today: date | None = None) -> list[str]:
     ]
 
 
+def _safe_float(value, default: float = 0.0) -> float:
+    """Coerce ``value`` to float, falling back to ``default``.
+
+    Handles the pandas/nba_api sentinels for missing data: ``None`` and
+    NaN (``float`` truthy, so a plain ``or`` fallback lets it through).
+    """
+    if value is None:
+        return default
+    try:
+        as_float = float(value)
+    except (TypeError, ValueError):
+        return default
+    return default if math.isnan(as_float) else as_float
+
+
+def _safe_str(value) -> str:
+    """Coerce ``value`` to str, treating None/NaN as ''.
+
+    ``str(float('nan'))`` produces the literal string ``'nan'``, which
+    would otherwise leak into nullable text columns via ``or None``.
+    """
+    if value is None:
+        return ''
+    if isinstance(value, float) and math.isnan(value):
+        return ''
+    return str(value)
+
+
 def _fetch_league_log_df(season: str, season_type: str):
     """One nba_api call for a full season of player game logs."""
     from nba_api.stats.endpoints import leaguegamelog
@@ -51,25 +80,22 @@ def _rows_from_league_log(df, season: str) -> list[dict]:
     """Map a LeagueGameLog dataframe to HistoricalGameLog constructor kwargs."""
     rows = []
     for rec in df.to_dict('records'):
-        matchup = str(rec.get('MATCHUP') or '')
+        matchup = _safe_str(rec.get('MATCHUP'))
         stats = {}
         for col, key in _NBA_STAT_COLUMNS.items():
-            try:
-                stats[key] = float(rec.get(col) or 0.0)
-            except (TypeError, ValueError):
-                stats[key] = 0.0
+            stats[key] = _safe_float(rec.get(col))
         rows.append(dict(
             sport='nba',
-            player_id=str(rec.get('PLAYER_ID', '')),
-            player_name=str(rec.get('PLAYER_NAME', '')),
-            team_abbr=str(rec.get('TEAM_ABBREVIATION') or '') or None,
+            player_id=_safe_str(rec.get('PLAYER_ID')),
+            player_name=_safe_str(rec.get('PLAYER_NAME')),
+            team_abbr=_safe_str(rec.get('TEAM_ABBREVIATION')) or None,
             opp_abbr=extract_opp_abbr(matchup) or None,
-            game_id=str(rec.get('GAME_ID', '')),
+            game_id=_safe_str(rec.get('GAME_ID')),
             game_date=datetime.strptime(
-                str(rec.get('GAME_DATE', '')), '%Y-%m-%d').date(),
+                _safe_str(rec.get('GAME_DATE')), '%Y-%m-%d').date(),
             season=season,
             home_away='HOME' if ' vs. ' in matchup else 'AWAY',
-            win_loss=str(rec.get('WL') or '') or None,
+            win_loss=_safe_str(rec.get('WL')) or None,
             starter=None,          # filled by `flask enrich-logs`
             stats=stats,
         ))
@@ -106,23 +132,31 @@ def cli_backfill_logs(sport, seasons, season_type, sleep_seconds):
                          season, exc)
             continue
 
-        existing = {
-            (pid, gid) for pid, gid in db.session.query(
-                HistoricalGameLog.player_id, HistoricalGameLog.game_id,
-            ).filter_by(sport=sport, season=season)
-        }
-        batch = []
-        for kwargs in _rows_from_league_log(df, season):
-            if (kwargs['player_id'], kwargs['game_id']) in existing:
-                skipped += 1
-                continue
-            batch.append(HistoricalGameLog(**kwargs))
-        db.session.add_all(batch)
-        db.session.commit()
-        inserted += len(batch)
-        click.echo(f"{season}: +{len(batch)} rows ({skipped} already present)")
-        if sleep_seconds:
-            time.sleep(sleep_seconds)
+        try:
+            existing = {
+                (pid, gid) for pid, gid in db.session.query(
+                    HistoricalGameLog.player_id, HistoricalGameLog.game_id,
+                ).filter_by(sport=sport, season=season)
+            }
+            batch = []
+            for kwargs in _rows_from_league_log(df, season):
+                if (kwargs['player_id'], kwargs['game_id']) in existing:
+                    skipped += 1
+                    continue
+                batch.append(HistoricalGameLog(**kwargs))
+            db.session.add_all(batch)
+            db.session.commit()
+            inserted += len(batch)
+            click.echo(
+                f"{season}: +{len(batch)} rows ({skipped} already present)")
+            if sleep_seconds:
+                time.sleep(sleep_seconds)
+        except Exception as exc:  # malformed rows, DB errors, etc.
+            db.session.rollback()
+            errors.append(f"{season}: {exc}")
+            logger.error("backfill-logs: season %s processing failed: %s",
+                         season, exc)
+            continue
 
     job.finished_at = datetime.now(timezone.utc)
     job.status = 'failed' if errors else 'success'
