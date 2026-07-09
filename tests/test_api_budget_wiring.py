@@ -15,6 +15,16 @@ def _fake_response(json_payload):
 
 class TestBudgetWiring(BaseTestCase):
 
+    def setUp(self):
+        super().setUp()
+        from app.services.api_budget import ODDS_BUDGET
+        ODDS_BUDGET._remaining = None
+
+    def tearDown(self):
+        from app.services.api_budget import ODDS_BUDGET
+        ODDS_BUDGET._remaining = None
+        super().tearDown()
+
     @patch.dict('os.environ', {'ODDS_API_KEY': 'test-key'})
     @patch('app.services.api_budget.requests.get')
     def test_fetch_odds_combined_uses_budgeted_get(self, mock_get):
@@ -31,9 +41,11 @@ class TestBudgetWiring(BaseTestCase):
     def test_fetch_odds_events_uses_budgeted_get(self, mock_get):
         mock_get.return_value = _fake_response([])
         from app.services import nba_service
+        from app.services.api_budget import ODDS_BUDGET
         result = nba_service.fetch_odds_events()
         self.assertEqual(result, {})
         mock_get.assert_called_once()
+        self.assertEqual(ODDS_BUDGET.remaining, 400.0)
 
     @patch.dict('os.environ', {'ODDS_API_KEY': 'test-key'})
     def test_budget_exhaustion_degrades_to_empty(self):
