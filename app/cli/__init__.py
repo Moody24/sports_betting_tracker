@@ -95,10 +95,12 @@ def register_cli(app):
     from app.cli.model_commands import register_model_commands
     from app.cli.market_commands import register_market_commands
     from app.cli.observability_commands import register_observability_commands
+    from app.cli.history_commands import register_history_commands
     register_stats_commands(app)
     register_model_commands(app)
     register_market_commands(app)
     register_observability_commands(app)
+    register_history_commands(app)
     # Commands registered via add_command() don't get an app context
     # automatically (unlike @app.cli.command()). Wrap each registered
     # command to push this specific app's context before running.
