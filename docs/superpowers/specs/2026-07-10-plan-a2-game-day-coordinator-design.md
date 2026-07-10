@@ -1,7 +1,7 @@
 # Plan A2: Game-Day Coordinator — Tiered Polling & Event Chains (Design)
 
 Date: 2026-07-10
-Status: approved by user (Approach A of 3)
+Status: implemented (this plan)
 Predecessor: Plan A (data platform foundations) — merged to main @ 8472d59,
 HistoricalGameLog backfilled with 79,603 rows (3 seasons, ESPN id namespace).
 
