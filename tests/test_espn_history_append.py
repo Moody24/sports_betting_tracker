@@ -71,6 +71,8 @@ class TestAppendFinalGame(BaseTestCase):
                              (6.0, 7.0, 1.0, 0.0, 3.0))
             self.assertEqual(s['minutes'], 36.0)
             self.assertEqual(s['plus_minus'], 12.0)
+            self.assertEqual(s['team_score'], 120.0)
+            self.assertEqual(s['opp_score'], 110.0)
             # usage vs hand-computed LAL totals: min66 fga34 fta12 tov5
             expected = ((19 + 0.44 * 7 + 3) * (66 / 5)) / (36 * (34 + 0.44 * 12 + 5))
             self.assertAlmostEqual(s['usage_pct'], expected, places=6)
@@ -78,6 +80,8 @@ class TestAppendFinalGame(BaseTestCase):
             self.assertEqual(curry.team_abbr, 'GSW')
             self.assertEqual(curry.win_loss, 'L')
             self.assertEqual(curry.home_away, 'AWAY')
+            self.assertEqual(curry.stats['team_score'], 110.0)
+            self.assertEqual(curry.stats['opp_score'], 120.0)
 
     @patch('app.services.espn_history_append._fetch_summary')
     def test_no_refetch_guard_skips_existing_game(self, mock_fetch):
@@ -128,3 +132,20 @@ class TestAppendFinalGame(BaseTestCase):
         game['home']['score'] = 'n/a'
         with self.app.app_context():
             self.assertEqual(append_final_game(game), 0)
+
+
+class TestScoreEnrichmentAppend(BaseTestCase):
+
+    @patch('app.services.espn_history_append._fetch_summary')
+    def test_appended_rows_carry_scores(self, mock_fetch):
+        from app.models import HistoricalGameLog
+        from app.services.espn_history_append import append_final_game
+        mock_fetch.return_value = _summary_json()
+        with self.app.app_context():
+            append_final_game(_scoreboard_game())    # home LAL 120, away GS 110
+            lebron = HistoricalGameLog.query.filter_by(player_id='1966').one()
+            self.assertEqual(lebron.stats['team_score'], 120.0)
+            self.assertEqual(lebron.stats['opp_score'], 110.0)
+            curry = HistoricalGameLog.query.filter_by(player_id='3975').one()
+            self.assertEqual(curry.stats['team_score'], 110.0)
+            self.assertEqual(curry.stats['opp_score'], 120.0)

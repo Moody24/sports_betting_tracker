@@ -151,6 +151,8 @@ def _rows_from_player_box(df, season: str, season_type_code: int,
             for col, key in _HOOPR_STAT_COLUMNS.items()
         }
         stats['plus_minus'] = _parse_plus_minus(rec.get('plus_minus'))
+        stats['team_score'] = _safe_float(rec.get('team_score'))
+        stats['opp_score'] = _safe_float(rec.get('opponent_team_score'))
 
         tm = team_totals.loc[(rec['game_id'], rec['team_id'])]
         minutes = stats['minutes']
@@ -186,7 +188,7 @@ def _rows_from_player_box(df, season: str, season_type_code: int,
 
 def import_hoopr_seasons(sport='nba', seasons=3,
                          season_type='Regular Season', from_dir=None,
-                         max_games=None) -> dict:
+                         max_games=None, update_stats: bool = False) -> dict:
     """Callable core of import-hoopr-logs (scheduler + CLI entry points)."""
     season_type_code = _SEASON_TYPE_CODES[season_type]
 
@@ -195,7 +197,7 @@ def import_hoopr_seasons(sport='nba', seasons=3,
     db.session.add(job)
     db.session.commit()
 
-    inserted = skipped = 0
+    inserted = skipped = updated = 0
     errors: list[str] = []
     warnings: list[str] = []
 
@@ -217,6 +219,13 @@ def import_hoopr_seasons(sport='nba', seasons=3,
                         HistoricalGameLog.game_id,
                     ).filter_by(sport=sport, season=season)
                 }
+                existing_rows = {}
+                if update_stats:
+                    existing_rows = {
+                        (r.player_id, r.game_id): r
+                        for r in HistoricalGameLog.query.filter_by(
+                            sport=sport, season=season)
+                    }
                 # NBA game ids are zero-padded ('0022500001'); ESPN ids are
                 # bare ints ('401700001'). Same season + both namespaces =
                 # the same games counted twice in training data.
@@ -233,6 +242,16 @@ def import_hoopr_seasons(sport='nba', seasons=3,
                 batch = []
                 for kwargs in season_rows:
                     if (kwargs['player_id'], kwargs['game_id']) in existing:
+                        if update_stats:
+                            row = existing_rows[(kwargs['player_id'],
+                                                 kwargs['game_id'])]
+                            merged = dict(row.stats or {})
+                            missing = {k: v for k, v in kwargs['stats'].items()
+                                       if k not in merged}
+                            if missing:
+                                merged.update(missing)
+                                row.stats = merged   # reassign — JSON no mutation tracking
+                                updated += 1
                         skipped += 1
                         continue
                     batch.append(HistoricalGameLog(**kwargs))
@@ -260,14 +279,14 @@ def import_hoopr_seasons(sport='nba', seasons=3,
         job.finished_at = datetime.now(timezone.utc)
         job.status = 'failed' if errors else 'success'
         job.message = (
-            f"inserted={inserted} skipped={skipped}"
+            f"inserted={inserted} skipped={skipped} updated={updated}"
             + (f" errors={'; '.join(errors)}" if errors else "")
         )
         db.session.commit()
         logger.info("import-hoopr-logs: Done: %s", job.message)
 
-    return {'inserted': inserted, 'skipped': skipped, 'errors': errors,
-            'warnings': warnings}
+    return {'inserted': inserted, 'skipped': skipped, 'updated': updated,
+            'errors': errors, 'warnings': warnings}
 
 
 @click.command('import-hoopr-logs')
@@ -281,7 +300,11 @@ def import_hoopr_seasons(sport='nba', seasons=3,
 @click.option('--max-games', default=None, type=int,
               help='Cap games imported per season (whole games kept) — '
                    'for small-batch validation runs.')
-def cli_import_hoopr_logs(sport, seasons, season_type, from_dir, max_games):
+@click.option('--update-stats', is_flag=True, default=False,
+              help='Merge missing stats-payload keys into existing rows '
+                   '(never overwrites keys already present).')
+def cli_import_hoopr_logs(sport, seasons, season_type, from_dir, max_games,
+                          update_stats):
     """Backfill HistoricalGameLog from hoopR (ESPN) data dumps on GitHub."""
     if sport != 'nba':
         raise click.BadParameter(
@@ -289,11 +312,12 @@ def cli_import_hoopr_logs(sport, seasons, season_type, from_dir, max_games):
             "Phase 3/4)")
     result = import_hoopr_seasons(sport=sport, seasons=seasons,
                                   season_type=season_type, from_dir=from_dir,
-                                  max_games=max_games)
+                                  max_games=max_games,
+                                  update_stats=update_stats)
     for warning in result['warnings']:
         click.echo(warning)
     click.echo(f"Done: inserted={result['inserted']} "
-               f"skipped={result['skipped']}"
+               f"skipped={result['skipped']} updated={result['updated']}"
                + (f" errors={'; '.join(result['errors'])}"
                   if result['errors'] else ""))
 

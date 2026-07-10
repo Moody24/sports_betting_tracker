@@ -142,6 +142,8 @@ def append_final_game(game: dict) -> int:
             stats['usage_pct'] = usage_pct(
                 rec['fga'], rec['fta'], rec['tov'], rec['minutes'],
                 t['minutes'], t['fga'], t['fta'], t['tov'])
+            stats['team_score'] = float(home_score if is_home else away_score)
+            stats['opp_score'] = float(away_score if is_home else home_score)
             rows.append(HistoricalGameLog(
                 sport='nba', player_id=rec['player_id'],
                 player_name=rec['player_name'], team_abbr=team,

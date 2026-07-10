@@ -31,6 +31,7 @@ def _player_box_df():
             'three_point_field_goals_attempted': 6.0,
             'free_throws_made': 6.0, 'free_throws_attempted': 7.0,
             'plus_minus': '+12',
+            'team_score': 120, 'opponent_team_score': 110,
         },
         {
             **base, 'athlete_id': 6583,
@@ -44,6 +45,7 @@ def _player_box_df():
             'three_point_field_goals_attempted': 1.0,
             'free_throws_made': 4.0, 'free_throws_attempted': 5.0,
             'plus_minus': '+8',
+            'team_score': 120, 'opponent_team_score': 110,
         },
         {
             **base, 'athlete_id': 4065648,
@@ -57,6 +59,7 @@ def _player_box_df():
             'three_point_field_goals_attempted': 11.0,
             'free_throws_made': 5.0, 'free_throws_attempted': 5.0,
             'plus_minus': '-12',
+            'team_score': 110, 'opponent_team_score': 120,
         },
         {
             **base, 'athlete_id': 3078576,
@@ -70,6 +73,7 @@ def _player_box_df():
             'three_point_field_goals_attempted': 7.0,
             'free_throws_made': 2.0, 'free_throws_attempted': 2.0,
             'plus_minus': '-6',
+            'team_score': 110, 'opponent_team_score': 120,
         },
         # DNP row — all stats null, must be skipped entirely.
         {
@@ -85,6 +89,7 @@ def _player_box_df():
             'three_point_field_goals_attempted': None,
             'free_throws_made': None, 'free_throws_attempted': None,
             'plus_minus': None,
+            'team_score': 120, 'opponent_team_score': 110,
         },
         # All-Star exhibition — ESPN codes these season_type 2 (regular
         # season!), so they must be excluded by team-abbr validation.
@@ -101,6 +106,7 @@ def _player_box_df():
             'three_point_field_goals_attempted': 4.0,
             'free_throws_made': 1.0, 'free_throws_attempted': 1.0,
             'plus_minus': '+10',
+            'team_score': 163, 'opponent_team_score': 157,
         },
         # Playoff row (season_type 3) — filtered out on a regular-season run.
         {
@@ -116,6 +122,7 @@ def _player_box_df():
             'three_point_field_goals_attempted': 8.0,
             'free_throws_made': 5.0, 'free_throws_attempted': 6.0,
             'plus_minus': '-3',
+            'team_score': 112, 'opponent_team_score': 101,
         },
     ]
     return pd.DataFrame(rows)
@@ -310,3 +317,49 @@ class TestImportCallable(BaseTestCase):
             result = import_hoopr_seasons(seasons=1)
         self.assertEqual(result['inserted'], 4)
         self.assertEqual(result['errors'], [])
+
+
+class TestScoreEnrichment(BaseTestCase):
+
+    def test_rows_carry_team_and_opp_scores(self):
+        from app.cli.hoopr_import import _rows_from_player_box
+        rows, _ = _rows_from_player_box(
+            _player_box_df(), season='2025-26', season_type_code=2)
+        lebron = next(r for r in rows if r['player_id'] == '1966')
+        self.assertEqual(lebron['stats']['team_score'], 120.0)
+        self.assertEqual(lebron['stats']['opp_score'], 110.0)
+        tatum = next(r for r in rows if r['player_id'] == '4065648')
+        self.assertEqual(tatum['stats']['team_score'], 110.0)
+        self.assertEqual(tatum['stats']['opp_score'], 120.0)
+
+    @patch('app.cli.hoopr_import._load_player_box_df')
+    def test_update_stats_merges_missing_keys_only(self, mock_load):
+        from app import db
+        from app.cli.hoopr_import import import_hoopr_seasons
+        from app.models import HistoricalGameLog
+        mock_load.return_value = _player_box_df()
+        with self.app.app_context():
+            # first import: rows land WITH scores
+            import_hoopr_seasons(seasons=1)
+            row = HistoricalGameLog.query.filter_by(player_id='1966').one()
+            # simulate a pre-Plan-B row: strip scores, poison pts
+            st = dict(row.stats)
+            del st['team_score'], st['opp_score']
+            st['pts'] = 99.0                       # must NOT be overwritten
+            row.stats = st
+            db.session.commit()
+            result = import_hoopr_seasons(seasons=1, update_stats=True)
+            self.assertEqual(result['updated'], 1)  # only the stripped row
+            row = HistoricalGameLog.query.filter_by(player_id='1966').one()
+            self.assertEqual(row.stats['team_score'], 120.0)   # merged in
+            self.assertEqual(row.stats['pts'], 99.0)           # untouched
+
+    @patch('app.cli.hoopr_import._load_player_box_df')
+    def test_update_stats_cli_flag(self, mock_load):
+        mock_load.return_value = _player_box_df()
+        runner = self.app.test_cli_runner()
+        runner.invoke(args=['import-hoopr-logs', '--seasons', '1'])
+        result = runner.invoke(args=['import-hoopr-logs', '--seasons', '1',
+                                     '--update-stats'])
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn('updated=', result.output)
