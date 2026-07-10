@@ -89,6 +89,23 @@ first tick after any downtime automatically heal everything missed.
 - This existing-rows-check-before-fetch pattern is the documented convention
   for all future per-game fetchers (MLB/NFL in Phases 3/4).
 
+### Caching policy
+
+Three deliberate layers — and one hard rule:
+
+- Day-verdict memo: the DORMANT tier caches the "any games today?" answer
+  in memory for the current ET day (restart re-checks once; cheap).
+- Persistence as cache: for final games, HistoricalGameLog rows, graded
+  Bet outcomes, and is_final snapshots ARE the permanent cache — the
+  no-refetch guard makes every per-game fetch happen at most once, ever.
+- Existing TTL caches reused where compatible: context_service's 24h
+  past-date scoreboard cache makes the 3-day lookback nearly free;
+  nba_service's 60s scoreboard cache is fine under a 5-minute tick.
+- HARD RULE: the LIVE-tier scoreboard read must never be served by a cache
+  whose TTL ≥ the tick interval (context_service's 10-min today-cache is
+  the known offender) — otherwise finals detection lags a tick. The
+  coordinator uses the fresh/60s-TTL path for live status.
+
 ### Changes to existing jobs
 
 - `resolve_and_grade` (01:00 ET) and `_update_final_snapshots` (23:15 ET):
