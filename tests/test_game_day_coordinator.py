@@ -185,7 +185,18 @@ class TestWiring(CoordinatorBase):
            return_value=[])
     def test_snapshot_props_odds_skips_on_empty_day(self, mock_sb):
         from app.services import scheduler as sched
-        with patch.object(sched, '_capture_todays_snapshots') as mock_cap:
+        with patch('app.services.nba_service.snapshot_todays_props') as mock_snap:
             with self.app.app_context():
                 sched.snapshot_props_odds()
-            mock_cap.assert_not_called()
+            mock_snap.assert_not_called()
+
+    @patch('app.services.game_day_coordinator.fetch_espn_scoreboard')
+    def test_snapshot_props_odds_runs_on_game_day(self, mock_sb):
+        from app.services import scheduler as sched
+        mock_sb.return_value = [{'espn_id': '401800123',
+                                 'status': 'STATUS_SCHEDULED'}]
+        with patch('app.services.nba_service.snapshot_todays_props') as mock_snap:
+            mock_snap.return_value = 5
+            with self.app.app_context():
+                sched.snapshot_props_odds()
+            mock_snap.assert_called_once()
