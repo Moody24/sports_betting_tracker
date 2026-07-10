@@ -32,6 +32,10 @@ from app.cli.history_commands import (
     _safe_str,
 )
 from app.models import HistoricalGameLog, JobLog
+from app.services.espn_mapping import (
+    ESPN_TO_NBA_ABBR as _ESPN_TO_NBA_ABBR,
+    NBA_TEAMS as _NBA_TEAMS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -46,20 +50,6 @@ _SEASON_TYPE_CODES = {
     'Playoffs': 3,
     'Play-In': 5,
 }
-
-# ESPN abbreviations that differ from stats.nba.com convention. The rest
-# of the app (PlayerGameLog, feature builder) uses NBA abbreviations, so
-# rows are normalized on import to keep joins working.
-_ESPN_TO_NBA_ABBR = {
-    'GS': 'GSW', 'NO': 'NOP', 'NY': 'NYK',
-    'SA': 'SAS', 'UTAH': 'UTA', 'WSH': 'WAS',
-}
-
-_NBA_TEAMS = frozenset({
-    'ATL', 'BKN', 'BOS', 'CHA', 'CHI', 'CLE', 'DAL', 'DEN', 'DET', 'GSW',
-    'HOU', 'IND', 'LAC', 'LAL', 'MEM', 'MIA', 'MIL', 'MIN', 'NOP', 'NYK',
-    'OKC', 'ORL', 'PHI', 'PHX', 'POR', 'SAC', 'SAS', 'TOR', 'UTA', 'WAS',
-})
 
 # hoopR player_box column → stats-payload key (all coerced to float)
 _HOOPR_STAT_COLUMNS = {
