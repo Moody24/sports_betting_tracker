@@ -169,3 +169,23 @@ class TestChainAndCatchUp(CoordinatorBase):
             job = JobLog.query.filter_by(job_name='game-final-chain').one()
             self.assertEqual(job.status, 'success')
             self.assertIn('401800123', job.message)
+
+
+class TestWiring(CoordinatorBase):
+
+    @patch('app.services.game_day_coordinator.run_tick', return_value='dormant')
+    def test_coordinator_tick_cli(self, mock_tick):
+        runner = self.app.test_cli_runner()
+        result = runner.invoke(args=['coordinator-tick'])
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn('dormant', result.output)
+        mock_tick.assert_called_once()
+
+    @patch('app.services.game_day_coordinator.fetch_espn_scoreboard',
+           return_value=[])
+    def test_snapshot_props_odds_skips_on_empty_day(self, mock_sb):
+        from app.services import scheduler as sched
+        with patch.object(sched, '_capture_todays_snapshots') as mock_cap:
+            with self.app.app_context():
+                sched.snapshot_props_odds()
+            mock_cap.assert_not_called()

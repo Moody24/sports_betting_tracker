@@ -184,23 +184,10 @@ def _rows_from_player_box(df, season: str, season_type_code: int,
     return rows, dropped
 
 
-@click.command('import-hoopr-logs')
-@click.option('--sport', default='nba', show_default=True)
-@click.option('--seasons', default=3, show_default=True, type=int)
-@click.option('--season-type', default='Regular Season', show_default=True,
-              type=click.Choice(sorted(_SEASON_TYPE_CODES)))
-@click.option('--from-dir', default=None,
-              help='Read player_box_{year}.parquet files from a local '
-                   'directory instead of downloading from GitHub.')
-@click.option('--max-games', default=None, type=int,
-              help='Cap games imported per season (whole games kept) — '
-                   'for small-batch validation runs.')
-def cli_import_hoopr_logs(sport, seasons, season_type, from_dir, max_games):
-    """Backfill HistoricalGameLog from hoopR (ESPN) data dumps on GitHub."""
-    if sport != 'nba':
-        raise click.BadParameter(
-            f"sport '{sport}' not supported yet (nba only; mlb/nfl are "
-            "Phase 3/4)")
+def import_hoopr_seasons(sport='nba', seasons=3,
+                         season_type='Regular Season', from_dir=None,
+                         max_games=None) -> dict:
+    """Callable core of import-hoopr-logs (scheduler + CLI entry points)."""
     season_type_code = _SEASON_TYPE_CODES[season_type]
 
     job = JobLog(job_name='import-hoopr-logs',
@@ -210,6 +197,7 @@ def cli_import_hoopr_logs(sport, seasons, season_type, from_dir, max_games):
 
     inserted = skipped = 0
     errors: list[str] = []
+    warnings: list[str] = []
 
     try:
         for season in _recent_seasons(seasons):
@@ -233,11 +221,13 @@ def cli_import_hoopr_logs(sport, seasons, season_type, from_dir, max_games):
                 # bare ints ('401700001'). Same season + both namespaces =
                 # the same games counted twice in training data.
                 if any(gid.startswith('00') for _, gid in existing):
-                    click.echo(
+                    warning = (
                         f"WARNING: {season} already has stats.nba.com rows; "
                         "importing ESPN rows too would duplicate games. "
                         "New rows are still inserted — clean up one source "
                         "before training.")
+                    warnings.append(warning)
+                    logger.info("import-hoopr-logs: %s", warning)
                 season_rows, dropped = _rows_from_player_box(
                     df, season, season_type_code, max_games=max_games)
                 batch = []
@@ -252,7 +242,7 @@ def cli_import_hoopr_logs(sport, seasons, season_type, from_dir, max_games):
                 msg = f"{season}: +{len(batch)} rows ({skipped} already present)"
                 if dropped:
                     msg += f"; dropped non-NBA teams: {dropped}"
-                click.echo(msg)
+                logger.info("import-hoopr-logs: %s", msg)
             except Exception as exc:   # malformed rows, DB errors, etc.
                 db.session.rollback()
                 errors.append(f"{season}: {exc}")
@@ -274,7 +264,38 @@ def cli_import_hoopr_logs(sport, seasons, season_type, from_dir, max_games):
             + (f" errors={'; '.join(errors)}" if errors else "")
         )
         db.session.commit()
-        click.echo(f"Done: {job.message}")
+        logger.info("import-hoopr-logs: Done: %s", job.message)
+
+    return {'inserted': inserted, 'skipped': skipped, 'errors': errors,
+            'warnings': warnings}
+
+
+@click.command('import-hoopr-logs')
+@click.option('--sport', default='nba', show_default=True)
+@click.option('--seasons', default=3, show_default=True, type=int)
+@click.option('--season-type', default='Regular Season', show_default=True,
+              type=click.Choice(sorted(_SEASON_TYPE_CODES)))
+@click.option('--from-dir', default=None,
+              help='Read player_box_{year}.parquet files from a local '
+                   'directory instead of downloading from GitHub.')
+@click.option('--max-games', default=None, type=int,
+              help='Cap games imported per season (whole games kept) — '
+                   'for small-batch validation runs.')
+def cli_import_hoopr_logs(sport, seasons, season_type, from_dir, max_games):
+    """Backfill HistoricalGameLog from hoopR (ESPN) data dumps on GitHub."""
+    if sport != 'nba':
+        raise click.BadParameter(
+            f"sport '{sport}' not supported yet (nba only; mlb/nfl are "
+            "Phase 3/4)")
+    result = import_hoopr_seasons(sport=sport, seasons=seasons,
+                                  season_type=season_type, from_dir=from_dir,
+                                  max_games=max_games)
+    for warning in result['warnings']:
+        click.echo(warning)
+    click.echo(f"Done: inserted={result['inserted']} "
+               f"skipped={result['skipped']}"
+               + (f" errors={'; '.join(result['errors'])}"
+                  if result['errors'] else ""))
 
 
 def register_hoopr_import_commands(app):

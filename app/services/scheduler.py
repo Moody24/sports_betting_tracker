@@ -1153,9 +1153,17 @@ def run_historical_odds_ingest_job():
 
 
 def snapshot_props_odds():
-    """Snapshot today's player prop odds (FD+DK) for line movement tracking."""
+    """Snapshot today's player prop odds (FD+DK) for line movement tracking.
+
+    Guarded: skip entirely when there are no games today (Plan A2) — no
+    point burning odds-API quota on an empty slate.
+    """
+    from app.services.game_day_coordinator import fetch_espn_scoreboard
     app = _get_app()
     with app.app_context():
+        if not fetch_espn_scoreboard():
+            logger.info("snapshot_props_odds: no games today — skipped")
+            return
         from app.services.nba_service import snapshot_todays_props
         count = snapshot_todays_props()
         logger.info("snapshot_props_odds: inserted %d rows", count)
@@ -1223,6 +1231,22 @@ def _watchdog_check_stale_jobs():
                     logger.warning(
                         "Stale job detected: %s last ran at %s", job.id, last_run
                     )
+
+
+def _run_coordinator_tick():
+    from app.services.game_day_coordinator import run_tick
+    app = _get_app()
+    with app.app_context():
+        tier = run_tick()
+        logger.info("coordinator tick: %s", tier)
+
+
+def _run_hoopr_reconcile():
+    from app.cli.hoopr_import import import_hoopr_seasons
+    app = _get_app()
+    with app.app_context():
+        result = import_hoopr_seasons(seasons=1)
+        logger.info("hoopr reconcile: %s", result)
 
 
 def init_scheduler(app):
@@ -1381,6 +1405,23 @@ def init_scheduler(app):
         _watchdog_check_stale_jobs,
         trigger=CronTrigger(minute='*/30', timezone=APP_TIMEZONE),
         id='watchdog_stale_jobs',
+        replace_existing=True,
+    )
+
+    # Plan A2: game-day coordinator — tiered polling + event chains
+    scheduler.add_job(
+        lambda: _log_job('game_day_coordinator', _run_coordinator_tick),
+        CronTrigger(minute='*/5', timezone=APP_TIMEZONE),
+        id='game_day_coordinator',
+        replace_existing=True,
+    )
+
+    # Plan A2: weekly hoopR reconciliation (current season, idempotent)
+    scheduler.add_job(
+        lambda: _log_job('hoopr_reconcile', _run_hoopr_reconcile),
+        CronTrigger(day_of_week='sun', hour=8, minute=20,
+                    timezone=APP_TIMEZONE),
+        id='hoopr_reconcile',
         replace_existing=True,
     )
 

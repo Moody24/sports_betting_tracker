@@ -298,3 +298,15 @@ class TestImportCommand(BaseTestCase):
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertIn('WARNING', result.output)
         self.assertIn('stats.nba.com', result.output)
+
+
+class TestImportCallable(BaseTestCase):
+
+    @patch('app.cli.hoopr_import._load_player_box_df')
+    def test_import_hoopr_seasons_returns_counts(self, mock_load):
+        from app.cli.hoopr_import import import_hoopr_seasons
+        mock_load.return_value = _player_box_df()
+        with self.app.app_context():
+            result = import_hoopr_seasons(seasons=1)
+        self.assertEqual(result['inserted'], 4)
+        self.assertEqual(result['errors'], [])
