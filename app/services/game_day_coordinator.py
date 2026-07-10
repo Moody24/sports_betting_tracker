@@ -60,8 +60,21 @@ def _game_et_date(game) -> date | None:
         return datetime.fromisoformat(
             game.get('start_time', '').replace('Z', '+00:00')
         ).astimezone(ET).date()
-    except ValueError:
+    except (ValueError, TypeError, AttributeError):
         return None
+
+
+def todays_games() -> list:
+    """Today's ET slate from a fresh scoreboard read.
+
+    ESPN's dateless scoreboard endpoint returns the LAST PLAYED league day
+    during the off-season (not an empty list) -- filter to games whose
+    start_time actually falls on today's ET date so off-season callers see
+    an empty slate. For "real now" callers only; run_tick takes an
+    injectable `now` and keeps its own filtering keyed to that value.
+    """
+    today = datetime.now(ET).date()
+    return [g for g in fetch_espn_scoreboard() if _game_et_date(g) == today]
 
 
 def _catch_up_lookback(today) -> int:
@@ -101,6 +114,13 @@ def _unresolved_final_ids(final_games, seen_final: set) -> set:
     earlier today (seen_final) or the DB already has a finalized snapshot
     for it (a prior, real resolve_and_grade run already handled it) --
     either way there's nothing new to resolve for that specific game.
+
+    Note: `seen_final` (and the day-cache generally) is an in-process
+    cheap-exit only -- the DB checks above remain the source of truth. If a
+    final game never gets a GameSnapshot (e.g. it errors before one is
+    written), it simply isn't in `seen_final` after a restart and
+    resolve_and_grade re-runs for it once; that's harmless since
+    resolve_and_grade is idempotent.
     """
     ids = set()
     for g in final_games:
@@ -114,10 +134,10 @@ def _unresolved_final_ids(final_games, seen_final: set) -> set:
     return ids
 
 
-def _run_chain(final_games, unresolved_ids: set) -> None:
+def _run_chain(final_games, unresolved_ids: set, needs_resolve: bool) -> None:
     """Grade/postmortem/finalize (existing idempotent job) + history append."""
     chained_ids, steps = [], []
-    if unresolved_ids or _needs_resolve(final_games):
+    if unresolved_ids or needs_resolve:
         resolve_and_grade()
         steps.append('resolve_and_grade')
     for g in final_games:
@@ -178,8 +198,9 @@ def run_tick(now: datetime | None = None) -> str:
         if g.get('season_type') == 2
         and not history_rows_exist(str(g.get('espn_id')))
     ]
-    if pending_work or unresolved_ids or _needs_resolve(final_games):
-        _run_chain(final_games, unresolved_ids)
+    needs_resolve = _needs_resolve(final_games)
+    if pending_work or unresolved_ids or needs_resolve:
+        _run_chain(final_games, unresolved_ids, needs_resolve)
         state['seen_final'] |= final_ids
         return 'live'
 

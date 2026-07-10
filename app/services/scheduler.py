@@ -1158,10 +1158,10 @@ def snapshot_props_odds():
     Guarded: skip entirely when there are no games today (Plan A2) — no
     point burning odds-API quota on an empty slate.
     """
-    from app.services.game_day_coordinator import fetch_espn_scoreboard
+    from app.services.game_day_coordinator import todays_games
     app = _get_app()
     with app.app_context():
-        if not fetch_espn_scoreboard():
+        if not todays_games():
             logger.info("snapshot_props_odds: no games today — skipped")
             return
         from app.services.nba_service import snapshot_todays_props

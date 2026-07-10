@@ -1,6 +1,6 @@
 """Tests for the game-day coordinator tick state machine."""
 
-from datetime import datetime, date, timezone
+from datetime import datetime, date, timedelta, timezone
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
@@ -86,6 +86,29 @@ class TestTiers(CoordinatorBase):
             self.assertEqual(mock_sb.call_count, calls_after_first)
         mock_app.assert_not_called()
         mock_rag.assert_not_called()
+
+    def test_day_rollover_reinitializes_cache(self, mock_sb, mock_app, mock_rag):
+        # A tick just before midnight ET establishes the day-cache for
+        # 11/6; a tick just after midnight is a new ET calendar date and
+        # must NOT be served from the 11/6 cache entry -- it re-fetches
+        # the scoreboard and the cache holds only the new day.
+        from app.services import game_day_coordinator as gdc
+        live_game = _game(status='STATUS_SCHEDULED', tip_et_hour=22,
+                           game_date=(2026, 11, 6))
+        mock_sb.side_effect = lambda date_str=None: (
+            [live_game] if date_str is None else [])
+        with self.app.app_context():
+            tier = gdc.run_tick(now=datetime(2026, 11, 6, 23, 58, tzinfo=ET))
+            self.assertEqual(tier, 'live')
+            self.assertIn(date(2026, 11, 6), gdc._DAY_CACHE)
+            calls_before = mock_sb.call_count
+
+            gdc.run_tick(now=datetime(2026, 11, 7, 0, 3, tzinfo=ET))
+
+            self.assertGreater(mock_sb.call_count, calls_before)
+            self.assertNotIn(date(2026, 11, 6), gdc._DAY_CACHE)
+            self.assertIn(date(2026, 11, 7), gdc._DAY_CACHE)
+            self.assertEqual(len(gdc._DAY_CACHE), 1)
 
     def test_post_when_all_final_and_nothing_needed(self, mock_sb, mock_app, mock_rag):
         from app.services import game_day_coordinator as gdc
@@ -244,10 +267,34 @@ class TestWiring(CoordinatorBase):
     @patch('app.services.game_day_coordinator.fetch_espn_scoreboard')
     def test_snapshot_props_odds_runs_on_game_day(self, mock_sb):
         from app.services import scheduler as sched
-        mock_sb.return_value = [{'espn_id': '401800123',
-                                 'status': 'STATUS_SCHEDULED'}]
+        # start_time must genuinely fall on today's ET date -- todays_games()
+        # filters on real datetime.now(ET), not an injectable `now`.
+        today_tip = datetime.now(ET).replace(
+            hour=19, minute=0, second=0, microsecond=0)
+        mock_sb.return_value = [{
+            'espn_id': '401800123', 'status': 'STATUS_SCHEDULED',
+            'start_time': today_tip.astimezone(timezone.utc).strftime(
+                '%Y-%m-%dT%H:%M:%SZ'),
+        }]
         with patch('app.services.nba_service.snapshot_todays_props') as mock_snap:
             mock_snap.return_value = 5
             with self.app.app_context():
                 sched.snapshot_props_odds()
             mock_snap.assert_called_once()
+
+    @patch('app.services.game_day_coordinator.fetch_espn_scoreboard')
+    def test_snapshot_props_odds_skips_on_stale_offseason_slate(self, mock_sb):
+        # ESPN's dateless scoreboard returns the LAST PLAYED league day
+        # during the off-season (a month-old final), not an empty list --
+        # todays_games() must filter that out so the guard still fires.
+        from app.services import scheduler as sched
+        stale_tip = datetime.now(ET) - timedelta(days=30)
+        mock_sb.return_value = [{
+            'espn_id': '401800999', 'status': 'STATUS_FINAL',
+            'start_time': stale_tip.astimezone(timezone.utc).strftime(
+                '%Y-%m-%dT%H:%M:%SZ'),
+        }]
+        with patch('app.services.nba_service.snapshot_todays_props') as mock_snap:
+            with self.app.app_context():
+                sched.snapshot_props_odds()
+            mock_snap.assert_not_called()
