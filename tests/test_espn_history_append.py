@@ -110,3 +110,21 @@ class TestAppendFinalGame(BaseTestCase):
         mock_fetch.side_effect = RuntimeError('espn down')
         with self.app.app_context():
             self.assertEqual(append_final_game(_scoreboard_game()), 0)
+
+    @patch('app.services.espn_history_append._fetch_summary')
+    def test_none_start_time_returns_zero_not_raise(self, mock_fetch):
+        from app.services.espn_history_append import append_final_game
+        mock_fetch.return_value = _summary_json()
+        game = _scoreboard_game()
+        game['start_time'] = None
+        with self.app.app_context():
+            self.assertEqual(append_final_game(game), 0)
+
+    @patch('app.services.espn_history_append._fetch_summary')
+    def test_non_numeric_score_returns_zero_not_raise(self, mock_fetch):
+        from app.services.espn_history_append import append_final_game
+        mock_fetch.return_value = _summary_json()
+        game = _scoreboard_game()
+        game['home']['score'] = 'n/a'
+        with self.app.app_context():
+            self.assertEqual(append_final_game(game), 0)

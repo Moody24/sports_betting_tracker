@@ -112,44 +112,50 @@ def append_final_game(game: dict) -> int:
         game_date = datetime.fromisoformat(
             game.get('start_time', '').replace('Z', '+00:00')
         ).astimezone(ET).date()
-    except ValueError:
+    except (ValueError, TypeError, AttributeError):
         logger.warning("history-append: %s bad start_time %r",
                        espn_id, game.get('start_time'))
         return 0
-    season = season_for_date(game_date)
-    home_score = int(game.get('home', {}).get('score') or 0)
-    away_score = int(game.get('away', {}).get('score') or 0)
 
-    totals = {}
-    for rec in records:
-        t = totals.setdefault(rec['team_abbr'],
-                              {'minutes': 0.0, 'fga': 0.0, 'fta': 0.0,
-                               'tov': 0.0})
-        for key in t:
-            t[key] += rec[key]
+    try:
+        season = season_for_date(game_date)
+        home_score = int(game.get('home', {}).get('score') or 0)
+        away_score = int(game.get('away', {}).get('score') or 0)
 
-    rows = []
-    for rec in records:
-        team, is_home = rec['team_abbr'], rec['team_abbr'] == home_abbr
-        won = (home_score > away_score) if is_home else \
-              (away_score > home_score)
-        t = totals[team]
-        stats = {k: rec[k] for k in
-                 ('pts', 'reb', 'ast', 'stl', 'blk', 'tov', 'fgm', 'fga',
-                  'fg3m', 'fg3a', 'ftm', 'fta', 'minutes', 'plus_minus')}
-        stats['usage_pct'] = usage_pct(
-            rec['fga'], rec['fta'], rec['tov'], rec['minutes'],
-            t['minutes'], t['fga'], t['fta'], t['tov'])
-        rows.append(HistoricalGameLog(
-            sport='nba', player_id=rec['player_id'],
-            player_name=rec['player_name'], team_abbr=team,
-            opp_abbr=away_abbr if is_home else home_abbr,
-            game_id=espn_id, game_date=game_date, season=season,
-            home_away='HOME' if is_home else 'AWAY',
-            win_loss='W' if won else 'L',
-            starter=rec['starter'], stats=stats,
-        ))
-    db.session.add_all(rows)
-    db.session.commit()
-    logger.info("history-append: %s +%d rows", espn_id, len(rows))
-    return len(rows)
+        totals = {}
+        for rec in records:
+            t = totals.setdefault(rec['team_abbr'],
+                                  {'minutes': 0.0, 'fga': 0.0, 'fta': 0.0,
+                                   'tov': 0.0})
+            for key in t:
+                t[key] += rec[key]
+
+        rows = []
+        for rec in records:
+            team, is_home = rec['team_abbr'], rec['team_abbr'] == home_abbr
+            won = (home_score > away_score) if is_home else \
+                  (away_score > home_score)
+            t = totals[team]
+            stats = {k: rec[k] for k in
+                     ('pts', 'reb', 'ast', 'stl', 'blk', 'tov', 'fgm', 'fga',
+                      'fg3m', 'fg3a', 'ftm', 'fta', 'minutes', 'plus_minus')}
+            stats['usage_pct'] = usage_pct(
+                rec['fga'], rec['fta'], rec['tov'], rec['minutes'],
+                t['minutes'], t['fga'], t['fta'], t['tov'])
+            rows.append(HistoricalGameLog(
+                sport='nba', player_id=rec['player_id'],
+                player_name=rec['player_name'], team_abbr=team,
+                opp_abbr=away_abbr if is_home else home_abbr,
+                game_id=espn_id, game_date=game_date, season=season,
+                home_away='HOME' if is_home else 'AWAY',
+                win_loss='W' if won else 'L',
+                starter=rec['starter'], stats=stats,
+            ))
+        db.session.add_all(rows)
+        db.session.commit()
+        logger.info("history-append: %s +%d rows", espn_id, len(rows))
+        return len(rows)
+    except Exception as exc:
+        db.session.rollback()
+        logger.warning("history-append: %s insert failed: %s", espn_id, exc)
+        return 0
