@@ -15,7 +15,7 @@ directly (uncached) -- never a cache with TTL >= the tick interval.
 """
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from app import db
 from app.enums import Outcome
@@ -49,13 +49,35 @@ def _first_tip(games) -> datetime | None:
     return min(tips) if tips else None
 
 
+def _game_et_date(game) -> date | None:
+    """ET calendar date the game is played on, or None if unparseable.
+
+    Used to guard against ESPN's dateless scoreboard endpoint, which during
+    the off-season returns the LAST PLAYED league day (not an empty list) --
+    without this filter, month-old games get treated as today's slate.
+    """
+    try:
+        return datetime.fromisoformat(
+            game.get('start_time', '').replace('Z', '+00:00')
+        ).astimezone(ET).date()
+    except ValueError:
+        return None
+
+
 def _catch_up_lookback(today) -> int:
-    """Append history for final games on the previous LOOKBACK_DAYS dates."""
+    """Append history for regular-season final games on the previous
+    LOOKBACK_DAYS dates.
+
+    HistoricalGameLog is deliberately regular-season-only (matches the
+    hoopR import + weekly reconcile job), so playoff/preseason/Summer
+    League finals are never appended here.
+    """
     appended = 0
     for delta in range(1, LOOKBACK_DAYS + 1):
         day = today - timedelta(days=delta)
         for game in fetch_espn_scoreboard(day.strftime('%Y%m%d')):
-            if game.get('status') == _STATUS_FINAL:
+            if (game.get('status') == _STATUS_FINAL
+                    and game.get('season_type') == 2):
                 appended += 1 if append_final_game(game) else 0
     return appended
 
@@ -99,6 +121,8 @@ def _run_chain(final_games, unresolved_ids: set) -> None:
         resolve_and_grade()
         steps.append('resolve_and_grade')
     for g in final_games:
+        if g.get('season_type') != 2:
+            continue    # regular-season only -- matches HistoricalGameLog
         espn_id = str(g.get('espn_id'))
         if not history_rows_exist(espn_id):
             inserted = append_final_game(g)
@@ -124,6 +148,7 @@ def run_tick(now: datetime | None = None) -> str:
     state = _DAY_CACHE.get(today)
     if state is None:
         games = fetch_espn_scoreboard()
+        games = [g for g in games if _game_et_date(g) == today]
         state = {'has_games': bool(games),
                  'first_tip': _first_tip(games), 'done': False,
                  'seen_final': set()}
@@ -141,12 +166,17 @@ def run_tick(now: datetime | None = None) -> str:
         return 'pre-game'
 
     games = fetch_espn_scoreboard()          # fresh LIVE read (uncached)
+    games = [g for g in games if _game_et_date(g) == today]
     final_games = [g for g in games if g.get('status') == _STATUS_FINAL]
     final_ids = {str(g.get('espn_id')) for g in final_games}
     unresolved_ids = _unresolved_final_ids(final_games, state['seen_final'])
+    # Non-regular-season finals are never appended (see _run_chain), so they
+    # must not count as "pending" -- otherwise a playoff-only day could
+    # never reach 'post' (append never succeeds, so history never exists).
     pending_work = [
         g for g in final_games
-        if not history_rows_exist(str(g.get('espn_id')))
+        if g.get('season_type') == 2
+        and not history_rows_exist(str(g.get('espn_id')))
     ]
     if pending_work or unresolved_ids or _needs_resolve(final_games):
         _run_chain(final_games, unresolved_ids)

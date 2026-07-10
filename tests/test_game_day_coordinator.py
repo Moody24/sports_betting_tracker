@@ -9,16 +9,18 @@ from tests.helpers import BaseTestCase, make_bet, make_user
 ET = ZoneInfo("America/New_York")
 
 
-def _game(espn_id='401800123', status='STATUS_FINAL', tip_et_hour=19):
+def _game(espn_id='401800123', status='STATUS_FINAL', tip_et_hour=19,
+          season_type=2, game_date=(2026, 11, 6)):
     # start_time is UTC in ESPN payloads; compute via real tz conversion
     # (Nov 6 2026 is standard time, ET = UTC-5).
-    tip_et = datetime(2026, 11, 6, tip_et_hour, tzinfo=ET)
+    tip_et = datetime(*game_date, tip_et_hour, tzinfo=ET)
     return {
         'espn_id': espn_id, 'status': status,
         'home': {'abbr': 'LAL', 'score': 120},
         'away': {'abbr': 'GS', 'score': 110},
         'start_time': tip_et.astimezone(timezone.utc).strftime(
             '%Y-%m-%dT%H:%M:%SZ'),
+        'season_type': season_type,
     }
 
 
@@ -68,6 +70,22 @@ class TestTiers(CoordinatorBase):
         self.assertEqual(tier, 'live')
         mock_app.assert_called_once()             # chain fired for the game
         mock_rag.assert_called_once()
+
+    def test_stale_offseason_scoreboard_goes_dormant(self, mock_sb, mock_app, mock_rag):
+        # ESPN's dateless scoreboard returns the LAST PLAYED league day
+        # during the off-season (a month-old final), not an empty list.
+        from app.services.game_day_coordinator import run_tick
+        stale_final = _game(status='STATUS_FINAL', game_date=(2026, 6, 13))
+        now = datetime(2026, 7, 10, 12, 0, tzinfo=ET)
+        mock_sb.side_effect = lambda date_str=None: (
+            [stale_final] if date_str is None else [])
+        with self.app.app_context():
+            self.assertEqual(run_tick(now=now), 'dormant')
+            calls_after_first = mock_sb.call_count
+            self.assertEqual(run_tick(now=now), 'dormant')
+            self.assertEqual(mock_sb.call_count, calls_after_first)
+        mock_app.assert_not_called()
+        mock_rag.assert_not_called()
 
     def test_post_when_all_final_and_nothing_needed(self, mock_sb, mock_app, mock_rag):
         from app.services import game_day_coordinator as gdc
@@ -157,6 +175,39 @@ class TestChainAndCatchUp(CoordinatorBase):
                  if c.kwargs.get('date_str') or (c.args and c.args[0])]
         self.assertEqual(len(dated), LOOKBACK_DAYS)
         self.assertEqual(mock_app.call_count, LOOKBACK_DAYS)  # per past final
+
+    def test_playoff_final_not_appended_but_still_graded(
+            self, mock_sb, mock_app, mock_rag):
+        # A playoff final must never be appended to HistoricalGameLog
+        # (regular-season-only), but pending bets on it still need grading.
+        from app import db
+        from app.services.game_day_coordinator import run_tick
+        mock_sb.side_effect = lambda date_str=None: (
+            [_game(season_type=3)] if date_str is None else [])
+        with self.app.app_context():
+            user = make_user()
+            db.session.add(user)
+            db.session.commit()
+            db.session.add(make_bet(
+                user.id, match_date=datetime(2026, 11, 6, 19, 0),
+                bet_type='total', outcome='pending'))
+            db.session.commit()
+            run_tick(now=NOW_EVENING)
+        mock_app.assert_not_called()
+        mock_rag.assert_called_once()
+
+    def test_lookback_skips_non_regular_season(self, mock_sb, mock_app, mock_rag):
+        from app.services.game_day_coordinator import run_tick, LOOKBACK_DAYS
+        playoff_final = _game(espn_id='401800001', season_type=3)
+        regular_final = _game(espn_id='401800002', season_type=2)
+        mock_sb.side_effect = lambda date_str=None: (
+            [] if date_str is None else [playoff_final, regular_final])
+        mock_app.return_value = 20
+        with self.app.app_context():
+            run_tick(now=NOW_MORNING)
+        self.assertEqual(mock_app.call_count, LOOKBACK_DAYS)
+        for call in mock_app.call_args_list:
+            self.assertEqual(call.args[0].get('espn_id'), '401800002')
 
     def test_joblog_written_for_chain(self, mock_sb, mock_app, mock_rag):
         from app.models import JobLog

@@ -110,6 +110,7 @@ def fetch_espn_scoreboard(date_str: Optional[str] = None) -> list[dict]:
                 "clock": status_obj.get("displayClock", ""),
                 "period": status_obj.get("period", 0),
                 "start_time": event.get("date", ""),
+                "season_type": event.get("season", {}).get("type"),
             }
         )
 
