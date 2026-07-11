@@ -1,7 +1,7 @@
 # Plan B: Scenario Engine — Conditional Splits over HistoricalGameLog (Design)
 
 Date: 2026-07-10
-Status: approved by user (Approach A of 3; odds dimensions restored via Kaggle dataset)
+Status: implemented (this plan)
 Predecessors: Plan A (79,603-row HistoricalGameLog, ESPN id namespace) and
 Plan A2 (game-day coordinator keeps the store current) — both merged to main.
 
