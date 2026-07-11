@@ -477,7 +477,7 @@ class HistoricalGameLog(db.Model):
     """
 
     id = db.Column(db.Integer, primary_key=True)
-    sport = db.Column(db.String(10), nullable=False, default='nba', index=True)
+    sport = db.Column(db.String(10), nullable=False, default='nba')
     player_id = db.Column(db.String(20), nullable=False)
     player_name = db.Column(db.String(120), nullable=False)
     team_abbr = db.Column(db.String(10), nullable=True)
