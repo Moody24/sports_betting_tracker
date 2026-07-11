@@ -64,6 +64,10 @@ def import_betting_lines(file: str, seasons_from: int = 2024) -> dict:
             if (game_date, home) in existing:
                 skipped += 1
                 continue
+            spread, total = _f(rec.get('spread')), _f(rec.get('total'))
+            if spread is None or total is None:
+                errors.append(f"missing spread/total: {game_date} {home}")
+                continue
             match = store.get((game_date, home))
             espn_id = match.game_id if match else None
             if match:
@@ -81,8 +85,8 @@ def import_betting_lines(file: str, seasons_from: int = 2024) -> dict:
                 unmatched += 1
             batch.append(HistoricalGameOdds(
                 game_date=game_date, home_abbr=home, away_abbr=away,
-                spread=float(rec['spread']), favored=str(rec['whos_favored']),
-                total=float(rec['total']),
+                spread=spread, favored=str(rec['whos_favored']),
+                total=total,
                 moneyline_home=_f(rec.get('moneyline_home')),
                 moneyline_away=_f(rec.get('moneyline_away')),
                 is_playoff=bool(rec.get('playoffs')),

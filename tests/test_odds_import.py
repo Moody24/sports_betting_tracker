@@ -99,6 +99,21 @@ class TestImportBettingLines(BaseTestCase):
             self.assertEqual(result['inserted'], 1)     # still imported
             self.assertEqual(result['score_mismatches'], 1)
 
+    def test_missing_spread_skips_row_and_fails_job(self):
+        from app.cli.odds_import import import_betting_lines
+        from app.models import HistoricalGameOdds, JobLog
+        path = _csv([_row(spread='')])          # blank spread -> NaN
+        with self.app.app_context():
+            result = import_betting_lines(path)
+            self.assertEqual(result['inserted'], 0)
+            self.assertTrue(result['errors'])
+            self.assertIn('missing spread/total', result['errors'][0])
+            self.assertEqual(HistoricalGameOdds.query.count(), 0)
+            job = JobLog.query.filter_by(
+                job_name='import-betting-lines').one()
+            self.assertEqual(job.status, 'failed')
+            self.assertIsNotNone(job.finished_at)
+
     def test_cli_registered_and_reports(self):
         runner = self.app.test_cli_runner()
         result = runner.invoke(args=[
