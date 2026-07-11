@@ -1,5 +1,7 @@
 """Engine math + end-to-end materialization tests."""
 
+from unittest.mock import patch
+
 import pandas as pd
 
 from tests.helpers import BaseTestCase
@@ -133,3 +135,38 @@ class TestAgreementScore(BaseTestCase):
             score, n = agreement_score('9', 'pts', 20.0,
                                        {'home_away': 'AWAY'})
             self.assertEqual((score, n), (0.0, 0))
+
+
+class TestWiring(BaseTestCase):
+
+    @patch('app.services.scenario_engine.refresh_splits',
+           return_value={'players': 2, 'rows': 40, 'skipped_reason': None})
+    def test_refresh_cli(self, mock_refresh):
+        runner = self.app.test_cli_runner()
+        result = runner.invoke(args=['refresh-splits', '--force'])
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn('rows=40', result.output)
+        mock_refresh.assert_called_once_with(sport='nba', force=True)
+
+    def test_show_splits_cli(self):
+        from app import db
+        from app.models import ScenarioSplit
+        with self.app.app_context():
+            db.session.add(ScenarioSplit(
+                sport='nba', player_id='1', player_name='LeBron James',
+                stat='pts', dim1='home_away', bucket1='HOME', dim2=None,
+                bucket2=None, season_scope='all', n=41, raw_mean=27.1,
+                shrunk_mean=26.8, baseline_mean=26.2))
+            db.session.commit()
+        runner = self.app.test_cli_runner()
+        result = runner.invoke(args=['show-splits', '--player',
+                                     'LeBron James', '--stat', 'pts'])
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn('home_away=HOME', result.output)
+        self.assertIn('26.8', result.output)
+
+    def test_scheduler_job_registered(self):
+        from pathlib import Path
+        src = Path('app/services/scheduler.py').read_text()
+        self.assertIn("id='refresh_scenario_splits'", src)
+        self.assertIn("hour=5, minute=10", src)

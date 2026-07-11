@@ -99,6 +99,7 @@ def register_cli(app):
     from app.cli.hoopr_import import register_hoopr_import_commands
     from app.cli.coordinator_commands import register_coordinator_commands
     from app.cli.odds_import import register_odds_import_commands
+    from app.cli.scenario_commands import register_scenario_commands
     register_stats_commands(app)
     register_model_commands(app)
     register_market_commands(app)
@@ -107,6 +108,7 @@ def register_cli(app):
     register_hoopr_import_commands(app)
     register_coordinator_commands(app)
     register_odds_import_commands(app)
+    register_scenario_commands(app)
     # Commands registered via add_command() don't get an app context
     # automatically (unlike @app.cli.command()). Wrap each registered
     # command to push this specific app's context before running.

@@ -1249,6 +1249,14 @@ def _run_hoopr_reconcile():
         logger.info("hoopr reconcile: %s", result)
 
 
+def _run_refresh_scenario_splits():
+    from app.services.scenario_engine import refresh_splits
+    app = _get_app()
+    with app.app_context():
+        result = refresh_splits()
+        logger.info("scenario splits refresh: %s", result)
+
+
 def init_scheduler(app):
     """Register all scheduled jobs.  Called once from create_app()."""
     global _scheduler_app
@@ -1422,6 +1430,15 @@ def init_scheduler(app):
         CronTrigger(day_of_week='sun', hour=8, minute=20,
                     timezone=APP_TIMEZONE),
         id='hoopr_reconcile',
+        replace_existing=True,
+    )
+
+    # Plan B: nightly scenario-split materialization (after night's appends)
+    scheduler.add_job(
+        lambda: _log_job('refresh_scenario_splits',
+                         _run_refresh_scenario_splits),
+        CronTrigger(hour=5, minute=10, timezone=APP_TIMEZONE),
+        id='refresh_scenario_splits',
         replace_existing=True,
     )
 

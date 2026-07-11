@@ -2561,7 +2561,7 @@ class TestScheduler(BaseTestCase):
                 with patch.object(scheduler_module, '_acquire_scheduler_lock', return_value=True):
                     scheduler_module.init_scheduler(self.app)
         self.assertTrue(fake.started)
-        self.assertEqual(len(fake.jobs), 20)  # +2 Plan A2: coordinator, hoopr_reconcile
+        self.assertEqual(len(fake.jobs), 21)  # +1 Plan B: refresh_scenario_splits
 
 
 # ═══════════════════════════════════════════════════════════════════════════
