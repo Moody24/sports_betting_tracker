@@ -504,6 +504,66 @@ class HistoricalGameLog(db.Model):
         return f"<HistoricalGameLog {self.sport} {self.player_name} {self.game_date}>"
 
 
+class ScenarioSplit(db.Model):
+    """Materialized conditional split (single or pairwise) per player/stat.
+
+    Derived data: rebuilt wholesale by the scenario engine — never edited.
+    """
+
+    id = db.Column(db.Integer, primary_key=True)
+    sport = db.Column(db.String(10), nullable=False, default='nba')
+    player_id = db.Column(db.String(20), nullable=False)
+    player_name = db.Column(db.String(120), nullable=False)
+    stat = db.Column(db.String(20), nullable=False)
+    dim1 = db.Column(db.String(30), nullable=False)
+    bucket1 = db.Column(db.String(20), nullable=False)
+    dim2 = db.Column(db.String(30), nullable=True)
+    bucket2 = db.Column(db.String(20), nullable=True)
+    season_scope = db.Column(db.String(10), nullable=False, default='all')
+    n = db.Column(db.Integer, nullable=False)
+    raw_mean = db.Column(db.Float, nullable=False)
+    shrunk_mean = db.Column(db.Float, nullable=False)
+    baseline_mean = db.Column(db.Float, nullable=False)
+    computed_at = db.Column(
+        db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        UniqueConstraint('sport', 'player_id', 'stat', 'dim1', 'bucket1',
+                         'dim2', 'bucket2', 'season_scope',
+                         name='uq_scenario_split_key'),
+        Index('ix_scenario_split_lookup', 'sport', 'player_id', 'stat'),
+    )
+
+    def __repr__(self) -> str:
+        return (f"<ScenarioSplit {self.player_name} {self.stat} "
+                f"{self.dim1}={self.bucket1}>")
+
+
+class HistoricalGameOdds(db.Model):
+    """Closing line context per historical game (source: Kaggle backfill)."""
+
+    id = db.Column(db.Integer, primary_key=True)
+    game_date = db.Column(db.Date, nullable=False, index=True)
+    home_abbr = db.Column(db.String(10), nullable=False)
+    away_abbr = db.Column(db.String(10), nullable=False)
+    spread = db.Column(db.Float, nullable=False)
+    favored = db.Column(db.String(4), nullable=False)   # 'home' | 'away'
+    total = db.Column(db.Float, nullable=False)
+    moneyline_home = db.Column(db.Float, nullable=True)
+    moneyline_away = db.Column(db.Float, nullable=True)
+    is_playoff = db.Column(db.Boolean, nullable=False, default=False)
+    source = db.Column(db.String(20), nullable=False, default='kaggle')
+    espn_game_id = db.Column(db.String(30), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint('game_date', 'home_abbr',
+                         name='uq_game_odds_date_home'),
+    )
+
+    def __repr__(self) -> str:
+        return f"<HistoricalGameOdds {self.game_date} {self.away_abbr}@{self.home_abbr}>"
+
+
 class TeamDefenseSnapshot(db.Model):
     """Daily snapshot of a team's defensive profile."""
 
