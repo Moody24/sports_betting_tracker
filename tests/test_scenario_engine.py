@@ -166,7 +166,40 @@ class TestWiring(BaseTestCase):
         self.assertIn('26.8', result.output)
 
     def test_scheduler_job_registered(self):
-        from pathlib import Path
-        src = Path('app/services/scheduler.py').read_text()
-        self.assertIn("id='refresh_scenario_splits'", src)
-        self.assertIn("hour=5, minute=10", src)
+        """Behavioral check: init_scheduler registers the Plan B job with the
+        right id, cron kwargs (05:10 ET), and replace_existing=True.
+
+        Mirrors the FakeScheduler pattern in
+        tests/test_services.py::TestScheduler.test_init_scheduler_adds_jobs
+        (defined inline there, so not importable).
+        """
+        from app.services import scheduler as scheduler_module
+
+        class FakeScheduler:
+            def __init__(self):
+                self.running = False
+                self.jobs = {}
+                self.started = False
+
+            def add_job(self, func, trigger, id=None, replace_existing=None):
+                self.jobs[id] = (trigger, replace_existing)
+
+            def start(self):
+                self.started = True
+
+            def get_jobs(self):
+                return list(self.jobs)
+
+        fake = FakeScheduler()
+        with patch.object(scheduler_module, 'scheduler', fake):
+            with patch.object(scheduler_module, 'CronTrigger',
+                              side_effect=lambda **kw: kw):
+                with patch.object(scheduler_module, '_acquire_scheduler_lock',
+                                  return_value=True):
+                    scheduler_module.init_scheduler(self.app)
+        self.assertTrue(fake.started)
+        self.assertIn('refresh_scenario_splits', fake.jobs)
+        trigger, replace_existing = fake.jobs['refresh_scenario_splits']
+        self.assertEqual(trigger, {'hour': 5, 'minute': 10,
+                                   'timezone': scheduler_module.APP_TIMEZONE})
+        self.assertTrue(replace_existing)
