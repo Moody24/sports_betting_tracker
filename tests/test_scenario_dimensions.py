@@ -105,6 +105,39 @@ class TestBuildContext(BaseTestCase):
         p1g2 = ctx[(ctx.player_id == '1') & (ctx.game_id == 'g2')].iloc[0]
         self.assertFalse(pd.isna(p1g2['ctx_opp_def_tier']))
 
+    def test_opp_def_tier_labels(self):
+        # Priors as of g2 (2025-10-22), each from g1 only:
+        #   LAL allowed 110, GSW allowed 120.
+        # rank(pct=True) among the two: LAL 0.5, GSW 1.0.
+        # bins [0, 1/3, 2/3, 1.0001] -> LAL 'mid', GSW 'bottom10'
+        # (more points allowed = worse defense = bottom tier).
+        ctx = self._ctx()
+
+        def g(pid):
+            return ctx[(ctx.player_id == pid)
+                       & (ctx.game_id == 'g2')].iloc[0]['ctx_opp_def_tier']
+        self.assertEqual(g('1'), 'bottom10')   # player 1 (LAL) faces GSW
+        self.assertEqual(g('3'), 'mid')        # player 3 (GSW) faces LAL
+
+    def test_pace_tier(self):
+        # Possessions per game = both teams' fga + 0.44*fta + tov summed:
+        #   g1: LAL 29+0.44*10+4 = 37.4;  GSW 22+0.44*5+2 = 26.2  -> 63.60
+        #   g2: LAL 18+0.44*6+4 = 24.64;  GSW 24+0.44*7+1 = 28.08 -> 52.72
+        #   g3: LAL 21+0.44*9+2 = 26.96;  GSW 23+0.44*6+3 = 28.64 -> 55.60
+        #   g4: LAL 36+0.44*13+3 = 44.72; GSW 19+0.44*4+5 = 25.76 -> 70.48
+        # qcut tertile edges over [52.72, 55.6, 63.6, 70.48] land exactly
+        # on 55.6 and 63.6 (right-inclusive):
+        #   g2, g3 -> slow; g1 -> mid; g4 -> fast
+        ctx = self._ctx()
+
+        def g(gid):
+            return ctx[(ctx.player_id == '1')
+                       & (ctx.game_id == gid)].iloc[0]['ctx_pace_tier']
+        self.assertEqual(g('g2'), 'slow')
+        self.assertEqual(g('g3'), 'slow')
+        self.assertEqual(g('g1'), 'mid')
+        self.assertEqual(g('g4'), 'fast')
+
     def test_fav_dog_and_total_from_odds(self):
         odds = pd.DataFrame([
             dict(game_date=date(2025, 10, 21), home_abbr='LAL',
@@ -133,3 +166,85 @@ class TestBuildContext(BaseTestCase):
         self.assertEqual(len(DIMENSIONS), 10)
         self.assertEqual(DIMENSIONS['fav_dog'],
                          ('fav_big', 'fav', 'dog', 'dog_big'))
+
+
+class TestLoaders(BaseTestCase):
+    """DB-backed loaders: load_frame / load_odds_frame over seeded rows."""
+
+    def _seed(self):
+        from app import db
+        from app.models import HistoricalGameLog, HistoricalGameOdds
+
+        def log(pid, name, team, opp, gid, gdate, season, ha, starter,
+                **stats):
+            return HistoricalGameLog(
+                sport='nba', player_id=pid, player_name=name,
+                team_abbr=team, opp_abbr=opp, game_id=gid, game_date=gdate,
+                season=season, home_away=ha, starter=starter, stats=stats)
+        db.session.add_all([
+            log('1', 'A', 'LAL', 'GSW', 'g1', date(2025, 10, 21),
+                '2025-26', 'HOME', True,
+                pts=30.0, reb=8.0, ast=9.0, fg3m=1.0, fga=20.0, fta=8.0,
+                tov=3.0, minutes=36.0, team_score=120.0, opp_score=110.0),
+            log('3', 'C', 'GSW', 'LAL', 'g1', date(2025, 10, 21),
+                '2025-26', 'AWAY', True,
+                pts=25.0, reb=4.0, ast=6.0, fg3m=2.0, fga=22.0, fta=5.0,
+                tov=2.0, minutes=38.0, team_score=110.0, opp_score=120.0),
+            log('1', 'A', 'LAL', 'BOS', 'g0', date(2025, 1, 10),
+                '2024-25', 'AWAY', False,
+                pts=18.0, reb=5.0, ast=4.0, fg3m=0.0, fga=15.0, fta=4.0,
+                tov=1.0, minutes=28.0, team_score=98.0, opp_score=104.0),
+        ])
+        db.session.add(HistoricalGameOdds(
+            game_date=date(2025, 10, 21), home_abbr='LAL', away_abbr='GSW',
+            spread=6.5, favored='home', total=220.0))
+        db.session.commit()
+
+    def test_load_frame_flattens_stats_and_computes_pra(self):
+        from app.services.scenario_dimensions import load_frame
+        with self.app.app_context():
+            self._seed()
+            df = load_frame()
+            self.assertEqual(len(df), 3)     # one row per player-game
+            for col in ('player_id', 'player_name', 'game_id', 'game_date',
+                        'season', 'team_abbr', 'opp_abbr', 'home_away',
+                        'starter', 'pts', 'reb', 'ast', 'fg3m', 'fga',
+                        'fta', 'tov', 'minutes', 'team_score', 'opp_score',
+                        'pra'):
+                self.assertIn(col, df.columns)
+            row = df[(df.player_id == '1') & (df.game_id == 'g1')].iloc[0]
+            self.assertEqual(row['player_name'], 'A')
+            self.assertEqual(row['season'], '2025-26')
+            self.assertEqual(row['game_date'], date(2025, 10, 21))
+            self.assertEqual(row['pts'], 30.0)
+            self.assertEqual(row['team_score'], 120.0)
+            self.assertEqual(row['opp_score'], 110.0)
+            self.assertTrue(bool(row['starter']))
+            self.assertEqual(row['pra'], 47.0)   # 30+8+9, computed not stored
+
+    def test_load_frame_seasons_filter(self):
+        from app.services.scenario_dimensions import load_frame
+        with self.app.app_context():
+            self._seed()
+            df = load_frame(seasons=['2025-26'])
+            self.assertEqual(len(df), 2)
+            self.assertEqual(set(df['game_id']), {'g1'})
+            self.assertEqual(set(df['season']), {'2025-26'})
+
+    def test_load_odds_frame(self):
+        from app.services.scenario_dimensions import load_odds_frame
+        with self.app.app_context():
+            self._seed()
+            odf = load_odds_frame()
+            self.assertEqual(len(odf), 1)
+            self.assertEqual(
+                list(odf.columns),
+                ['game_date', 'home_abbr', 'away_abbr', 'spread',
+                 'favored', 'total'])
+            row = odf.iloc[0]
+            self.assertEqual(row['game_date'], date(2025, 10, 21))
+            self.assertEqual(row['home_abbr'], 'LAL')
+            self.assertEqual(row['away_abbr'], 'GSW')
+            self.assertEqual(row['spread'], 6.5)
+            self.assertEqual(row['favored'], 'home')
+            self.assertEqual(row['total'], 220.0)
