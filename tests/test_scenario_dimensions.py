@@ -4,6 +4,7 @@ from datetime import date
 
 import pandas as pd
 
+from app.services.scenario_dimensions import build_context
 from tests.helpers import BaseTestCase
 
 
@@ -166,6 +167,65 @@ class TestBuildContext(BaseTestCase):
         self.assertEqual(len(DIMENSIONS), 10)
         self.assertEqual(DIMENSIONS['fav_dog'],
                          ('fav_big', 'fav', 'dog', 'dog_big'))
+
+    def test_pace_tier_single_game_season_does_not_raise(self):
+        # A season with a single game can't support 3 pace tertiles.
+        # qcut(duplicates='drop') collapses the bin edges and raises
+        # ValueError; build_context must instead yield NaN for that row.
+        frame = _mini_frame()
+        solo = frame[frame['game_id'] == 'g1'].copy()
+        solo['season'] = '2099-00'   # isolate as its own season group
+        ctx = build_context(solo)
+        self.assertTrue(ctx['ctx_pace_tier'].isna().all())
+
+    def test_pace_tier_all_tied_possessions_does_not_raise(self):
+        # All rows in the season group have identical possession totals ->
+        # qcut can't form distinct bin edges either.
+        frame = _mini_frame()
+        tied = frame.copy()
+        tied['season'] = '2098-00'
+        tied['fga'] = 20
+        tied['fta'] = 5
+        tied['tov'] = 2
+        ctx = build_context(tied)
+        self.assertTrue(ctx['ctx_pace_tier'].isna().all())
+
+    def test_pace_tier_unaffected_for_normal_multi_game_season(self):
+        # Existing 4-game season group still buckets normally alongside an
+        # unrelated single-game season present in the same frame.
+        frame = _mini_frame()
+        solo = frame[frame['game_id'] == 'g1'].copy()
+        solo['season'] = '2099-00'
+        solo['game_id'] = 'solo1'
+        combined = pd.concat([frame, solo], ignore_index=True)
+        ctx = build_context(combined)
+
+        def g(gid):
+            return ctx[(ctx.player_id == '1')
+                       & (ctx.game_id == gid)].iloc[0]['ctx_pace_tier']
+        self.assertEqual(g('g2'), 'slow')
+        self.assertEqual(g('g3'), 'slow')
+        self.assertEqual(g('g1'), 'mid')
+        self.assertEqual(g('g4'), 'fast')
+        solo_row = ctx[ctx.game_id == 'solo1'].iloc[0]
+        self.assertTrue(pd.isna(solo_row['ctx_pace_tier']))
+
+    def test_total_bucket_single_game_season_does_not_raise(self):
+        odds = pd.DataFrame([
+            dict(game_date=date(2025, 10, 21), home_abbr='LAL',
+                 away_abbr='GSW', spread=6.5, favored='home', total=220.0),
+        ])
+        ctx = self._ctx(odds=odds)
+        self.assertTrue(ctx['ctx_total_bucket'].isna().all())
+
+    def test_build_context_without_score_columns_does_not_raise(self):
+        # Pre-backfill store: HistoricalGameLog.stats payload has no
+        # team_score/opp_score keys yet, so load_frame's DataFrame lacks
+        # those columns entirely.
+        frame = _mini_frame().drop(columns=['team_score', 'opp_score'])
+        ctx = build_context(frame)
+        self.assertTrue(ctx['ctx_game_script'].isna().all())
+        self.assertTrue(ctx['ctx_opp_def_tier'].isna().all())
 
 
 class TestLoaders(BaseTestCase):

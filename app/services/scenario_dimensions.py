@@ -57,6 +57,25 @@ def load_odds_frame() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _safe_qcut(s: pd.Series, labels: tuple[str, ...]) -> pd.Series:
+    """qcut ``s`` into ``len(labels)`` quantile bins.
+
+    Small or degenerate groups (too few distinct values, e.g. a single
+    game on opening night, or an all-tied group) can't support that many
+    bins; ``duplicates='drop'`` then collapses the edges and pandas raises
+    ValueError. Return an all-NaN series instead (NaN bucket = row
+    excluded from this dimension, the registry's existing convention) so
+    one thin season group can't fail the whole build.
+    """
+    if s.nunique(dropna=True) < len(labels):
+        return pd.Series(float('nan'), index=s.index, dtype=object)
+    try:
+        return pd.qcut(s, len(labels), labels=list(labels),
+                       duplicates='drop').astype(object)
+    except ValueError:
+        return pd.Series(float('nan'), index=s.index, dtype=object)
+
+
 def _team_games(df: pd.DataFrame) -> pd.DataFrame:
     """One row per (game_id, team): totals needed for pace/def tiers."""
     g = df.groupby(['game_id', 'game_date', 'season', 'team_abbr',
@@ -71,6 +90,13 @@ def build_context(df: pd.DataFrame,
     df = df.copy()
     if 'pra' not in df.columns:
         df['pra'] = df['pts'] + df['reb'] + df['ast']
+    # Pre-backfill store: HistoricalGameLog.stats payload may not yet carry
+    # team_score/opp_score (backfill runs post-merge). Treat as unknown
+    # rather than raising -- rows fall out via the existing NaN-bucket
+    # conventions below (game_script, opp_def_tier).
+    for score_col in ('team_score', 'opp_score'):
+        if score_col not in df.columns:
+            df[score_col] = float('nan')
 
     # --- simple row-wise dims
     df['ctx_home_away'] = df['home_away']
@@ -104,8 +130,7 @@ def build_context(df: pd.DataFrame,
     game_poss = tg.groupby('game_id', as_index=False).agg(
         season=('season', 'first'), poss=('poss', 'sum'))
     game_poss['ctx_pace_tier'] = game_poss.groupby('season')['poss'].transform(
-        lambda s: pd.qcut(s, 3, labels=['slow', 'mid', 'fast'],
-                          duplicates='drop').astype(object))
+        lambda s: _safe_qcut(s, ('slow', 'mid', 'fast')))
     df = df.merge(game_poss[['game_id', 'ctx_pace_tier']],
                   on='game_id', how='left')
 
@@ -117,14 +142,18 @@ def build_context(df: pd.DataFrame,
     allowed['prior_allowed'] = allowed.groupby(
         ['season', 'team_abbr'])['allowed'].transform(
         lambda s: s.expanding().mean().shift(1))
-    # rank each team's prior among teams with data in the same season+date
-    def _tier(group):
-        pct = group['prior_allowed'].rank(pct=True)
+    # rank each team's prior among teams with data in the same season+date.
+    # Note: groupby(...).apply(func, include_groups=False) has a pandas
+    # quirk where a *single* group can come back as a transposed DataFrame
+    # instead of a concatenated Series (e.g. a season's opening night with
+    # only one game). groupby(...)[col].transform(func) always aligns to
+    # the original index regardless of group count, so use that instead.
+    def _tier(s: pd.Series) -> pd.Series:
+        pct = s.rank(pct=True)
         return pd.cut(pct, bins=[0, 1 / 3, 2 / 3, 1.0001],
                       labels=['top10', 'mid', 'bottom10']).astype(object)
     allowed['def_tier'] = allowed.groupby(
-        ['season', 'game_date'], group_keys=False).apply(
-        _tier, include_groups=False)
+        ['season', 'game_date'])['prior_allowed'].transform(_tier)
     allowed.loc[allowed['prior_allowed'].isna(), 'def_tier'] = float('nan')
     df = df.merge(
         allowed[['game_id', 'team_abbr', 'def_tier']].rename(
@@ -164,8 +193,7 @@ def build_context(df: pd.DataFrame,
         lambda d: f"{d.year}-{str(d.year + 1)[-2:]}" if d.month >= 10
         else f"{d.year - 1}-{str(d.year)[-2:]}")
     o['ctx_total_bucket'] = o.groupby('season_key')['total'].transform(
-        lambda s: pd.qcut(s, 3, labels=['low', 'mid', 'high'],
-                          duplicates='drop').astype(object))
+        lambda s: _safe_qcut(s, ('low', 'mid', 'high')))
     # join twice: once as home team, once as away
     merged_home = None
     merged_away = None
