@@ -11,6 +11,8 @@ import logging
 from datetime import datetime, timezone
 from itertools import combinations
 
+import pandas as pd
+
 from app import db
 from app.models import HistoricalGameLog, JobLog, ScenarioSplit
 from app.services.scenario_dimensions import (
@@ -123,7 +125,8 @@ def refresh_splits(sport: str = 'nba', min_games: int = MIN_GAMES_DEFAULT,
         ks = {stat: fit_prior_strength(scope_all, stat)
               for stat in SPLIT_STATS}
         current = seasons[-1]
-        batch = []
+        computed_at = datetime.now(timezone.utc)
+        parts: list[pd.DataFrame] = []
         for scope_name, frame in (('all', scope_all),
                                   (current,
                                    scope_all[scope_all['season'] == current])):
@@ -144,28 +147,77 @@ def refresh_splits(sport: str = 'nba', min_games: int = MIN_GAMES_DEFAULT,
                     continue
                 agg = sub.groupby(cols, observed=True)[
                     list(SPLIT_STATS)].agg(['mean', 'count'])
-                for key, row in agg.iterrows():
-                    key_tuple = key if isinstance(key, tuple) else (key,)
-                    pid = key_tuple[0]
-                    b1 = str(key_tuple[1])
-                    b2 = str(key_tuple[2]) if dim2 else None
-                    for stat in SPLIT_STATS:
-                        n = int(row[(stat, 'count')])
-                        if n < MIN_N:
-                            continue
-                        raw = float(row[(stat, 'mean')])
-                        base = float(baselines.loc[pid, stat])
-                        batch.append(dict(
-                            sport=sport, player_id=pid,
-                            player_name=names[pid], stat=stat,
-                            dim1=dim1, bucket1=b1, dim2=dim2, bucket2=b2,
-                            season_scope=scope_name, n=n, raw_mean=raw,
-                            shrunk_mean=shrink(raw, n, base, ks[stat]),
-                            baseline_mean=base,
-                            computed_at=datetime.now(timezone.utc)))
+                idx = agg.index
+                pid_vals = idx.get_level_values(0).to_numpy()
+                b1_vals = idx.get_level_values(1).to_numpy()
+                b2_vals = idx.get_level_values(2).to_numpy() if dim2 else None
+                for stat in SPLIT_STATS:
+                    counts = agg[(stat, 'count')].to_numpy()
+                    mask = counts >= MIN_N
+                    if not mask.any():
+                        continue
+                    n_arr = counts[mask]
+                    raw_arr = agg[(stat, 'mean')].to_numpy()[mask]
+                    pid_stat = pid_vals[mask]
+                    b1_stat = b1_vals[mask]
+                    b2_stat = b2_vals[mask] if b2_vals is not None else None
+
+                    base_arr = pd.Series(pid_stat).map(
+                        baselines[stat]).to_numpy()
+                    k = ks[stat]
+                    # mirrors shrink() above, vectorized over the group array
+                    shrunk_arr = (n_arr * raw_arr + k * base_arr) / (
+                        n_arr + k)
+
+                    part = pd.DataFrame({
+                        'player_id': pid_stat,
+                        'bucket1': pd.Series(b1_stat).astype(str),
+                        'n': n_arr.astype(int),
+                        'raw_mean': raw_arr.astype(float),
+                        'baseline_mean': base_arr.astype(float),
+                        'shrunk_mean': shrunk_arr.astype(float),
+                    })
+                    part['bucket2'] = (
+                        pd.Series(b2_stat).astype(str)
+                        if b2_stat is not None else None)
+                    part['stat'] = stat
+                    part['dim1'] = dim1
+                    part['dim2'] = dim2
+                    part['season_scope'] = scope_name
+                    part['player_name'] = part['player_id'].map(names)
+                    parts.append(part)
+
+        if parts:
+            final = pd.concat(parts, ignore_index=True)
+            # Guard against pandas silently upcasting an all-None object
+            # column to float64 NaN during concat -- bucket2/dim2 must
+            # stay Python None (-> SQL NULL) for single-dim splits.
+            for col in ('dim2', 'bucket2'):
+                final[col] = final[col].astype(object)
+                final.loc[final[col].isna(), col] = None
+            batch = [dict(
+                sport=sport, player_id=pid, player_name=pname, stat=stat,
+                dim1=dim1, bucket1=b1, dim2=dim2, bucket2=b2,
+                season_scope=scope, n=int(n), raw_mean=float(raw),
+                shrunk_mean=float(shr), baseline_mean=float(base),
+                computed_at=computed_at)
+                for pid, pname, stat, dim1, b1, dim2, b2, scope, n, raw,
+                shr, base in zip(
+                    final['player_id'].tolist(), final['player_name'].tolist(),
+                    final['stat'].tolist(), final['dim1'].tolist(),
+                    final['bucket1'].tolist(), final['dim2'].tolist(),
+                    final['bucket2'].tolist(), final['season_scope'].tolist(),
+                    final['n'].tolist(), final['raw_mean'].tolist(),
+                    final['shrunk_mean'].tolist(),
+                    final['baseline_mean'].tolist())]
+        else:
+            batch = []
+
         ScenarioSplit.query.filter_by(sport=sport).delete()
-        if batch:
-            db.session.bulk_insert_mappings(ScenarioSplit, batch)
+        CHUNK = 50_000
+        for i in range(0, len(batch), CHUNK):
+            db.session.bulk_insert_mappings(
+                ScenarioSplit, batch[i:i + CHUNK])
         db.session.commit()
         rows_written = len(batch)
         return {'players': players, 'rows': rows_written,
