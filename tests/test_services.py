@@ -2024,6 +2024,38 @@ class TestValueDetector(BaseTestCase):
                 )
         self.assertAlmostEqual(flag_on_result['model_prob_over'], flag_off_result['model_prob_over'])
 
+    def test_model_prob_over_falls_back_when_predictor_raises(self):
+        from app.services.value_detector import ValueDetector
+        with self.app.app_context():
+            for i in range(20):
+                db.session.add(PlayerGameLog(
+                    player_id='912', player_name='Exception Fallback Player', team_abbr='TST',
+                    game_date=date(2026, 1, 1) + timedelta(days=i),
+                    pts=25, reb=6, ast=4, fg3m=2, minutes=33,
+                    stl=1, blk=0, tov=2, fgm=9, fga=18, ftm=5, fta=6, fg3a=6,
+                ))
+            db.session.commit()
+
+            detector_on = ValueDetector()
+            with patch('app.services.projection_engine.find_player_id', return_value='912'), \
+                 patch.dict('os.environ', {'USE_DISTRIBUTIONAL_MODEL': 'true'}), \
+                 patch(
+                     'app.services.distributional_predictor.predict_prob_over',
+                     side_effect=RuntimeError('distributional inference failed'),
+                 ):
+                flag_on_result = detector_on.score_prop(
+                    'Exception Fallback Player', 'player_points',
+                    line=20.5, over_odds=-110, under_odds=-110,
+                )
+
+            detector_off = ValueDetector()
+            with patch('app.services.projection_engine.find_player_id', return_value='912'):
+                flag_off_result = detector_off.score_prop(
+                    'Exception Fallback Player', 'player_points',
+                    line=20.5, over_odds=-110, under_odds=-110,
+                )
+        self.assertAlmostEqual(flag_on_result['model_prob_over'], flag_off_result['model_prob_over'])
+
     # -- _empty_score --
 
     def test_empty_score(self):
