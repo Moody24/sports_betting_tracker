@@ -6323,6 +6323,40 @@ class TestModelCommandsStatus(BaseTestCase):
         mock_market.assert_called_once()
         self.assertIn('bypassing guardrails', result.output)
 
+    @patch('app.services.distributional_model.retrain_all_distributional_models')
+    @patch('app.services.ml_model.retrain_all_models')
+    @patch('app.services.pick_quality_model.train_pick_quality_model')
+    @patch('app.services.market_recommender.train_market_models')
+    def test_cli_retrain_force_also_trains_distributional_heads(
+        self, mock_market, mock_pq, mock_retrain, mock_dist,
+    ):
+        """cli_retrain --force also retrains the Plan C distributional heads."""
+        mock_retrain.return_value = {'player_points': {'ok': True}}
+        mock_pq.return_value = {'status': 'ok'}
+        mock_market.return_value = {'status': 'ok'}
+        mock_dist.return_value = {'player_points': {'ok': True}}
+        from app.cli.model_commands import cli_retrain
+        with self.app.app_context():
+            result = self._invoke(cli_retrain, ['--force'])
+        self.assertEqual(result.exit_code, 0)
+        mock_dist.assert_called_once()
+        self.assertIn('Distributional retrain', result.output)
+
+    def test_backtest_cli_no_active_model(self):
+        """flask backtest exits cleanly when no dist_<stat> model exists yet."""
+        from app.cli.model_commands import cli_backtest
+        with self.app.app_context():
+            result = self._invoke(cli_backtest, ['--stat-type', 'player_points'])
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn('No active dist_player_points model', result.output)
+
+    def test_backtest_cli_unsupported_stat_type(self):
+        from app.cli.model_commands import cli_backtest
+        with self.app.app_context():
+            result = self._invoke(cli_backtest, ['--stat-type', 'player_rebounds_per_minute'])
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn('Unsupported stat_type', result.output)
+
     @patch('app.services.scheduler.bootstrap_pick_quality_examples')
     def test_bootstrap_pick_quality_no_train(self, mock_bootstrap):
         """cli_bootstrap_pick_quality exits 0 without --train-after."""

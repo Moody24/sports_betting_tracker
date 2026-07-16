@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from app import db
 from app.models import ModelMetadata, PlayerGameLog
 from app.services.distribution import median_from_quantiles, rectify_quantiles
+from app.services.distribution_calibration import collect_oof_pairs_quantile, fit_isotonic_calibrator
 from app.services.ml_feature_builder import build_ml_features_from_history, build_team_game_aggregates
 from app.services.ml_model import (
     MIN_TRAIN_SAMPLES,
@@ -197,7 +198,7 @@ def train_distributional_model(stat_type: str) -> dict:
 
     Persists a new dist_<stat_type> ModelMetadata row (model_type
     'xgboost_quantile_regressor') via the existing model_storage layer.
-    Does not yet fit a calibrator — see Task 7's extension of this function.
+    Also fits and persists the stat's out-of-fold isotonic calibrator.
     """
     try:
         from xgboost import XGBRegressor
@@ -245,6 +246,9 @@ def train_distributional_model(stat_type: str) -> dict:
     val_preds_rectified = [rectify_quantiles(row.tolist()) for row in val_preds_raw]
     val_medians = [median_from_quantiles(QUANTILE_ALPHAS, q) for q in val_preds_rectified]
     val_mae = float(np.mean(np.abs(np.array(val_medians) - y_val)))
+    calibration_pairs = collect_oof_pairs_quantile(
+        list(zip([QUANTILE_ALPHAS] * len(val_preds_rectified), val_preds_rectified, y_val.tolist())),
+    )
 
     _ensure_model_dir()
     today = datetime.now(ET).date().isoformat()
@@ -289,6 +293,34 @@ def train_distributional_model(stat_type: str) -> dict:
     db.session.add(meta)
     db.session.commit()
 
+    calibrator_fitted = False
+    calibrator_model_name = f'dist_calibrator_{stat_type}'
+    try:
+        calibrator = fit_isotonic_calibrator(calibration_pairs)
+        import joblib
+        calibrator_filename = f"{calibrator_model_name}_{today}.pkl"
+        calibrator_filepath = os.path.join(MODEL_DIR, calibrator_filename)
+        joblib.dump(calibrator, calibrator_filepath)
+        calibrator_artifact_path = persist_model_artifact(calibrator_filepath, calibrator_filename)
+
+        ModelMetadata.query.filter_by(model_name=calibrator_model_name, is_active=True).update({
+            'is_active': False,
+        })
+        db.session.add(ModelMetadata(
+            model_name=calibrator_model_name,
+            model_type='isotonic_calibrator',
+            version=f"{stat_type}_{today}",
+            file_path=calibrator_artifact_path,
+            training_date=datetime.now(timezone.utc),
+            training_samples=len(calibration_pairs),
+            is_active=True,
+            metadata_json=json.dumps({'oof_pairs': len(calibration_pairs)}),
+        ))
+        db.session.commit()
+        calibrator_fitted = True
+    except ValueError:
+        logger.warning("No OOF calibration pairs for dist_%s; skipping calibrator fit", stat_type)
+
     logger.info(
         "Trained dist_%s model: val_mae=%.3f, %d train / %d val samples",
         stat_type, val_mae, len(X_train), len(X_val),
@@ -300,4 +332,107 @@ def train_distributional_model(stat_type: str) -> dict:
         'train_samples': len(X_train),
         'val_samples': len(X_val),
         'model_path': artifact_path,
+        'calibrator_fitted': calibrator_fitted,
+        'calibration_pairs': len(calibration_pairs),
     }
+
+
+def _collect_poisson_oof_rows(stat_type: str, frac: float = 0.8) -> list:
+    """Return held-out ``(lambda, realized)`` rows from an active point model."""
+    from app.services import ml_model
+    from app.services.ml_model import _build_training_rows as _build_point_training_rows
+    from app.services.ml_model import load_active_model
+
+    model, feature_names = load_active_model(stat_type)
+    if model is None or feature_names is None:
+        return []
+
+    # An active model may have been trained with a lower explicit threshold
+    # (notably the small offline fixture). OOF reconstruction should depend on
+    # the active artifact, not today's training-admission threshold.
+    min_train_samples = ml_model.MIN_TRAIN_SAMPLES
+    try:
+        ml_model.MIN_TRAIN_SAMPLES = 0
+        rows = _build_point_training_rows(stat_type)
+    finally:
+        ml_model.MIN_TRAIN_SAMPLES = min_train_samples
+    if not rows:
+        return []
+
+    _, val_idx, _, _ = _date_cutoff_split(rows, frac=frac)
+    if not val_idx:
+        return []
+
+    import numpy as np
+    oof_rows = []
+    for idx in val_idx:
+        _, _, features, target = rows[idx]
+        X = np.array([[features.get(k, 0) for k in feature_names]])
+        lam = float(model.predict(X)[0])
+        if lam > 0:
+            oof_rows.append((lam, target))
+    return oof_rows
+
+
+def train_distributional_calibrator_for_poisson_stat(stat_type: str) -> dict:
+    """Fit and persist an isotonic calibrator over an incumbent Poisson head."""
+    if stat_type not in POISSON_DIST_STAT_TYPES:
+        return {'error': f'Unsupported poisson stat_type: {stat_type}', 'stat_type': stat_type}
+
+    from app.services.distribution_calibration import collect_oof_pairs_poisson
+
+    oof_rows = _collect_poisson_oof_rows(stat_type)
+    if not oof_rows:
+        return {'error': 'No OOF rows available', 'stat_type': stat_type}
+
+    pairs = collect_oof_pairs_poisson(oof_rows)
+    try:
+        calibrator = fit_isotonic_calibrator(pairs)
+    except ValueError:
+        return {'error': 'No calibration pairs produced', 'stat_type': stat_type}
+
+    import joblib
+    _ensure_model_dir()
+    today = datetime.now(ET).date().isoformat()
+    model_name = f'dist_calibrator_{stat_type}'
+    filename = f"{model_name}_{today}.pkl"
+    filepath = os.path.join(MODEL_DIR, filename)
+    joblib.dump(calibrator, filepath)
+    artifact_path = persist_model_artifact(filepath, filename)
+
+    ModelMetadata.query.filter_by(model_name=model_name, is_active=True).update({'is_active': False})
+    db.session.add(ModelMetadata(
+        model_name=model_name,
+        model_type='isotonic_calibrator',
+        version=f"{stat_type}_{today}",
+        file_path=artifact_path,
+        training_date=datetime.now(timezone.utc),
+        training_samples=len(pairs),
+        is_active=True,
+        metadata_json=json.dumps({'oof_pairs': len(pairs), 'oof_rows': len(oof_rows)}),
+    ))
+    db.session.commit()
+
+    return {
+        'stat_type': stat_type,
+        'calibration_pairs': len(pairs),
+        'oof_rows': len(oof_rows),
+        'model_path': artifact_path,
+    }
+
+
+def retrain_all_distributional_models() -> dict:
+    """Retrain all distributional heads and their calibrators."""
+    results = {}
+    for stat_type in DIST_STAT_TYPES:
+        results[stat_type] = train_distributional_model(stat_type)
+    for stat_type in POISSON_DIST_STAT_TYPES:
+        results[stat_type] = train_distributional_calibrator_for_poisson_stat(stat_type)
+    return results
+
+
+def backtest_verdict(dist_ece: float, gauss_ece: float, gate: float = 0.03) -> str:
+    """Promote only when distributional ECE clears the gate and incumbent."""
+    if dist_ece <= gate and dist_ece <= gauss_ece:
+        return 'PROMOTE'
+    return 'HOLD'

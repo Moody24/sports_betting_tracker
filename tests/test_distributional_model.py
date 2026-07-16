@@ -181,6 +181,117 @@ class TestTrainDistributionalModel(BaseTestCase):
         self.assertEqual(rectified, sorted(rectified))
 
 
+class TestTrainDistributionalModelWithCalibrator(BaseTestCase):
+
+    def test_train_persists_calibrator_metadata(self):
+        from app.services import distributional_model as dm
+        with self.app.app_context():
+            for pid in ('621', '622', '623'):
+                _seed_dist_logs(player_id=pid, count=40, seed_offset=int(pid))
+            with patch.object(dm, 'MIN_TRAIN_SAMPLES', 50):
+                result = dm.train_distributional_model('player_assists')
+
+            self.assertIn('calibrator_fitted', result)
+            self.assertTrue(result['calibrator_fitted'])
+            self.assertGreater(result['calibration_pairs'], 0)
+
+            calib_meta = ModelMetadata.query.filter_by(
+                model_name='dist_calibrator_player_assists', is_active=True,
+            ).first()
+            self.assertIsNotNone(calib_meta)
+            self.assertEqual(calib_meta.model_type, 'isotonic_calibrator')
+
+
+class TestPoissonOofCalibration(BaseTestCase):
+
+    def test_collect_poisson_oof_rows_from_trained_point_model(self):
+        from app.services import ml_model
+        from app.services.distributional_model import _collect_poisson_oof_rows
+
+        with self.app.app_context():
+            for pid in ('631', '632', '633'):
+                _seed_dist_logs(player_id=pid, count=40, seed_offset=int(pid))
+            with patch.object(ml_model, 'MIN_TRAIN_SAMPLES', 50):
+                ml_model.train_model('player_steals')
+            oof_rows = _collect_poisson_oof_rows('player_steals')
+
+        self.assertTrue(oof_rows)
+        for lam, realized in oof_rows:
+            self.assertGreater(lam, 0.0)
+            self.assertGreaterEqual(realized, 0.0)
+
+    def test_collect_poisson_oof_rows_no_active_model_returns_empty(self):
+        from app.services.distributional_model import _collect_poisson_oof_rows
+        with self.app.app_context():
+            self.assertEqual(_collect_poisson_oof_rows('player_steals'), [])
+
+    def test_train_calibrator_for_poisson_stat_persists_metadata(self):
+        from app.services import ml_model
+        from app.services.distributional_model import train_distributional_calibrator_for_poisson_stat
+
+        with self.app.app_context():
+            for pid in ('641', '642', '643'):
+                _seed_dist_logs(player_id=pid, count=40, seed_offset=int(pid))
+            with patch.object(ml_model, 'MIN_TRAIN_SAMPLES', 50):
+                ml_model.train_model('player_blocks')
+            result = train_distributional_calibrator_for_poisson_stat('player_blocks')
+
+            self.assertNotIn('error', result)
+            self.assertGreater(result['calibration_pairs'], 0)
+            meta = ModelMetadata.query.filter_by(
+                model_name='dist_calibrator_player_blocks', is_active=True,
+            ).first()
+            self.assertIsNotNone(meta)
+            self.assertEqual(meta.model_type, 'isotonic_calibrator')
+
+    def test_train_calibrator_for_poisson_stat_unsupported_type(self):
+        from app.services.distributional_model import train_distributional_calibrator_for_poisson_stat
+        with self.app.app_context():
+            result = train_distributional_calibrator_for_poisson_stat('player_points')
+        self.assertIn('error', result)
+
+
+class TestRetrainAllDistributionalModels(BaseTestCase):
+
+    def test_calls_quantile_and_poisson_training_for_every_stat_type(self):
+        from app.services import distributional_model as dm
+
+        with patch.object(dm, 'train_distributional_model', return_value={'ok': True}) as mock_q, \
+             patch.object(
+                 dm, 'train_distributional_calibrator_for_poisson_stat', return_value={'ok': True},
+             ) as mock_p:
+            with self.app.app_context():
+                results = dm.retrain_all_distributional_models()
+
+        self.assertEqual(mock_q.call_count, len(dm.DIST_STAT_TYPES))
+        self.assertEqual(mock_p.call_count, len(dm.POISSON_DIST_STAT_TYPES))
+        for stat_type in dm.DIST_STAT_TYPES + dm.POISSON_DIST_STAT_TYPES:
+            self.assertIn(stat_type, results)
+
+
+class TestBacktestVerdict(BaseTestCase):
+
+    def test_promotes_when_under_gate_and_better_than_incumbent(self):
+        from app.services.distributional_model import backtest_verdict
+        self.assertEqual(backtest_verdict(dist_ece=0.02, gauss_ece=0.10), 'PROMOTE')
+
+    def test_holds_when_over_gate_even_if_better_than_incumbent(self):
+        from app.services.distributional_model import backtest_verdict
+        self.assertEqual(backtest_verdict(dist_ece=0.05, gauss_ece=0.10), 'HOLD')
+
+    def test_holds_when_worse_than_incumbent_even_under_gate(self):
+        from app.services.distributional_model import backtest_verdict
+        self.assertEqual(backtest_verdict(dist_ece=0.029, gauss_ece=0.01), 'HOLD')
+
+    def test_holds_at_exact_gate_boundary_if_worse_than_incumbent(self):
+        from app.services.distributional_model import backtest_verdict
+        self.assertEqual(backtest_verdict(dist_ece=0.03, gauss_ece=0.02), 'HOLD')
+
+    def test_promotes_at_exact_gate_boundary_if_better(self):
+        from app.services.distributional_model import backtest_verdict
+        self.assertEqual(backtest_verdict(dist_ece=0.03, gauss_ece=0.03), 'PROMOTE')
+
+
 if __name__ == '__main__':
     import unittest
     unittest.main()

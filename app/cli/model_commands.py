@@ -68,6 +68,10 @@ def cli_retrain(force):
         click.echo(f'Pick quality retrain: {pq_result}')
         market_result = train_market_models()
         click.echo(f'Market models retrain: {market_result}')
+        from app.services.distributional_model import retrain_all_distributional_models
+        click.echo('--force: training distributional heads + calibrators (Plan C, shadow path)...')
+        dist_result = retrain_all_distributional_models()
+        click.echo(f'Distributional retrain: {dist_result}')
     else:
         retrain_models()
     click.echo('Done.')
@@ -318,6 +322,147 @@ def cli_model_accuracy(days, stat_type):
             )
         else:
             click.echo(f'  {stype:<30} live={live_mae:.3f}  val=n/a (no active model)')
+
+
+@click.command('backtest')
+@click.option(
+    '--stat-type', default='player_points', show_default=True,
+    help='Distributional stat type to backtest (quantile: player_points/'
+         'player_rebounds/player_assists/player_points_rebounds_assists; '
+         'poisson: player_threes/player_steals/player_blocks).',
+)
+def cli_backtest(stat_type):
+    """Compare calibrated distributional P(over) with the incumbent Gaussian."""
+    import math as _math
+    import time as _time
+
+    from app import db
+    from app.models import JobLog
+    from app.services.distribution import (
+        median_from_quantiles,
+        prob_over,
+        prob_over_poisson,
+        rectify_quantiles,
+    )
+    from app.services.distribution_calibration import apply_calibrator
+    from app.services.distributional_model import (
+        DIST_STAT_TYPES,
+        POISSON_DIST_STAT_TYPES,
+        QUANTILE_ALPHAS,
+        _build_dist_training_rows,
+        _date_cutoff_split,
+        backtest_verdict,
+    )
+    from app.services.distributional_predictor import load_calibrator, load_quantile_model
+    from app.services.ml_model import load_active_model
+    from app.services.pick_quality_model import compute_calibration_metrics
+
+    click.echo(f'=== Distributional Backtest: {stat_type} ===')
+    _t0 = _time.perf_counter()
+
+    if stat_type in DIST_STAT_TYPES:
+        model, feature_names = load_quantile_model(stat_type)
+        if model is None:
+            click.echo(f'No active dist_{stat_type} model — run `flask retrain --force` first.')
+            return
+        calibrator = load_calibrator(stat_type)
+        rows = _build_dist_training_rows(stat_type)
+    elif stat_type in POISSON_DIST_STAT_TYPES:
+        from app.services.ml_model import _build_training_rows as _build_point_rows
+        rows = _build_point_rows(stat_type)
+    else:
+        click.echo(f'Unsupported stat_type: {stat_type}')
+        return
+
+    if not rows:
+        click.echo('No training rows available for backtest.')
+        return
+
+    _, val_idx, _, _ = _date_cutoff_split(rows)
+    if not val_idx:
+        click.echo('No held-out rows available for backtest.')
+        return
+
+    dist_pairs = []
+    gaussian_pairs = []
+
+    if stat_type in DIST_STAT_TYPES:
+        import numpy as np
+        from scipy.stats import norm
+        for idx in val_idx:
+            _, _, features, target = rows[idx]
+            X = np.array([[features.get(k, 0) for k in feature_names]])
+            raw_q = rectify_quantiles(model.predict(X)[0].tolist())
+            median = median_from_quantiles(QUANTILE_ALPHAS, raw_q)
+            std_proxy = max((raw_q[-1] - raw_q[0]) / 4.0, 0.5)
+            for offset in (-6.0, -3.0, 0.0, 3.0, 6.0):
+                line = median + offset
+                p_dist = prob_over(line, QUANTILE_ALPHAS, raw_q)
+                if calibrator is not None:
+                    p_dist = apply_calibrator(calibrator, p_dist)
+                y = 1.0 if target > line else 0.0
+                dist_pairs.append((p_dist, y))
+                p_gauss = float(1.0 - norm.cdf(line, loc=median, scale=std_proxy))
+                gaussian_pairs.append((p_gauss, y))
+    else:
+        model, feature_names = load_active_model(stat_type)
+        if model is None:
+            click.echo(f'No active projection_{stat_type} model — run `flask retrain --force` first.')
+            return
+        calibrator = load_calibrator(stat_type)
+        import numpy as np
+        from scipy.stats import norm
+        for idx in val_idx:
+            _, _, features, target = rows[idx]
+            X = np.array([[features.get(k, 0) for k in feature_names]])
+            lam = float(model.predict(X)[0])
+            if lam <= 0:
+                continue
+            for offset_frac in (-0.9, -0.6, 0.0, 0.6, 0.9):
+                candidate = lam + offset_frac * max(lam, 1.0)
+                line = max(0.5, _math.floor(candidate) + 0.5)
+                p_dist = prob_over_poisson(line, lam)
+                if calibrator is not None:
+                    p_dist = apply_calibrator(calibrator, p_dist)
+                y = 1.0 if target > line else 0.0
+                dist_pairs.append((p_dist, y))
+                p_gauss = float(1.0 - norm.cdf(line, loc=lam, scale=max(lam ** 0.5, 0.5)))
+                gaussian_pairs.append((p_gauss, y))
+
+    if not dist_pairs:
+        click.echo('No evaluable held-out pairs produced.')
+        return
+
+    dist_metrics = compute_calibration_metrics(dist_pairs, bins=5)
+    gauss_metrics = compute_calibration_metrics(gaussian_pairs, bins=5)
+    elapsed = _time.perf_counter() - _t0
+
+    click.echo(f"Held-out pairs: {len(dist_pairs)}")
+    click.echo(
+        f"Distributional  ECE={dist_metrics['ece']:.4f}  "
+        f"Brier={dist_metrics['brier']:.4f}  LogLoss={dist_metrics['logloss']:.4f}"
+    )
+    click.echo(
+        f"Incumbent (Gaussian) ECE={gauss_metrics['ece']:.4f}  "
+        f"Brier={gauss_metrics['brier']:.4f}  LogLoss={gauss_metrics['logloss']:.4f}"
+    )
+    click.echo(f"Backtest wall time: {elapsed:.1f}s")
+
+    verdict = backtest_verdict(dist_metrics['ece'], gauss_metrics['ece'])
+    message = (
+        f"stat={stat_type} dist_ece={dist_metrics['ece']:.4f} "
+        f"gauss_ece={gauss_metrics['ece']:.4f} verdict={verdict}"
+    )
+    db.session.add(JobLog(
+        job_name='distributional_backtest',
+        started_at=datetime.now(timezone.utc),
+        finished_at=datetime.now(timezone.utc),
+        status='success' if verdict == 'PROMOTE' else 'warn',
+        message=message[:500],
+    ))
+    db.session.commit()
+
+    click.echo(f"\nVerdict: {verdict}  (gate: ECE <= 0.03 and beats incumbent)")
 
 
 @click.command('model_status')
@@ -1095,3 +1240,4 @@ def register_model_commands(app):
     app.cli.add_command(cli_pollution_report)
     app.cli.add_command(cli_backfill_postmortems)
     app.cli.add_command(cli_postmortem_report)
+    app.cli.add_command(cli_backtest)
