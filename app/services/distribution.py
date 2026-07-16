@@ -1,9 +1,8 @@
 """Pure quantile/CDF math for the Plan C distributional core (Increment 1).
 
 No DB or model access here — this module only turns a predicted quantile
-grid into a usable CDF / P(over line). Kept dependency-free (numpy only) so
-it is trivially unit-testable and reusable from training, calibration, and
-inference code alike.
+grid or Poisson rate into a usable CDF / P(over line). It is unit-testable
+and reusable from training, calibration, and inference code alike.
 """
 
 import math

@@ -81,6 +81,32 @@ class TestPredictDistribution(BaseTestCase):
 
 class TestPredictProbOver(BaseTestCase):
 
+    def test_corrupt_active_calibrator_is_ignored(self):
+        from app.services.distributional_predictor import load_calibrator
+        from app.services.model_storage import persist_model_artifact
+
+        with self.app.app_context():
+            with tempfile.NamedTemporaryFile(suffix=".pkl") as artifact:
+                artifact.write(b"not a joblib artifact")
+                artifact.flush()
+                artifact_path = persist_model_artifact(
+                    artifact.name, "dist_calibrator_player_points_corrupt.pkl"
+                )
+
+            db.session.add(
+                ModelMetadata(
+                    model_name="dist_calibrator_player_points",
+                    model_type="isotonic_calibrator",
+                    version="corrupt-test",
+                    file_path=artifact_path,
+                    training_date=datetime.now(timezone.utc),
+                    is_active=True,
+                )
+            )
+            db.session.commit()
+
+            self.assertIsNone(load_calibrator("player_points"))
+
     def test_no_model_returns_none(self):
         from app.services.distributional_predictor import predict_prob_over
 
@@ -131,6 +157,9 @@ class TestPredictProbOver(BaseTestCase):
                 filepath, "dist_calibrator_player_points_test.pkl"
             )
 
+            ModelMetadata.query.filter_by(
+                model_name="dist_calibrator_player_points", is_active=True
+            ).update({"is_active": False})
             db.session.add(
                 ModelMetadata(
                     model_name="dist_calibrator_player_points",
