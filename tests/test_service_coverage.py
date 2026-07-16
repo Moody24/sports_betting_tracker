@@ -306,6 +306,18 @@ class TestPickQualityModel(BaseTestCase):
             result = get_calibration_report(limit='abc', bins=None)
             self.assertIn('error', result)
 
+    def test_compute_calibration_metrics_matches_manual_calculation(self):
+        from app.services.pick_quality_model import compute_calibration_metrics
+
+        xs = [0.9] * 10 + [0.2] * 10
+        ys = [1, 1, 1, 1, 1, 0, 0, 0, 0, 0] + [0, 0, 0, 0, 0, 1, 1, 1, 1, 1]
+        result = compute_calibration_metrics(list(zip(xs, ys)), bins=5)
+        self.assertEqual(result['wins'], 10)
+        self.assertEqual(result['losses'], 10)
+        self.assertAlmostEqual(result['win_rate'], 0.5)
+        self.assertAlmostEqual(result['avg_pred'], 0.55)
+        self.assertAlmostEqual(result['ece'], 0.35, places=4)
+
     def test_build_training_data_with_picks(self):
         from app.services.pick_quality_model import _build_training_data, MIN_RESOLVED_PICKS
         with self.app.app_context():
