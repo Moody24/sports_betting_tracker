@@ -1,7 +1,7 @@
 # Plan C — Increment 1: Distributional Core (Design)
 
 **Date:** 2026-07-13
-**Status:** Approved design, pending implementation plan
+**Status:** Implemented (Increment 1) — see docs/superpowers/plans/2026-07-13-plan-c-distributional-core.md
 **Roadmap:** Plan C of the ML platform upgrade (Phase 1 spec: `docs/superpowers/specs/2026-07-07-ml-platform-upgrade-phase1-design.md`). Follows Plans A, A2, B (all complete).
 
 ## Goal
