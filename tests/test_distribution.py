@@ -2,6 +2,8 @@
 
 import unittest
 
+from scipy.stats import poisson
+
 
 ALPHAS = [0.05, 0.15, 0.25, 0.35, 0.45, 0.55, 0.65, 0.75, 0.85, 0.95]
 RAW_QUANTILES = [10, 12, 14, 13, 15, 16, 18, 17, 19, 20]
@@ -91,6 +93,37 @@ class TestProbOver(unittest.TestCase):
         self.assertAlmostEqual(prob_over(14, ALPHAS, RECTIFIED), 0.65)
         self.assertAlmostEqual(prob_over(16, ALPHAS, RECTIFIED), 0.45)
         self.assertAlmostEqual(prob_over(10, ALPHAS, RECTIFIED), 0.95)
+
+
+class TestProbOverPoisson(unittest.TestCase):
+    def test_matches_scipy_poisson_cdf(self):
+        from app.services.distribution import prob_over_poisson
+
+        for line, lam in ((2.5, 3.4), (1.5, 1.2), (0.5, 0.8), (5.5, 2.0)):
+            expected = 1.0 - poisson.cdf(int(line // 1), lam)
+            self.assertAlmostEqual(prob_over_poisson(line, lam), expected)
+
+    def test_half_integer_lines_no_tie_ambiguity(self):
+        from app.services.distribution import prob_over_poisson
+
+        # Props always quote half-integer lines for count stats; floor()
+        # of a half-integer never lands on an integer support point twice.
+        p_below = prob_over_poisson(1.5, 2.0)
+        p_above = prob_over_poisson(2.5, 2.0)
+        self.assertGreater(p_below, p_above)
+
+    def test_in_unit_interval(self):
+        from app.services.distribution import prob_over_poisson
+
+        for line in (-1.5, 0.5, 3.5, 10.5):
+            p = prob_over_poisson(line, 2.5)
+            self.assertGreaterEqual(p, 0.0)
+            self.assertLessEqual(p, 1.0)
+
+    def test_negative_lambda_treated_as_zero(self):
+        from app.services.distribution import prob_over_poisson
+
+        self.assertAlmostEqual(prob_over_poisson(0.5, -1.0), 0.0)
 
 
 if __name__ == "__main__":

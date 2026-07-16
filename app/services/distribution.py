@@ -6,6 +6,7 @@ it is trivially unit-testable and reusable from training, calibration, and
 inference code alike.
 """
 
+import math
 from typing import List, Sequence
 
 import numpy as np
@@ -48,3 +49,20 @@ def prob_over(
     """Return P(stat > line), clamped to the unit interval."""
     cdf = cdf_from_quantiles(line, alphas, quantile_values)
     return float(min(max(1.0 - cdf, 0.0), 1.0))
+
+
+def prob_over_poisson(line: float, lam: float) -> float:
+    """P(count stat > line) under Poisson(lam): 1 - PoissonCDF(floor(line), lam).
+
+    Count-stat props (threes, steals, blocks) always quote half-integer
+    lines (e.g. 1.5), so floor() never lands exactly on a support point and
+    there is no tie ambiguity. lam < 0 is treated as lam == 0 (defensive —
+    a trained regressor should never emit a negative mean).
+    """
+    from scipy.stats import poisson
+
+    lam = max(float(lam), 0.0)
+    k = math.floor(line)
+    if k < 0:
+        return 1.0
+    return float(min(max(1.0 - poisson.cdf(k, lam), 0.0), 1.0))
