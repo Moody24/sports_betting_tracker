@@ -1964,6 +1964,66 @@ class TestValueDetector(BaseTestCase):
         prob = detector._model_prob_over(30, 25, 5)
         self.assertGreater(prob, 0.5)
 
+    def test_model_prob_over_flag_off_ignores_context_kwargs(self):
+        from app.services.value_detector import ValueDetector
+        detector = ValueDetector()
+        legacy = detector._model_prob_over(30, 25, 5)
+        with_context = detector._model_prob_over(
+            30, 25, 5, player_name='Anyone', prop_type='player_points',
+        )
+        self.assertEqual(legacy, with_context)
+
+    def test_model_prob_over_uses_distributional_predictor_when_flag_on(self):
+        from app.services.value_detector import ValueDetector
+        with self.app.app_context():
+            for i in range(20):
+                db.session.add(PlayerGameLog(
+                    player_id='910', player_name='Dist Flag Player', team_abbr='TST',
+                    game_date=date(2026, 1, 1) + timedelta(days=i),
+                    pts=25 + (i % 3), reb=6, ast=4, fg3m=2, minutes=33,
+                    stl=1, blk=0, tov=2, fgm=9, fga=18, ftm=5, fta=6, fg3a=6,
+                ))
+            db.session.commit()
+
+            detector = ValueDetector()
+            with patch('app.services.projection_engine.find_player_id', return_value='910'), \
+                 patch.dict('os.environ', {'USE_DISTRIBUTIONAL_MODEL': 'true'}), \
+                 patch('app.services.distributional_predictor.predict_prob_over', return_value=0.777):
+                result = detector.score_prop(
+                    'Dist Flag Player', 'player_points',
+                    line=20.5, over_odds=-110, under_odds=-110,
+                )
+        self.assertAlmostEqual(result['model_prob_over'], 0.777)
+
+    def test_model_prob_over_falls_back_when_predictor_returns_none(self):
+        from app.services.value_detector import ValueDetector
+        with self.app.app_context():
+            for i in range(20):
+                db.session.add(PlayerGameLog(
+                    player_id='911', player_name='Fallback Player', team_abbr='TST',
+                    game_date=date(2026, 1, 1) + timedelta(days=i),
+                    pts=25, reb=6, ast=4, fg3m=2, minutes=33,
+                    stl=1, blk=0, tov=2, fgm=9, fga=18, ftm=5, fta=6, fg3a=6,
+                ))
+            db.session.commit()
+
+            detector_on = ValueDetector()
+            with patch('app.services.projection_engine.find_player_id', return_value='911'), \
+                 patch.dict('os.environ', {'USE_DISTRIBUTIONAL_MODEL': 'true'}), \
+                 patch('app.services.distributional_predictor.predict_prob_over', return_value=None):
+                flag_on_result = detector_on.score_prop(
+                    'Fallback Player', 'player_points',
+                    line=20.5, over_odds=-110, under_odds=-110,
+                )
+
+            detector_off = ValueDetector()
+            with patch('app.services.projection_engine.find_player_id', return_value='911'):
+                flag_off_result = detector_off.score_prop(
+                    'Fallback Player', 'player_points',
+                    line=20.5, over_odds=-110, under_odds=-110,
+                )
+        self.assertAlmostEqual(flag_on_result['model_prob_over'], flag_off_result['model_prob_over'])
+
     # -- _empty_score --
 
     def test_empty_score(self):
