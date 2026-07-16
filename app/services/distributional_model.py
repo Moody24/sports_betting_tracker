@@ -17,7 +17,7 @@ stored column.
 import json
 import logging
 import os
-from datetime import date as date_type, datetime, timezone
+from datetime import datetime, timezone
 
 from app import db
 from app.models import ModelMetadata, PlayerGameLog
@@ -32,6 +32,7 @@ from app.services.ml_model import (
     _ensure_model_dir,
 )
 from app.services.model_storage import persist_model_artifact
+from app.utils.time_helpers import ET
 
 logger = logging.getLogger(__name__)
 
@@ -246,7 +247,7 @@ def train_distributional_model(stat_type: str) -> dict:
     val_mae = float(np.mean(np.abs(np.array(val_medians) - y_val)))
 
     _ensure_model_dir()
-    today = date_type.today().isoformat()
+    today = datetime.now(ET).date().isoformat()
     filename = f"dist_{stat_type}_{today}.json"
     filepath = os.path.join(MODEL_DIR, filename)
     model.save_model(filepath)
