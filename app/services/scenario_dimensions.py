@@ -25,6 +25,41 @@ DIMENSIONS: dict[str, tuple[str, ...]] = {
     'fav_dog': ('fav_big', 'fav', 'dog', 'dog_big'),
     'total_bucket': ('low', 'mid', 'high'),
 }
+
+# Fixed-logic bucketing shared by the historical builder (build_context) and
+# the live builder (live_context). One source of truth: edit here, both move.
+REST_BINS = [-1, 0, 1, 2, 10_000]
+REST_LABELS = ('0', '1', '2', '3+')
+SEGMENT_BINS = [9, 12, 14, 17]          # shifted months: Oct..Apr -> 10..16
+SEGMENT_LABELS = ('early', 'mid', 'late')
+SPREAD_BIG = 7.0
+
+
+def rest_bucket_label(days_rest: float) -> str:
+    for edge, label in zip(REST_BINS[1:], REST_LABELS):
+        if days_rest <= edge:
+            return label
+    return REST_LABELS[-1]
+
+
+def season_segment_label(d) -> str | None:
+    month = d.month
+    shifted = month if month >= 9 else month + 12
+    for edge, label in zip(SEGMENT_BINS[1:], SEGMENT_LABELS):
+        if shifted <= edge:
+            return label
+    return None
+
+
+def fav_dog_label(spread: float, team_is_favored: bool) -> str:
+    if spread == 0:
+        return 'fav'
+    big = abs(spread) > SPREAD_BIG
+    if team_is_favored:
+        return 'fav_big' if big else 'fav'
+    return 'dog_big' if big else 'dog'
+
+
 # Reserved (not implemented): line_move (Plan D), referee_crew (no free data).
 
 
@@ -105,7 +140,7 @@ def build_context(df: pd.DataFrame,
     month = df['game_date'].dt.month
     df['ctx_season_segment'] = pd.cut(
         month.where(month >= 9, month + 12),   # Oct..Apr -> 10..16
-        bins=[9, 12, 14, 17], labels=['early', 'mid', 'late']).astype(object)
+        bins=SEGMENT_BINS, labels=list(SEGMENT_LABELS)).astype(object)
 
     # --- game_script from realized margin
     margin = (df['team_score'] - df['opp_score']).abs()
@@ -120,8 +155,8 @@ def build_context(df: pd.DataFrame,
     gap = df.groupby('player_id')['game_date'].diff().dt.days
     rest = gap - 1
     df['ctx_rest_bucket'] = pd.cut(
-        rest.fillna(99), bins=[-1, 0, 1, 2, 10_000],
-        labels=['0', '1', '2', '3+']).astype(object)
+        rest.fillna(99), bins=REST_BINS,
+        labels=list(REST_LABELS)).astype(object)
 
     # --- team-game table for pace + def tiers
     tg = _team_games(df)
@@ -207,13 +242,9 @@ def build_context(df: pd.DataFrame,
             merged_away = sub
     odds_long = pd.concat([merged_home, merged_away], ignore_index=True)
     def _fav_bucket(row):
-        team_favored = ((row['favored'] == 'home') == row['is_home_side'])
-        big = abs(row['spread']) > 7
-        if row['spread'] == 0:
-            return 'fav'
-        if team_favored:
-            return 'fav_big' if big else 'fav'
-        return 'dog_big' if big else 'dog'
+        return fav_dog_label(
+            row['spread'],
+            (row['favored'] == 'home') == row['is_home_side'])
     odds_long['ctx_fav_dog'] = odds_long.apply(_fav_bucket, axis=1)
     df = df.merge(
         odds_long[['game_date', 'team_abbr', 'ctx_fav_dog',
