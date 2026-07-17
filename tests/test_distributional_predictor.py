@@ -90,6 +90,21 @@ class TestPredictProbOver(BaseTestCase):
         with self.app.app_context():
             self.assertIsNone(predict_prob_over("player_points", {}, 60.5))
 
+    @patch("app.services.distributional_predictor.load_calibrator", return_value=None)
+    @patch("app.services.distributional_predictor.predict_distribution")
+    def test_details_carry_distribution_point_alongside_prob(self, predict, _cal):
+        from app.services.distributional_predictor import predict_prob_over_details
+        predict.return_value = {
+            "kind": "quantile", "point": 21.5,
+            "alphas": [0.05, 0.5, 0.95], "quantile_values": [10.0, 21.5, 30.0],
+        }
+        with self.app.app_context():
+            details = predict_prob_over_details("player_points", {}, 21.5)
+        self.assertIsNotNone(details)
+        self.assertEqual(details["point"], 21.5)
+        self.assertEqual(details["kind"], "quantile")
+        self.assertAlmostEqual(details["prob_over"], 0.5)
+
     @patch("app.services.distributional_predictor.ModelMetadata")
     def test_calibrator_load_is_cached_per_stat(self, metadata):
         from app.services import distributional_predictor as predictor

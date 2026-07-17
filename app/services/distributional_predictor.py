@@ -114,10 +114,11 @@ def predict_distribution(stat_type: str, features: dict) -> Optional[dict]:
     return None
 
 
-def predict_prob_over(
+def predict_prob_over_details(
     stat_type: str, features: dict, line: float
-) -> Optional[float]:
-    """Return calibrated P(stat > line), or None when no head is active."""
+) -> Optional[dict]:
+    """Return {'prob_over', 'point', 'kind'} for the line, or None when no
+    head is active or the line falls outside the trained quantile support."""
     dist = predict_distribution(stat_type, features)
     if dist is None:
         return None
@@ -130,6 +131,13 @@ def predict_prob_over(
         raw = prob_over(line, dist["alphas"], dist["quantile_values"])
 
     calibrator = load_calibrator(stat_type)
-    if calibrator is not None:
-        return apply_calibrator(calibrator, raw)
-    return float(raw)
+    calibrated = apply_calibrator(calibrator, raw) if calibrator is not None else float(raw)
+    return {"prob_over": calibrated, "point": float(dist["point"]), "kind": dist["kind"]}
+
+
+def predict_prob_over(
+    stat_type: str, features: dict, line: float
+) -> Optional[float]:
+    """Return calibrated P(stat > line), or None when no head is active."""
+    details = predict_prob_over_details(stat_type, features, line)
+    return None if details is None else details["prob_over"]

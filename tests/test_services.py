@@ -2004,12 +2004,61 @@ class TestValueDetector(BaseTestCase):
             detector = ValueDetector()
             with patch('app.services.projection_engine.find_player_id', return_value='910'), \
                  patch.dict('os.environ', {'USE_DISTRIBUTIONAL_MODEL': 'true'}), \
-                 patch('app.services.distributional_predictor.predict_prob_over', return_value=0.777):
+                 patch('app.services.distributional_predictor.predict_prob_over_details',
+                       return_value={'prob_over': 0.777, 'point': 25.0, 'kind': 'quantile'}):
                 result = detector.score_prop(
                     'Dist Flag Player', 'player_points',
                     line=20.5, over_odds=-110, under_odds=-110,
                 )
         self.assertAlmostEqual(result['model_prob_over'], 0.777)
+
+    def test_dist_scored_prop_displays_dist_median_as_projection(self):
+        from app.services.value_detector import ValueDetector
+        with self.app.app_context():
+            for i in range(20):
+                db.session.add(PlayerGameLog(
+                    player_id='913', player_name='Dist Median Player', team_abbr='TST',
+                    game_date=date(2026, 1, 1) + timedelta(days=i),
+                    pts=25 + (i % 3), reb=6, ast=4, fg3m=2, minutes=33,
+                    stl=1, blk=0, tov=2, fgm=9, fga=18, ftm=5, fta=6, fg3a=6,
+                ))
+            db.session.commit()
+
+            detector = ValueDetector()
+            with patch('app.services.projection_engine.find_player_id', return_value='913'), \
+                 patch.dict('os.environ', {'USE_DISTRIBUTIONAL_MODEL': 'true'}), \
+                 patch(
+                     'app.services.distributional_predictor.predict_prob_over_details',
+                     return_value={'prob_over': 0.31, 'point': 31.24, 'kind': 'quantile'},
+                 ):
+                result = detector.score_prop(
+                    'Dist Median Player', 'player_points',
+                    line=34.5, over_odds=-110, under_odds=-110,
+                )
+        self.assertAlmostEqual(result['model_prob_over'], 0.31)
+        self.assertEqual(result['projection'], 31.2)
+        self.assertEqual(result['projection_source'], 'distributional')
+
+    def test_flag_off_projection_stays_heuristic(self):
+        from app.services.value_detector import ValueDetector
+        with self.app.app_context():
+            for i in range(20):
+                db.session.add(PlayerGameLog(
+                    player_id='914', player_name='Heuristic Player', team_abbr='TST',
+                    game_date=date(2026, 1, 1) + timedelta(days=i),
+                    pts=25, reb=6, ast=4, fg3m=2, minutes=33,
+                    stl=1, blk=0, tov=2, fgm=9, fga=18, ftm=5, fta=6, fg3a=6,
+                ))
+            db.session.commit()
+
+            detector = ValueDetector()
+            with patch('app.services.projection_engine.find_player_id', return_value='914'):
+                result = detector.score_prop(
+                    'Heuristic Player', 'player_points',
+                    line=20.5, over_odds=-110, under_odds=-110,
+                )
+        self.assertNotEqual(result['projection_source'], 'distributional')
+        self.assertGreater(result['projection'], 0)
 
     def test_model_prob_over_falls_back_when_predictor_returns_none(self):
         from app.services.value_detector import ValueDetector
@@ -2026,7 +2075,7 @@ class TestValueDetector(BaseTestCase):
             detector_on = ValueDetector()
             with patch('app.services.projection_engine.find_player_id', return_value='911'), \
                  patch.dict('os.environ', {'USE_DISTRIBUTIONAL_MODEL': 'true'}), \
-                 patch('app.services.distributional_predictor.predict_prob_over', return_value=None):
+                 patch('app.services.distributional_predictor.predict_prob_over_details', return_value=None):
                 flag_on_result = detector_on.score_prop(
                     'Fallback Player', 'player_points',
                     line=20.5, over_odds=-110, under_odds=-110,
@@ -2056,7 +2105,7 @@ class TestValueDetector(BaseTestCase):
             with patch('app.services.projection_engine.find_player_id', return_value='912'), \
                  patch.dict('os.environ', {'USE_DISTRIBUTIONAL_MODEL': 'true'}), \
                  patch(
-                     'app.services.distributional_predictor.predict_prob_over',
+                     'app.services.distributional_predictor.predict_prob_over_details',
                      side_effect=RuntimeError('distributional inference failed'),
                  ):
                 flag_on_result = detector_on.score_prop(

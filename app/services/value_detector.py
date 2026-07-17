@@ -167,13 +167,22 @@ class ValueDetector:
         # Model probability of exceeding the line (calibrated distributional
         # model when USE_DISTRIBUTIONAL_MODEL=true; normal CDF approximation
         # otherwise — see _model_prob_over).
-        model_prob_over = self._model_prob_over(
+        model_prob_over, dist_point = self._model_prob_over_details(
             projection, line, std_dev,
             player_name=player_name, prop_type=prop_type,
             opponent_name=opponent_name, team_name=team_name,
             is_home=is_home, game_date=game_date, game_total_line=game_total_line,
         )
         model_prob_under = 1.0 - model_prob_over
+
+        # When the distributional head scored this prop, display ITS point
+        # estimate so projection and P(over) describe the same distribution
+        # (the heuristic projection carries bias corrections the dist head
+        # deliberately omits — e.g. PRA's combo correction).
+        projection_source = proj.get('projection_source', 'heuristic')
+        if dist_point is not None:
+            projection = round(float(dist_point), 1)
+            projection_source = 'distributional'
 
         # Book no-vig probabilities
         book_prob_over, book_prob_under = devig_probs(over_odds, under_odds)
@@ -271,7 +280,7 @@ class ValueDetector:
             'z_score': proj.get('z_score', 0),
             'games_played': games_played,
             'confidence': projection_confidence,
-            'projection_source': proj.get('projection_source', 'heuristic'),
+            'projection_source': projection_source,
             'breakdown': proj.get('breakdown', {}),
             'game_id': game_id,
             'win_probability': win_probability,
@@ -291,15 +300,38 @@ class ValueDetector:
         game_date: Optional[_date] = None,
         game_total_line: float = 0.0,
     ) -> float:
-        """Estimate probability of the player exceeding the line.
+        """Estimate probability of the player exceeding the line."""
+        prob, _ = self._model_prob_over_details(
+            projection, line, std_dev,
+            player_name=player_name, prop_type=prop_type,
+            opponent_name=opponent_name, team_name=team_name,
+            is_home=is_home, game_date=game_date, game_total_line=game_total_line,
+        )
+        return prob
+
+    def _model_prob_over_details(
+        self,
+        projection: float,
+        line: float,
+        std_dev: float,
+        player_name: str = '',
+        prop_type: str = '',
+        opponent_name: str = '',
+        team_name: str = '',
+        is_home: bool = True,
+        game_date: Optional[_date] = None,
+        game_total_line: float = 0.0,
+    ) -> tuple:
+        """Return ``(prob_over, dist_point_or_None)`` for the line.
 
         When USE_DISTRIBUTIONAL_MODEL=true and a trained distributional
         model is available for (player_name, prop_type), P(over) comes from
         the calibrated model CDF (quantile heads for points/rebounds/
-        assists/PRA, Poisson CDF for threes/steals/blocks). Otherwise (flag
+        assists/PRA, Poisson CDF for threes/steals/blocks) and the second
+        element is the distribution's own point estimate. Otherwise (flag
         off, or no model/features available) falls back to the legacy
         Normal(projection, std_dev) synthetic CDF — byte-identical to
-        pre-Plan-C behavior.
+        pre-Plan-C behavior — and the second element is None.
         """
         if self._use_distributional_model() and player_name and prop_type:
             try:
@@ -308,10 +340,12 @@ class ValueDetector:
                     game_total_line,
                 )
                 if features:
-                    from app.services.distributional_predictor import predict_prob_over
-                    calibrated = predict_prob_over(stat_type, features, line)
-                    if calibrated is not None:
-                        return calibrated
+                    from app.services.distributional_predictor import (
+                        predict_prob_over_details,
+                    )
+                    details = predict_prob_over_details(stat_type, features, line)
+                    if details is not None:
+                        return float(details['prob_over']), float(details['point'])
             except Exception as exc:
                 logger.warning(
                     "Distributional P(over) failed for %s/%s; falling back to Gaussian: %s",
@@ -319,15 +353,15 @@ class ValueDetector:
                 )
 
         if std_dev <= 0:
-            return 0.65 if projection > line else 0.35
+            return (0.65 if projection > line else 0.35), None
 
         try:
             from scipy.stats import norm
-            return float(1.0 - norm.cdf(line, loc=projection, scale=std_dev))
+            return float(1.0 - norm.cdf(line, loc=projection, scale=std_dev)), None
         except ImportError:
             # Fallback: approximate normal CDF using the error function
             z = (line - projection) / std_dev
-            return 0.5 * (1.0 + math.erf(-z / math.sqrt(2)))
+            return 0.5 * (1.0 + math.erf(-z / math.sqrt(2))), None
 
     def _use_distributional_model(self) -> bool:
         return os.getenv('USE_DISTRIBUTIONAL_MODEL', 'false').lower() == 'true'
