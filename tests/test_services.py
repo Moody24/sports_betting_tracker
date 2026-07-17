@@ -5212,7 +5212,7 @@ class TestNBAService(BaseTestCase):
         import os
         with patch.dict(os.environ, {'ODDS_API_KEY': ''}):
             from app.services.nba_service import fetch_odds_combined
-            totals, h2h = fetch_odds_combined()
+            totals, h2h, _spreads = fetch_odds_combined()
         self.assertEqual(totals, {})
         self.assertEqual(h2h, {})
         mock_get.assert_not_called()
@@ -5241,7 +5241,7 @@ class TestNBAService(BaseTestCase):
         import os
         with patch.dict(os.environ, {'ODDS_API_KEY': 'test_key_123'}):
             from app.services.nba_service import fetch_odds_combined
-            totals, h2h = fetch_odds_combined()
+            totals, h2h, _spreads = fetch_odds_combined()
 
         self.assertTrue(len(totals) > 0)
         line = list(totals.values())[0]
