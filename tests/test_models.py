@@ -253,3 +253,20 @@ class TestModels(BaseTestCase):
     def test_bet_repr(self):
         b = make_bet(1)
         self.assertIn("Lakers", repr(b))
+
+
+class TestScenarioContextPack(BaseTestCase):
+
+    def test_pack_round_trips_payload_json(self):
+        import json
+        from datetime import datetime, timezone
+        from app.models import ScenarioContextPack
+        with self.app.app_context():
+            db.session.add(ScenarioContextPack(
+                sport='nba',
+                payload=json.dumps({'season': '2025-26', 'total_bins': [200.0, 220.0, 230.0, 260.0]}),
+                computed_at=datetime.now(timezone.utc),
+            ))
+            db.session.commit()
+            row = ScenarioContextPack.query.filter_by(sport='nba').first()
+            self.assertEqual(json.loads(row.payload)['season'], '2025-26')
