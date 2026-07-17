@@ -45,6 +45,8 @@ def rest_bucket_label(days_rest: float) -> str:
 def season_segment_label(d) -> str | None:
     month = d.month
     shifted = month if month >= 9 else month + 12
+    if shifted <= SEGMENT_BINS[0] or shifted > SEGMENT_BINS[-1]:
+        return None
     for edge, label in zip(SEGMENT_BINS[1:], SEGMENT_LABELS):
         if shifted <= edge:
             return label

@@ -330,6 +330,12 @@ class TestSharedBucketHelpers(BaseTestCase):
         self.assertEqual(season_segment_label(date(2026, 3, 1)), 'late')
         self.assertEqual(season_segment_label(date(2026, 4, 12)), 'late')
 
+    def test_season_segment_label_matches_historical_range(self):
+        from datetime import date
+        from app.services.scenario_dimensions import season_segment_label
+        self.assertIsNone(season_segment_label(date(2025, 9, 30)))
+        self.assertEqual(season_segment_label(date(2026, 5, 1)), 'late')
+
     def test_fav_dog_label_matches_historical_rules(self):
         from app.services.scenario_dimensions import fav_dog_label
         self.assertEqual(fav_dog_label(9.5, True), 'fav_big')
