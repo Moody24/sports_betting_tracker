@@ -223,7 +223,10 @@ def refresh_splits(sport: str = 'nba', min_games: int = MIN_GAMES_DEFAULT,
         import json as _json
         from app.models import ScenarioContextPack
         pack_payload = build_context_pack(df, odds_df)
-        ScenarioContextPack.query.filter_by(sport=sport).delete()
+        existing_pack = ScenarioContextPack.query.filter_by(sport=sport).first()
+        if existing_pack is not None:
+            db.session.delete(existing_pack)
+        db.session.flush()
         db.session.add(ScenarioContextPack(
             sport=sport, payload=_json.dumps(pack_payload),
             computed_at=computed_at))

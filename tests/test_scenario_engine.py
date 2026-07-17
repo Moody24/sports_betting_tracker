@@ -397,8 +397,10 @@ class TestContextPack(BaseTestCase):
 
     def test_refresh_splits_writes_pack_atomically(self):
         import json
+        import warnings
         from app.models import ScenarioContextPack
         from app.services.scenario_engine import refresh_splits
+        from sqlalchemy.exc import SAWarning
         with self.app.app_context():
             TestRefreshSplits._seed_store(self)
             refresh_splits(force=True, min_games=1)
@@ -406,5 +408,14 @@ class TestContextPack(BaseTestCase):
             self.assertIsNotNone(row)
             payload = json.loads(row.payload)
             self.assertIn('team_def_tier', payload)
-            refresh_splits(force=True, min_games=1)
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter('always', SAWarning)
+                refresh_splits(force=True, min_games=1)
+            identity_warnings = [
+                warning for warning in caught
+                if issubclass(warning.category, SAWarning)
+                and 'Identity map already had an identity'
+                in str(warning.message)
+            ]
+            self.assertEqual(identity_warnings, [])
             self.assertEqual(ScenarioContextPack.query.count(), 1)
