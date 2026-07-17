@@ -97,6 +97,12 @@ class ValueDetector:
 
     def __init__(self, engine: ProjectionEngine = None):
         self.engine = engine or ProjectionEngine()
+        # Per-scan scenario-signal cache: non-None only while
+        # score_all_todays_props is scoring, so the ScenarioContextPack is
+        # fetched once per scan, live context once per (player, game), and
+        # 'all'-scope splits once per (player, stat). Standalone score_prop
+        # calls (cache is None) query fresh every time.
+        self._scenario_scan_cache: Optional[dict] = None
 
     @staticmethod
     def _build_player_team_map(player_names: set[str]) -> dict[str, str]:
@@ -432,14 +438,38 @@ class ValueDetector:
         espn_id = resolve_espn_id(player_name)
         if espn_id is None:
             return None
-        from app.services.live_context import build_live_context
-        context, fresh = build_live_context(
-            espn_id, team_abbr=team_name, opponent_abbr=opponent_name,
-            is_home=is_home, game_date=game_date,
-            total=game_total_line or None, spread=spread,
-            favored_side=favored_side)
-        from app.services.scenario_engine import agreement_score
-        score, matches = agreement_score(espn_id, stat, line, context)
+        from app.services.live_context import build_live_context, get_live_pack
+        from app.services.scenario_engine import (
+            agreement_score, load_agreement_splits,
+        )
+        cache = self._scenario_scan_cache
+        if cache is None:
+            context, fresh = build_live_context(
+                espn_id, team_abbr=team_name, opponent_abbr=opponent_name,
+                is_home=is_home, game_date=game_date,
+                total=game_total_line or None, spread=spread,
+                favored_side=favored_side)
+            score, matches = agreement_score(espn_id, stat, line, context)
+        else:
+            if 'pack' not in cache:
+                cache['pack'] = get_live_pack()
+            ctx_key = (espn_id, team_name, opponent_name, is_home, game_date,
+                       game_total_line or None, spread, favored_side)
+            if ctx_key not in cache['context']:
+                cache['context'][ctx_key] = build_live_context(
+                    espn_id, team_abbr=team_name,
+                    opponent_abbr=opponent_name, is_home=is_home,
+                    game_date=game_date, total=game_total_line or None,
+                    spread=spread, favored_side=favored_side,
+                    pack=cache['pack'])
+            context, fresh = cache['context'][ctx_key]
+            splits_key = (espn_id, stat)
+            if splits_key not in cache['splits']:
+                cache['splits'][splits_key] = load_agreement_splits(
+                    espn_id, stat)
+            score, matches = agreement_score(
+                espn_id, stat, line, context,
+                splits=cache['splits'][splits_key])
         if matches == 0:
             return None
         return score, matches, fresh
@@ -635,66 +665,72 @@ class ValueDetector:
         logger.info("PERF player_team_map: players=%d elapsed=%.2fs", len(player_team_map), _time.perf_counter() - _t_team)
 
         _t_score = _time.perf_counter()
-        for game, props in game_props_payloads:
-            espn_id = game.get('espn_id', '')
-            home_team = game.get('home', {}).get('name', '')
-            away_team = game.get('away', {}).get('name', '')
-            home_abbr = (game.get('home', {}).get('abbr') or '').upper()
-            away_abbr = (game.get('away', {}).get('abbr') or '').upper()
+        # Fresh per-scan scenario cache — see __init__. Rebuilt every scan so
+        # a refreshed pack/splits set is picked up on the next scan.
+        self._scenario_scan_cache = {'context': {}, 'splits': {}}
+        try:
+            for game, props in game_props_payloads:
+                espn_id = game.get('espn_id', '')
+                home_team = game.get('home', {}).get('name', '')
+                away_team = game.get('away', {}).get('name', '')
+                home_abbr = (game.get('home', {}).get('abbr') or '').upper()
+                away_abbr = (game.get('away', {}).get('abbr') or '').upper()
 
-            for market_key, market_props in props.items():
-                for prop in market_props:
-                    player = prop.get('player', '')
-                    if not player:
-                        continue
+                for market_key, market_props in props.items():
+                    for prop in market_props:
+                        player = prop.get('player', '')
+                        if not player:
+                            continue
 
-                    # Skip unavailable players
-                    if not is_player_available(player):
-                        continue
+                        # Skip unavailable players
+                        if not is_player_available(player):
+                            continue
 
-                    line = prop.get('line', 0)
-                    over_odds = prop.get('over_odds', -110)
-                    under_odds = prop.get('under_odds', -110)
+                        line = prop.get('line', 0)
+                        over_odds = prop.get('over_odds', -110)
+                        under_odds = prop.get('under_odds', -110)
 
-                    team_name, opponent_name, is_home = self._resolve_game_context_for_player(
-                        player_name=player,
-                        home_team=home_team,
-                        away_team=away_team,
-                        home_abbr=home_abbr,
-                        away_abbr=away_abbr,
-                        player_team_map=player_team_map,
-                    )
-
-                    _start_time_str = game.get('start_time', '')[:10]
-                    try:
-                        _game_date: Optional[_date] = (
-                            _date.fromisoformat(_start_time_str) if _start_time_str else None
+                        team_name, opponent_name, is_home = self._resolve_game_context_for_player(
+                            player_name=player,
+                            home_team=home_team,
+                            away_team=away_team,
+                            home_abbr=home_abbr,
+                            away_abbr=away_abbr,
+                            player_team_map=player_team_map,
                         )
-                    except ValueError:
-                        _game_date = None
 
-                    score = self.score_prop(
-                        player_name=player,
-                        prop_type=market_key,
-                        line=line,
-                        over_odds=over_odds,
-                        under_odds=under_odds,
-                        opponent_name=opponent_name,
-                        team_name=team_name,
-                        is_home=is_home,
-                        game_id=espn_id,
-                        game_date=_game_date,
-                        game_total_line=float(game.get('over_under_line') or 0.0),
-                        spread=game.get('spread'),
-                        favored_side=game.get('favored_side'),
-                    )
+                        _start_time_str = game.get('start_time', '')[:10]
+                        try:
+                            _game_date: Optional[_date] = (
+                                _date.fromisoformat(_start_time_str) if _start_time_str else None
+                            )
+                        except ValueError:
+                            _game_date = None
 
-                    # Add game context to score
-                    score['home_team'] = home_team
-                    score['away_team'] = away_team
-                    score['match_date'] = _start_time_str
+                        score = self.score_prop(
+                            player_name=player,
+                            prop_type=market_key,
+                            line=line,
+                            over_odds=over_odds,
+                            under_odds=under_odds,
+                            opponent_name=opponent_name,
+                            team_name=team_name,
+                            is_home=is_home,
+                            game_id=espn_id,
+                            game_date=_game_date,
+                            game_total_line=float(game.get('over_under_line') or 0.0),
+                            spread=game.get('spread'),
+                            favored_side=game.get('favored_side'),
+                        )
 
-                    all_scores.append(score)
+                        # Add game context to score
+                        score['home_team'] = home_team
+                        score['away_team'] = away_team
+                        score['match_date'] = _start_time_str
+
+                        all_scores.append(score)
+        finally:
+            self._scenario_scan_cache = None
 
         # Sort by absolute edge descending
         all_scores.sort(key=lambda s: abs(s.get('edge', 0)), reverse=True)

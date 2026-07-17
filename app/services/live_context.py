@@ -61,8 +61,13 @@ def build_live_context(espn_id: str, *, team_abbr: str, opponent_abbr: str,
                        total: float | None = None,
                        spread: float | None = None,
                        favored_side: str | None = None,
-                       sport: str = 'nba') -> tuple:
-    """Return ``(context_dict, pack_fresh)`` for one (player, game)."""
+                       sport: str = 'nba',
+                       pack: tuple | None = None) -> tuple:
+    """Return ``(context_dict, pack_fresh)`` for one (player, game).
+
+    ``pack`` (optional) is a prefetched ``get_live_pack()`` result; when
+    provided the pack query is skipped — callers scoring many props in one
+    scan should fetch the pack once and pass it here."""
     as_of = game_date or datetime.now(ET).date()
     ctx: dict = {'home_away': 'home' if is_home else 'away'}
 
@@ -91,7 +96,7 @@ def build_live_context(espn_id: str, *, team_abbr: str, opponent_abbr: str,
         team_is_favored = (favored_side == 'home') == is_home
         ctx['fav_dog'] = fav_dog_label(float(spread), team_is_favored)
 
-    pack, fresh = get_live_pack(sport)
+    pack, fresh = get_live_pack(sport) if pack is None else pack
     if pack:
         opp = normalize_abbr((opponent_abbr or '').strip().upper())
         team = normalize_abbr((team_abbr or '').strip().upper())
