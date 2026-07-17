@@ -231,6 +231,8 @@ def refresh_splits(sport: str = 'nba', min_games: int = MIN_GAMES_DEFAULT,
             sport=sport, payload=_json.dumps(pack_payload),
             computed_at=computed_at))
         db.session.commit()
+        from app.services.player_crosswalk import clear_cache
+        clear_cache()
         rows_written = len(batch)
         return {'players': players, 'rows': rows_written,
                 'skipped_reason': None}
