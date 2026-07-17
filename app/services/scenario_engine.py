@@ -251,14 +251,27 @@ def refresh_splits(sport: str = 'nba', min_games: int = MIN_GAMES_DEFAULT,
         db.session.commit()
 
 
-def agreement_score(player_id: str, stat: str, line: float,
-                     context: dict, sport: str = 'nba') -> tuple[float, int]:
-    """Signed weighted share of applicable splits vs the line (+ = over)."""
-    q = ScenarioSplit.query.filter_by(
+def load_agreement_splits(player_id: str, stat: str,
+                          sport: str = 'nba') -> list:
+    """All 'all'-scope splits for one (player, stat) — the candidate rows
+    agreement_score matches against. Callers scoring many lines for the
+    same player should load once and pass via ``splits=``."""
+    return ScenarioSplit.query.filter_by(
         sport=sport, player_id=str(player_id), stat=stat,
-        season_scope='all')
+        season_scope='all').all()
+
+
+def agreement_score(player_id: str, stat: str, line: float,
+                     context: dict, sport: str = 'nba',
+                     splits: list | None = None) -> tuple[float, int]:
+    """Signed weighted share of applicable splits vs the line (+ = over).
+
+    ``splits`` (optional) is a prefetched load_agreement_splits() result;
+    when provided (even empty) no query is issued."""
+    if splits is None:
+        splits = load_agreement_splits(player_id, stat, sport)
     matches = []
-    for s in q.all():
+    for s in splits:
         if s.dim1 not in context or context[s.dim1] != s.bucket1:
             continue
         if s.dim2 is not None and (
