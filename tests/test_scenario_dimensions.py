@@ -308,3 +308,38 @@ class TestLoaders(BaseTestCase):
             self.assertEqual(row['spread'], 6.5)
             self.assertEqual(row['favored'], 'home')
             self.assertEqual(row['total'], 220.0)
+
+
+class TestSharedBucketHelpers(BaseTestCase):
+
+    def test_rest_bucket_label_boundaries(self):
+        from app.services.scenario_dimensions import rest_bucket_label
+        self.assertEqual(rest_bucket_label(0), '0')
+        self.assertEqual(rest_bucket_label(1), '1')
+        self.assertEqual(rest_bucket_label(2), '2')
+        self.assertEqual(rest_bucket_label(3), '3+')
+        self.assertEqual(rest_bucket_label(99), '3+')   # first-game convention
+
+    def test_season_segment_label_month_edges(self):
+        from datetime import date
+        from app.services.scenario_dimensions import season_segment_label
+        self.assertEqual(season_segment_label(date(2025, 10, 25)), 'early')
+        self.assertEqual(season_segment_label(date(2025, 12, 31)), 'early')
+        self.assertEqual(season_segment_label(date(2026, 1, 1)), 'mid')
+        self.assertEqual(season_segment_label(date(2026, 2, 28)), 'mid')
+        self.assertEqual(season_segment_label(date(2026, 3, 1)), 'late')
+        self.assertEqual(season_segment_label(date(2026, 4, 12)), 'late')
+
+    def test_season_segment_label_matches_historical_range(self):
+        from datetime import date
+        from app.services.scenario_dimensions import season_segment_label
+        self.assertIsNone(season_segment_label(date(2025, 9, 30)))
+        self.assertEqual(season_segment_label(date(2026, 5, 1)), 'late')
+
+    def test_fav_dog_label_matches_historical_rules(self):
+        from app.services.scenario_dimensions import fav_dog_label
+        self.assertEqual(fav_dog_label(9.5, True), 'fav_big')
+        self.assertEqual(fav_dog_label(7.0, True), 'fav')       # big is strictly > 7
+        self.assertEqual(fav_dog_label(3.0, False), 'dog')
+        self.assertEqual(fav_dog_label(10.0, False), 'dog_big')
+        self.assertEqual(fav_dog_label(0.0, False), 'fav')      # pick'em convention

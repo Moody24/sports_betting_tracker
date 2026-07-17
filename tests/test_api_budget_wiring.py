@@ -31,7 +31,7 @@ class TestBudgetWiring(BaseTestCase):
         mock_get.return_value = _fake_response([])
         from app.services import nba_service
         from app.services.api_budget import ODDS_BUDGET
-        totals, h2h = nba_service.fetch_odds_combined()
+        totals, h2h, _spreads = nba_service.fetch_odds_combined()
         self.assertEqual((totals, h2h), ({}, {}))
         mock_get.assert_called_once()          # went through api_budget module
         self.assertEqual(ODDS_BUDGET.remaining, 400.0)
@@ -53,7 +53,7 @@ class TestBudgetWiring(BaseTestCase):
         from app.services.api_budget import ODDS_BUDGET
         ODDS_BUDGET.record_headers({'x-requests-remaining': '1'})
         try:
-            totals, h2h = nba_service.fetch_odds_combined()
+            totals, h2h, _spreads = nba_service.fetch_odds_combined()
             self.assertEqual((totals, h2h), ({}, {}))
         finally:
             ODDS_BUDGET._remaining = None   # reset singleton for other tests

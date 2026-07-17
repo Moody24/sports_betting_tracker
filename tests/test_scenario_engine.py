@@ -157,8 +157,9 @@ class TestRefreshSplits(BaseTestCase):
         """Persist the mini frame as HistoricalGameLog rows (>=15-game gate
         disabled via min_games param)."""
         from app import db
-        from app.models import HistoricalGameLog
-        for rec in _mini_frame().to_dict('records'):
+        from app.models import HistoricalGameLog, HistoricalGameOdds
+        frame = _mini_frame()
+        for rec in frame.to_dict('records'):
             stats = {k: float(rec[k]) for k in
                      ('pts', 'reb', 'ast', 'fg3m', 'fga', 'fta', 'tov',
                       'minutes', 'team_score', 'opp_score')}
@@ -170,6 +171,14 @@ class TestRefreshSplits(BaseTestCase):
                 game_date=rec['game_date'], season=rec['season'],
                 home_away=rec['home_away'], win_loss='W',
                 starter=rec['starter'], stats=stats))
+        for idx, (game_id, game) in enumerate(frame.groupby('game_id')):
+            home = game[game['home_away'] == 'HOME'].iloc[0]
+            away = game[game['home_away'] == 'AWAY'].iloc[0]
+            db.session.add(HistoricalGameOdds(
+                game_date=home['game_date'], home_abbr=home['team_abbr'],
+                away_abbr=away['team_abbr'], spread=3.0 + idx,
+                favored='home', total=210.0 + idx * 5,
+                espn_game_id=game_id))
         db.session.commit()
 
     def test_end_to_end_materialization(self):
@@ -368,3 +377,45 @@ class TestWiring(BaseTestCase):
         self.assertEqual(trigger, {'hour': 5, 'minute': 10,
                                    'timezone': scheduler_module.APP_TIMEZONE})
         self.assertTrue(replace_existing)
+
+
+class TestContextPack(BaseTestCase):
+
+    def test_build_context_pack_payload_shape(self):
+        from app.services.scenario_dimensions import (
+            build_context_pack, load_frame, load_odds_frame,
+        )
+        with self.app.app_context():
+            TestRefreshSplits._seed_store(self)
+            pack = build_context_pack(load_frame(), load_odds_frame())
+        self.assertIn('season', pack)
+        self.assertEqual(len(pack['total_bins']), 4)
+        self.assertEqual(len(pack['pace_bins']), 4)
+        self.assertTrue(all(t in ('top10', 'mid', 'bottom10')
+                            for t in pack['team_def_tier'].values()))
+        self.assertTrue(all(v > 0 for v in pack['team_game_poss'].values()))
+
+    def test_refresh_splits_writes_pack_atomically(self):
+        import json
+        import warnings
+        from app.models import ScenarioContextPack
+        from app.services.scenario_engine import refresh_splits
+        from sqlalchemy.exc import SAWarning
+        with self.app.app_context():
+            TestRefreshSplits._seed_store(self)
+            refresh_splits(force=True, min_games=1)
+            row = ScenarioContextPack.query.filter_by(sport='nba').first()
+            self.assertIsNotNone(row)
+            payload = json.loads(row.payload)
+            self.assertIn('team_def_tier', payload)
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter('always', SAWarning)
+                refresh_splits(force=True, min_games=1)
+            identity_warnings = [
+                warning for warning in caught
+                if issubclass(warning.category, SAWarning)
+                and 'Identity map already had an identity'
+                in str(warning.message)
+            ]
+            self.assertEqual(identity_warnings, [])
+            self.assertEqual(ScenarioContextPack.query.count(), 1)

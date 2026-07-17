@@ -177,20 +177,22 @@ def fetch_espn_boxscore(espn_id: str) -> dict:
 
 def fetch_odds() -> dict:
     """Return over/under lines from The Odds API (needs ODDS_API_KEY env var)."""
-    totals, _ = fetch_odds_combined()
+    totals, _, _ = fetch_odds_combined()
     return totals
 
 
 def fetch_odds_combined() -> tuple:
-    """Return (totals_map, h2h_map) from a single Odds API request.
+    """Return (totals_map, h2h_map, spreads_map) from a single Odds API request.
 
-    totals_map: {matchup_key -> over_under_line (float)}
-    h2h_map:    {matchup_key -> {"home": int, "away": int}}
+    totals_map:  {matchup_key -> over_under_line (float)}
+    h2h_map:     {matchup_key -> {"home": int, "away": int}}
+    spreads_map: {matchup_key -> {"spread": float (positive magnitude),
+                                  "favored": "home" | "away"}}
     """
     api_key = _get_odds_api_key()
     if not api_key:
         logger.warning("ODDS_API_KEY not set – odds unavailable")
-        return {}, {}
+        return {}, {}, {}
 
     try:
         resp = ODDS_BUDGET.budgeted_get(
@@ -198,7 +200,7 @@ def fetch_odds_combined() -> tuple:
             params={
                 "apiKey": api_key,
                 "regions": "us",
-                "markets": "totals,h2h",
+                "markets": "totals,h2h,spreads",
                 "oddsFormat": "american",
             },
             timeout=10,
@@ -207,10 +209,11 @@ def fetch_odds_combined() -> tuple:
         data = resp.json()
     except (requests.RequestException, ValueError) as exc:
         logger.error("Odds API (combined) fetch failed: %s", _sanitize_api_error(exc))
-        return {}, {}
+        return {}, {}, {}
 
     totals_map: dict = {}
     h2h_map: dict = {}
+    spreads_map: dict = {}
 
     for game in data:
         home_team = game.get("home_team", "")
@@ -219,6 +222,7 @@ def fetch_odds_combined() -> tuple:
 
         ou_line = None
         home_ml = away_ml = None
+        home_spread = None
 
         for bookmaker in game.get("bookmakers", []):
             for market in bookmaker.get("markets", []):
@@ -239,15 +243,29 @@ def fetch_odds_combined() -> tuple:
                         elif name == away_team:
                             away_ml = price
 
-            if ou_line is not None and home_ml is not None:
+                if mkey == "spreads" and home_spread is None:
+                    for outcome in market.get("outcomes", []):
+                        if outcome.get("name") == home_team and \
+                                outcome.get("point") is not None:
+                            home_spread = float(outcome["point"])
+                            break
+
+            if ou_line is not None and home_ml is not None and \
+                    home_spread is not None:
                 break
 
         if ou_line is not None:
             totals_map[key] = ou_line
         if home_ml is not None or away_ml is not None:
             h2h_map[key] = {"home": home_ml, "away": away_ml}
+        if home_spread is not None:
+            # Home outcome's point is negative when home is favored.
+            spreads_map[key] = {
+                "spread": abs(home_spread),
+                "favored": "home" if home_spread < 0 else "away",
+            }
 
-    return totals_map, h2h_map
+    return totals_map, h2h_map, spreads_map
 
 
 # ── Merge scores + odds ─────────────────────────────────────────────
@@ -1091,7 +1109,7 @@ def get_todays_games() -> list[dict]:
     logger.info("PERF espn_scoreboard: games=%d elapsed=%.2fs", len(games), _time.perf_counter() - _t)
 
     _t = _time.perf_counter()
-    totals, h2h = fetch_odds_combined()
+    totals, h2h, spreads = fetch_odds_combined()
     logger.info("PERF odds_combined: matchups=%d elapsed=%.2fs", len(totals), _time.perf_counter() - _t)
 
     _t = _time.perf_counter()
@@ -1105,6 +1123,9 @@ def get_todays_games() -> list[dict]:
         ml = h2h.get(key, {})
         game["moneyline_home"] = ml.get("home")
         game["moneyline_away"] = ml.get("away")
+        sp = spreads.get(key) or {}
+        game["spread"] = sp.get("spread")
+        game["favored_side"] = sp.get("favored")
 
     logger.info("PERF get_todays_games: total_elapsed=%.2fs", _time.perf_counter() - _t0)
     _GAMES_CACHE.clear()

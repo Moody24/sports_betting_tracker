@@ -39,6 +39,30 @@ TIER_MODERATE = 0.08
 TIER_SLIGHT = 0.03
 STRONG_CONFIDENCE_LEVELS = {'medium', 'high'}
 
+SCENARIO_MIN_MATCHES = 5
+SCENARIO_STRONG_THRESHOLD = 0.5
+PROP_TO_SPLIT_STAT = {
+    'player_points': 'pts',
+    'player_rebounds': 'reb',
+    'player_assists': 'ast',
+    'player_threes': 'fg3m',
+    'player_points_rebounds_assists': 'pra',
+}
+_TIER_DEMOTE = {'strong': 'moderate', 'moderate': 'slight', 'slight': 'no_edge'}
+
+
+def _apply_scenario_nudge(tier: str, agreement: float, matches: int) -> str:
+    """One bounded step: strong disagreement demotes; strong agreement can
+    only promote slight -> moderate (a scenario signal never manufactures
+    'strong')."""
+    if matches < SCENARIO_MIN_MATCHES:
+        return tier
+    if agreement <= -SCENARIO_STRONG_THRESHOLD:
+        return _TIER_DEMOTE.get(tier, tier)
+    if agreement >= SCENARIO_STRONG_THRESHOLD and tier == 'slight':
+        return 'moderate'
+    return tier
+
 
 def _sanitize_context_notes(notes, max_notes: int = 8) -> list[str]:
     """Normalize, dedupe, and cap context notes for stable UI rendering."""
@@ -135,6 +159,8 @@ class ValueDetector:
         game_id: str = '',
         game_date: Optional[_date] = None,
         game_total_line: float = 0.0,
+        spread: Optional[float] = None,
+        favored_side: Optional[str] = None,
     ) -> dict:
         """Score a single player prop for value.
 
@@ -260,6 +286,30 @@ class ValueDetector:
             logger.warning("Model 2 quality scoring unavailable for %s/%s: %s", player_name, prop_type, exc)
         context_notes = _sanitize_context_notes(context_notes)
 
+        # Scenario-split agreement signal (Plan C Increment 2). Applied after
+        # the Model 2 adjustment so the bounded nudge has the last word.
+        scenario_agreement = None
+        scenario_matches = None
+        if self._use_scenario_signal():
+            try:
+                signal = self._scenario_signal(
+                    player_name, prop_type, line, opponent_name, team_name,
+                    is_home, game_date, game_total_line, spread, favored_side)
+            except Exception as exc:
+                logger.warning(
+                    "Scenario signal failed for %s/%s: %s",
+                    player_name, prop_type, exc)
+                signal = None
+            if signal is not None:
+                scenario_agreement, scenario_matches, pack_fresh = signal
+                lean = 'over' if scenario_agreement >= 0 else 'under'
+                context_notes.append(
+                    f"Scenario splits: {scenario_matches} matches, "
+                    f"lean {lean} {scenario_agreement:+.2f}")
+                if pack_fresh:      # stale conditioning never nudges tiers
+                    confidence_tier = _apply_scenario_nudge(
+                        confidence_tier, scenario_agreement, scenario_matches)
+
         return {
             'player': player_name,
             'prop_type': prop_type,
@@ -281,6 +331,8 @@ class ValueDetector:
             'games_played': games_played,
             'confidence': projection_confidence,
             'projection_source': projection_source,
+            'scenario_agreement': scenario_agreement,
+            'scenario_matches': scenario_matches,
             'breakdown': proj.get('breakdown', {}),
             'game_id': game_id,
             'win_probability': win_probability,
@@ -366,6 +418,32 @@ class ValueDetector:
     def _use_distributional_model(self) -> bool:
         return os.getenv('USE_DISTRIBUTIONAL_MODEL', 'false').lower() == 'true'
 
+    def _use_scenario_signal(self) -> bool:
+        return os.getenv('USE_SCENARIO_SIGNAL', 'false').lower() == 'true'
+
+    def _scenario_signal(self, player_name, prop_type, line, opponent_name,
+                         team_name, is_home, game_date, game_total_line,
+                         spread, favored_side):
+        """Return ``(agreement, matches, pack_fresh)`` or None (no signal)."""
+        stat = PROP_TO_SPLIT_STAT.get(prop_type)
+        if stat is None:
+            return None
+        from app.services.player_crosswalk import resolve_espn_id
+        espn_id = resolve_espn_id(player_name)
+        if espn_id is None:
+            return None
+        from app.services.live_context import build_live_context
+        context, fresh = build_live_context(
+            espn_id, team_abbr=team_name, opponent_abbr=opponent_name,
+            is_home=is_home, game_date=game_date,
+            total=game_total_line or None, spread=spread,
+            favored_side=favored_side)
+        from app.services.scenario_engine import agreement_score
+        score, matches = agreement_score(espn_id, stat, line, context)
+        if matches == 0:
+            return None
+        return score, matches, fresh
+
     def _build_dist_features(
         self,
         player_name: str,
@@ -449,6 +527,8 @@ class ValueDetector:
             'games_played': 0,
             'confidence': 'low',
             'projection_source': 'heuristic',
+            'scenario_agreement': None,
+            'scenario_matches': None,
             'breakdown': {},
             'game_id': game_id,
         }
@@ -605,6 +685,8 @@ class ValueDetector:
                         game_id=espn_id,
                         game_date=_game_date,
                         game_total_line=float(game.get('over_under_line') or 0.0),
+                        spread=game.get('spread'),
+                        favored_side=game.get('favored_side'),
                     )
 
                     # Add game context to score

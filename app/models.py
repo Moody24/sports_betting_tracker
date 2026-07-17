@@ -539,6 +539,20 @@ class ScenarioSplit(db.Model):
                 f"{self.dim1}={self.bucket1}>")
 
 
+class ScenarioContextPack(db.Model):
+    """Live-context lookup pack persisted atomically with each splits refresh.
+
+    Derived data (quantile bin edges + team tier maps) — one live row per
+    sport, replaced wholesale by the scenario engine.
+    """
+
+    id = db.Column(db.Integer, primary_key=True)
+    sport = db.Column(db.String(10), nullable=False, unique=True, default='nba')
+    payload = db.Column(db.Text, nullable=False)   # JSON
+    computed_at = db.Column(
+        db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
 class HistoricalGameOdds(db.Model):
     """Closing line context per historical game (source: Kaggle backfill)."""
 
