@@ -141,6 +141,27 @@ nudge, results byte-identical to today.
 scenario features in `FEATURE_KEYS` (later increment), Plan D `line_move`
 dimension, any UI redesign (the note rides existing context-note rendering).
 
+## Deviations (recorded at implementation, 2026-07-17)
+
+- Split execution: Codex implemented Tasks 1–4, Claude Tasks 5–9 (Codex hit
+  its usage limit — harness budget-first handoff).
+- `season_segment_label` returns None for out-of-window months INCLUDING
+  September (Codex fix `ec215e2`; the plan's sketch would have mislabeled
+  Sep as 'early').
+- Pack refresh made warning-free on the skip path (Codex, `52c3c20`).
+- `tests/test_nba_service.py` was CREATED (plan said "append" but no such
+  file existed).
+- Live-context test fixture date arithmetic corrected (`(n-1-i)*2`, plan had
+  an off-by-one making the newest seeded game 2 days older than intended).
+- `_empty_score` also carries `scenario_agreement`/`scenario_matches` (None)
+  so every score dict has a uniform shape (not in plan; additive).
+- Three pre-existing tests MOCK `fetch_odds_combined` with 2-tuples; the
+  widened 3-tuple return broke them in the full suite only (the plan's
+  "update every caller" step found real calls but not mock configurations).
+  Fixed to 3-tuples. Process lesson: the first gate run masked the failure
+  behind a pipe (`| tail` eats the exit code) — gates must run with
+  `set -o pipefail`.
+
 ## Post-merge runbook
 1) Migration (python `flask_migrate.upgrade()`, after DB backup).
 2) `flask refresh-splits --force` → first pack materialized.

@@ -6667,7 +6667,7 @@ class TestNBAServiceDirect(BaseTestCase):
         }]
         from app.services.nba_service import get_todays_games
         with self.app.app_context():
-            with patch('app.services.nba_service.fetch_odds_combined', return_value=({}, {})):
+            with patch('app.services.nba_service.fetch_odds_combined', return_value=({}, {}, {})):
                 with patch('app.services.nba_service.fetch_odds_events', return_value={}):
                     games = get_todays_games()
         self.assertIsInstance(games, list)
