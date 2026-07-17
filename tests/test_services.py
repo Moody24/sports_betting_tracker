@@ -1625,6 +1625,22 @@ class TestProjectionEngine(BaseTestCase):
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TestValueDetector(BaseTestCase):
+
+    def test_dist_features_receive_real_game_total_line(self):
+        from app.services.value_detector import ValueDetector
+        detector = ValueDetector()
+        detector.engine._player_state_cache['test player'] = ('1', [MagicMock()] * 10, {})
+        detector.engine._build_ml_features = MagicMock(return_value={'game_total_line': 228.5})
+        detector.engine._context_cache['__dist_defense_lookup__'] = {}
+
+        _stat, features = detector._build_dist_features(
+            'Test Player', 'player_points', 'OPP', 'TST', True, None, 228.5,
+        )
+
+        self.assertEqual(features['game_total_line'], 228.5)
+        self.assertEqual(
+            detector.engine._build_ml_features.call_args.kwargs['game_total_line'], 228.5,
+        )
     """Tests for ValueDetector: score_prop, score_all_todays_props, get_top_plays."""
 
     def test_score_prop_insufficient_games(self):
@@ -1963,6 +1979,98 @@ class TestValueDetector(BaseTestCase):
         detector = ValueDetector()
         prob = detector._model_prob_over(30, 25, 5)
         self.assertGreater(prob, 0.5)
+
+    def test_model_prob_over_flag_off_ignores_context_kwargs(self):
+        from app.services.value_detector import ValueDetector
+        detector = ValueDetector()
+        legacy = detector._model_prob_over(30, 25, 5)
+        with_context = detector._model_prob_over(
+            30, 25, 5, player_name='Anyone', prop_type='player_points',
+        )
+        self.assertEqual(legacy, with_context)
+
+    def test_model_prob_over_uses_distributional_predictor_when_flag_on(self):
+        from app.services.value_detector import ValueDetector
+        with self.app.app_context():
+            for i in range(20):
+                db.session.add(PlayerGameLog(
+                    player_id='910', player_name='Dist Flag Player', team_abbr='TST',
+                    game_date=date(2026, 1, 1) + timedelta(days=i),
+                    pts=25 + (i % 3), reb=6, ast=4, fg3m=2, minutes=33,
+                    stl=1, blk=0, tov=2, fgm=9, fga=18, ftm=5, fta=6, fg3a=6,
+                ))
+            db.session.commit()
+
+            detector = ValueDetector()
+            with patch('app.services.projection_engine.find_player_id', return_value='910'), \
+                 patch.dict('os.environ', {'USE_DISTRIBUTIONAL_MODEL': 'true'}), \
+                 patch('app.services.distributional_predictor.predict_prob_over', return_value=0.777):
+                result = detector.score_prop(
+                    'Dist Flag Player', 'player_points',
+                    line=20.5, over_odds=-110, under_odds=-110,
+                )
+        self.assertAlmostEqual(result['model_prob_over'], 0.777)
+
+    def test_model_prob_over_falls_back_when_predictor_returns_none(self):
+        from app.services.value_detector import ValueDetector
+        with self.app.app_context():
+            for i in range(20):
+                db.session.add(PlayerGameLog(
+                    player_id='911', player_name='Fallback Player', team_abbr='TST',
+                    game_date=date(2026, 1, 1) + timedelta(days=i),
+                    pts=25, reb=6, ast=4, fg3m=2, minutes=33,
+                    stl=1, blk=0, tov=2, fgm=9, fga=18, ftm=5, fta=6, fg3a=6,
+                ))
+            db.session.commit()
+
+            detector_on = ValueDetector()
+            with patch('app.services.projection_engine.find_player_id', return_value='911'), \
+                 patch.dict('os.environ', {'USE_DISTRIBUTIONAL_MODEL': 'true'}), \
+                 patch('app.services.distributional_predictor.predict_prob_over', return_value=None):
+                flag_on_result = detector_on.score_prop(
+                    'Fallback Player', 'player_points',
+                    line=20.5, over_odds=-110, under_odds=-110,
+                )
+
+            detector_off = ValueDetector()
+            with patch('app.services.projection_engine.find_player_id', return_value='911'):
+                flag_off_result = detector_off.score_prop(
+                    'Fallback Player', 'player_points',
+                    line=20.5, over_odds=-110, under_odds=-110,
+                )
+        self.assertAlmostEqual(flag_on_result['model_prob_over'], flag_off_result['model_prob_over'])
+
+    def test_model_prob_over_falls_back_when_predictor_raises(self):
+        from app.services.value_detector import ValueDetector
+        with self.app.app_context():
+            for i in range(20):
+                db.session.add(PlayerGameLog(
+                    player_id='912', player_name='Exception Fallback Player', team_abbr='TST',
+                    game_date=date(2026, 1, 1) + timedelta(days=i),
+                    pts=25, reb=6, ast=4, fg3m=2, minutes=33,
+                    stl=1, blk=0, tov=2, fgm=9, fga=18, ftm=5, fta=6, fg3a=6,
+                ))
+            db.session.commit()
+
+            detector_on = ValueDetector()
+            with patch('app.services.projection_engine.find_player_id', return_value='912'), \
+                 patch.dict('os.environ', {'USE_DISTRIBUTIONAL_MODEL': 'true'}), \
+                 patch(
+                     'app.services.distributional_predictor.predict_prob_over',
+                     side_effect=RuntimeError('distributional inference failed'),
+                 ):
+                flag_on_result = detector_on.score_prop(
+                    'Exception Fallback Player', 'player_points',
+                    line=20.5, over_odds=-110, under_odds=-110,
+                )
+
+            detector_off = ValueDetector()
+            with patch('app.services.projection_engine.find_player_id', return_value='912'):
+                flag_off_result = detector_off.score_prop(
+                    'Exception Fallback Player', 'player_points',
+                    line=20.5, over_odds=-110, under_odds=-110,
+                )
+        self.assertAlmostEqual(flag_on_result['model_prob_over'], flag_off_result['model_prob_over'])
 
     # -- _empty_score --
 
@@ -6230,6 +6338,40 @@ class TestModelCommandsStatus(BaseTestCase):
         mock_pq.assert_called_once()
         mock_market.assert_called_once()
         self.assertIn('bypassing guardrails', result.output)
+
+    @patch('app.services.distributional_model.retrain_all_distributional_models')
+    @patch('app.services.ml_model.retrain_all_models')
+    @patch('app.services.pick_quality_model.train_pick_quality_model')
+    @patch('app.services.market_recommender.train_market_models')
+    def test_cli_retrain_force_also_trains_distributional_heads(
+        self, mock_market, mock_pq, mock_retrain, mock_dist,
+    ):
+        """cli_retrain --force also retrains the Plan C distributional heads."""
+        mock_retrain.return_value = {'player_points': {'ok': True}}
+        mock_pq.return_value = {'status': 'ok'}
+        mock_market.return_value = {'status': 'ok'}
+        mock_dist.return_value = {'player_points': {'ok': True}}
+        from app.cli.model_commands import cli_retrain
+        with self.app.app_context():
+            result = self._invoke(cli_retrain, ['--force'])
+        self.assertEqual(result.exit_code, 0)
+        mock_dist.assert_called_once()
+        self.assertIn('Distributional retrain', result.output)
+
+    def test_backtest_cli_no_active_model(self):
+        """flask backtest exits cleanly when no dist_<stat> model exists yet."""
+        from app.cli.model_commands import cli_backtest
+        with self.app.app_context():
+            result = self._invoke(cli_backtest, ['--stat-type', 'player_points'])
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn('No active dist_player_points model', result.output)
+
+    def test_backtest_cli_unsupported_stat_type(self):
+        from app.cli.model_commands import cli_backtest
+        with self.app.app_context():
+            result = self._invoke(cli_backtest, ['--stat-type', 'player_rebounds_per_minute'])
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn('Unsupported stat_type', result.output)
 
     @patch('app.services.scheduler.bootstrap_pick_quality_examples')
     def test_bootstrap_pick_quality_no_train(self, mock_bootstrap):

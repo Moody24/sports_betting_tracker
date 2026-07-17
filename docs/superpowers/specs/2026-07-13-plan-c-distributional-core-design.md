@@ -1,7 +1,7 @@
 # Plan C — Increment 1: Distributional Core (Design)
 
 **Date:** 2026-07-13
-**Status:** Approved design, pending implementation plan
+**Status:** Implemented (Increment 1) — see docs/superpowers/plans/2026-07-13-plan-c-distributional-core.md
 **Roadmap:** Plan C of the ML platform upgrade (Phase 1 spec: `docs/superpowers/specs/2026-07-07-ml-platform-upgrade-phase1-design.md`). Follows Plans A, A2, B (all complete).
 
 ## Goal
@@ -51,7 +51,7 @@ The additive bias-correction constants (`SINGLE_STAT_BIAS_CORRECTION`, `COMBO_PR
 ## Training, Evaluation, Rollout (safety)
 
 - **Shadow training:** the distributional heads train **alongside** the incumbent point models under separate artifact names; the incumbent stays the default.
-- **Backtest gate:** `flask backtest` (extended) runs a walk-forward comparison of the calibrated distributional `P(over)` (reliability / ECE) plus a CLV-proxy against the incumbent's synthetic-Gaussian `P(over)`. The new model is promoted to active **only if it beats the incumbent** on calibration.
+- **Backtest recommendation:** `flask backtest` runs a temporal holdout comparison of calibrated distributional `P(over)` against the replayed live heuristic baseline and prints `PROMOTE` or `HOLD`; activation remains an explicit operator decision.
 - **Success gates** (from the Phase 1 spec): out-of-fold ECE ≤ 0.03; full retrain < 30 minutes.
 - The `retrain` CLI is extended to build the distributional heads + calibrators; artifacts persist through the existing storage path.
 

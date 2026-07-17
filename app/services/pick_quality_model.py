@@ -610,6 +610,58 @@ def _no_model_result() -> dict:
     }
 
 
+def compute_calibration_metrics(evaluated: list[tuple[float, int]], bins: int = 5) -> dict:
+    """Brier score, log-loss, ECE, and reliability stats for (p, y) pairs."""
+    n = len(evaluated)
+    wins = sum(y for _, y in evaluated)
+    losses = n - wins
+    avg_pred = sum(p for p, _ in evaluated) / n
+    win_rate = wins / n
+    brier = sum((p - y) ** 2 for p, y in evaluated) / n
+    clipped = [(min(max(p, 1e-6), 1 - 1e-6), y) for p, y in evaluated]
+    logloss = -sum(y * math.log(p) + (1 - y) * math.log(1 - p) for p, y in clipped) / n
+
+    bin_rows = []
+    ece_weighted_sum = 0.0
+    for idx in range(bins):
+        start = idx / bins
+        end = (idx + 1) / bins
+        values = [(p, y) for p, y in evaluated if (start <= p < end) or (idx == bins - 1 and p == 1.0)]
+        if not values:
+            bin_rows.append({
+                'range': f'{start:.2f}-{end:.2f}',
+                'count': 0,
+                'avg_pred': None,
+                'win_rate': None,
+                'gap': None,
+            })
+            continue
+        b_count = len(values)
+        b_avg = sum(p for p, _ in values) / b_count
+        b_win = sum(y for _, y in values) / b_count
+        gap = b_avg - b_win
+        bin_rows.append({
+            'range': f'{start:.2f}-{end:.2f}',
+            'count': b_count,
+            'avg_pred': round(b_avg, 3),
+            'win_rate': round(b_win, 3),
+            'gap': round(gap, 3),
+        })
+        ece_weighted_sum += (b_count / n) * abs(gap)
+
+    return {
+        'wins': wins,
+        'losses': losses,
+        'win_rate': round(win_rate, 3),
+        'avg_pred': round(avg_pred, 3),
+        'overconfidence_gap': round(avg_pred - win_rate, 3),
+        'brier': round(brier, 4),
+        'logloss': round(logloss, 4),
+        'ece': round(ece_weighted_sum, 4),
+        'bins': bin_rows,
+    }
+
+
 def get_calibration_report(
     limit: int = 500,
     bins: int = 5,
@@ -678,52 +730,12 @@ def get_calibration_report(
         }
 
     n = len(evaluated)
-    wins = sum(y for _, y in evaluated)
-    losses = n - wins
-    avg_pred = sum(p for p, _ in evaluated) / n
-    win_rate = wins / n
-
-    brier = sum((p - y) ** 2 for p, y in evaluated) / n
-    logloss = -sum(y * math.log(p) + (1 - y) * math.log(1 - p) for p, y in evaluated) / n
-
-    bin_rows = []
-    for idx in range(bins):
-        start = idx / bins
-        end = (idx + 1) / bins
-        values = [(p, y) for p, y in evaluated if (start <= p < end) or (idx == bins - 1 and p == 1.0)]
-        if not values:
-            bin_rows.append({
-                'range': f'{start:.2f}-{end:.2f}',
-                'count': 0,
-                'avg_pred': None,
-                'win_rate': None,
-                'gap': None,
-            })
-            continue
-
-        b_count = len(values)
-        b_avg = sum(p for p, _ in values) / b_count
-        b_win = sum(y for _, y in values) / b_count
-        bin_rows.append({
-            'range': f'{start:.2f}-{end:.2f}',
-            'count': b_count,
-            'avg_pred': round(b_avg, 3),
-            'win_rate': round(b_win, 3),
-            'gap': round(b_avg - b_win, 3),
-        })
-
+    metrics = compute_calibration_metrics(evaluated, bins=bins)
     return {
         'model_version': model_version,
         'total_rows': len(rows),
         'evaluated': n,
         'no_model_count': no_model_count,
-        'wins': wins,
-        'losses': losses,
-        'win_rate': round(win_rate, 3),
-        'avg_pred': round(avg_pred, 3),
-        'overconfidence_gap': round(avg_pred - win_rate, 3),
-        'brier': round(brier, 4),
-        'logloss': round(logloss, 4),
         'recommendation_counts': recommendation_counts,
-        'bins': bin_rows,
+        **metrics,
     }

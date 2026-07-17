@@ -7,12 +7,14 @@ identify mispriced props and quantify the edge.
 import json
 import logging
 import math
+import os
 import time as _time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date as _date, datetime
 from itertools import combinations
 from typing import Optional
 
+from app.config_display import PROP_STAT_KEY
 from app.models import PlayerGameLog
 from app.services.pick_quality_model import predict_pick_quality
 from app.services.projection_engine import ProjectionEngine
@@ -132,6 +134,7 @@ class ValueDetector:
         is_home: bool = True,
         game_id: str = '',
         game_date: Optional[_date] = None,
+        game_total_line: float = 0.0,
     ) -> dict:
         """Score a single player prop for value.
 
@@ -151,7 +154,7 @@ class ValueDetector:
         """
         proj = self.engine.project_stat(
             player_name, prop_type, opponent_name, team_name, is_home,
-            game_date=game_date,
+            game_total_line=game_total_line, game_date=game_date,
         )
 
         projection = proj['projection']
@@ -161,8 +164,15 @@ class ValueDetector:
         if projection == 0 or games_played < 5:
             return self._empty_score(player_name, prop_type, line, over_odds, under_odds, game_id)
 
-        # Model probability of exceeding the line (normal CDF approximation)
-        model_prob_over = self._model_prob_over(projection, line, std_dev)
+        # Model probability of exceeding the line (calibrated distributional
+        # model when USE_DISTRIBUTIONAL_MODEL=true; normal CDF approximation
+        # otherwise — see _model_prob_over).
+        model_prob_over = self._model_prob_over(
+            projection, line, std_dev,
+            player_name=player_name, prop_type=prop_type,
+            opponent_name=opponent_name, team_name=team_name,
+            is_home=is_home, game_date=game_date, game_total_line=game_total_line,
+        )
         model_prob_under = 1.0 - model_prob_over
 
         # Book no-vig probabilities
@@ -268,12 +278,46 @@ class ValueDetector:
             'pick_quality_recommendation': pick_quality_recommendation,
         }
 
-    def _model_prob_over(self, projection: float, line: float, std_dev: float) -> float:
+    def _model_prob_over(
+        self,
+        projection: float,
+        line: float,
+        std_dev: float,
+        player_name: str = '',
+        prop_type: str = '',
+        opponent_name: str = '',
+        team_name: str = '',
+        is_home: bool = True,
+        game_date: Optional[_date] = None,
+        game_total_line: float = 0.0,
+    ) -> float:
         """Estimate probability of the player exceeding the line.
 
-        Uses the normal distribution CDF.  Falls back to a simple
-        comparison if scipy is unavailable.
+        When USE_DISTRIBUTIONAL_MODEL=true and a trained distributional
+        model is available for (player_name, prop_type), P(over) comes from
+        the calibrated model CDF (quantile heads for points/rebounds/
+        assists/PRA, Poisson CDF for threes/steals/blocks). Otherwise (flag
+        off, or no model/features available) falls back to the legacy
+        Normal(projection, std_dev) synthetic CDF — byte-identical to
+        pre-Plan-C behavior.
         """
+        if self._use_distributional_model() and player_name and prop_type:
+            try:
+                stat_type, features = self._build_dist_features(
+                    player_name, prop_type, opponent_name, team_name, is_home, game_date,
+                    game_total_line,
+                )
+                if features:
+                    from app.services.distributional_predictor import predict_prob_over
+                    calibrated = predict_prob_over(stat_type, features, line)
+                    if calibrated is not None:
+                        return calibrated
+            except Exception as exc:
+                logger.warning(
+                    "Distributional P(over) failed for %s/%s; falling back to Gaussian: %s",
+                    player_name, prop_type, exc,
+                )
+
         if std_dev <= 0:
             return 0.65 if projection > line else 0.35
 
@@ -284,6 +328,70 @@ class ValueDetector:
             # Fallback: approximate normal CDF using the error function
             z = (line - projection) / std_dev
             return 0.5 * (1.0 + math.erf(-z / math.sqrt(2)))
+
+    def _use_distributional_model(self) -> bool:
+        return os.getenv('USE_DISTRIBUTIONAL_MODEL', 'false').lower() == 'true'
+
+    def _build_dist_features(
+        self,
+        player_name: str,
+        prop_type: str,
+        opponent_name: str,
+        team_name: str,
+        is_home: bool,
+        game_date: Optional[_date],
+        game_total_line: float = 0.0,
+    ):
+        """Build the 30-key ML feature dict for the distributional predictor.
+
+        Reuses ProjectionEngine's already-cached (player_id, logs, summary)
+        from the project_stat() call score_prop() just made — no extra DB
+        round trip. Returns (prop_type, features) or (None, None) when
+        unavailable (caller falls back to the synthetic Gaussian).
+        """
+        from app.services.distributional_model import DIST_STAT_KEY_MAP, wrap_pra_logs
+        from app.services.ml_model import _build_defense_lookup
+
+        player_cache_key = str(player_name).strip().lower()
+        state = self.engine._player_state_cache.get(player_cache_key)
+        if not state:
+            return None, None
+        _, logs, _ = state
+        if len(logs) < 10:
+            return None, None
+
+        stat_key = DIST_STAT_KEY_MAP.get(prop_type)
+        use_logs = logs
+        if stat_key:
+            if stat_key == 'pra':
+                use_logs = wrap_pra_logs(logs)
+        else:
+            stat_key = PROP_STAT_KEY.get(prop_type)
+            if not stat_key:
+                return None, None
+
+        defense_cache_key = '__dist_defense_lookup__'
+        defense_lookup = self.engine._context_cache.get(defense_cache_key)
+        if defense_lookup is None:
+            try:
+                defense_lookup = _build_defense_lookup()
+            except Exception:
+                defense_lookup = {}
+            self.engine._context_cache[defense_cache_key] = defense_lookup
+
+        current_matchup = ''
+        if team_name and opponent_name:
+            sep = ' vs. ' if is_home else ' @ '
+            current_matchup = f"{team_name}{sep}{opponent_name}"
+
+        features = self.engine._build_ml_features(
+            use_logs, stat_key, is_home,
+            current_matchup=current_matchup,
+            game_total_line=game_total_line,
+            defense_lookup=defense_lookup,
+            game_date=game_date,
+        )
+        return prop_type, features
 
     def _empty_score(self, player, prop_type, line, over_odds, under_odds, game_id=''):
         return {
@@ -462,6 +570,7 @@ class ValueDetector:
                         is_home=is_home,
                         game_id=espn_id,
                         game_date=_game_date,
+                        game_total_line=float(game.get('over_under_line') or 0.0),
                     )
 
                     # Add game context to score
