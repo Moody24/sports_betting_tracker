@@ -16,7 +16,8 @@ import pandas as pd
 from app import db
 from app.models import HistoricalGameLog, JobLog, ScenarioSplit
 from app.services.scenario_dimensions import (
-    DIMENSIONS, SPLIT_STATS, build_context, load_frame, load_odds_frame,
+    DIMENSIONS, SPLIT_STATS, build_context, build_context_pack, load_frame,
+    load_odds_frame,
 )
 
 logger = logging.getLogger(__name__)
@@ -113,7 +114,8 @@ def refresh_splits(sport: str = 'nba', min_games: int = MIN_GAMES_DEFAULT,
         if df.empty:
             skipped_reason = 'empty_store'
             return {'players': 0, 'rows': 0, 'skipped_reason': skipped_reason}
-        ctx = build_context(df, odds_df=load_odds_frame())
+        odds_df = load_odds_frame()
+        ctx = build_context(df, odds_df=odds_df)
 
         # gate: >= min_games in the trailing 2 seasons
         seasons = sorted(ctx['season'].unique())[-2:]
@@ -218,6 +220,13 @@ def refresh_splits(sport: str = 'nba', min_games: int = MIN_GAMES_DEFAULT,
         for i in range(0, len(batch), CHUNK):
             db.session.bulk_insert_mappings(
                 ScenarioSplit, batch[i:i + CHUNK])
+        import json as _json
+        from app.models import ScenarioContextPack
+        pack_payload = build_context_pack(df, odds_df)
+        ScenarioContextPack.query.filter_by(sport=sport).delete()
+        db.session.add(ScenarioContextPack(
+            sport=sport, payload=_json.dumps(pack_payload),
+            computed_at=computed_at))
         db.session.commit()
         rows_written = len(batch)
         return {'players': players, 'rows': rows_written,

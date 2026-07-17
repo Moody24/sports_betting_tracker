@@ -122,6 +122,59 @@ def _team_games(df: pd.DataFrame) -> pd.DataFrame:
     return g
 
 
+def build_context_pack(df: pd.DataFrame,
+                       odds_df: pd.DataFrame | None) -> dict:
+    """Build current-season quantile edges and team maps for live context."""
+    df = df.copy()
+    season = sorted(df['season'].unique())[-1]
+    cur = df[df['season'] == season]
+
+    def _qbins(s: pd.Series) -> list | None:
+        s = s.dropna()
+        if s.nunique() < 3:
+            return None
+        try:
+            _, bins = pd.qcut(s, 3, retbins=True, duplicates='drop')
+        except ValueError:
+            return None
+        return [float(b) for b in bins] if len(bins) == 4 else None
+
+    tg = _team_games(cur)
+    tg['poss'] = tg['fga'] + 0.44 * tg['fta'] + tg['tov']
+    game_poss = tg.groupby('game_id', as_index=False).agg(poss=('poss', 'sum'))
+    pace_bins = _qbins(game_poss['poss'])
+    team_poss = (
+        tg.merge(game_poss.rename(columns={'poss': 'game_poss'}),
+                 on='game_id')
+        .groupby('team_abbr')['game_poss']
+        .mean()
+    )
+
+    allowed = tg.groupby('team_abbr')['opp_score'].mean().dropna()
+    pct = allowed.rank(pct=True)
+    def_tier = pd.cut(
+        pct, bins=[0, 1 / 3, 2 / 3, 1.0001],
+        labels=['top10', 'mid', 'bottom10'],
+    ).astype(str)
+
+    total_bins = None
+    if odds_df is not None and not odds_df.empty:
+        o = odds_df.copy()
+        o['game_date'] = pd.to_datetime(o['game_date'])
+        o['season_key'] = o['game_date'].map(
+            lambda d: f"{d.year}-{str(d.year + 1)[-2:]}" if d.month >= 10
+            else f"{d.year - 1}-{str(d.year)[-2:]}")
+        total_bins = _qbins(o.loc[o['season_key'] == season, 'total'])
+
+    return {
+        'season': season,
+        'total_bins': total_bins,
+        'pace_bins': pace_bins,
+        'team_game_poss': {k: float(v) for k, v in team_poss.items()},
+        'team_def_tier': {k: str(v) for k, v in def_tier.items()},
+    }
+
+
 def build_context(df: pd.DataFrame,
                   odds_df: pd.DataFrame | None = None) -> pd.DataFrame:
     df = df.copy()
