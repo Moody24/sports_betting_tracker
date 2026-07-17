@@ -13,6 +13,11 @@ from app.models import HistoricalGameLog, HistoricalGameOdds
 
 SPLIT_STATS = ('pts', 'reb', 'ast', 'fg3m', 'pra')
 
+# NOTE: only the KEYS are authoritative (they name the dims refresh_splits
+# iterates). Stored bucket VALUES are the raw ctx_* frame values — for
+# home_away that is lowercase 'home'/'away', NOT this tuple's case. Live
+# matching (live_context/agreement_score) is case-sensitive against the
+# stored values; the parity test enforces the real labels.
 DIMENSIONS: dict[str, tuple[str, ...]] = {
     'home_away': ('HOME', 'AWAY'),
     'rest_bucket': ('0', '1', '2', '3+'),
