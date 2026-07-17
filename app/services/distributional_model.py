@@ -38,6 +38,9 @@ from app.utils.time_helpers import ET
 logger = logging.getLogger(__name__)
 
 QUANTILE_ALPHAS = [0.05, 0.15, 0.25, 0.35, 0.45, 0.55, 0.65, 0.75, 0.85, 0.95]
+TRAIN_FRACTION = 0.70
+CALIBRATION_FRACTION = 0.15
+EARLY_STOPPING_FRACTION = 0.10
 
 DIST_STAT_KEY_MAP = {
     'player_points': 'pts',
@@ -118,6 +121,51 @@ def _date_cutoff_split(rows: list, frac: float = 0.8):
     return train_idx, val_idx, split_method, cutoff_date
 
 
+def _three_way_temporal_split(
+    rows: list,
+    train_frac: float,
+    calib_frac: float,
+):
+    """Return disjoint, ordered train/calibration/test row indexes."""
+    if train_frac <= 0 or calib_frac <= 0 or train_frac + calib_frac >= 1:
+        raise ValueError("split fractions must leave non-empty train, calib, and test slices")
+
+    unique_dates = sorted({row[0] for row in rows if row[0] is not None})
+    if len(unique_dates) >= 3:
+        train_count = max(1, min(int(len(unique_dates) * train_frac), len(unique_dates) - 2))
+        calib_end = max(
+            train_count + 1,
+            min(int(len(unique_dates) * (train_frac + calib_frac)), len(unique_dates) - 1),
+        )
+        train_end = unique_dates[train_count - 1]
+        calib_end_date = unique_dates[calib_end - 1]
+        train_idx = [i for i, row in enumerate(rows) if row[0] is not None and row[0] <= train_end]
+        calib_idx = [
+            i for i, row in enumerate(rows)
+            if row[0] is not None and train_end < row[0] <= calib_end_date
+        ]
+        test_idx = [i for i, row in enumerate(rows) if row[0] is None or row[0] > calib_end_date]
+        method = 'date_cutoff'
+        cutoffs = (train_end, calib_end_date)
+    else:
+        n = len(rows)
+        train_end_idx = max(1, min(int(n * train_frac), n - 2))
+        calib_end_idx = max(train_end_idx + 1, min(int(n * (train_frac + calib_frac)), n - 1))
+        train_idx = list(range(train_end_idx))
+        calib_idx = list(range(train_end_idx, calib_end_idx))
+        test_idx = list(range(calib_end_idx, n))
+        method = 'index_fallback'
+        cutoffs = (None, None)
+    return train_idx, calib_idx, test_idx, method, cutoffs
+
+
+def _early_stopping_split(train_idx: list[int], eval_frac: float):
+    """Carve the temporal tail of the training slice out for early stopping."""
+    eval_count = max(1, int(len(train_idx) * eval_frac))
+    eval_count = min(eval_count, len(train_idx) - 1)
+    return train_idx[:-eval_count], train_idx[-eval_count:]
+
+
 def _build_dist_training_rows(stat_type: str) -> list:
     """Dated training rows for one distributional stat type.
 
@@ -193,6 +241,61 @@ def _build_dist_training_rows(stat_type: str) -> list:
     return rows
 
 
+def replay_running_baseline(row: tuple, stat_type: str) -> tuple[float, float] | None:
+    """Replay the live heuristic projection using only information before the row date."""
+    from app.services.projection_engine import ProjectionEngine
+    from app.services.stats_service import get_player_stats_summary
+
+    game_date, player_id, features, _ = row
+    current = PlayerGameLog.query.filter_by(
+        player_id=str(player_id), game_date=game_date,
+    ).first()
+    if current is None:
+        return None
+
+    prior_logs = (
+        PlayerGameLog.query
+        .filter(
+            PlayerGameLog.player_id == str(player_id),
+            PlayerGameLog.game_date < game_date,
+        )
+        .order_by(PlayerGameLog.game_date.desc())
+        .limit(82)
+        .all()
+    )
+    if not prior_logs:
+        return None
+
+    matchup = current.matchup or ''
+    opponent = ''
+    for separator in (' vs. ', ' @ '):
+        if separator in matchup:
+            opponent = matchup.split(separator, 1)[1]
+            break
+    is_home = (current.home_away or '').lower() == 'home'
+    engine = ProjectionEngine()
+    summary = get_player_stats_summary(str(player_id), prior_logs)
+    engine._player_state_cache[current.player_name.strip().lower()] = (
+        str(player_id), prior_logs, summary,
+    )
+    # The running product defaults USE_ML_PROJECTIONS=false; replay that exact baseline.
+    engine._use_ml_projections = lambda: False
+    result = engine.project_stat(
+        current.player_name,
+        stat_type,
+        opponent_name=opponent,
+        team_name=current.team_abbr or '',
+        is_home=is_home,
+        game_total_line=float(features.get('game_total_line', 0.0) or 0.0),
+        game_date=game_date,
+    )
+    projection = float(result.get('projection', 0.0) or 0.0)
+    std_dev = float(result.get('std_dev', 0.0) or 0.0)
+    if projection <= 0 or std_dev <= 0:
+        return None
+    return projection, std_dev
+
+
 def train_distributional_model(stat_type: str) -> dict:
     """Train a multi-quantile XGBoost head for one continuous stat type.
 
@@ -218,12 +321,18 @@ def train_distributional_model(stat_type: str) -> dict:
     X = np.array([[row[2][k] for k in feature_names] for row in rows])
     y = np.array([row[3] for row in rows])
 
-    train_idx, val_idx, split_method, cutoff_date = _date_cutoff_split(rows)
-    if not train_idx or not val_idx:
+    train_idx, calib_idx, test_idx, split_method, cutoff_dates = _three_way_temporal_split(
+        rows, train_frac=TRAIN_FRACTION, calib_frac=CALIBRATION_FRACTION,
+    )
+    fit_idx, early_stop_idx = _early_stopping_split(
+        train_idx, eval_frac=EARLY_STOPPING_FRACTION,
+    )
+    if not fit_idx or not early_stop_idx or not calib_idx or not test_idx:
         return {'error': 'Insufficient validation data', 'stat_type': stat_type}
 
-    X_train, X_val = X[train_idx], X[val_idx]
-    y_train, y_val = y[train_idx], y[val_idx]
+    X_train, X_early = X[fit_idx], X[early_stop_idx]
+    y_train, y_early = y[fit_idx], y[early_stop_idx]
+    X_calib, y_calib = X[calib_idx], y[calib_idx]
 
     xgb_params = dict(
         objective='reg:quantileerror',
@@ -240,14 +349,14 @@ def train_distributional_model(stat_type: str) -> dict:
         early_stopping_rounds=25,
     )
     model = XGBRegressor(**xgb_params)
-    model.fit(X_train, y_train, eval_set=[(X_val, y_val)], verbose=False)
+    model.fit(X_train, y_train, eval_set=[(X_early, y_early)], verbose=False)
 
-    val_preds_raw = model.predict(X_val)
+    val_preds_raw = model.predict(X_calib)
     val_preds_rectified = [rectify_quantiles(row.tolist()) for row in val_preds_raw]
     val_medians = [median_from_quantiles(QUANTILE_ALPHAS, q) for q in val_preds_rectified]
-    val_mae = float(np.mean(np.abs(np.array(val_medians) - y_val)))
+    val_mae = float(np.mean(np.abs(np.array(val_medians) - y_calib)))
     calibration_pairs = collect_oof_pairs_quantile(
-        list(zip([QUANTILE_ALPHAS] * len(val_preds_rectified), val_preds_rectified, y_val.tolist())),
+        list(zip([QUANTILE_ALPHAS] * len(val_preds_rectified), val_preds_rectified, y_calib.tolist())),
     )
 
     _ensure_model_dir()
@@ -283,10 +392,13 @@ def train_distributional_model(stat_type: str) -> dict:
         metadata_json=json.dumps({
             'feature_names': feature_names,
             'quantile_alphas': QUANTILE_ALPHAS,
-            'val_samples': len(X_val),
+            'val_samples': len(X_calib),
             'train_samples': len(X_train),
+            'early_stopping_samples': len(X_early),
+            'test_samples': len(test_idx),
             'split_method': split_method,
-            'cutoff_date': cutoff_date.isoformat() if cutoff_date else None,
+            'train_cutoff_date': cutoff_dates[0].isoformat() if cutoff_dates[0] else None,
+            'calibration_cutoff_date': cutoff_dates[1].isoformat() if cutoff_dates[1] else None,
             'calibrator_model_name': f'dist_calibrator_{stat_type}',
         }),
     )
@@ -317,29 +429,30 @@ def train_distributional_model(stat_type: str) -> dict:
             metadata_json=json.dumps({'oof_pairs': len(calibration_pairs)}),
         ))
         db.session.commit()
+        from app.services.distributional_predictor import load_calibrator
+        load_calibrator.cache_clear()
         calibrator_fitted = True
     except ValueError:
         logger.warning("No OOF calibration pairs for dist_%s; skipping calibrator fit", stat_type)
 
     logger.info(
         "Trained dist_%s model: val_mae=%.3f, %d train / %d val samples",
-        stat_type, val_mae, len(X_train), len(X_val),
+        stat_type, val_mae, len(X_train), len(X_calib),
     )
 
     return {
         'stat_type': stat_type,
         'val_mae': round(val_mae, 3),
         'train_samples': len(X_train),
-        'val_samples': len(X_val),
+        'val_samples': len(X_calib),
         'model_path': artifact_path,
         'calibrator_fitted': calibrator_fitted,
         'calibration_pairs': len(calibration_pairs),
     }
 
 
-def _collect_poisson_oof_rows(stat_type: str, frac: float = 0.8) -> list:
+def _collect_poisson_oof_rows(stat_type: str) -> list:
     """Return held-out ``(lambda, realized)`` rows from an active point model."""
-    from app.services import ml_model
     from app.services.ml_model import _build_training_rows as _build_point_training_rows
     from app.services.ml_model import load_active_model
 
@@ -350,22 +463,19 @@ def _collect_poisson_oof_rows(stat_type: str, frac: float = 0.8) -> list:
     # An active model may have been trained with a lower explicit threshold
     # (notably the small offline fixture). OOF reconstruction should depend on
     # the active artifact, not today's training-admission threshold.
-    min_train_samples = ml_model.MIN_TRAIN_SAMPLES
-    try:
-        ml_model.MIN_TRAIN_SAMPLES = 0
-        rows = _build_point_training_rows(stat_type)
-    finally:
-        ml_model.MIN_TRAIN_SAMPLES = min_train_samples
+    rows = _build_point_training_rows(stat_type, min_train_samples=0)
     if not rows:
         return []
 
-    _, val_idx, _, _ = _date_cutoff_split(rows, frac=frac)
-    if not val_idx:
+    _, calib_idx, _, _, _ = _three_way_temporal_split(
+        rows, train_frac=TRAIN_FRACTION, calib_frac=CALIBRATION_FRACTION,
+    )
+    if not calib_idx:
         return []
 
     import numpy as np
     oof_rows = []
-    for idx in val_idx:
+    for idx in calib_idx:
         _, _, features, target = rows[idx]
         X = np.array([[features.get(k, 0) for k in feature_names]])
         lam = float(model.predict(X)[0])
@@ -412,6 +522,8 @@ def train_distributional_calibrator_for_poisson_stat(stat_type: str) -> dict:
         metadata_json=json.dumps({'oof_pairs': len(pairs), 'oof_rows': len(oof_rows)}),
     ))
     db.session.commit()
+    from app.services.distributional_predictor import load_calibrator
+    load_calibrator.cache_clear()
 
     return {
         'stat_type': stat_type,
@@ -432,7 +544,7 @@ def retrain_all_distributional_models() -> dict:
 
 
 def backtest_verdict(dist_ece: float, gauss_ece: float, gate: float = 0.03) -> str:
-    """Promote only when distributional ECE clears the gate and incumbent."""
+    """Recommend promotion only when distributional ECE clears both comparisons."""
     if dist_ece <= gate and dist_ece <= gauss_ece:
         return 'PROMOTE'
     return 'HOLD'

@@ -88,6 +88,14 @@ class TestFitApplyCalibrator(unittest.TestCase):
         self.assertAlmostEqual(after['ece'], 0.0, places=4)
         self.assertLess(after['ece'], before['ece'])
 
+    def test_metrics_clip_exact_probability_endpoints_for_logloss(self):
+        from app.services.pick_quality_model import compute_calibration_metrics
+
+        metrics = compute_calibration_metrics([(1.0, 1), (0.0, 0)], bins=5)
+
+        self.assertGreaterEqual(metrics['logloss'], 0.0)
+        self.assertLess(metrics['logloss'], 0.001)
+
 
 if __name__ == '__main__':
     unittest.main()

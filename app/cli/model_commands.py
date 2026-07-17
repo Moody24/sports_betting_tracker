@@ -332,7 +332,7 @@ def cli_model_accuracy(days, stat_type):
          'poisson: player_threes/player_steals/player_blocks).',
 )
 def cli_backtest(stat_type):
-    """Compare calibrated distributional P(over) with the incumbent Gaussian."""
+    """Compare calibrated P(over) with a historical replay of the live heuristic."""
     import math as _math
     import time as _time
 
@@ -349,9 +349,12 @@ def cli_backtest(stat_type):
         DIST_STAT_TYPES,
         POISSON_DIST_STAT_TYPES,
         QUANTILE_ALPHAS,
+        CALIBRATION_FRACTION,
+        TRAIN_FRACTION,
         _build_dist_training_rows,
-        _date_cutoff_split,
+        _three_way_temporal_split,
         backtest_verdict,
+        replay_running_baseline,
     )
     from app.services.distributional_predictor import load_calibrator, load_quantile_model
     from app.services.ml_model import load_active_model
@@ -369,7 +372,7 @@ def cli_backtest(stat_type):
         rows = _build_dist_training_rows(stat_type)
     elif stat_type in POISSON_DIST_STAT_TYPES:
         from app.services.ml_model import _build_training_rows as _build_point_rows
-        rows = _build_point_rows(stat_type)
+        rows = _build_point_rows(stat_type, min_train_samples=0)
     else:
         click.echo(f'Unsupported stat_type: {stat_type}')
         return
@@ -378,23 +381,28 @@ def cli_backtest(stat_type):
         click.echo('No training rows available for backtest.')
         return
 
-    _, val_idx, _, _ = _date_cutoff_split(rows)
-    if not val_idx:
+    _, _, test_idx, _, _ = _three_way_temporal_split(
+        rows, train_frac=TRAIN_FRACTION, calib_frac=CALIBRATION_FRACTION,
+    )
+    if not test_idx:
         click.echo('No held-out rows available for backtest.')
         return
 
     dist_pairs = []
-    gaussian_pairs = []
+    baseline_pairs = []
 
     if stat_type in DIST_STAT_TYPES:
         import numpy as np
         from scipy.stats import norm
-        for idx in val_idx:
+        for idx in test_idx:
             _, _, features, target = rows[idx]
+            baseline = replay_running_baseline(rows[idx], stat_type)
+            if baseline is None:
+                continue
+            baseline_projection, baseline_std_dev = baseline
             X = np.array([[features.get(k, 0) for k in feature_names]])
             raw_q = rectify_quantiles(model.predict(X)[0].tolist())
             median = median_from_quantiles(QUANTILE_ALPHAS, raw_q)
-            std_proxy = max((raw_q[-1] - raw_q[0]) / 4.0, 0.5)
             for offset in (-6.0, -3.0, 0.0, 3.0, 6.0):
                 line = median + offset
                 p_dist = prob_over(line, QUANTILE_ALPHAS, raw_q)
@@ -402,8 +410,10 @@ def cli_backtest(stat_type):
                     p_dist = apply_calibrator(calibrator, p_dist)
                 y = 1.0 if target > line else 0.0
                 dist_pairs.append((p_dist, y))
-                p_gauss = float(1.0 - norm.cdf(line, loc=median, scale=std_proxy))
-                gaussian_pairs.append((p_gauss, y))
+                p_baseline = float(
+                    1.0 - norm.cdf(line, loc=baseline_projection, scale=baseline_std_dev)
+                )
+                baseline_pairs.append((p_baseline, y))
     else:
         model, feature_names = load_active_model(stat_type)
         if model is None:
@@ -412,8 +422,12 @@ def cli_backtest(stat_type):
         calibrator = load_calibrator(stat_type)
         import numpy as np
         from scipy.stats import norm
-        for idx in val_idx:
+        for idx in test_idx:
             _, _, features, target = rows[idx]
+            baseline = replay_running_baseline(rows[idx], stat_type)
+            if baseline is None:
+                continue
+            baseline_projection, baseline_std_dev = baseline
             X = np.array([[features.get(k, 0) for k in feature_names]])
             lam = float(model.predict(X)[0])
             if lam <= 0:
@@ -426,15 +440,17 @@ def cli_backtest(stat_type):
                     p_dist = apply_calibrator(calibrator, p_dist)
                 y = 1.0 if target > line else 0.0
                 dist_pairs.append((p_dist, y))
-                p_gauss = float(1.0 - norm.cdf(line, loc=lam, scale=max(lam ** 0.5, 0.5)))
-                gaussian_pairs.append((p_gauss, y))
+                p_baseline = float(
+                    1.0 - norm.cdf(line, loc=baseline_projection, scale=baseline_std_dev)
+                )
+                baseline_pairs.append((p_baseline, y))
 
     if not dist_pairs:
         click.echo('No evaluable held-out pairs produced.')
         return
 
     dist_metrics = compute_calibration_metrics(dist_pairs, bins=5)
-    gauss_metrics = compute_calibration_metrics(gaussian_pairs, bins=5)
+    baseline_metrics = compute_calibration_metrics(baseline_pairs, bins=5)
     elapsed = _time.perf_counter() - _t0
 
     click.echo(f"Held-out pairs: {len(dist_pairs)}")
@@ -443,15 +459,15 @@ def cli_backtest(stat_type):
         f"Brier={dist_metrics['brier']:.4f}  LogLoss={dist_metrics['logloss']:.4f}"
     )
     click.echo(
-        f"Incumbent (Gaussian) ECE={gauss_metrics['ece']:.4f}  "
-        f"Brier={gauss_metrics['brier']:.4f}  LogLoss={gauss_metrics['logloss']:.4f}"
+        f"Incumbent (replayed live heuristic) ECE={baseline_metrics['ece']:.4f}  "
+        f"Brier={baseline_metrics['brier']:.4f}  LogLoss={baseline_metrics['logloss']:.4f}"
     )
     click.echo(f"Backtest wall time: {elapsed:.1f}s")
 
-    verdict = backtest_verdict(dist_metrics['ece'], gauss_metrics['ece'])
+    verdict = backtest_verdict(dist_metrics['ece'], baseline_metrics['ece'])
     message = (
         f"stat={stat_type} dist_ece={dist_metrics['ece']:.4f} "
-        f"gauss_ece={gauss_metrics['ece']:.4f} verdict={verdict}"
+        f"baseline_ece={baseline_metrics['ece']:.4f} verdict={verdict}"
     )
     db.session.add(JobLog(
         job_name='distributional_backtest',

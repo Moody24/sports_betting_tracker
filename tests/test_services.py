@@ -1625,6 +1625,22 @@ class TestProjectionEngine(BaseTestCase):
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TestValueDetector(BaseTestCase):
+
+    def test_dist_features_receive_real_game_total_line(self):
+        from app.services.value_detector import ValueDetector
+        detector = ValueDetector()
+        detector.engine._player_state_cache['test player'] = ('1', [MagicMock()] * 10, {})
+        detector.engine._build_ml_features = MagicMock(return_value={'game_total_line': 228.5})
+        detector.engine._context_cache['__dist_defense_lookup__'] = {}
+
+        _stat, features = detector._build_dist_features(
+            'Test Player', 'player_points', 'OPP', 'TST', True, None, 228.5,
+        )
+
+        self.assertEqual(features['game_total_line'], 228.5)
+        self.assertEqual(
+            detector.engine._build_ml_features.call_args.kwargs['game_total_line'], 228.5,
+        )
     """Tests for ValueDetector: score_prop, score_all_todays_props, get_top_plays."""
 
     def test_score_prop_insufficient_games(self):

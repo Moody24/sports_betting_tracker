@@ -187,7 +187,7 @@ def _build_game_total_lookup() -> dict:
     return lookup
 
 
-def _build_training_rows(stat_type: str):
+def _build_training_rows(stat_type: str, min_train_samples: int | None = None):
     """Build dated training rows for walk-forward validation."""
     stat_key = STAT_KEY_MAP.get(stat_type, 'pts')
 
@@ -197,10 +197,11 @@ def _build_training_rows(stat_type: str):
         .all()
     )
 
-    if len(all_logs) < MIN_TRAIN_SAMPLES:
+    threshold = MIN_TRAIN_SAMPLES if min_train_samples is None else min_train_samples
+    if len(all_logs) < threshold:
         logger.info(
             "Insufficient data for %s model: %d rows (need %d)",
-            stat_type, len(all_logs), MIN_TRAIN_SAMPLES,
+            stat_type, len(all_logs), threshold,
         )
         return []
 

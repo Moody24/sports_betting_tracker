@@ -618,7 +618,8 @@ def compute_calibration_metrics(evaluated: list[tuple[float, int]], bins: int = 
     avg_pred = sum(p for p, _ in evaluated) / n
     win_rate = wins / n
     brier = sum((p - y) ** 2 for p, y in evaluated) / n
-    logloss = -sum(y * math.log(p) + (1 - y) * math.log(1 - p) for p, y in evaluated) / n
+    clipped = [(min(max(p, 1e-6), 1 - 1e-6), y) for p, y in evaluated]
+    logloss = -sum(y * math.log(p) + (1 - y) * math.log(1 - p) for p, y in clipped) / n
 
     bin_rows = []
     ece_weighted_sum = 0.0

@@ -2,6 +2,9 @@
 
 import json
 import logging
+from functools import lru_cache
+
+from flask import current_app
 from typing import Optional
 
 from app.models import ModelMetadata
@@ -47,7 +50,8 @@ def load_quantile_model(stat_type: str):
     return model, feature_names
 
 
-def load_calibrator(stat_type: str):
+@lru_cache(maxsize=None)
+def _load_calibrator(_app_identity: int, stat_type: str):
     """Return the active isotonic calibrator for the stat, or None."""
     meta = ModelMetadata.query.filter_by(
         model_name=f"dist_calibrator_{stat_type}", is_active=True
@@ -60,10 +64,19 @@ def load_calibrator(stat_type: str):
     try:
         import joblib
 
+        # Trusted local artifact produced by our training pipeline/model storage.
         return joblib.load(local_path)
     except Exception as exc:
         logger.warning("Failed to load calibrator for %s: %s", stat_type, exc)
         return None
+
+
+def load_calibrator(stat_type: str):
+    """Return a calibrator cached per Flask application and stat type."""
+    return _load_calibrator(id(current_app._get_current_object()), stat_type)
+
+
+load_calibrator.cache_clear = _load_calibrator.cache_clear
 
 
 def predict_distribution(stat_type: str, features: dict) -> Optional[dict]:
@@ -112,6 +125,8 @@ def predict_prob_over(
     if dist["kind"] == "poisson":
         raw = prob_over_poisson(line, dist["lam"])
     else:
+        if line < dist["quantile_values"][0] or line > dist["quantile_values"][-1]:
+            return None
         raw = prob_over(line, dist["alphas"], dist["quantile_values"])
 
     calibrator = load_calibrator(stat_type)

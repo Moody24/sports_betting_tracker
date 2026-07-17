@@ -70,6 +70,28 @@ class TestPRALogProxy(BaseTestCase):
 
 class TestDateCutoffSplit(BaseTestCase):
 
+    def test_three_way_split_is_disjoint_and_temporally_ordered(self):
+        from app.services.distributional_model import _three_way_temporal_split
+        rows = [(date(2024, 1, 1) + timedelta(days=i), 'p1', {}, float(i)) for i in range(20)]
+        train_idx, calib_idx, test_idx, method, _ = _three_way_temporal_split(
+            rows, train_frac=0.70, calib_frac=0.15,
+        )
+        self.assertEqual(method, 'date_cutoff')
+        self.assertFalse(set(train_idx) & set(calib_idx))
+        self.assertFalse(set(train_idx) & set(test_idx))
+        self.assertFalse(set(calib_idx) & set(test_idx))
+        self.assertEqual(set(train_idx) | set(calib_idx) | set(test_idx), set(range(20)))
+        self.assertLess(max(rows[i][0] for i in train_idx), min(rows[i][0] for i in calib_idx))
+        self.assertLess(max(rows[i][0] for i in calib_idx), min(rows[i][0] for i in test_idx))
+
+    def test_internal_early_stopping_slice_stays_inside_train(self):
+        from app.services.distributional_model import _early_stopping_split
+        train_idx = list(range(70))
+        fit_idx, eval_idx = _early_stopping_split(train_idx, eval_frac=0.10)
+        self.assertEqual(fit_idx + eval_idx, train_idx)
+        self.assertTrue(set(fit_idx).isdisjoint(eval_idx))
+        self.assertEqual(eval_idx, list(range(63, 70)))
+
     def test_splits_by_date_when_enough_unique_dates(self):
         from app.services.distributional_model import _date_cutoff_split
         rows = [(date(2024, 1, 1) + timedelta(days=i), 'p1', {}, float(i)) for i in range(10)]
@@ -90,6 +112,28 @@ class TestDateCutoffSplit(BaseTestCase):
 
 
 class TestBuildDistTrainingRows(BaseTestCase):
+
+    def test_replay_running_baseline_uses_only_prior_logs_and_real_context(self):
+        from app.services.distributional_model import replay_running_baseline
+        with self.app.app_context():
+            logs = _seed_dist_logs(player_id='558', count=15)
+            current = logs[12]
+            row = (
+                current.game_date, current.player_id,
+                {'game_total_line': 228.5}, current.pts,
+            )
+            with patch(
+                'app.services.projection_engine.ProjectionEngine.project_stat',
+                autospec=True,
+                return_value={'projection': 21.5, 'std_dev': 4.2},
+            ) as project:
+                result = replay_running_baseline(row, 'player_points')
+
+            self.assertEqual(result, (21.5, 4.2))
+            self.assertEqual(project.call_args.kwargs['game_total_line'], 228.5)
+            engine = project.call_args.args[0]
+            cached_logs = engine._player_state_cache[current.player_name.lower()][1]
+            self.assertTrue(all(log.game_date < current.game_date for log in cached_logs))
 
     def test_pra_target_equals_realized_sum(self):
         from app.services import distributional_model as dm
@@ -203,6 +247,16 @@ class TestTrainDistributionalModelWithCalibrator(BaseTestCase):
 
 
 class TestPoissonOofCalibration(BaseTestCase):
+
+    def test_poisson_oof_builder_does_not_mutate_global_threshold(self):
+        from app.services import distributional_model as dm, ml_model
+        sentinel = ml_model.MIN_TRAIN_SAMPLES
+        with self.app.app_context(), \
+             patch('app.services.ml_model.load_active_model', return_value=(object(), ['x'])), \
+             patch('app.services.ml_model._build_training_rows', return_value=[]) as build:
+            dm._collect_poisson_oof_rows('player_steals')
+        build.assert_called_once_with('player_steals', min_train_samples=0)
+        self.assertEqual(ml_model.MIN_TRAIN_SAMPLES, sentinel)
 
     def test_collect_poisson_oof_rows_from_trained_point_model(self):
         from app.services import ml_model

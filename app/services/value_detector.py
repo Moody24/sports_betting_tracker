@@ -134,6 +134,7 @@ class ValueDetector:
         is_home: bool = True,
         game_id: str = '',
         game_date: Optional[_date] = None,
+        game_total_line: float = 0.0,
     ) -> dict:
         """Score a single player prop for value.
 
@@ -153,7 +154,7 @@ class ValueDetector:
         """
         proj = self.engine.project_stat(
             player_name, prop_type, opponent_name, team_name, is_home,
-            game_date=game_date,
+            game_total_line=game_total_line, game_date=game_date,
         )
 
         projection = proj['projection']
@@ -170,7 +171,7 @@ class ValueDetector:
             projection, line, std_dev,
             player_name=player_name, prop_type=prop_type,
             opponent_name=opponent_name, team_name=team_name,
-            is_home=is_home, game_date=game_date,
+            is_home=is_home, game_date=game_date, game_total_line=game_total_line,
         )
         model_prob_under = 1.0 - model_prob_over
 
@@ -288,6 +289,7 @@ class ValueDetector:
         team_name: str = '',
         is_home: bool = True,
         game_date: Optional[_date] = None,
+        game_total_line: float = 0.0,
     ) -> float:
         """Estimate probability of the player exceeding the line.
 
@@ -303,6 +305,7 @@ class ValueDetector:
             try:
                 stat_type, features = self._build_dist_features(
                     player_name, prop_type, opponent_name, team_name, is_home, game_date,
+                    game_total_line,
                 )
                 if features:
                     from app.services.distributional_predictor import predict_prob_over
@@ -337,6 +340,7 @@ class ValueDetector:
         team_name: str,
         is_home: bool,
         game_date: Optional[_date],
+        game_total_line: float = 0.0,
     ):
         """Build the 30-key ML feature dict for the distributional predictor.
 
@@ -383,6 +387,7 @@ class ValueDetector:
         features = self.engine._build_ml_features(
             use_logs, stat_key, is_home,
             current_matchup=current_matchup,
+            game_total_line=game_total_line,
             defense_lookup=defense_lookup,
             game_date=game_date,
         )
@@ -565,6 +570,7 @@ class ValueDetector:
                         is_home=is_home,
                         game_id=espn_id,
                         game_date=_game_date,
+                        game_total_line=float(game.get('over_under_line') or 0.0),
                     )
 
                     # Add game context to score
