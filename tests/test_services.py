@@ -2012,6 +2012,78 @@ class TestValueDetector(BaseTestCase):
                 )
         self.assertAlmostEqual(result['model_prob_over'], 0.777)
 
+    def _seed_scenario_player(self, pid='920', name='Scenario Player'):
+        for i in range(20):
+            db.session.add(PlayerGameLog(
+                player_id=pid, player_name=name, team_abbr='TST',
+                game_date=date(2026, 1, 1) + timedelta(days=i),
+                pts=25, reb=6, ast=4, fg3m=2, minutes=33,
+                stl=1, blk=0, tov=2, fgm=9, fga=18, ftm=5, fta=6, fg3a=6,
+            ))
+        db.session.commit()
+
+    def test_scenario_signal_fields_note_and_demotion(self):
+        from app.services.value_detector import ValueDetector
+        with self.app.app_context():
+            self._seed_scenario_player()
+            detector = ValueDetector()
+            with patch('app.services.projection_engine.find_player_id', return_value='920'), \
+                 patch.dict('os.environ', {'USE_SCENARIO_SIGNAL': 'true'}), \
+                 patch('app.services.player_crosswalk.resolve_espn_id', return_value='4396'), \
+                 patch('app.services.live_context.build_live_context',
+                       return_value=({'home_away': 'home'}, True)), \
+                 patch('app.services.scenario_engine.agreement_score',
+                       return_value=(-0.8, 9)):
+                result = detector.score_prop(
+                    'Scenario Player', 'player_points',
+                    line=20.5, over_odds=-110, under_odds=-110,
+                )
+        self.assertEqual(result['scenario_agreement'], -0.8)
+        self.assertEqual(result['scenario_matches'], 9)
+        self.assertTrue(any('Scenario splits' in n for n in result['context_notes']))
+        # strong disagreement demotes one tier from whatever it was
+        self.assertIn(result['confidence_tier'],
+                      ('moderate', 'slight', 'no_edge'))
+
+    def test_scenario_promotion_only_from_slight(self):
+        from app.services import value_detector as vd
+        self.assertEqual(vd._TIER_DEMOTE['moderate'], 'slight')
+        self.assertEqual(vd._apply_scenario_nudge('slight', 0.7, 6), 'moderate')
+        self.assertEqual(vd._apply_scenario_nudge('moderate', 0.7, 6), 'moderate')
+        self.assertEqual(vd._apply_scenario_nudge('moderate', -0.7, 6), 'slight')
+        self.assertEqual(vd._apply_scenario_nudge('moderate', 0.7, 3), 'moderate')   # < MIN_MATCHES
+        self.assertEqual(vd._apply_scenario_nudge('moderate', 0.3, 9), 'moderate')   # < threshold
+
+    def test_flag_off_result_is_byte_identical_and_fields_none(self):
+        from app.services.value_detector import ValueDetector
+        with self.app.app_context():
+            self._seed_scenario_player(pid='921', name='Flagoff Player')
+            detector = ValueDetector()
+            with patch('app.services.projection_engine.find_player_id', return_value='921'):
+                result = detector.score_prop(
+                    'Flagoff Player', 'player_points',
+                    line=20.5, over_odds=-110, under_odds=-110,
+                )
+        self.assertIsNone(result['scenario_agreement'])
+        self.assertIsNone(result['scenario_matches'])
+        self.assertFalse(any('Scenario splits' in n for n in result['context_notes']))
+
+    def test_scenario_exception_never_breaks_scoring(self):
+        from app.services.value_detector import ValueDetector
+        with self.app.app_context():
+            self._seed_scenario_player(pid='922', name='Boom Player')
+            detector = ValueDetector()
+            with patch('app.services.projection_engine.find_player_id', return_value='922'), \
+                 patch.dict('os.environ', {'USE_SCENARIO_SIGNAL': 'true'}), \
+                 patch('app.services.player_crosswalk.resolve_espn_id',
+                       side_effect=RuntimeError('boom')):
+                result = detector.score_prop(
+                    'Boom Player', 'player_points',
+                    line=20.5, over_odds=-110, under_odds=-110,
+                )
+        self.assertIsNone(result['scenario_agreement'])
+        self.assertGreater(result['model_prob_over'], 0)
+
     def test_dist_scored_prop_displays_dist_median_as_projection(self):
         from app.services.value_detector import ValueDetector
         with self.app.app_context():
