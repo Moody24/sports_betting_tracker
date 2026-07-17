@@ -179,11 +179,19 @@ def _build_dist_training_rows(stat_type: str) -> list:
     if not stat_key:
         return []
 
-    all_logs = (
-        PlayerGameLog.query
-        .order_by(PlayerGameLog.player_id, PlayerGameLog.game_date)
-        .all()
+    from app.services.historical_training_source import (
+        load_historical_game_total_lookup,
+        load_historical_training_logs,
     )
+
+    all_logs = load_historical_training_logs()
+    using_historical_source = bool(all_logs)
+    if not using_historical_source:
+        all_logs = (
+            PlayerGameLog.query
+            .order_by(PlayerGameLog.player_id, PlayerGameLog.game_date)
+            .all()
+        )
     if len(all_logs) < MIN_TRAIN_SAMPLES:
         logger.info(
             "Insufficient data for dist_%s model: %d rows (need %d)",
@@ -208,7 +216,11 @@ def _build_dist_training_rows(stat_type: str) -> list:
 
     team_totals, team_counts = build_team_game_aggregates(all_logs)
     defense_lookup = _build_defense_lookup()
-    game_total_lookup = _build_game_total_lookup()
+    game_total_lookup = (
+        load_historical_game_total_lookup()
+        if using_historical_source
+        else _build_game_total_lookup()
+    )
 
     rows = []
     for pid, logs in player_logs.items():
@@ -221,8 +233,12 @@ def _build_dist_training_rows(stat_type: str) -> list:
             current = logs[i]
             target = float(getattr(current, stat_key, 0.0) or 0.0)
 
-            team_abbr = (getattr(current, 'team_abbr', '') or '').strip().upper()
-            game_total = game_total_lookup.get((current.game_date, team_abbr), 0.0)
+            if using_historical_source:
+                game_total_key = str(getattr(current, '_historical_game_id', '') or '')
+            else:
+                team_abbr = (getattr(current, 'team_abbr', '') or '').strip().upper()
+                game_total_key = (current.game_date, team_abbr)
+            game_total = game_total_lookup.get(game_total_key, 0.0)
 
             features = build_ml_features_from_history(
                 prior_logs=prior,
@@ -244,26 +260,30 @@ def _build_dist_training_rows(stat_type: str) -> list:
 def replay_running_baseline(row: tuple, stat_type: str) -> tuple[float, float] | None:
     """Replay the live heuristic projection using only information before the row date."""
     from app.services.projection_engine import ProjectionEngine
+    from app.services.historical_training_source import (
+        historical_training_store_has_rows,
+        load_historical_replay_logs,
+    )
     from app.services.stats_service import get_player_stats_summary
 
     game_date, player_id, features, _ = row
-    current = PlayerGameLog.query.filter_by(
-        player_id=str(player_id), game_date=game_date,
-    ).first()
-    if current is None:
-        return None
-
-    prior_logs = (
-        PlayerGameLog.query
-        .filter(
-            PlayerGameLog.player_id == str(player_id),
-            PlayerGameLog.game_date < game_date,
+    if historical_training_store_has_rows():
+        current, prior_logs = load_historical_replay_logs(player_id, game_date)
+    else:
+        current = PlayerGameLog.query.filter_by(
+            player_id=str(player_id), game_date=game_date,
+        ).first()
+        prior_logs = (
+            PlayerGameLog.query
+            .filter(
+                PlayerGameLog.player_id == str(player_id),
+                PlayerGameLog.game_date < game_date,
+            )
+            .order_by(PlayerGameLog.game_date.desc())
+            .limit(82)
+            .all()
         )
-        .order_by(PlayerGameLog.game_date.desc())
-        .limit(82)
-        .all()
-    )
-    if not prior_logs:
+    if current is None or not prior_logs:
         return None
 
     matchup = current.matchup or ''

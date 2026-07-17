@@ -189,13 +189,21 @@ def _build_game_total_lookup() -> dict:
 
 def _build_training_rows(stat_type: str, min_train_samples: int | None = None):
     """Build dated training rows for walk-forward validation."""
+    from app.services.historical_training_source import (
+        load_historical_game_total_lookup,
+        load_historical_training_logs,
+    )
+
     stat_key = STAT_KEY_MAP.get(stat_type, 'pts')
 
-    all_logs = (
-        PlayerGameLog.query
-        .order_by(PlayerGameLog.player_id, PlayerGameLog.game_date)
-        .all()
-    )
+    all_logs = load_historical_training_logs()
+    using_historical_source = bool(all_logs)
+    if not using_historical_source:
+        all_logs = (
+            PlayerGameLog.query
+            .order_by(PlayerGameLog.player_id, PlayerGameLog.game_date)
+            .all()
+        )
 
     threshold = MIN_TRAIN_SAMPLES if min_train_samples is None else min_train_samples
     if len(all_logs) < threshold:
@@ -221,7 +229,11 @@ def _build_training_rows(stat_type: str, min_train_samples: int | None = None):
 
     # Phase 1: pre-fetch context lookups once (not per row)
     defense_lookup = _build_defense_lookup()
-    game_total_lookup = _build_game_total_lookup()
+    game_total_lookup = (
+        load_historical_game_total_lookup()
+        if using_historical_source
+        else _build_game_total_lookup()
+    )
 
     rows = []
 
@@ -236,8 +248,12 @@ def _build_training_rows(stat_type: str, min_train_samples: int | None = None):
             target = float(getattr(current, stat_key, 0.0) or 0.0)
 
             # Phase 1: resolve per-row context
-            team_abbr = (getattr(current, 'team_abbr', '') or '').strip().upper()
-            game_total = game_total_lookup.get((current.game_date, team_abbr), 0.0)
+            if using_historical_source:
+                game_total_key = str(getattr(current, '_historical_game_id', '') or '')
+            else:
+                team_abbr = (getattr(current, 'team_abbr', '') or '').strip().upper()
+                game_total_key = (current.game_date, team_abbr)
+            game_total = game_total_lookup.get(game_total_key, 0.0)
 
             features = build_ml_features_from_history(
                 prior_logs=prior,
