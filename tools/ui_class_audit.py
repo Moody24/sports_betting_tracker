@@ -14,6 +14,9 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 TEMPLATES = REPO / 'app' / 'templates'
 THEME = REPO / 'app' / 'static' / 'css' / 'theme.css'
+# Everything below this banner in theme.css is the owned Bootstrap
+# replacement this audit drives — never counted as pre-existing custom CSS.
+FRAMEWORK_MARKER = 'FRAMEWORK LAYER (Phase 2 Increment A)'
 
 GRID_RE = re.compile(
     r'^(row|col(-(sm|md|lg|xl))?(-\d{1,2}|-auto)?|g-\d|gx-\d|gy-\d|container(-fluid)?)$')
@@ -88,9 +91,12 @@ def scan() -> dict:
         icons.update(i for i in re.findall(r'\bbi-([a-z0-9-]+)', text)
                      if not i.endswith('-'))
 
-    # Classes already defined in theme.css are OURS — excluded from every
-    # bucket (they need no reimplementation).
-    custom = set(re.findall(r'\.([a-zA-Z][\w-]*)', THEME.read_text()))
+    # Classes defined in the CUSTOM section of theme.css are OURS — excluded
+    # from every bucket. The framework layer (everything below the marker)
+    # is the OUTPUT of this audit and must not feed back into it, or the
+    # manifest would erase itself as Tasks 2-4 implement it.
+    theme_text = THEME.read_text().split(FRAMEWORK_MARKER)[0]
+    custom = set(re.findall(r'\.([a-zA-Z][\w-]*)', theme_text))
     remaining = {c for c in classes if c not in custom and not c.startswith('bi')}
 
     # Dynamic Jinja-composed fragments (trailing '-') and names that merely
