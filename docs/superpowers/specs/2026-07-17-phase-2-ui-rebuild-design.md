@@ -6,7 +6,7 @@
 
 ## Goal
 
-Two increments, one spec:
+Three increments, one spec:
 - **Increment A — de-Bootstrap foundation:** remove the Bootstrap CSS/icons
   CDN dependency entirely; the app renders pixel-equivalent from self-hosted
   fonts + a single `theme.css`. Zero external requests. Visual parity is the
@@ -15,6 +15,10 @@ Two increments, one spec:
   platform: scenario-split evidence on pick cards, distributional provenance
   + quantile strip on pick cards, and a model-health dashboard (the October
   operator view).
+- **Increment C — the beauty pass:** a deliberate, user-judged polish
+  increment over every screen. Parity (A) is a regression gate, NOT the
+  ambition; C is the ambition. Driven by the frontend-design skill; "wow"
+  is accepted per-screen by the user, not by checklist.
 
 ## Verified starting state (audited 2026-07-17)
 
@@ -54,8 +58,11 @@ Two increments, one spec:
    Popper/bundle.
 6. **Fonts self-hosted** (woff2, exact weights in use) in
    `app/static/fonts/` — the app becomes fully offline-capable.
-7. **Sequencing:** A merges at visual parity BEFORE B starts. B never
-   builds on Bootstrap.
+7. **Sequencing:** A merges at visual parity BEFORE B starts (B never
+   builds on Bootstrap); C runs last, over everything, as its own
+   increment with per-screen user acceptance. A's parity gate is a
+   regression control, not the product ambition — C is the ambition
+   (user decision 2026-07-17: "I want wow, not clunky").
 
 ## Increment A — components
 
@@ -111,6 +118,34 @@ sections from existing tables, no new state, no JS charts:
 4. Flags & freshness: live values of the two `USE_*` flags;
    `ScenarioContextPack.computed_at` with the same 7-day freshness rule the
    live builder uses.
+
+## Increment C — components (the beauty pass)
+
+All within the standing laws (no build step, vanilla JS, single theme.css,
+amber tokens, three fonts). Modern-CSS-first; JS only where CSS cannot.
+
+- **Motion system:** a tokenized motion scale in `:root` (2 durations, 2
+  easings); page transitions via the native View Transitions API
+  (progressive enhancement — no-op on unsupported browsers); staggered
+  entrance animation for card grids (CSS only, animation-delay off
+  `:nth-child`); hover-lift/press states on all interactive components;
+  every animation gated behind `prefers-reduced-motion: reduce`.
+- **KPI number tickers:** count-up on dashboard KPI values (tabular-nums
+  JetBrains Mono, ~15 lines of vanilla JS, `IntersectionObserver`-triggered,
+  reduced-motion → instant).
+- **Component craft pass:** adopt shadcn-grade detail into our owned
+  components — consistent radius + spacing scale as tokens, layered focus
+  rings (`:focus-visible`), skeleton loading states for live-progress rows,
+  designed empty states (icon + line + action) replacing bare text.
+- **Showpiece treatment** for the two signature visuals: the quantile fan
+  (gradient fill under the curve, line-tick with label, animated draw-in)
+  and the scenario evidence drill-in (aligned columns, n-weight encoded as
+  bar depth, smooth `<details>` expansion).
+- **Acceptance:** per-screen before/after review with the user; a screen is
+  done when the user says it wows, within the design-system laws. The
+  frontend-design skill is REQUIRED at execution time for this increment.
+- **Fallback recorded:** if C lands and does not satisfy, the React/shadcn
+  conversation reopens explicitly (decisions transfer; no wasted work).
 
 ## Error handling
 
