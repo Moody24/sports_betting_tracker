@@ -3314,3 +3314,56 @@ a:hover {
   margin-top: 0.4rem;
   line-height: 1.5;
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   FRAMEWORK LAYER (Phase 2 Increment A) — owned replacements for the
+   Bootstrap vocabulary in use. Source of truth: ui_class_audit.py →
+   phase2-class-manifest.json. Section order: grid → components →
+   utilities. Existing :root tokens only; no new colors, no effects.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* grid ─────────────────────────────────────────────────────────────── */
+:root { --fw-gutter-x: 1.5rem; --fw-gutter-y: 0rem; }
+
+.row {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  column-gap: var(--fw-gutter-x);
+  row-gap: var(--fw-gutter-y);
+}
+.row > * { min-width: 0; grid-column: span 12; }
+
+.g-0 { --fw-gutter-x: 0rem;  --fw-gutter-y: 0rem; }
+.g-2 { --fw-gutter-x: .5rem; --fw-gutter-y: .5rem; }
+.g-3 { --fw-gutter-x: 1rem;  --fw-gutter-y: 1rem; }
+
+.col-3  { grid-column: span 3; }
+.col-4  { grid-column: span 4; }
+.col-6  { grid-column: span 6; }
+.col-10 { grid-column: span 10; }
+.col-12 { grid-column: span 12; }
+
+@media (min-width: 576px) {
+  .col-sm-4 { grid-column: span 4; }
+  .col-sm-6 { grid-column: span 6; }
+  .col-sm-8 { grid-column: span 8; }
+}
+@media (min-width: 768px) {
+  .col-md-2 { grid-column: span 2; }
+  .col-md-4 { grid-column: span 4; }
+  .col-md-6 { grid-column: span 6; }
+  .col-md-8 { grid-column: span 8; }
+  .col-md-9 { grid-column: span 9; }
+}
+@media (min-width: 992px) {
+  .col-lg-1 { grid-column: span 1; }
+  .col-lg-2 { grid-column: span 2; }
+  .col-lg-3 { grid-column: span 3; }
+  .col-lg-5 { grid-column: span 5; }
+  .col-lg-6 { grid-column: span 6; }
+}
+@media (min-width: 1200px) {
+  .col-xl-2 { grid-column: span 2; }
+  .col-xl-3 { grid-column: span 3; }
+  .col-xl-4 { grid-column: span 4; }
+}
