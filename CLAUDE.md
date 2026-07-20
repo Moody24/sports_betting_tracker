@@ -37,3 +37,4 @@ source .venv/bin/activate && bandit -q -r app -x tests -ll
 - **`deployment-ci`** — GitHub Actions CI, Railway deployment, git workflow, gunicorn
 - **`project-layout`** — Flask blueprints, services map, multi-sport expansion
 - **`definition-of-done`** — UI breakpoints, live-progress rows, control regression checklist
+- **`ui-design-rubric`** — design taste constraints, slop blacklist + craft checklist, mock-and-grade loop (INVOKE for any UI/design work)
