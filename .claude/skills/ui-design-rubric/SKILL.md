@@ -71,6 +71,30 @@ sidebar + KPI-card row + center chart.
 15. Visible keyboard affordances (focus rings, keycap hints).
 16. Motion on transform/opacity only; reduced-motion respected.
 
+## Dual-audience + education rules (square AND sharp; researched 2026-07-19)
+
+- Lead every probability with natural frequency ("7 in 10") + precise % adjacent;
+  translate odds to dollars for the USER'S stake, never the $100 convention.
+- Task-critical numbers NEVER live only in tooltips. Tooltips = definitions only,
+  ≤150 chars, uniform dotted-underline affordance on EVERY jargon term
+  (edge/EV/CLV/vig/Kelly/fair line), hover + keyboard-focus + tap parity.
+- Progressive disclosure: max TWO levels; disclosure labels carry information
+  scent ("Show the working — fair line · splits · distribution", never "More").
+  Simple default is correct pedagogy — don't show everything to "teach".
+- Simplify presentation, never data (Robinhood lesson): every plain number
+  expands to its full accurate breakdown. Calm, factual confirmations — no
+  confetti, no streaks, no urgency mechanics. Stake presets anchor LOW.
+- Education is pull, not push: point-of-encounter, once, dismissible,
+  re-findable via a persistent "?" route; never explain standard controls.
+- Sharp layer requirements: CLV per bet + aggregate (it's the pro scoreboard),
+  devigged fair-line anchor visible per row, staleness timestamps on prices,
+  persistent filters, computed fractional-Kelly stakes, one-click drill-down.
+- Distinctiveness levers (never decoration): ONE stated opinion enforced
+  everywhere; ≤2 motion durations as identity; six designed microstates per
+  interactive element; layout-matched skeletons with staggered reveal;
+  structure-as-decoration (visible hairlines, ledger numerals); aggressive
+  contrast + doubled whitespace.
+
 ## Mandatory process for any UI change
 
 1. Mock in plain HTML/CSS at `design-mock/index.html` (worktree), serve via
