@@ -82,7 +82,7 @@ Live player props and market lines require an API key from [the-odds-api.com](ht
 
 ## ML Models
 
-Models are XGBoost regressors trained on `HistoricalGameLog` data (30 features). Artifacts are stored locally at `app/ml_models/*.json` (gitignored).
+Two models: **Model 1** (6 XGBoost regressors — points, rebounds, assists, threes, steals, blocks) trained on `HistoricalGameLog` data with a shared 30-feature builder, and **Model 2** (XGBoost pick-quality classifier, 21 features) that scores projection confidence. Artifacts are stored locally at `app/ml_models/*.json` (gitignored).
 
 To retrain models locally:
 
@@ -128,7 +128,7 @@ app/
 ├── routes/       Flask blueprints (auth, bets, NBA analysis)
 ├── services/     Business logic (NBA, ML, scheduler, odds, postmortems)
 ├── cli/          Flask CLI commands (retrain, health-report, market-recommend)
-├── models.py     SQLAlchemy models (11 tables)
+├── models.py     SQLAlchemy models (15 tables)
 ├── ml_models/    Local model artifact JSON files (gitignored)
 └── templates/    Jinja2 HTML templates
 docs/
