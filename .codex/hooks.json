@@ -1,0 +1,29 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "input=$(cat); file=$(echo \"$input\" | python3 -c \"import sys,json; d=json.load(sys.stdin); print(d.get('tool_input',{}).get('file_path',''))\"); if echo \"$file\" | grep -qE '(^|/)(\\.env)$'; then echo \"Blocked: do not edit .env directly — it contains live credentials. Update .env.example for documentation instead.\" >&2; exit 2; fi"
+          },
+          {
+            "type": "command",
+            "command": "input=$(cat); file=$(echo \"$input\" | python3 -c \"import sys,json; d=json.load(sys.stdin); print(d.get('tool_input',{}).get('file_path',''))\"); if echo \"$file\" | grep -qE 'app/ml_models/.*\\.json$'; then echo \"Blocked: ML model artifacts are generated files. Regenerate via CLI (e.g. 'flask retrain-model'), not manual edits.\" >&2; exit 2; fi"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo \"REMINDERS FOR THIS PROJECT: (1) Tests use unittest, not pytest — run: source .venv/bin/activate && SECRET_KEY=test python -m coverage run -m unittest discover -s tests -v (2) All date/time logic uses ET timezone (ZoneInfo America/New_York). (3) Do not edit .env or app/ml_models/*.json directly. (4) Never include Co-Authored-By tags in git commits.\""
+          }
+        ]
+      }
+    ]
+  }
+}
