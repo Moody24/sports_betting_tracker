@@ -82,7 +82,7 @@ Live player props and market lines require an API key from [the-odds-api.com](ht
 
 ## ML Models
 
-Models are XGBoost regressors trained on `PlayerGameLog` data (37 features). Artifacts are stored locally at `app/ml_models/*.json` (gitignored).
+Models are XGBoost regressors trained on `HistoricalGameLog` data (30 features). Artifacts are stored locally at `app/ml_models/*.json` (gitignored).
 
 To retrain models locally:
 

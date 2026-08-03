@@ -30,7 +30,7 @@ Edge Tracker is a Flask application for tracking sports bets, projecting player 
 │    │     nba_service.py     ← ESPN + Odds API integration (1300 ln) │
 │    │     ml_model.py        ← XGBoost Model 1 (stat projections)    │
 │    │     pick_quality_model.py ← XGBoost Model 2 (bet quality)      │
-│    │     ml_feature_builder.py ← 37-feature extractor (shared)      │
+│    │     ml_feature_builder.py ← 30-feature extractor (shared)      │
 │    │     projection_engine.py  ← bias-corrected projection logic    │
 │    │     postmortem_service.py ← settled bet diagnostics            │
 │    │     market_recommender.py ← auto pick generation               │
@@ -90,7 +90,7 @@ PlayerGameLog rows
         │
         ▼
 ml_feature_builder.py::build_features()
-  └── 37 features: minutes, FGA, FG3A, opponent pace,
+  └── 30 features: minutes, FGA, FG3A, opponent pace,
       defensive metrics, injury status, home/away, etc.
         │
         ├── Model 1 (ml_model.py)
@@ -102,7 +102,7 @@ ml_feature_builder.py::build_features()
         │
         └── Model 2 (pick_quality_model.py)
               XGBoost classifier
-              Input: 37 features + minutes_volatility + stat_attempts_volatility
+              Input: own 21-feature set (17 pick-quality features + 4 categorical, incl. minutes_volatility, stat_attempts_volatility)
               Output: confidence tier (strong / medium / low)
 ```
 

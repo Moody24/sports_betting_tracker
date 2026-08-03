@@ -114,7 +114,7 @@ Breaks down projection accuracy by stat type over the last N days.
 ```bash
 grep -n "FEATURE_KEYS" app/services/ml_feature_builder.py
 ```
-Currently 37 features + 2 volatility features for Model 2 (`minutes_volatility`, `stat_attempts_volatility`).
+Currently 30 features for Model 1. Model 2 has its own separate 21-feature set, including `minutes_volatility` and `stat_attempts_volatility`.
 
 ---
 
