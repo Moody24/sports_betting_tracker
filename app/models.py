@@ -706,13 +706,20 @@ class OddsSnapshot(db.Model):
 
     id          = db.Column(db.Integer, primary_key=True)
     game_id     = db.Column(db.String(32), index=True)
+    source_event_id = db.Column(db.String(64), nullable=True, index=True)
     game_date   = db.Column(db.Date, index=True)
+    event_start_time = db.Column(db.DateTime(timezone=True), nullable=True, index=True)
+    player_id   = db.Column(db.String(20), nullable=True, index=True)
     player_name = db.Column(db.String(100))
+    player_key  = db.Column(db.String(140), nullable=True, index=True)
     market      = db.Column(db.String(60))
     bookmaker   = db.Column(db.String(30))   # 'fanduel' | 'draftkings'
     line        = db.Column(db.Float)
     over_odds   = db.Column(db.Integer)
     under_odds  = db.Column(db.Integer)
+    source      = db.Column(db.String(30), nullable=False, default='odds_api')
+    snapshot_kind = db.Column(db.String(20), nullable=False, default='scheduled')
+    source_snapshot_key = db.Column(db.String(160), nullable=True, unique=True)
     snapped_at  = db.Column(
         db.DateTime(timezone=True),
         nullable=False,
@@ -724,10 +731,48 @@ class OddsSnapshot(db.Model):
             'ix_odds_snap_composite',
             'game_date', 'game_id', 'player_name', 'market', 'bookmaker',
         ),
+        db.Index(
+            'ix_odds_snap_backtest',
+            'market', 'event_start_time', 'player_key', 'bookmaker', 'snapped_at',
+        ),
     )
 
     def __repr__(self) -> str:
         return f"<OddsSnapshot {self.player_name} {self.market} {self.bookmaker} {self.game_date}>"
+
+
+class ModelEvaluationRun(db.Model):
+    """Reproducible model diagnostic or backtest result.
+
+    Large row-level outputs belong in ``artifact_path``; the JSON columns keep
+    the exact configuration and compact metrics needed for audits and gates.
+    """
+
+    __tablename__ = 'model_evaluation_run'
+
+    id = db.Column(db.Integer, primary_key=True)
+    evaluation_type = db.Column(db.String(40), nullable=False, index=True)
+    model_name = db.Column(db.String(80), nullable=True, index=True)
+    model_version = db.Column(db.String(80), nullable=True)
+    stat_type = db.Column(db.String(60), nullable=True, index=True)
+    started_at = db.Column(db.DateTime(timezone=True), nullable=False)
+    finished_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    status = db.Column(db.String(20), nullable=False, default='running', index=True)
+    verdict = db.Column(db.String(20), nullable=True)
+    config_json = db.Column(db.Text, nullable=True)
+    metrics_json = db.Column(db.Text, nullable=True)
+    artifact_path = db.Column(db.String(300), nullable=True)
+    code_revision = db.Column(db.String(64), nullable=True)
+    created_at = db.Column(
+        db.DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    __table_args__ = (
+        db.Index(
+            'ix_model_eval_type_stat_created',
+            'evaluation_type', 'stat_type', 'created_at',
+        ),
+    )
 
 
 class BetPostmortem(db.Model):

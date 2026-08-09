@@ -97,6 +97,35 @@ def cli_bootstrap_pick_quality(target, max_logs, train_after):
 
 # ── Model diagnostics ──────────────────────────────────────────────────────────
 
+@click.command('model-diagnostics')
+@click.option('--stat-type', default=None,
+              help='Limit diagnostics to one projection stat type.')
+@click.option('--learning-curves', is_flag=True,
+              help='Fit 25/50/75/100% temporal learning curves (slower).')
+def cli_model_diagnostics(stat_type, learning_curves):
+    """Report train/validation gaps, baselines, and residual slices."""
+    from app.services.ml_model import STAT_TYPES
+    from app.services.model_diagnostics import run_projection_diagnostics
+
+    stat_types = [stat_type] if stat_type else STAT_TYPES
+    if stat_type and stat_type not in STAT_TYPES:
+        raise click.UsageError(f'Unsupported stat type: {stat_type}')
+    for current in stat_types:
+        click.echo(f'=== Model Diagnostics: {current} ===')
+        result = run_projection_diagnostics(current, include_learning_curves=learning_curves)
+        if result.get('error'):
+            click.echo(f"ERROR: {result['error']}")
+            continue
+        click.echo(
+            f"train_mae={result['train_mae']:.4f}  val_mae={result['val_mae']:.4f}  "
+            f"gap={result['generalization_gap']:+.4f}  "
+            f"baseline_improvement={result['baseline_improvement']:.1%}"
+        )
+        status = 'UNDERFIT' if result['likely_underfit'] else (
+            'OVERFIT' if result['likely_overfit'] else 'OK'
+        )
+        click.echo(f'Status: {status}\n')
+
 @click.command('drift_report')
 @click.option('--days', type=int, default=30, show_default=True, help='Rolling window in days.')
 def cli_drift_report(days):
@@ -332,7 +361,7 @@ def cli_model_accuracy(days, stat_type):
          'poisson: player_threes/player_steals/player_blocks).',
 )
 def cli_backtest(stat_type):
-    """Compare calibrated P(over) with a historical replay of the live heuristic."""
+    """Synthetic-line calibration smoke test (not an ROI backtest)."""
     import math as _math
     import time as _time
 
@@ -360,7 +389,8 @@ def cli_backtest(stat_type):
     from app.services.ml_model import load_active_model
     from app.services.pick_quality_model import compute_calibration_metrics
 
-    click.echo(f'=== Distributional Backtest: {stat_type} ===')
+    click.echo(f'=== Synthetic-Line Calibration Backtest: {stat_type} ===')
+    click.echo('NOTE: This command does not measure real-line ROI or CLV.')
     _t0 = _time.perf_counter()
 
     if stat_type in DIST_STAT_TYPES:
@@ -479,6 +509,44 @@ def cli_backtest(stat_type):
     db.session.commit()
 
     click.echo(f"\nVerdict: {verdict}  (gate: ECE <= 0.03 and beats incumbent)")
+
+
+@click.command('rolling-backtest')
+@click.option('--stat-type', required=True,
+              help='One supported NBA player-prop market.')
+@click.option('--date-from', 'date_from', required=True, type=click.DateTime(formats=['%Y-%m-%d']))
+@click.option('--date-to', 'date_to', required=True, type=click.DateTime(formats=['%Y-%m-%d']))
+@click.option('--edge-threshold', default=0.03, show_default=True, type=float)
+@click.option('--output', type=click.Path(dir_okay=False), default=None,
+              help='Optional additional JSON report path.')
+def cli_rolling_backtest(stat_type, date_from, date_to, edge_threshold, output):
+    """Run an expanding-window backtest against real player-prop quotes."""
+    import json
+    from app.services.rolling_backtest import run_rolling_backtest
+
+    if date_from.date() > date_to.date():
+        raise click.UsageError('--date-from must be on or before --date-to')
+    if edge_threshold < 0 or edge_threshold >= 1:
+        raise click.UsageError('--edge-threshold must be in [0, 1)')
+    click.echo(f'=== Rolling Real-Line Backtest: {stat_type} ===')
+    result = run_rolling_backtest(
+        stat_type, date_from.date(), date_to.date(), edge_threshold,
+    )
+    if result.get('error'):
+        raise click.ClickException(result['error'])
+    selected = result['thresholds'][str(float(edge_threshold))]
+    for label in ('challenger', 'incumbent'):
+        metrics = selected[label]
+        click.echo(
+            f"{label:<10} bets={metrics['bets']} ROI={metrics['flat_roi']:.2%} "
+            f"ECE={metrics['ece']:.4f} CLV={metrics['mean_line_clv']} "
+            f"drawdown={metrics['kelly']['max_drawdown_pct']:.2%}"
+        )
+    click.echo(f"Verdict: {result['verdict']}")
+    if output:
+        with open(output, 'w', encoding='utf-8') as handle:
+            json.dump(result, handle, indent=2, sort_keys=True, default=str)
+        click.echo(f'Report written to {output}')
 
 
 @click.command('model_status')
@@ -769,8 +837,7 @@ def cli_prod_readiness():
         click.echo('VERDICT: PRODUCTION READY')
 
     ml_enabled = os.getenv('USE_ML_PROJECTIONS', 'false').lower() == 'true'
-    m2_enabled = os.getenv('MODEL2_TIME_AWARE_SPLIT', 'false').lower() == 'true'
-    click.echo(f'\n  USE_ML_PROJECTIONS={ml_enabled}  MODEL2_TIME_AWARE_SPLIT={m2_enabled}')
+    click.echo(f'\n  USE_ML_PROJECTIONS={ml_enabled}  MODEL2_SPLIT=three_way_temporal')
 
 
 # ── Pick-context backfill commands ─────────────────────────────────────────────
@@ -1246,6 +1313,7 @@ def register_model_commands(app):
     app.cli.add_command(cli_grade_bets)
     app.cli.add_command(cli_retrain)
     app.cli.add_command(cli_bootstrap_pick_quality)
+    app.cli.add_command(cli_model_diagnostics)
     app.cli.add_command(cli_drift_report)
     app.cli.add_command(cli_model_calibration_report)
     app.cli.add_command(cli_model_accuracy)
@@ -1257,3 +1325,4 @@ def register_model_commands(app):
     app.cli.add_command(cli_backfill_postmortems)
     app.cli.add_command(cli_postmortem_report)
     app.cli.add_command(cli_backtest)
+    app.cli.add_command(cli_rolling_backtest)

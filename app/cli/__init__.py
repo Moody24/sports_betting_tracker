@@ -99,6 +99,7 @@ def register_cli(app):
     from app.cli.hoopr_import import register_hoopr_import_commands
     from app.cli.coordinator_commands import register_coordinator_commands
     from app.cli.odds_import import register_odds_import_commands
+    from app.cli.prop_odds_import import register_prop_odds_import_commands
     from app.cli.scenario_commands import register_scenario_commands
     register_stats_commands(app)
     register_model_commands(app)
@@ -108,6 +109,7 @@ def register_cli(app):
     register_hoopr_import_commands(app)
     register_coordinator_commands(app)
     register_odds_import_commands(app)
+    register_prop_odds_import_commands(app)
     register_scenario_commands(app)
     # Commands registered via add_command() don't get an app context
     # automatically (unlike @app.cli.command()). Wrap each registered
@@ -120,6 +122,11 @@ def register_cli(app):
         return wrapped
 
     for name, cmd in list(app.cli.commands.items()):
+        # Flask-Migrate's group callback owns its context and stores the
+        # migration directory on ``g`` for nested commands. Re-wrapping it
+        # loses that state before ``db upgrade/heads`` executes.
+        if name == 'db':
+            continue
         if callable(getattr(cmd, 'callback', None)):
             c = copy.copy(cmd)
             c.callback = _push_ctx(cmd.callback)

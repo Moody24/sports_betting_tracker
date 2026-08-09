@@ -1169,6 +1169,22 @@ def snapshot_props_odds():
         logger.info("snapshot_props_odds: inserted %d rows", count)
 
 
+def snapshot_event_relative_props():
+    """Capture T-60 decision and T-10 closing quotes when an event is due."""
+    from app.services.game_day_coordinator import todays_games
+    app = _get_app()
+    with app.app_context():
+        if not todays_games():
+            return
+        from app.services.nba_service import snapshot_todays_props
+        decision = snapshot_todays_props(snapshot_kind='decision')
+        closing = snapshot_todays_props(snapshot_kind='close')
+        if decision or closing:
+            logger.info(
+                'snapshot_event_relative_props: decision=%d close=%d', decision, closing,
+            )
+
+
 def prune_cache():
     """Remove expired and espn_* unresolvable rows from PlayerGameLog."""
     app = _get_app()
@@ -1405,6 +1421,13 @@ def init_scheduler(app):
         lambda: _log_job('snapshot_props_odds', snapshot_props_odds),
         CronTrigger(hour='8,10,12,14,16,18,20,22', timezone=APP_TIMEZONE),
         id='snapshot_props_odds',
+        replace_existing=True,
+    )
+
+    scheduler.add_job(
+        lambda: _log_job('snapshot_event_relative_props', snapshot_event_relative_props),
+        CronTrigger(minute='*/5', timezone=APP_TIMEZONE),
+        id='snapshot_event_relative_props',
         replace_existing=True,
     )
 

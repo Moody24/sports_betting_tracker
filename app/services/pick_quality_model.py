@@ -4,7 +4,7 @@ Learns from resolved bet history to predict which picks are likely to
 win. Supports both a global model and user-specific models when enough
 per-user data exists.
 
-Requires 100+ resolved picks before training has enough signal (see MIN_RESOLVED_PICKS).
+Requires 400+ dated resolved picks before training has enough signal.
 """
 
 import glob
@@ -13,6 +13,7 @@ import logging
 import os
 import math
 from datetime import datetime, timezone, date as date_type
+from dataclasses import dataclass
 from typing import Optional
 
 from app import db
@@ -23,7 +24,9 @@ from app.utils import env_float
 logger = logging.getLogger(__name__)
 
 MODEL_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'ml_models')
-MIN_RESOLVED_PICKS = 100
+MIN_RESOLVED_PICKS = 400
+MIN_CALIBRATION_PICKS = 50
+MIN_TEST_PICKS = 50
 
 # Feature keys extracted from PickContext.context_json for training.
 # Entries added later (minutes_volatility, stat_attempts_volatility) will be
@@ -194,33 +197,107 @@ def _build_training_data(user_id: int | None = None, include_bootstrap: bool = F
     return features_list, targets, _dates
 
 
-def _prepare_training_data(features_list, targets, dates) -> tuple:
-    """Returns (X_train, X_val, y_train, y_val, split_method). Pure — no db, no S3."""
+@dataclass(frozen=True)
+class TemporalPickSplit:
+    X_fit: object
+    X_early: object
+    X_calibration: object
+    X_test: object
+    y_fit: object
+    y_early: object
+    y_calibration: object
+    y_test: object
+    metadata: dict
+
+
+def _prepare_training_data(features_list, targets, dates) -> TemporalPickSplit:
+    """Build a mandatory date-boundary fit/early/calibration/test split."""
     import numpy as np
 
+    if not features_list or len(features_list) != len(targets) or len(targets) != len(dates):
+        raise ValueError('Model 2 features, targets, and dates must be non-empty and aligned')
+
     feature_names = list(features_list[0].keys())
-    X = np.array([[f[k] for k in feature_names] for f in features_list])
-    y = np.array(targets)
-
-    use_time_split = os.getenv('MODEL2_TIME_AWARE_SPLIT', 'false').lower() == 'true'
-    split_method = 'time_ordered' if use_time_split else 'stratified_random'
-
-    if use_time_split and dates and any(d is not None for d in dates):
-        order = sorted(range(len(dates)), key=lambda i: (dates[i] is None, dates[i]))
-        X = X[order]
-        y = y[order]
-        split_idx = int(len(X) * 0.7)
-        split_idx = max(1, min(split_idx, len(X) - 1))
-        X_train, X_val = X[:split_idx], X[split_idx:]
-        y_train, y_val = y[:split_idx], y[split_idx:]
-        logger.info("Model 2 time-aware split: %d train / %d val", len(X_train), len(X_val))
-    else:
-        from sklearn.model_selection import train_test_split
-        X_train, X_val, y_train, y_val = train_test_split(
-            X, y, test_size=0.3, stratify=y, random_state=42,
+    valid = [i for i, value in enumerate(dates) if value is not None]
+    excluded_missing_dates = len(dates) - len(valid)
+    if len(valid) < MIN_RESOLVED_PICKS:
+        raise ValueError(
+            f'Insufficient dated Model 2 rows: {len(valid)} (need {MIN_RESOLVED_PICKS})'
         )
 
-    return X_train, X_val, y_train, y_val, split_method
+    valid.sort(key=lambda i: dates[i])
+    unique_dates = sorted({dates[i] for i in valid})
+    if len(unique_dates) < 4:
+        raise ValueError('Model 2 needs at least four unique match dates')
+    train_date_count = max(2, min(int(len(unique_dates) * 0.70), len(unique_dates) - 2))
+    calibration_end_count = max(
+        train_date_count + 1,
+        min(int(len(unique_dates) * 0.85), len(unique_dates) - 1),
+    )
+    train_cutoff = unique_dates[train_date_count - 1]
+    calibration_cutoff = unique_dates[calibration_end_count - 1]
+
+    train_indices = [i for i in valid if dates[i] <= train_cutoff]
+    calibration_indices = [
+        i for i in valid if train_cutoff < dates[i] <= calibration_cutoff
+    ]
+    test_indices = [i for i in valid if dates[i] > calibration_cutoff]
+    early_count = max(1, int(len(train_indices) * 0.10))
+    fit_indices = train_indices[:-early_count]
+    early_indices = train_indices[-early_count:]
+
+    if len(calibration_indices) < MIN_CALIBRATION_PICKS:
+        raise ValueError(
+            f'Insufficient Model 2 calibration rows: {len(calibration_indices)} '
+            f'(need {MIN_CALIBRATION_PICKS})'
+        )
+    if len(test_indices) < MIN_TEST_PICKS:
+        raise ValueError(
+            f'Insufficient Model 2 test rows: {len(test_indices)} (need {MIN_TEST_PICKS})'
+        )
+    if not fit_indices or not early_indices:
+        raise ValueError('Insufficient Model 2 rows for fit and early stopping')
+
+    def _classes(indices):
+        return {int(targets[i]) for i in indices}
+
+    for name, indices in (
+        ('fit', fit_indices),
+        ('early stopping', early_indices),
+        ('calibration', calibration_indices),
+        ('test', test_indices),
+    ):
+        if _classes(indices) != {0, 1}:
+            raise ValueError(f'Model 2 {name} partition must contain wins and losses')
+
+    X = np.array([[features_list[i][key] for key in feature_names] for i in valid])
+    y = np.array([targets[i] for i in valid])
+    position = {original: pos for pos, original in enumerate(valid)}
+
+    def _take(values, indices):
+        return values[[position[i] for i in indices]]
+
+    metadata = {
+        'split_method': 'three_way_date_cutoff',
+        'train_cutoff_date': train_cutoff.isoformat(),
+        'calibration_cutoff_date': calibration_cutoff.isoformat(),
+        'fit_samples': len(fit_indices),
+        'early_stopping_samples': len(early_indices),
+        'calibration_samples': len(calibration_indices),
+        'test_samples': len(test_indices),
+        'excluded_missing_dates': excluded_missing_dates,
+    }
+    return TemporalPickSplit(
+        X_fit=_take(X, fit_indices),
+        X_early=_take(X, early_indices),
+        X_calibration=_take(X, calibration_indices),
+        X_test=_take(X, test_indices),
+        y_fit=_take(y, fit_indices),
+        y_early=_take(y, early_indices),
+        y_calibration=_take(y, calibration_indices),
+        y_test=_take(y, test_indices),
+        metadata=metadata,
+    )
 
 
 def _compute_class_weights(y_train) -> float:
@@ -251,12 +328,13 @@ def train_pick_quality_model(user_id: int | None = None) -> dict:
         }
 
     feature_names = list(features_list[0].keys())
-    X_train, X_val, y_train, y_val, split_method = _prepare_training_data(
-        features_list, targets, dates,
-    )
+    try:
+        split = _prepare_training_data(features_list, targets, dates)
+    except ValueError as exc:
+        return {'error': str(exc), 'resolved_picks': len(features_list), 'user_id': user_id}
 
     # Handle class imbalance
-    scale_pos = _compute_class_weights(y_train)
+    scale_pos = _compute_class_weights(split.y_fit)
 
     model = XGBClassifier(
         n_estimators=150,
@@ -272,34 +350,45 @@ def train_pick_quality_model(user_id: int | None = None) -> dict:
     )
 
     model.fit(
-        X_train, y_train,
-        eval_set=[(X_val, y_val)],
+        split.X_fit, split.y_fit,
+        eval_set=[(split.X_early, split.y_early)],
         verbose=False,
     )
 
-    # Calibrate with isotonic regression on the validation set (graceful fallback)
+    # Calibration is isolated from both early stopping and final evaluation.
     calibration_method = 'none'
     final_model = model
     try:
         from sklearn.calibration import CalibratedClassifierCV
         # Isotonic regression overfits with small calibration sets (scikit-learn docs).
         # Use sigmoid (Platt scaling) unless we have a large enough calibration set.
-        # cv='prefit': calibration uses the same data as training — monitor for overfit if cal set < 200 samples
-        method = 'isotonic' if len(X_val) >= 1000 else 'sigmoid'
+        # cv='prefit' keeps calibration on its dedicated temporal partition.
+        method = 'isotonic' if len(split.X_calibration) >= 1000 else 'sigmoid'
         calibrated = CalibratedClassifierCV(model, method=method, cv='prefit')
-        calibrated.fit(X_val, y_val)
+        calibrated.fit(split.X_calibration, split.y_calibration)
         final_model = calibrated
         calibration_method = method
     except Exception as exc:
-        logger.warning("Calibration failed; using uncalibrated model: %s", exc)
+        logger.error("Calibration failed; refusing to activate Model 2: %s", exc)
+        return {
+            'error': f'Calibration failed: {exc}',
+            'resolved_picks': len(features_list),
+            'user_id': user_id,
+        }
 
     # Evaluate the final model
-    y_pred = final_model.predict(X_val)
-    y_prob = final_model.predict_proba(X_val)[:, 1]
-    accuracy = accuracy_score(y_val, y_pred)
-    logloss = log_loss(y_val, y_prob)
+    y_pred = final_model.predict(split.X_test)
+    y_prob = final_model.predict_proba(split.X_test)[:, 1]
+    accuracy = accuracy_score(split.y_test, y_pred)
+    logloss = log_loss(split.y_test, y_prob)
+    calibration_metrics = compute_calibration_metrics(
+        [(float(prob), int(target)) for prob, target in zip(y_prob, split.y_test)]
+    )
     val_avg_pred = (sum(float(p) for p in y_prob) / len(y_prob)) if len(y_prob) else 0.5
-    val_win_rate = (sum(float(v) for v in y_val) / len(y_val)) if len(y_val) else 0.5
+    val_win_rate = (
+        sum(float(v) for v in split.y_test) / len(split.y_test)
+        if len(split.y_test) else 0.5
+    )
     calibration_bias = round(val_avg_pred - val_win_rate, 4)
 
     # Feature importance from base XGBoost model
@@ -339,16 +428,17 @@ def train_pick_quality_model(user_id: int | None = None) -> dict:
         version=f"{model_name}_{today}",
         file_path=artifact_path,
         training_date=datetime.now(timezone.utc),
-        training_samples=len(X_train),
+        training_samples=len(split.X_fit),
         val_accuracy=round(accuracy, 4),
         is_active=True,
         metadata_json=json.dumps({
             'feature_names': feature_names,
-            'val_samples': len(X_val),
+            **split.metadata,
             'logloss': round(logloss, 4),
+            'brier': calibration_metrics['brier'],
+            'ece': calibration_metrics['ece'],
             'top_features': top_features,
             'calibration_method': calibration_method,
-            'split_method': split_method,
             'calibration_bias': calibration_bias,
             'val_avg_pred': round(val_avg_pred, 4),
             'val_win_rate': round(val_win_rate, 4),
@@ -362,14 +452,18 @@ def train_pick_quality_model(user_id: int | None = None) -> dict:
 
     logger.info(
         "Trained pick quality model: accuracy=%.3f, logloss=%.3f, %d samples",
-        accuracy, logloss, len(X_train),
+        accuracy, logloss, len(split.X_fit),
     )
 
     return {
         'accuracy': round(accuracy, 4),
         'logloss': round(logloss, 4),
-        'train_samples': len(X_train),
-        'val_samples': len(X_val),
+        'train_samples': len(split.X_fit),
+        'early_stopping_samples': len(split.X_early),
+        'calibration_samples': len(split.X_calibration),
+        'test_samples': len(split.X_test),
+        'brier': calibration_metrics['brier'],
+        'ece': calibration_metrics['ece'],
         'top_features': top_features,
         'model_path': artifact_path,
         'user_id': user_id,

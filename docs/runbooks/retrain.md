@@ -1,6 +1,6 @@
 # ML Retrain Runbook — Edge Tracker
 **Stack:** XGBoost · scikit-learn · Local model artifacts (`app/ml_models/*.json`)
-**Last verified:** 2026-06-24
+**Last verified:** 2026-08-09
 **Source configs:** `app/services/ml_model.py`, `app/services/ml_feature_builder.py`
 **Est. total time:** 10–15 min
 
@@ -9,7 +9,8 @@
 ## How Retraining Works
 
 - Models are XGBoost regressors (Model 1: stat projections) and a classifier (Model 2: pick quality)
-- Training data comes from the `player_game_log` table — you need at least 500 rows for meaningful models
+- Projection training prefers the permanent `historical_game_log` store and falls back to `player_game_log` only when that store is empty; at least 500 rows are required
+- Model 2 requires 400 clean, dated resolved picks and uses isolated temporal fit, early-stopping, calibration, and test partitions
 - Artifacts are saved to `app/ml_models/*.json` (gitignored, local-only)
 - The guardrail skips retrain if the active model is < 7 days old OR no new `PlayerGameLog` rows exist since last train
 
@@ -89,6 +90,10 @@ Bias corrections live in `app/services/projection_engine.py`:
 flask evaluate-calibration --days 14
 ```
 Breaks down projection accuracy by stat type over the last N days.
+
+For train/validation gaps, residual slices, and learning curves, use
+`flask model-diagnostics`. For real-line ROI and CLV, follow
+[`ml-validation.md`](ml-validation.md).
 
 ---
 

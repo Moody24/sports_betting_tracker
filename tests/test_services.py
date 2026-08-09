@@ -2790,7 +2790,7 @@ class TestScheduler(BaseTestCase):
                 with patch.object(scheduler_module, '_acquire_scheduler_lock', return_value=True):
                     scheduler_module.init_scheduler(self.app)
         self.assertTrue(fake.started)
-        self.assertEqual(len(fake.jobs), 21)  # +1 Plan B: refresh_scenario_splits
+        self.assertEqual(len(fake.jobs), 22)  # + event-relative prop close capture
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -2929,6 +2929,7 @@ class TestPickQualityModel(BaseTestCase):
 
     def test_train_pick_quality_model_success(self):
         from app.services import pick_quality_model
+        from app.services.pick_quality_model import TemporalPickSplit
 
         class _SliceableProba:
             def __getitem__(self, item):
@@ -2959,11 +2960,19 @@ class TestPickQualityModel(BaseTestCase):
             accuracy_score=lambda y_true, y_pred: 0.5,
             log_loss=lambda y_true, y_prob: 0.7,
         )
-        fake_model_selection = SimpleNamespace(
-            train_test_split=lambda X, y, test_size, stratify, random_state: (
-                X[:2], X[2:], y[:2], y[2:],
-            )
-        )
+
+        class _FakeCalibrated:
+            def __init__(self, model, **_kwargs):
+                self.model = model
+
+            def fit(self, _x, _y):
+                return self
+
+            def predict(self, x):
+                return self.model.predict(x)
+
+            def predict_proba(self, x):
+                return self.model.predict_proba(x)
 
         features = [
             {'projected_edge': 1.0, 'player_trend': 1},
@@ -2972,6 +2981,18 @@ class TestPickQualityModel(BaseTestCase):
             {'projected_edge': 0.1, 'player_trend': 0},
         ]
         targets = [1, 0, 1, 0]
+        split = TemporalPickSplit(
+            X_fit=features[:2], X_early=features[2:],
+            X_calibration=features[:2], X_test=features[2:],
+            y_fit=targets[:2], y_early=targets[2:],
+            y_calibration=targets[:2], y_test=targets[2:],
+            metadata={
+                'split_method': 'three_way_date_cutoff',
+                'fit_samples': 2, 'early_stopping_samples': 2,
+                'calibration_samples': 2, 'test_samples': 2,
+                'excluded_missing_dates': 0,
+            },
+        )
 
         with self.app.app_context():
             # Cover "deactivate previous active model" branch.
@@ -2996,12 +3017,13 @@ class TestPickQualityModel(BaseTestCase):
                 'xgboost': fake_xgboost,
                 'numpy': fake_np,
                 'sklearn.metrics': fake_metrics,
-                'sklearn.model_selection': fake_model_selection,
+                'sklearn.calibration': SimpleNamespace(CalibratedClassifierCV=_FakeCalibrated),
             }):
                 with patch.object(pick_quality_model, '_build_training_data', return_value=(features, targets, [None] * len(targets))):
-                    with patch('app.services.pick_quality_model.persist_model_artifact', return_value='s3://bucket/model.json'):
-                        with patch.object(db.engine, 'dispose'):
-                            result = pick_quality_model.train_pick_quality_model()
+                    with patch.object(pick_quality_model, '_prepare_training_data', return_value=split):
+                        with patch('app.services.pick_quality_model.persist_model_artifact', return_value='s3://bucket/model.json'):
+                            with patch.object(db.engine, 'dispose'):
+                                result = pick_quality_model.train_pick_quality_model()
 
             self.assertIn('accuracy', result)
             self.assertEqual(result['model_path'], 's3://bucket/model.json')
@@ -3713,9 +3735,9 @@ class TestValueDetectorModel2Integration(BaseTestCase):
 class TestPickQualityModelCalibration(BaseTestCase):
     """Tests for calibration, cold-start threshold, and local fallback."""
 
-    def test_min_resolved_picks_is_100(self):
+    def test_min_resolved_picks_is_400(self):
         from app.services import pick_quality_model
-        self.assertEqual(pick_quality_model.MIN_RESOLVED_PICKS, 100)
+        self.assertEqual(pick_quality_model.MIN_RESOLVED_PICKS, 400)
 
     def test_find_local_model_fallback_no_files(self):
         """Returns None when no local model files exist."""
@@ -4624,26 +4646,34 @@ class TestPrepareTrainingData(BaseTestCase):
         return (
             [{'projected_stat': float(i), 'prop_line': float(i % 5)} for i in range(n)],
             [i % 2 for i in range(n)],
-            [None] * n,
+            [datetime(2024, 1, 1, tzinfo=timezone.utc) + timedelta(days=i) for i in range(n)],
         )
 
     def test_return_shape_correct(self):
         from app.services.pick_quality_model import _prepare_training_data
-        features_list, targets, dates = self._rows(50)
-        X_train, X_val, y_train, y_val, split_method = _prepare_training_data(
-            features_list, targets, dates,
-        )
-        self.assertEqual(len(X_train) + len(X_val), 50)
-        self.assertEqual(len(y_train) + len(y_val), 50)
+        features_list, targets, dates = self._rows(420)
+        split = _prepare_training_data(features_list, targets, dates)
+        total = sum(len(values) for values in (
+            split.X_fit, split.X_early, split.X_calibration, split.X_test,
+        ))
+        self.assertEqual(total, 420)
+        self.assertEqual(split.metadata['split_method'], 'three_way_date_cutoff')
 
     def test_x_y_row_counts_match(self):
         from app.services.pick_quality_model import _prepare_training_data
-        features_list, targets, dates = self._rows(40)
-        X_train, X_val, y_train, y_val, _ = _prepare_training_data(
-            features_list, targets, dates,
-        )
-        self.assertEqual(len(X_train), len(y_train))
-        self.assertEqual(len(X_val), len(y_val))
+        features_list, targets, dates = self._rows(420)
+        split = _prepare_training_data(features_list, targets, dates)
+        self.assertEqual(len(split.X_fit), len(split.y_fit))
+        self.assertEqual(len(split.X_early), len(split.y_early))
+        self.assertEqual(len(split.X_calibration), len(split.y_calibration))
+        self.assertEqual(len(split.X_test), len(split.y_test))
+
+    def test_missing_dates_never_fall_back_to_random_split(self):
+        from app.services.pick_quality_model import _prepare_training_data
+        features_list, targets, dates = self._rows(420)
+        dates = [None] * len(dates)
+        with self.assertRaisesRegex(ValueError, 'Insufficient dated'):
+            _prepare_training_data(features_list, targets, dates)
 
 
 class TestComputeClassWeights(BaseTestCase):

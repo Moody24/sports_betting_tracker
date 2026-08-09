@@ -417,6 +417,10 @@ def train_model(stat_type: str) -> dict:
     # Evaluate
     y_pred = model.predict(X_val)
     mae = mean_absolute_error(y_val, y_pred)
+    from app.services.model_diagnostics import regression_summary
+    diagnostic_metrics = regression_summary(
+        y_train, model.predict(X_train), y_val, y_pred,
+    )
 
     # Save model
     _ensure_model_dir()
@@ -458,6 +462,7 @@ def train_model(stat_type: str) -> dict:
             'cutoff_date': cutoff_date.isoformat() if cutoff_date else None,
             'cv_mean_mae': round(cv_mean_mae, 3),
             'cv_std_mae': round(cv_std_mae, 3),
+            'diagnostics': diagnostic_metrics,
             'training_objective': xgb_params.get('objective', 'reg:squarederror'),
             'recency_weighted': bool(weights_np is not None),
             'recency_boost': recency_boost,
@@ -476,6 +481,8 @@ def train_model(stat_type: str) -> dict:
         'mae': round(mae, 3),
         'train_samples': len(X_train),
         'val_samples': len(X_val),
+        'train_mae': diagnostic_metrics['train_mae'],
+        'likely_underfit': diagnostic_metrics['likely_underfit'],
         'model_path': artifact_path,
     }
 

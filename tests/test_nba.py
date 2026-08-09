@@ -416,6 +416,29 @@ class TestNBAService(unittest.TestCase):
 
     @patch.dict(os.environ, {"ODDS_API_KEY": "test-key"})
     @patch("app.services.nba_service.requests.get")
+    def test_fetch_player_props_preserves_book_specific_lines(self, mock_get):
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status.return_value = None
+        mock_resp.json.return_value = {"bookmakers": [
+            {"key": "fanduel", "markets": [{"key": "player_points", "outcomes": [
+                {"description": "LeBron James", "name": "Over", "price": -110, "point": 25.5},
+                {"description": "LeBron James", "name": "Under", "price": -110, "point": 25.5},
+            ]}]},
+            {"key": "draftkings", "markets": [{"key": "player_points", "outcomes": [
+                {"description": "LeBron James", "name": "Over", "price": 105, "point": 26.5},
+                {"description": "LeBron James", "name": "Under", "price": -125, "point": 26.5},
+            ]}]},
+        ]}
+        mock_get.return_value = mock_resp
+
+        prop = nba_service.fetch_player_props_for_event('event123')['player_points'][0]
+        self.assertEqual(prop['books']['fanduel']['line'], 25.5)
+        self.assertEqual(prop['books']['draftkings']['line'], 26.5)
+        self.assertEqual(prop['line'], 25.5)
+        self.assertEqual(prop['best_over_book'], 'fanduel')
+
+    @patch.dict(os.environ, {"ODDS_API_KEY": "test-key"})
+    @patch("app.services.nba_service.requests.get")
     def test_fetch_player_props_skips_no_line(self, mock_get):
         mock_resp = MagicMock()
         mock_resp.raise_for_status.return_value = None

@@ -375,6 +375,15 @@ def train_distributional_model(stat_type: str) -> dict:
     val_preds_rectified = [rectify_quantiles(row.tolist()) for row in val_preds_raw]
     val_medians = [median_from_quantiles(QUANTILE_ALPHAS, q) for q in val_preds_rectified]
     val_mae = float(np.mean(np.abs(np.array(val_medians) - y_calib)))
+    train_preds_raw = model.predict(X_train)
+    train_medians = [
+        median_from_quantiles(QUANTILE_ALPHAS, rectify_quantiles(row.tolist()))
+        for row in train_preds_raw
+    ]
+    from app.services.model_diagnostics import regression_summary
+    diagnostic_metrics = regression_summary(
+        y_train, train_medians, y_calib, val_medians,
+    )
     calibration_pairs = collect_oof_pairs_quantile(
         list(zip([QUANTILE_ALPHAS] * len(val_preds_rectified), val_preds_rectified, y_calib.tolist())),
     )
@@ -420,6 +429,7 @@ def train_distributional_model(stat_type: str) -> dict:
             'train_cutoff_date': cutoff_dates[0].isoformat() if cutoff_dates[0] else None,
             'calibration_cutoff_date': cutoff_dates[1].isoformat() if cutoff_dates[1] else None,
             'calibrator_model_name': f'dist_calibrator_{stat_type}',
+            'diagnostics': diagnostic_metrics,
         }),
     )
     db.session.add(meta)
@@ -465,6 +475,8 @@ def train_distributional_model(stat_type: str) -> dict:
         'val_mae': round(val_mae, 3),
         'train_samples': len(X_train),
         'val_samples': len(X_calib),
+        'train_mae': diagnostic_metrics['train_mae'],
+        'likely_underfit': diagnostic_metrics['likely_underfit'],
         'model_path': artifact_path,
         'calibrator_fitted': calibrator_fitted,
         'calibration_pairs': len(calibration_pairs),
