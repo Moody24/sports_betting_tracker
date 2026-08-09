@@ -96,18 +96,21 @@
       ('player_assists', 'AST'), ('player_threes', '3PM'),
       ('player_blocks', 'BLK'), ('player_steals', 'STL'),
     ] %}
-    {% for val, label in stat_options %}
-    <a href="{{ url_for('bet.nba_stat_analysis', stat=val, q=search_q) }}"
-       class="btn btn-sm {% if stat_filter == val %}btn-primary{% else %}btn-outline-secondary{% endif %}">
-      {{ label }}
-    </a>
-    {% endfor %}
+    <nav class="sa-stat-filter-group" aria-label="Filter by statistic">
+      {% for val, label in stat_options %}
+      <a href="{{ url_for('bet.nba_stat_analysis', stat=val, q=search_q) }}"
+         class="btn btn-sm {% if stat_filter == val %}btn-primary{% else %}btn-outline-secondary{% endif %}"
+         {% if stat_filter == val %}aria-current="page"{% endif %}>
+        {{ label }}
+      </a>
+      {% endfor %}
+    </nav>
     <form class="ms-auto d-flex gap-2 sa-filter-form" method="get" action="{{ url_for('bet.nba_stat_analysis') }}">
       <input type="hidden" name="stat" value="{{ stat_filter }}">
       <input class="form-control form-control-sm sa-search-input" type="text"
              name="q" value="{{ search_q }}" placeholder="Search player…">
       <button class="btn btn-sm btn-outline-secondary" type="submit" aria-label="Search players">
-        <i class="bi bi-search"></i>
+        {{ icon('search') }}
       </button>
       {% if search_q %}
       <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('bet.nba_stat_analysis', stat=stat_filter) }}">Clear</a>
@@ -116,7 +119,7 @@
     <div class="d-flex align-items-center gap-2">
       <span id="stat-analysis-last-updated" class="small text-secondary">Last updated at --:--</span>
       <button class="btn btn-sm btn-outline-info btn-toolbar-primary" type="button" id="stat-analysis-refresh">
-        <i class="bi bi-arrow-repeat me-1"></i>Refresh
+        {{ icon('arrow-repeat', classes='me-1') }}Refresh
       </button>
     </div>
   </div>
@@ -132,13 +135,13 @@
   </div>
 </div>
 <div id="stat-analysis-error" class="ux-state-error card-soft p-3 mb-4 text-danger text-center" hidden>
-  <p class="mb-2"><i class="bi bi-exclamation-triangle me-1"></i>Unable to refresh stat analysis.</p>
+  <p class="mb-2">{{ icon('exclamation-triangle', classes='me-1') }}Unable to refresh stat analysis.</p>
   <button class="btn btn-sm btn-outline-danger" type="button" id="stat-analysis-refresh-retry">Retry</button>
 </div>
 <div id="stat-analysis-results" class="refresh-content">
 {% if not matchups %}
 <div class="ux-empty-state card-soft p-4 text-center text-secondary mb-4 fade-up fade-up-4">
-  <i class="bi bi-bar-chart-line fs-1 d-block mb-2 ux-empty-icon"></i>
+  {{ icon('bar-chart-line', classes='fs-1 d-block mb-2 ux-empty-icon') }}
   <p class="mb-0">No props available for today.</p>
   <p class="small mt-1 mb-0">Try refreshing closer to tip-off when books post more lines.</p>
 </div>
@@ -371,10 +374,10 @@
     {# ── Parlay buttons ─── #}
     <div class="d-flex gap-2 mt-2">
       <button class="btn btn-sm btn-outline-success flex-fill" id="sp-add-over" type="button">
-        <i class="bi bi-arrow-up me-1"></i>Add Over
+        {{ icon('arrow-up', classes='me-1') }}Add Over
       </button>
       <button class="btn btn-sm btn-outline-danger flex-fill" id="sp-add-under" type="button">
-        <i class="bi bi-arrow-down me-1"></i>Add Under
+        {{ icon('arrow-down', classes='me-1') }}Add Under
       </button>
     </div>
   </div>
@@ -422,7 +425,7 @@ const SA_PROP_TO_COL = PROP_TO_STAT_COL;
       refreshBtn.disabled = isLoading;
       refreshBtn.innerHTML = isLoading
         ? '<span class="spinner-border spinner-border-sm me-1"></span>Refreshing...'
-        : '<i class="bi bi-arrow-repeat me-1"></i>Refresh';
+        : '{{ icon('arrow-repeat', classes='me-1') }}Refresh';
     }
   }
 

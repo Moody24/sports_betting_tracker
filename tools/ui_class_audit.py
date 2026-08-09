@@ -1,4 +1,4 @@
-"""Scan templates for Bootstrap-vocabulary classes + bi-* glyphs in use.
+"""Scan templates for owned framework classes and icon-macro glyphs in use.
 
 Output (stdout, JSON): {"grid": [...], "components": [...],
 "utilities": [...], "icons": [...]} — sorted, deduped. The framework layer
@@ -58,7 +58,7 @@ UTILITY_RE = re.compile(
 # class="..." value but are not CSS classes.
 _JINJA_NOISE = {
     'if', 'else', 'elif', 'endif', 'and', 'or', 'not', 'in', 'is',
-    'for', 'endfor', 'loop', 'none', 'true', 'false',
+    'for', 'endfor', 'loop', 'none', 'true', 'false', 'classes',
 }
 _CLASS_TOKEN = re.compile(r'^[a-zA-Z][a-zA-Z0-9-]*$')
 
@@ -85,11 +85,16 @@ def scan() -> dict:
         text = f.read_text()
         for m in re.finditer(r'class="([^"]*)"', text):
             classes.update(_class_tokens(m.group(1)))
+        for m in re.finditer(r"\bclasses=['\"]([^'\"]*)['\"]", text):
+            classes.update(_class_tokens(m.group(1)))
         # Static glyph names only; a trailing '-' means a dynamic
         # bi-…-{{ var }} name — Task 5's migration grep surfaces those
         # per-template for manual handling.
         icons.update(i for i in re.findall(r'\bbi-([a-z0-9-]+)', text)
                      if not i.endswith('-'))
+        icons.update(re.findall(r"\bicon\(['\"]([a-z0-9-]+)", text))
+        if f.name == '_icons.html':
+            icons.update(re.findall(r'^\s*"([a-z0-9-]+)":', text, re.MULTILINE))
 
     # Classes defined in the CUSTOM section of theme.css are OURS — excluded
     # from every bucket. The framework layer (everything below the marker)

@@ -1,8 +1,11 @@
 import { expect, Page } from '@playwright/test';
 
 export async function registerAndLogin(page: Page): Promise<{ username: string; password: string }> {
-  const stamp = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  const username = `e2e_user_${stamp}`;
+  const randomPart = Math.random().toString(36).slice(2, 8);
+  const timePart = Date.now().toString().slice(-6);
+  // Keep entropy inside the form's 20-character username limit. Putting the
+  // random suffix last caused parallel workers to submit identical truncations.
+  const username = `e2e_${randomPart}_${timePart}`;
   const password = 'password123';
   const email = `${username}@example.com`;
 

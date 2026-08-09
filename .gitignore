@@ -23,6 +23,11 @@ instance/*.bak*
 .coverage
 htmlcov/
 
+# Local JavaScript dependencies and Playwright artifacts
+node_modules/
+playwright-report/
+test-results/
+
 # ML model artifacts — stored on S3 in production, not tracked in git
 app/ml_models/*.json
 app/ml_models/*.pkl

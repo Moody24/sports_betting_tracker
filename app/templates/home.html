@@ -19,14 +19,14 @@
     <div class="home-cta-group">
       {% if current_user.is_authenticated %}
         <a href="{{ url_for('main.dashboard') }}" class="btn btn-primary btn-lg px-4">
-          <i class="bi bi-grid-1x2 me-2"></i>Dashboard
+          {{ icon('grid-1x2', classes='me-2') }}Dashboard
         </a>
         <a href="{{ url_for('bet.nba_today') }}" class="btn btn-outline-light btn-lg px-4">
-          <i class="bi bi-dribbble me-2"></i>NBA Today
+          {{ icon('dribbble', classes='me-2') }}NBA Today
         </a>
       {% else %}
         <a href="{{ url_for('auth.register') }}" class="btn btn-primary btn-lg px-4">
-          <i class="bi bi-person-plus me-2"></i>Get Started Free
+          {{ icon('person-plus', classes='me-2') }}Get Started Free
         </a>
         <a href="{{ url_for('auth.login') }}" class="btn btn-outline-light btn-lg px-4">
           Sign In
@@ -58,32 +58,32 @@
     <p class="text-secondary small text-center mb-3 text-uppercase fw-semibold home-section-kicker">Everything you need</p>
     <div class="home-feature-grid">
       <div class="home-feature-card">
-        <i class="bi bi-graph-up-arrow home-feature-icon"></i>
+        {{ icon('graph-up-arrow', classes='home-feature-icon') }}
         <div class="home-feature-title">Performance Dashboard</div>
         <div class="home-feature-desc">Net P/L, ROI, win rate, and streak tracking with interactive charts.</div>
       </div>
       <div class="home-feature-card">
-        <i class="bi bi-cpu home-feature-icon"></i>
+        {{ icon('cpu', classes='home-feature-icon') }}
         <div class="home-feature-title">ML Projections</div>
         <div class="home-feature-desc">XGBoost models project player stats and surface +EV edges automatically.</div>
       </div>
       <div class="home-feature-card">
-        <i class="bi bi-activity home-feature-icon"></i>
+        {{ icon('activity', classes='home-feature-icon') }}
         <div class="home-feature-title">Live Prop Tracker</div>
         <div class="home-feature-desc">Real-time stat tracking during NBA games with period and clock display.</div>
       </div>
       <div class="home-feature-card">
-        <i class="bi bi-stars home-feature-icon"></i>
+        {{ icon('stars', classes='home-feature-icon') }}
         <div class="home-feature-title">Auto Picks</div>
         <div class="home-feature-desc">Daily top plays and best parlay recommendations with confidence tiers.</div>
       </div>
       <div class="home-feature-card">
-        <i class="bi bi-search home-feature-icon"></i>
+        {{ icon('search', classes='home-feature-icon') }}
         <div class="home-feature-title">Bet Postmortems</div>
         <div class="home-feature-desc">Understand why each bet won or lost with detailed stat breakdowns.</div>
       </div>
       <div class="home-feature-card">
-        <i class="bi bi-download home-feature-icon"></i>
+        {{ icon('download', classes='home-feature-icon') }}
         <div class="home-feature-title">CSV Export</div>
         <div class="home-feature-desc">Export your full bet history for external analysis anytime.</div>
       </div>

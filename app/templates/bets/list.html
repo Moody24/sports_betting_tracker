@@ -10,7 +10,7 @@
 {% if pending_bets %}
 <div class="pending-alert-bar">
   <div class="d-flex align-items-center gap-2">
-    <i class="bi bi-hourglass-split fs-5 pending-alert-icon"></i>
+    {{ icon('hourglass-split', classes='fs-5 pending-alert-icon') }}
     <div>
       <span class="fw-semibold pending-alert-count">{{ pending_bets|length }} pending bet{{ 's' if pending_bets|length != 1 else '' }}</span>
       <span class="d-none d-sm-inline ms-2 pending-alert-note">— auto-grades run at 1 AM ET</span>
@@ -19,7 +19,7 @@
   <form action="{{ url_for('bet.nba_update_results') }}" method="POST" class="d-inline">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <button type="submit" class="btn btn-sm btn-warning text-dark fw-semibold">
-      <i class="bi bi-arrow-repeat me-1"></i>Check Now
+      {{ icon('arrow-repeat', classes='me-1') }}Check Now
     </button>
   </form>
 </div>
@@ -104,8 +104,8 @@
       {% endif %}
     </h3>
     <div class="section-action-row">
-      <a href="{{ url_for('bet.export_bets', **filters) }}" class="btn btn-outline-secondary btn-sm btn-toolbar-secondary"><i class="bi bi-download me-1"></i>CSV</a>
-      <a href="{{ url_for('bet.new_bet') }}" class="btn btn-primary btn-sm"><i class="bi bi-plus-lg me-1"></i>Add Bet</a>
+      <a href="{{ url_for('bet.export_bets', **filters) }}" class="btn btn-outline-secondary btn-sm btn-toolbar-secondary">{{ icon('download', classes='me-1') }}CSV</a>
+      <a href="{{ url_for('bet.new_bet') }}" class="btn btn-primary btn-sm">{{ icon('plus-lg', classes='me-1') }}Add Bet</a>
     </div>
   </div>
 
@@ -133,7 +133,7 @@
                 {% else %}—{% endif %}
               </div>
               <button class="parlay-toggle-btn btn btn-sm btn-outline-secondary" data-parlay-id="{{ b.parlay_id }}" aria-expanded="true" aria-controls="parlay-legs-{{ b.parlay_id }}" aria-label="Collapse parlay legs" type="button">
-                <i class="bi bi-chevron-up toggle-icon"></i>
+                {{ icon('chevron-up', classes='toggle-icon') }}
               </button>
             </div>
           </div>
@@ -279,7 +279,7 @@
           {% if b.notes and not b.notes.startswith('AUTO_BOOTSTRAP_HIDDEN') %}
             {% set _note_clean = b.notes.replace('straight · Auto', 'Auto pick').replace('3leg_parlay · Auto', 'Auto pick').replace('2leg_parlay · Auto', 'Auto pick').replace('straight', '').strip(' ·') %}
             {% if _note_clean %}
-            <p class="bet-note mb-0"><i class="bi bi-chat-left-text me-1 opacity-50"></i>{{ _note_clean }}</p>
+            <p class="bet-note mb-0">{{ icon('chat-left-text', classes='me-1 opacity-50') }}{{ _note_clean }}</p>
             {% endif %}
           {% endif %}
 
@@ -326,17 +326,17 @@
           <div class="meta-actions">
             {% if b.outcome == 'pending' %}
               <div class="dropdown d-inline-block">
-                <button class="btn btn-sm btn-outline-warning dropdown-toggle" data-bs-toggle="dropdown" title="Grade this bet">Grade</button>
+                <button class="btn btn-sm btn-outline-warning dropdown-toggle" data-ui-toggle="dropdown" aria-expanded="false" title="Grade this bet">Grade</button>
                 <ul class="dropdown-menu dropdown-menu-end dropdown-menu-dark">
-                  <li><form action="{{ url_for('bet.grade_bet', bet_id=b.id) }}" method="POST"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit" name="outcome" value="win" class="dropdown-item text-success"><i class="bi bi-check-circle me-2"></i>Win</button></form></li>
-                  <li><form action="{{ url_for('bet.grade_bet', bet_id=b.id) }}" method="POST"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit" name="outcome" value="lose" class="dropdown-item text-danger"><i class="bi bi-x-circle me-2"></i>Loss</button></form></li>
-                  <li><form action="{{ url_for('bet.grade_bet', bet_id=b.id) }}" method="POST"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit" name="outcome" value="push" class="dropdown-item text-warning"><i class="bi bi-dash-circle me-2"></i>Push</button></form></li>
+                  <li><form action="{{ url_for('bet.grade_bet', bet_id=b.id) }}" method="POST"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit" name="outcome" value="win" class="dropdown-item text-success">{{ icon('check-circle', classes='me-2') }}Win</button></form></li>
+                  <li><form action="{{ url_for('bet.grade_bet', bet_id=b.id) }}" method="POST"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit" name="outcome" value="lose" class="dropdown-item text-danger">{{ icon('x-circle', classes='me-2') }}Loss</button></form></li>
+                  <li><form action="{{ url_for('bet.grade_bet', bet_id=b.id) }}" method="POST"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit" name="outcome" value="push" class="dropdown-item text-warning">{{ icon('dash-circle', classes='me-2') }}Push</button></form></li>
                 </ul>
               </div>
             {% endif %}
             <form action="{{ url_for('bet.delete_bet', bet_id=b.id) }}" method="POST" class="d-inline delete-bet-form">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <button type="submit" class="btn btn-sm btn-outline-danger" aria-label="Delete bet {{ b.id }}" title="Delete"><i class="bi bi-trash"></i></button>
+              <button type="submit" class="btn btn-sm btn-outline-danger" aria-label="Delete bet {{ b.id }}" title="Delete">{{ icon('trash') }}</button>
             </form>
           </div>
         </div>
@@ -348,7 +348,7 @@
       {% endif %}
     {% else %}
       <div class="empty-state">
-        <i class="bi bi-journal-x empty-state-icon"></i>
+        {{ icon('journal-x', classes='empty-state-icon') }}
         {% if filters.status or filters.type or filters.q or filters.start_date or filters.end_date %}
           <div class="empty-state-title">No matching bets</div>
           <p class="empty-state-sub">No bets match the current filters. Try adjusting your search criteria.</p>
@@ -356,7 +356,7 @@
         {% else %}
           <div class="empty-state-title">No bets yet</div>
           <p class="empty-state-sub">Start tracking your wagers to see performance analytics and trends.</p>
-          <a href="{{ url_for('bet.new_bet') }}" class="btn btn-primary btn-sm mt-2"><i class="bi bi-plus-lg me-1"></i>Add First Bet</a>
+          <a href="{{ url_for('bet.new_bet') }}" class="btn btn-primary btn-sm mt-2">{{ icon('plus-lg', classes='me-1') }}Add First Bet</a>
         {% endif %}
       </div>
     {% endfor %}

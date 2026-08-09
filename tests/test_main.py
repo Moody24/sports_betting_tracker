@@ -64,7 +64,8 @@ class TestMainRoutes(BaseTestCase):
             db.session.add(make_bet(user_id, outcome="pending"))
             db.session.commit()
         resp = self.client.get("/dashboard")
-        self.assertIn(b"No streak", resp.data)
+        self.assertIn("—".encode(), resp.data)
+        self.assertIn(b"No active streak", resp.data)
 
     def test_dashboard_streak_breaks_on_mixed(self):
         user_id = self.register_and_login()

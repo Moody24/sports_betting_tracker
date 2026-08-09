@@ -1,18 +1,19 @@
 import { defineConfig, devices } from '@playwright/test';
 
-const baseURL = process.env.E2E_BASE_URL || 'http://127.0.0.1:5000';
+const baseURL = process.env.E2E_BASE_URL || 'http://127.0.0.1:5010';
 const runLocalServer = !process.env.E2E_BASE_URL;
 const e2eSecret = process.env.SECRET_KEY || 'e2e-dev-secret';
 const e2eDatabaseUrl = process.env.DATABASE_URL || 'sqlite:////tmp/e2e.sqlite';
 const rateLimitEnabled = process.env.RATELIMIT_ENABLED || 'false';
 const bootstrapCommand = e2eDatabaseUrl.startsWith('sqlite:')
-  ? `SECRET_KEY=${e2eSecret} DATABASE_URL=${e2eDatabaseUrl} RATELIMIT_ENABLED=${rateLimitEnabled} python -c "from app import create_app, db; app = create_app(); ctx = app.app_context(); ctx.push(); db.create_all(); ctx.pop()"`
-  : `SECRET_KEY=${e2eSecret} DATABASE_URL=${e2eDatabaseUrl} RATELIMIT_ENABLED=${rateLimitEnabled} python -c "from app import create_app; from flask_migrate import upgrade; app = create_app();\nwith app.app_context(): upgrade(directory='migrations')"`;
+  ? `SECRET_KEY=${e2eSecret} DATABASE_URL=${e2eDatabaseUrl} RATELIMIT_ENABLED=${rateLimitEnabled} ./.venv/bin/python -c "from app import create_app, db; app = create_app(); ctx = app.app_context(); ctx.push(); db.create_all(); ctx.pop()"`
+  : `SECRET_KEY=${e2eSecret} DATABASE_URL=${e2eDatabaseUrl} RATELIMIT_ENABLED=${rateLimitEnabled} ./.venv/bin/python -c "from app import create_app; from flask_migrate import upgrade; app = create_app();\nwith app.app_context(): upgrade(directory='migrations')"`;
 
-const runServerCommand = `SECRET_KEY=${e2eSecret} DATABASE_URL=${e2eDatabaseUrl} RATELIMIT_ENABLED=${rateLimitEnabled} python run.py`;
+const runServerCommand = `SECRET_KEY=${e2eSecret} DATABASE_URL=${e2eDatabaseUrl} RATELIMIT_ENABLED=${rateLimitEnabled} ./.venv/bin/flask run --host 127.0.0.1 --port 5010`;
 
 export default defineConfig({
   testDir: './tests/e2e',
+  snapshotPathTemplate: '{testDir}/{testFilePath}-snapshots/{arg}-{projectName}{ext}',
   timeout: 60_000,
   fullyParallel: false,
   retries: process.env.CI ? 0 : 0,
@@ -21,7 +22,7 @@ export default defineConfig({
   expect: {
     timeout: 10_000,
     toHaveScreenshot: {
-      maxDiffPixelRatio: 0.02,
+      maxDiffPixelRatio: 0.005,
     },
   },
   use: {

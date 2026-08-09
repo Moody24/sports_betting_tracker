@@ -3,6 +3,8 @@ import { expect, test } from '@playwright/test';
 import { registerAndLogin } from './helpers/auth';
 
 const auditedPaths = [
+  '/dashboard',
+  '/bets',
   '/nba/today',
   '/nba/analysis',
   '/nba/stat-analysis',
@@ -11,12 +13,14 @@ const auditedPaths = [
 
 test.describe('Accessibility Audit', () => {
   for (const path of auditedPaths) {
-    test(`no critical axe issues: ${path}`, async ({ page }) => {
+    test(`no serious or critical axe issues: ${path}`, async ({ page }) => {
       await registerAndLogin(page);
       await page.goto(path);
       const results = await new AxeBuilder({ page }).analyze();
-      const critical = results.violations.filter((v) => v.impact === 'critical');
-      expect(critical, `Critical a11y violations found on ${path}`).toEqual([]);
+      const blocking = results.violations.filter(
+        (violation) => violation.impact === 'critical' || violation.impact === 'serious',
+      );
+      expect(blocking, `Serious or critical a11y violations found on ${path}`).toEqual([]);
     });
   }
 });

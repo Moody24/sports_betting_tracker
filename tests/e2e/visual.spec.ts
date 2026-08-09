@@ -2,23 +2,29 @@ import { expect, test } from '@playwright/test';
 import { registerAndLogin } from './helpers/auth';
 
 const pages = [
-  { path: '/nba/today', selector: '#active-games-section' },
-  { path: '/nba/analysis', selector: '#analysis-kpis' },
-  { path: '/nba/stat-analysis', selector: '#stat-analysis-results-shell' },
-  { path: '/bets/new?current_tab=prop#prop', selector: '#ub-root' },
+  { path: '/dashboard', selector: '.kpi-card', name: 'dashboard' },
+  { path: '/bets', selector: '.bets-list-wrap', name: 'bets' },
+  { path: '/nba/today', selector: '#active-games-section', name: 'nba-today' },
+  { path: '/nba/analysis', selector: '#analysis-kpis', name: 'nba-analysis' },
+  { path: '/nba/stat-analysis', selector: '#stat-analysis-results-shell', name: 'nba-stat-analysis' },
+  { path: '/bets/new?current_tab=prop#prop', selector: '#ub-root', name: 'bet-builder' },
 ];
 
 test.describe('Visual Regression', () => {
-  test('sportsbook core pages remain visually stable', async ({ page }, testInfo) => {
+  test('sportsbook core pages remain visually stable', async ({ page }) => {
     await registerAndLogin(page);
 
     for (const item of pages) {
       await page.goto(item.path);
-      await expect(page.locator(item.selector)).toBeVisible();
-      var name = `${testInfo.project.name}-${item.path.replace(/[/?#=&]/g, '_')}.png`;
-      const shot = await page.screenshot({ fullPage: true });
-      expect(shot.byteLength).toBeGreaterThan(50_000);
-      await testInfo.attach(name, { body: shot, contentType: 'image/png' });
+      await expect(page.locator(item.selector).first()).toBeVisible();
+      await expect(page).toHaveScreenshot(`${item.name}.png`, {
+        fullPage: true,
+        animations: 'disabled',
+        mask: [
+          page.locator('.user-btn'),
+          page.locator('[id$="last-updated"]'),
+        ],
+      });
     }
   });
 });

@@ -74,11 +74,11 @@
     </div>
     <div class="ms-auto d-flex align-items-end gap-2 section-action-row">
       <a href="{{ url_for('bet.new_bet', current_tab='parlay') }}#parlay" class="btn btn-sm btn-outline-info btn-toolbar-secondary" id="parlay-queue-btn">
-        <i class="bi bi-collection me-1"></i>Parlay (<span id="parlay-queue-count">0</span>)
+        {{ icon('collection', classes='me-1') }}Parlay (<span id="parlay-queue-count">0</span>)
       </a>
       <span id="analysis-last-updated" class="small text-secondary">Last updated at --:--</span>
       <button class="btn btn-sm btn-outline-info btn-toolbar-primary" id="btn-refresh">
-        <i class="bi bi-arrow-repeat me-1"></i>Refresh
+        {{ icon('arrow-repeat', classes='me-1') }}Refresh
       </button>
     </div>
   </div>
@@ -92,7 +92,7 @@
 {% if strong_plays %}
 <div class="mb-4 fade-up fade-up-2" id="analysis-strong-section">
   <div class="d-flex align-items-center gap-2 mb-3">
-    <h3 class="h5 mb-0"><i class="bi bi-stars me-2 text-success"></i>Strong Value Plays</h3>
+    <h3 class="h5 mb-0">{{ icon('stars', classes='me-2 text-success') }}Strong Value Plays</h3>
     <span class="tier-strong">{{ strong_plays|length }} plays</span>
   </div>
   <div class="row g-3">
@@ -143,7 +143,7 @@
                   data-home="{{ play.home_team }}"
                   data-away="{{ play.away_team }}"
                   data-date="{{ play.match_date }}">
-            <i class="bi bi-plus-lg me-1"></i>Bet
+            {{ icon('plus-lg', classes='me-1') }}Bet
           </button>
           <button class="btn btn-sm btn-outline-info quick-add-parlay-btn"
                   data-player="{{ play.player }}"
@@ -169,7 +169,7 @@
 {% if value_plays %}
 <div class="card-soft p-3 mb-4 fade-up fade-up-3 analysis-table-shell" id="analysis-table-shell">
   <div class="section-title-row mb-3">
-    <h3 class="h6 mb-0"><i class="bi bi-bullseye me-2"></i>{% if strong_plays %}All Plays{% else %}Value Plays{% endif %}</h3>
+    <h3 class="h6 mb-0">{{ icon('bullseye', classes='me-2') }}{% if strong_plays %}All Plays{% else %}Value Plays{% endif %}</h3>
     <span class="text-secondary small">Sorted by edge (highest first, top 50 shown)</span>
   </div>
 
@@ -182,7 +182,7 @@
     </div>
   </div>
   <div id="analysis-table-error" class="ux-state-error card-soft p-3 text-center text-danger mb-3" hidden>
-    <p class="mb-2"><i class="bi bi-exclamation-triangle me-1"></i>Unable to refresh prop analysis.</p>
+    <p class="mb-2">{{ icon('exclamation-triangle', classes='me-1') }}Unable to refresh prop analysis.</p>
     <button class="btn btn-sm btn-outline-danger" type="button" id="analysis-refresh-retry">Retry</button>
   </div>
 
@@ -277,7 +277,7 @@
 </div>
 {% else %}
 <div class="ux-empty-state card-soft p-4 text-center text-secondary mb-4">
-  <i class="bi bi-graph-up analysis-empty-icon ux-empty-icon"></i>
+  {{ icon('graph-up', classes='analysis-empty-icon ux-empty-icon') }}
   <p class="mt-2 mb-0">No value plays detected yet. Analysis runs when player stat data is available.</p>
   <p class="small mt-1 mb-0">Check back closer to game time or after running the stats refresh.</p>
 </div>
@@ -289,7 +289,7 @@
     <div class="modal-content bg-dark border-secondary-subtle">
       <div class="modal-header border-secondary-subtle">
         <h5 class="modal-title" id="playerDetailTitle">Player Analysis</h5>
-        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close player analysis"></button>
+        <button type="button" class="btn-close btn-close-white" data-ui-dismiss="modal" aria-label="Close player analysis"></button>
       </div>
       <div class="modal-body" id="playerDetailBody">
         <div class="text-center py-4">
@@ -372,7 +372,7 @@ document.addEventListener('DOMContentLoaded', function() {
       btnRefresh.disabled = isLoading;
       btnRefresh.innerHTML = isLoading
         ? '<span class="spinner-border spinner-border-sm me-1"></span>Refreshing...'
-        : '<i class="bi bi-arrow-repeat me-1"></i>Refresh';
+        : '{{ icon('arrow-repeat', classes='me-1') }}Refresh';
     }
   }
 
@@ -416,13 +416,13 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 
   function openPlayerDetail(player, propType, gameId) {
-    const modal = new bootstrap.Modal(document.getElementById('playerDetailModal'));
+    const modal = document.getElementById('playerDetailModal');
 
     document.getElementById('playerDetailTitle').textContent = player + ' — Analysis';
     document.getElementById('playerDetailBody').innerHTML =
       '<div class="text-center py-4"><div class="spinner-border text-info"></div></div>';
 
-    modal.show();
+    window.EdgeUI?.openModal(modal);
 
     fetch(`/nba/player-analysis/${encodeURIComponent(player)}?prop_type=${encodeURIComponent(propType)}&game_id=${encodeURIComponent(gameId)}`)
       .then(r => r.json())
@@ -501,9 +501,9 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 
   function showParlayToast(message) {
-    if (!parlayQueueToastEl || !parlayToastMsg || typeof bootstrap === 'undefined') return;
+    if (!parlayQueueToastEl || !parlayToastMsg || !window.EdgeUI) return;
     parlayToastMsg.textContent = message;
-    bootstrap.Toast.getOrCreateInstance(parlayQueueToastEl, { delay: 2200 }).show();
+    window.EdgeUI.showToast(parlayQueueToastEl, { delay: 2200 });
   }
 
   document.addEventListener('click', function(e) {

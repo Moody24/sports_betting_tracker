@@ -19,7 +19,7 @@
 
     <div class="card-soft mb-3" id="ub-root">
       <div class="bb-form-section">
-        <div class="bb-form-section-label"><i class="bi bi-layout-wtf"></i> Unified Bet Slip <span class="badge text-bg-info ms-1">Primary</span></div>
+        <div class="bb-form-section-label">{{ icon('layout-wtf') }} Unified Bet Slip <span class="badge text-bg-info ms-1">Primary</span></div>
         <div class="small text-secondary mb-2">
           One flow: choose game, tap markets/props, submit once. 1 pick = single, 2+ picks = parlay.
         </div>
@@ -27,7 +27,7 @@
           <div>
             <label class="form-label small mb-1">Game</label>
             <div class="ub-game-select-wrap">
-              <i class="bi bi-controller ub-game-select-icon" aria-hidden="true"></i>
+              {{ icon('controller', classes='ub-game-select-icon') }}
               <select id="ub-game-picker" class="form-select ub-game-select" aria-label="Select game for unified slip">
                 <option value="">Select a game...</option>
               </select>
@@ -35,7 +35,7 @@
             <div id="ub-game-meta" class="form-text">Pick a game to unlock moneyline, total, and props.</div>
             <div class="d-flex align-items-center gap-2 mt-1">
               <button type="button" id="ub-refresh-btn" class="btn btn-outline-secondary btn-sm">
-                <i class="bi bi-arrow-clockwise me-1"></i>Refresh Odds
+                {{ icon('arrow-clockwise', classes='me-1') }}Refresh Odds
               </button>
               <span id="ub-last-updated" class="small text-secondary">Not refreshed yet.</span>
             </div>
@@ -62,12 +62,12 @@
 
           <div>
             <div class="d-flex align-items-center justify-content-between">
-              <div class="bb-form-section-label mb-0"><i class="bi bi-receipt"></i> Slip</div>
+              <div class="bb-form-section-label mb-0">{{ icon('receipt') }} Slip</div>
               <span id="ub-mode-badge" class="badge text-bg-secondary">No picks</span>
             </div>
             <div id="ub-slip-list" class="bb-legs-list">
               <div class="bb-legs-empty">
-                <i class="bi bi-plus-circle bb-legs-empty-icon"></i>
+                {{ icon('plus-circle', classes='bb-legs-empty-icon') }}
                 <p class="mb-0 small mt-2 bb-legs-empty-text">No selections yet.</p>
               </div>
             </div>
@@ -83,7 +83,7 @@
               </div>
               <div class="col-12 d-grid">
                 <button type="button" id="ub-submit-btn" class="btn btn-primary btn-sm">
-                  <i class="bi bi-check-lg me-1"></i>Submit Slip
+                  {{ icon('check-lg', classes='me-1') }}Submit Slip
                 </button>
               </div>
               <div class="col-12 d-grid">
@@ -97,7 +97,7 @@
               <div class="col-12">
                 <div id="ub-rr-section" class="ub-rr-section d-none">
                   <button type="button" id="ub-rr-toggle" class="ub-rr-toggle">
-                    <i class="bi bi-shuffle me-1"></i>Round Robin
+                    {{ icon('shuffle', classes='me-1') }}Round Robin
                   </button>
                   <div id="ub-rr-config" class="ub-rr-config d-none">
                     <label class="form-label small mb-1 mt-2" for="ub-rr-size">Combination size</label>
@@ -118,12 +118,12 @@
   <aside class="bb-aside">
     <div class="bb-ticket" id="ticket-summary">
       <div class="bb-ticket-head">
-        <i class="bi bi-receipt me-2 bb-icon-accent"></i>
+        {{ icon('receipt', classes='me-2 bb-icon-accent') }}
         <span class="bb-ticket-head-title" id="ticket-mode-label">Ticket</span>
       </div>
       <div id="ticket-body" class="bb-ticket-body">
         <div class="bb-ticket-empty">
-          <i class="bi bi-plus-circle-dotted bb-ticket-empty-icon"></i>
+          {{ icon('plus-circle-dotted', classes='bb-ticket-empty-icon') }}
           <p class="bb-ticket-empty-text mt-2 mb-0">Fill in the form to preview your ticket</p>
         </div>
       </div>

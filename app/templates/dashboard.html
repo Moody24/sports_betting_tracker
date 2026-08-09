@@ -11,7 +11,7 @@
     <div class="card-soft kpi-card kpi-card-neutral h-100">
       <p class="kpi-label mb-1">Total Bets</p>
       <p class="kpi-value mb-0">{{ stats.total_bets }}</p>
-      <div class="kpi-trend kpi-trend-neutral"><i class="bi bi-dash"></i> All time</div>
+      <div class="kpi-trend kpi-trend-neutral">{{ icon('dash') }} All time</div>
     </div>
   </div>
   <div class="col-sm-6 col-xl-2 fade-up fade-up-2">
@@ -21,7 +21,7 @@
         {{ '+' if stats.net >= 0 else '' }}${{ '%.2f'|format(stats.net) }}
       </p>
       <div class="kpi-trend {{ 'kpi-trend-up' if stats.net >= 0 else 'kpi-trend-down' }}">
-        <i class="bi bi-arrow-{{ 'up' if stats.net >= 0 else 'down' }}-short"></i>
+        {{ icon('arrow-up' if stats.net >= 0 else 'arrow-down') }}
         {{ 'Profitable' if stats.net >= 0 else 'Negative' }}
       </div>
     </div>
@@ -31,7 +31,7 @@
       <p class="kpi-label mb-1">ROI</p>
       <p class="kpi-value mb-0 {{ 'text-success' if stats.roi >= 0 else 'text-danger' }}">{{ '%.1f'|format(stats.roi) }}%</p>
       <div class="kpi-trend {{ 'kpi-trend-up' if stats.roi >= 0 else 'kpi-trend-down' }}">
-        <i class="bi bi-arrow-{{ 'up' if stats.roi >= 0 else 'down' }}-short"></i>
+        {{ icon('arrow-up' if stats.roi >= 0 else 'arrow-down') }}
         Return on investment
       </div>
       {%- if resolved_bets | length >= 2 %}
@@ -59,7 +59,7 @@
       <p class="kpi-label mb-1">Win %</p>
       <p class="kpi-value mb-0">{{ '%.1f'|format(stats.win_pct) }}%</p>
       <div class="kpi-trend {{ 'kpi-trend-up' if stats.win_pct >= 50 else 'kpi-trend-down' }}">
-        <i class="bi bi-{{ 'trophy' if stats.win_pct >= 50 else 'exclamation-triangle' }}"></i>
+        {{ icon('check-circle' if stats.win_pct >= 50 else 'exclamation-triangle') }}
         {{ 'Above 50%' if stats.win_pct >= 50 else 'Below 50%' }}
       </div>
     </div>
@@ -68,15 +68,15 @@
     <div class="card-soft kpi-card kpi-card-neutral h-100">
       <p class="kpi-label mb-1">Total Wagered</p>
       <p class="kpi-value mb-0">${{ '%.2f'|format(stats.wagered) }}</p>
-      <div class="kpi-trend kpi-trend-neutral"><i class="bi bi-wallet2"></i> Total action</div>
+      <div class="kpi-trend kpi-trend-neutral">{{ icon('wallet2') }} Total action</div>
     </div>
   </div>
   <div class="col-sm-6 col-xl-2 fade-up fade-up-6">
     <div class="card-soft kpi-card kpi-card-neutral h-100">
       <p class="kpi-label mb-1">Current Streak</p>
-      <p class="kpi-value mb-0">{{ stats.current_streak }}</p>
+      <p class="kpi-value mb-0">{{ stats.current_streak if stats.current_streak and stats.current_streak != 'No streak' else '—' }}</p>
       <div class="kpi-trend {{ 'kpi-trend-up' if stats.current_streak and stats.current_streak != 'No streak' else 'kpi-trend-neutral' }}">
-        <i class="bi bi-lightning-charge"></i> {{ 'Active' if stats.current_streak and stats.current_streak != 'No streak' else 'No active streak' }}
+        {{ icon('lightning-charge') }} {{ 'Active' if stats.current_streak and stats.current_streak != 'No streak' else 'No active streak' }}
       </div>
     </div>
   </div>
@@ -101,11 +101,11 @@
 
 <details class="card-soft mb-4 fade-up fade-up-7">
   <summary class="p-3 d-flex justify-content-between align-items-center dash-settings-summary">
-    <span class="small text-secondary"><i class="bi bi-gear me-1"></i>Bet Settings</span>
+    <span class="small text-secondary">{{ icon('gear', classes='me-1') }}Bet Settings</span>
     {% if current_user.unit_size %}
       <span class="small text-secondary">1u = ${{ '%.2f'|format(current_user.unit_size) }}</span>
     {% else %}
-      <span class="small text-secondary opacity-50">Units not set</span>
+      <span class="small text-secondary">Units not set</span>
     {% endif %}
   </summary>
   <div class="px-3 pb-3">
@@ -136,7 +136,7 @@
 <div class="card-soft p-3 mb-4">
   <div class="section-title-row mb-3">
     <div>
-      <h3 class="h6 mb-0"><i class="bi bi-bullseye me-2 text-info"></i>Today's Top Plays</h3>
+      <h3 class="h6 mb-0">{{ icon('bullseye', classes='me-2 text-info') }}Today's Top Plays</h3>
       <p class="text-secondary small mb-0 mt-1">ML-ranked player props with highest edge</p>
     </div>
     <a href="{{ url_for('bet.nba_analysis') }}" class="btn btn-sm btn-outline-info btn-toolbar-primary">View All</a>
@@ -180,7 +180,7 @@
               <input type="hidden" name="confidence_tier" value="{{ play.confidence_tier or 'slight' }}">
               <label class="visually-hidden" for="quick-stake-{{ loop.index }}">Stake amount</label>
               <input id="quick-stake-{{ loop.index }}" type="number" name="stake" placeholder="$25" aria-label="Stake amount" class="form-control form-control-sm tabular-num quick-stake-input" min="1" step="0.01" required>
-              <button type="submit" class="btn btn-sm btn-success px-2" title="Add as bet" aria-label="Add play as bet"><i class="bi bi-plus-lg"></i></button>
+              <button type="submit" class="btn btn-sm btn-success px-2" title="Add as bet" aria-label="Add play as bet">{{ icon('plus-lg') }}</button>
             </form>
           </td>
         </tr>
@@ -194,7 +194,7 @@
 {% if best_parlay %}
 <div class="card-soft p-3 mb-4">
   <div class="section-title-row mb-2">
-    <h3 class="h6 mb-0"><i class="bi bi-stars me-2 text-warning"></i>Best Play Of The Day</h3>
+    <h3 class="h6 mb-0">{{ icon('stars', classes='me-2 text-warning') }}Best Play Of The Day</h3>
     <span class="badge text-bg-warning text-dark">High Confidence</span>
   </div>
   <p class="small text-secondary mb-2">
@@ -217,7 +217,7 @@
     </div>
     {% endif %}
     <button type="submit" class="btn btn-sm btn-warning text-dark fw-semibold">
-      <i class="bi bi-plus-lg me-1"></i>Place Parlay
+      {{ icon('plus-lg', classes='me-1') }}Place Parlay
     </button>
   </form>
   <div class="table-wrap">
@@ -298,4 +298,3 @@
   </div>
 </div>
 {% endblock %}
-

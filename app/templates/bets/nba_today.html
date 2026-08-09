@@ -17,12 +17,12 @@
   <div class="today-toolbar-actions section-action-row">
     <span id="today-last-updated" class="small text-secondary">Last updated at --:--</span>
     <button type="button" class="btn btn-sm btn-outline-info btn-toolbar-primary" id="refresh-active-games">
-      <i class="bi bi-arrow-repeat me-1"></i>Refresh Live Games
+      {{ icon('arrow-repeat', classes='me-1') }}Refresh Live Games
     </button>
     <form action="{{ url_for('bet.nba_update_results') }}" method="POST" class="d-inline">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button type="submit" class="btn btn-sm btn-outline-light btn-toolbar-secondary">
-        <i class="bi bi-arrow-repeat me-1"></i>Update Results
+        {{ icon('arrow-repeat', classes='me-1') }}Update Results
       </button>
     </form>
   </div>
@@ -33,7 +33,7 @@
 ══════════════════════════════════════════════════════════════ #}
 {% if not games and not completed_snaps %}
 <div class="ux-empty-state card-soft p-4 text-center text-secondary mb-4">
-  <i class="bi bi-calendar-x today-empty-icon ux-empty-icon"></i>
+  {{ icon('calendar-x', classes='today-empty-icon ux-empty-icon') }}
   <p class="mt-2 mb-0">No NBA games scheduled today.</p>
   <p class="small mt-1 mb-0">Check back later or use Refresh Live Games.</p>
 </div>
@@ -42,7 +42,7 @@
 <div id="active-games-section" class="loading-shell">
 {% if games %}
 <h2 class="h5 mb-3">
-  <i class="bi bi-broadcast me-2 text-success"></i>Active Games
+  {{ icon('broadcast', classes='me-2 text-success') }}Active Games
   <span class="badge text-bg-success ms-2 today-count-badge">{{ games|length }}</span>
 </h2>
 <div class="row g-3 mb-5 align-items-start refresh-content" id="active-games-content">
@@ -119,7 +119,7 @@
       {% if tracked.get(game.espn_id) %}
         {% set tb = tracked[game.espn_id] %}
         <div class="small text-center py-1 px-2 rounded mb-2 today-tracked-pill">
-          <i class="bi bi-eye"></i>
+          {{ icon('eye') }}
           Tracking <strong>{{ tb.bet_type|capitalize }}</strong>
           {% if tb.over_under_line %} {{ tb.over_under_line }}{% endif %}
           &middot; ${{ '%.2f'|format(tb.bet_amount) }}
@@ -137,7 +137,7 @@
             over_under_line=game.over_under_line,
             game_id=game.espn_id) }}#single"
            class="btn btn-sm btn-outline-success flex-fill">
-          <i class="bi bi-arrow-up me-1"></i>Over {{ game.over_under_line }}
+          {{ icon('arrow-up', classes='me-1') }}Over {{ game.over_under_line }}
         </a>
         <a href="{{ url_for('bet.new_bet',
             team_a=game.away.name,
@@ -147,7 +147,7 @@
             over_under_line=game.over_under_line,
             game_id=game.espn_id) }}#single"
            class="btn btn-sm btn-outline-danger flex-fill">
-          <i class="bi bi-arrow-down me-1"></i>Under {{ game.over_under_line }}
+          {{ icon('arrow-down', classes='me-1') }}Under {{ game.over_under_line }}
         </a>
       </div>
       {% elif not game.over_under_line %}
@@ -158,7 +158,7 @@
             match_date=game.start_time[:10],
             game_id=game.espn_id) }}#single"
            class="btn btn-sm btn-outline-light w-100">
-          <i class="bi bi-plus-lg me-1"></i>Place Bet
+          {{ icon('plus-lg', classes='me-1') }}Place Bet
         </a>
       </div>
       {% endif %}
@@ -166,7 +166,7 @@
       {% set rec = market_recs.get(game.espn_id, {}) if market_recs else {} %}
       {% if rec %}
       <div class="today-model-rec small mb-2 p-2 rounded border border-secondary-subtle">
-        <div class="fw-semibold text-info mb-1"><i class="bi bi-robot me-1"></i>Model Recommendations</div>
+        <div class="fw-semibold text-info mb-1">{{ icon('robot', classes='me-1') }}Model Recommendations</div>
         {% if rec.get('moneyline') %}
           {% set ml_rec = rec.get('moneyline') %}
           <div class="d-flex justify-content-between align-items-center">
@@ -180,7 +180,7 @@
           </div>
           {% if ml_rec.action_reason == 'market_disabled' %}
           <div class="text-warning-emphasis small">
-            <i class="bi bi-shield-exclamation me-1"></i>Temporarily disabled by governance guardrails
+            {{ icon('shield-exclamation', classes='me-1') }}Temporarily disabled by governance guardrails
           </div>
           {% endif %}
         {% endif %}
@@ -197,7 +197,7 @@
           </div>
           {% if t_rec.action_reason == 'market_disabled' %}
           <div class="text-warning-emphasis small">
-            <i class="bi bi-shield-exclamation me-1"></i>Temporarily disabled by governance guardrails
+            {{ icon('shield-exclamation', classes='me-1') }}Temporarily disabled by governance guardrails
           </div>
           {% endif %}
         {% endif %}
@@ -212,7 +212,7 @@
                 data-away="{{ game.away.name }}"
                 data-home="{{ game.home.name }}"
                 data-date="{{ game.start_time[:10] }}">
-          <i class="bi bi-person-lines-fill me-1"></i>Player Props
+          {{ icon('person-lines-fill', classes='me-1') }}Player Props
         </button>
         <div class="props-container mt-2" id="props-{{ game.espn_id }}" hidden>
           <div class="text-center py-3">
@@ -244,7 +244,7 @@
 </div>
 
 <div id="active-games-error" class="ux-state-error card-soft p-3 text-center text-danger mb-4" hidden>
-  <div class="mb-2"><i class="bi bi-exclamation-triangle me-1"></i>Unable to refresh live games.</div>
+  <div class="mb-2">{{ icon('exclamation-triangle', classes='me-1') }}Unable to refresh live games.</div>
   <button class="btn btn-sm btn-outline-danger" type="button" id="retry-active-games">Retry</button>
 </div>
 </div>
@@ -254,7 +254,7 @@
 ══════════════════════════════════════════════════════════════ #}
 {% if completed_snaps %}
 <h2 class="h5 mb-3 text-secondary">
-  <i class="bi bi-archive me-2"></i>Completed Games
+  {{ icon('archive', classes='me-2') }}Completed Games
   <span class="badge text-bg-dark ms-2 today-count-badge">{{ completed_snaps|length }}</span>
   <span class="small fw-normal ms-2 today-muted-note">
     &mdash; odds &amp; props locked at snapshot time
@@ -269,7 +269,7 @@
       <div class="d-flex justify-content-between align-items-center mb-2">
         <span class="badge text-bg-secondary">Final</span>
         <span class="small text-secondary" title="Snapshot time: {{ snap.snapshot_time.strftime('%H:%M UTC') }}">
-          <i class="bi bi-camera me-1"></i>
+          {{ icon('camera', classes='me-1') }}
           Snapped {{ snap.snapshot_time.strftime('%H:%M') }} UTC
         </span>
       </div>
@@ -342,10 +342,12 @@
       <div class="mt-auto">
         <button class="btn btn-sm btn-outline-secondary w-100 collapsed"
                 type="button"
-                data-bs-toggle="collapse"
-                data-bs-target="#snap-props-{{ snap.id }}">
-          <i class="bi bi-lock me-1"></i>Snapshot Props
-          <i class="bi bi-chevron-down ms-1 today-mini-chevron"></i>
+                data-ui-toggle="collapse"
+                data-ui-target="#snap-props-{{ snap.id }}"
+                aria-expanded="false"
+                aria-controls="snap-props-{{ snap.id }}">
+          {{ icon('lock', classes='me-1') }}Snapshot Props
+          {{ icon('chevron-down', classes='ms-1 today-mini-chevron') }}
         </button>
         <div class="collapse mt-2" id="snap-props-{{ snap.id }}">
           <div class="snap-props-scroll">
@@ -379,7 +381,7 @@
       </div>
       {% else %}
       <div class="mt-auto small text-secondary text-center">
-        <i class="bi bi-info-circle me-1"></i>No props were snapshotted for this game.
+        {{ icon('info-circle', classes='me-1') }}No props were snapshotted for this game.
       </div>
       {% endif %}
 
@@ -394,7 +396,7 @@
 ══════════════════════════════════════════════════════════════ #}
 {% if upcoming_games %}
 <h2 class="h5 mb-3 text-secondary">
-  <i class="bi bi-calendar-event me-2"></i>Coming Up Tomorrow
+  {{ icon('calendar-event', classes='me-2') }}Coming Up Tomorrow
   <span class="badge text-bg-dark ms-2 today-count-badge">{{ upcoming_games|length }} game{{ 's' if upcoming_games|length != 1 }}</span>
 </h2>
 <div class="row g-3 align-items-start">
@@ -430,7 +432,7 @@
             over_under_line=game.over_under_line,
             game_id=game.espn_id) }}#single"
            class="btn btn-sm btn-outline-success flex-fill">
-          <i class="bi bi-arrow-up me-1"></i>Over {{ game.over_under_line }}
+          {{ icon('arrow-up', classes='me-1') }}Over {{ game.over_under_line }}
         </a>
         <a href="{{ url_for('bet.new_bet',
             team_a=game.away.name,
@@ -440,7 +442,7 @@
             over_under_line=game.over_under_line,
             game_id=game.espn_id) }}#single"
            class="btn btn-sm btn-outline-danger flex-fill">
-          <i class="bi bi-arrow-down me-1"></i>Under {{ game.over_under_line }}
+          {{ icon('arrow-down', classes='me-1') }}Under {{ game.over_under_line }}
         </a>
         {% else %}
         <a href="{{ url_for('bet.new_bet',
@@ -449,7 +451,7 @@
             match_date=game.match_date,
             game_id=game.espn_id) }}#single"
            class="btn btn-sm btn-outline-light w-100">
-          <i class="bi bi-plus-lg me-1"></i>Place Bet
+          {{ icon('plus-lg', classes='me-1') }}Place Bet
         </a>
         {% endif %}
       </div>
@@ -464,15 +466,15 @@
 ══════════════════════════════════════════════════════════════ #}
 <div id="bet-slip" class="bet-slip d-none">
   <div class="bet-slip-header d-flex justify-content-between align-items-center">
-    <h6 class="mb-0"><i class="bi bi-receipt me-1"></i>Bet Slip <span id="slip-count" class="badge text-bg-info ms-1">0</span></h6>
+    <h6 class="mb-0">{{ icon('receipt', classes='me-1') }}Bet Slip <span id="slip-count" class="badge text-bg-info ms-1">0</span></h6>
     <button class="btn btn-sm btn-outline-secondary border-0" id="slip-toggle-btn" aria-label="Collapse bet slip" aria-expanded="true">
-      <i class="bi bi-chevron-down"></i>
+      {{ icon('chevron-down') }}
     </button>
   </div>
   <div class="bet-slip-body" id="slip-body">
     <div id="slip-legs"></div>
     <div id="slip-empty" class="text-center text-secondary small py-3">
-      <i class="bi bi-hand-index-thumb today-slip-empty-icon"></i>
+      {{ icon('hand-index-thumb', classes='today-slip-empty-icon') }}
       <p class="mb-0 mt-1">Click props above to add them here</p>
     </div>
 
@@ -491,7 +493,7 @@
       {# Bonus bet multiplier #}
       <div class="mb-2">
         <label class="form-label small mb-1 text-secondary">
-          <i class="bi bi-lightning-charge me-1"></i>Bonus Multiplier
+          {{ icon('lightning-charge', classes='me-1') }}Bonus Multiplier
           <span id="slip-bonus-label" class="text-warning ms-1"></span>
         </label>
         <div class="input-group input-group-sm">
@@ -513,10 +515,10 @@
 
       <div class="d-flex gap-2">
         <button class="btn btn-sm btn-outline-danger flex-fill" id="slip-clear">
-          <i class="bi bi-trash3 me-1"></i>Clear
+          {{ icon('trash3', classes='me-1') }}Clear
         </button>
         <button class="btn btn-sm btn-primary flex-fill" id="slip-submit">
-          <i class="bi bi-check-lg me-1"></i>Place Bet
+          {{ icon('check-lg', classes='me-1') }}Place Bet
         </button>
       </div>
     </div>
@@ -551,7 +553,7 @@ document.addEventListener('DOMContentLoaded', function () {
       refreshBtn.disabled = isLoading;
       refreshBtn.innerHTML = isLoading
         ? '<span class="spinner-border spinner-border-sm me-1"></span>Refreshing...'
-        : '<i class="bi bi-arrow-repeat me-1"></i>Refresh Live Games';
+        : '{{ icon('arrow-repeat', classes='me-1') }}Refresh Live Games';
     }
     if (!isLoading && errorEl) errorEl.hidden = true;
   }

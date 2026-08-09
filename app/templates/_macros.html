@@ -7,6 +7,20 @@
    update these macros accordingly.
    ─────────────────────────────────────────────────────────────── #}
 
+{% from "_icons.html" import ICON_MARKUP %}
+
+{# Decorative icon. Interactive controls keep their accessible name in text/aria-label. #}
+{% macro icon(name, size=16, classes='') -%}
+  {%- if name in ICON_MARKUP -%}
+    <svg class="icon{{ ' ' ~ classes if classes else '' }}"
+         width="{{ size }}" height="{{ size }}" viewBox="0 0 16 16"
+         fill="currentColor" aria-hidden="true" focusable="false"
+         xmlns="http://www.w3.org/2000/svg">{{ ICON_MARKUP[name] | safe }}</svg>
+  {%- else -%}
+    <!-- icon:missing {{ name }} -->
+  {%- endif -%}
+{%- endmacro %}
+
 {# ── Outcome badge ─────────────────────────────────────────── #}
 {% macro outcome_badge(outcome) -%}
   {% if outcome == 'win' %}
@@ -90,18 +104,18 @@
 {# ── Recommended side badge ──────────────────────────────── #}
 {% macro side_badge(side, odds=None) -%}
   {% if side == 'over' %}
-    <span class="badge text-bg-success"><i class="bi bi-arrow-up"></i> Over{% if odds %} ({{ '%+d'|format(odds) }}){% endif %}</span>
+    <span class="badge text-bg-success">{{ icon('arrow-up') }} Over{% if odds %} ({{ '%+d'|format(odds) }}){% endif %}</span>
   {% else %}
-    <span class="badge text-bg-danger"><i class="bi bi-arrow-down"></i> Under{% if odds %} ({{ '%+d'|format(odds) }}){% endif %}</span>
+    <span class="badge text-bg-danger">{{ icon('arrow-down') }} Under{% if odds %} ({{ '%+d'|format(odds) }}){% endif %}</span>
   {% endif %}
 {%- endmacro %}
 
 {# ── Side text (no badge) ────────────────────────────────── #}
 {% macro side_text(side) -%}
   {% if side == 'over' %}
-    <span class="text-success"><i class="bi bi-arrow-up"></i> Over</span>
+    <span class="text-success">{{ icon('arrow-up') }} Over</span>
   {% else %}
-    <span class="text-danger"><i class="bi bi-arrow-down"></i> Under</span>
+    <span class="text-danger">{{ icon('arrow-down') }} Under</span>
   {% endif %}
 {%- endmacro %}
 
@@ -156,11 +170,11 @@
 {# ── Confidence icon (shield) ────────────────────────────── #}
 {% macro confidence_icon(confidence_level) -%}
   {% if confidence_level == 'high' %}
-    <i class="bi bi-shield-fill-check text-success" title="High confidence"></i>
+    <span title="High confidence">{{ icon('shield-fill-check', classes='text-success') }}</span>
   {% elif confidence_level == 'medium' %}
-    <i class="bi bi-shield-fill text-warning" title="Medium confidence"></i>
+    <span title="Medium confidence">{{ icon('shield-fill', classes='text-warning') }}</span>
   {% else %}
-    <i class="bi bi-shield text-secondary" title="Low confidence"></i>
+    <span title="Low confidence">{{ icon('shield', classes='text-secondary') }}</span>
   {% endif %}
 {%- endmacro %}
 
