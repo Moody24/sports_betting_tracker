@@ -4041,3 +4041,843 @@ a:hover {
   .d-lg-none { display: none !important; }
 }
 
+/* ══════════════════════════════════════════════════════════════════
+   ▓▓ THE SHEET GRAMMAR LAYER — frozen union contract, 2026-08-10 ▓▓
+
+   Everything ABOVE this banner is the PRE-MIGRATION VOCABULARY. It is
+   retired page by page, not all at once: five page templates and 22
+   visual baselines still depend on `.kpi-card`, `.bet-row-card`, the
+   `bet-chip` family, and the rest of it. This is a strangler fig — the
+   two vocabularies coexist deliberately until every surface has moved,
+   and only then does the old layer get deleted in one selector-
+   preserving refactor. Do not "unify" them early.
+
+   Everything BELOW is the union contract frozen from a capability
+   inventory of all six page templates (see the table under "Frozen
+   class contracts" in docs/superpowers/sheet-migration-ledger.md).
+   That table is authoritative: exactly these class names, no more and
+   no fewer. A page that needs a new structural part must stop and ask
+   the steward, because inventing parts per page is what makes an app
+   feel incoherent.
+
+   The grammar's parts, in document order:
+     sheet head · control bar · column band · rows · grouped rows ·
+     in-row disclosure · the slip · pace axis · signature display ·
+     status · states · pagination · notice · actions
+
+   House rules enforced throughout this section:
+     · Zero border-radius, zero box-shadow. Elevation is the luminance
+       step alone: --bg → --bg-soft → --bg-elev.
+     · No zebra striping. Horizontal hairlines only.
+     · Every data figure is --font-mono + tabular-nums; prose is
+       --font-display. Never mixed inside one number.
+     · Numeric columns right-aligned; text left; a band header shares
+       its column's alignment.
+     · Exactly one full-contrast FIGURE per row (.row-figure.is-lead).
+       .row-lead is the row's identity anchor; everything else is muted.
+     · Positive letter-spacing only on uppercase labels ≤ 11px.
+       Negative tracking at display sizes, 0 at body.
+     · 4px spacing grid. Tighter within a group than between groups;
+       outer padding ≥ inner gaps.
+     · Motion: two durations, on transform/opacity/color only — never
+       `all`, never a layout property. Collapsed by prefers-reduced-motion.
+
+   Contrast, computed in Python against the WORST surface on this dark
+   ground, which is the LIGHTEST one — --bg-elev #262219, the slip:
+     --text-main  #E8E4DA → 12.48:1   --win  #4FB07A → 5.90:1
+     --text-muted #A29B8D →  5.74:1   --loss #E8695C → 4.98:1
+     --text-dim   #968F81 →  4.94:1   --amber #D9A03C → 6.82:1
+     --push       #A29B8D →  5.74:1   --info #8FA3BE → 6.15:1
+   Semantic tints are held at 7% alpha for exactly one reason: --loss
+   text on its own tint measures 4.54:1 at 7% and 4.47:1 at 8%, so 8%
+   is an AA failure. Do not raise it. --text-dim must never sit on
+   --accent-soft (4.09:1) — use --text-muted (4.76:1) or --text-main.
+
+   Server-computed numbers arrive as CSS custom properties, never as
+   utility classes: inline `style` in templates may set custom
+   properties ONLY, enforced by tests/test_template_inline_styles.py.
+   The hooks are documented beside each component.
+══════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* Two durations, one easing. Nothing else animates. */
+  --sheet-dur-fast: 120ms;
+  --sheet-dur:      180ms;
+  --sheet-ease:     cubic-bezier(.2, 0, .2, 1);
+
+  /* Column vocabulary. A stake, a price, an edge and a P/L land in the
+     same place on every surface because the band and the rows read the
+     same --cols. Set it once on the wrapping element. */
+  --cols: 1fr auto;
+
+  /* Signature display geometry. */
+  --pp-w:     2.5rem;
+  --pp-track: 1.25rem;
+}
+
+/* ── Sheet head ────────────────────────────────────────────────────
+   Title left in the display face, dateline right in mono. The dateline
+   carries counts, freshness and staleness — the things you check
+   before you trust the numbers under it. */
+
+.sheet-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  padding: 0 0 0.75rem;
+  border-bottom: 1px solid var(--border-mid);
+}
+
+.sheet-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--type-xl);
+  font-weight: 600;
+  line-height: var(--lh-tight);
+  letter-spacing: -0.02em;
+  color: var(--text-main);
+}
+
+.sheet-dateline {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.6875rem;
+  line-height: var(--lh-tight);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: right;
+  color: var(--text-muted);
+}
+
+/* ── Control bar ───────────────────────────────────────────────────
+   A closed vocabulary, and the closure is the point: an unset filter
+   offers `+`, an active one offers `×` to remove itself, and Clear-N
+   appears only while something is active. Three affordances, no
+   fourth. Suppress the affix with `--chip-affix: ""` where a chip is
+   a static label rather than a toggle. */
+
+.control-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--border-subtle);
+  background: transparent;
+  font-family: var(--font-display);
+  font-size: var(--type-xs);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--lh-tight);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color var(--sheet-dur-fast) var(--sheet-ease);
+}
+
+.chip::after {
+  content: var(--chip-affix, "+");
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+}
+
+.chip:hover { color: var(--text-main); }
+.chip:hover::after { color: var(--text-muted); }
+
+.chip.is-active {
+  background: var(--accent-soft);
+  border-color: var(--border-mid);
+  color: var(--text-main);
+}
+
+.chip.is-active::after {
+  content: var(--chip-affix, "\00d7");
+  color: var(--text-muted);
+}
+
+.chip-clear {
+  padding: 0.25rem 0;
+  margin-inline-start: 0.25rem;
+  border: 0;
+  background: none;
+  font-family: var(--font-display);
+  font-size: var(--type-xs);
+  color: var(--text-muted);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+  cursor: pointer;
+  transition: color var(--sheet-dur-fast) var(--sheet-ease);
+}
+
+.chip-clear:hover { color: var(--text-main); }
+
+/* ── Column band ───────────────────────────────────────────────────
+   The header row. Shares --cols with every .row-line beneath it, so a
+   column cannot drift out of alignment with its own heading. */
+
+.band {
+  display: grid;
+  grid-template-columns: var(--cols);
+  align-items: end;
+  column-gap: 0.75rem;
+  padding: 0.75rem 1rem 0.5rem;
+  border-bottom: 1px solid var(--border-mid);
+}
+
+.band-cell {
+  font-family: var(--font-display);
+  font-size: 0.625rem;
+  font-weight: 500;
+  line-height: var(--lh-tight);
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  text-align: left;
+  color: var(--text-dim);
+}
+
+.band-cell.is-num {
+  font-family: var(--font-mono);
+  text-align: right;
+}
+
+/* ── Rows ──────────────────────────────────────────────────────────
+   Hairline-separated, never boxed, never striped. Hover is a luminance
+   nudge, not a colour. */
+
+.row-line {
+  display: grid;
+  grid-template-columns: var(--cols);
+  align-items: baseline;
+  column-gap: 0.75rem;
+  row-gap: 0.25rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.row-line:hover { background: var(--bg-soft); }
+
+.row-lead {
+  font-family: var(--font-display);
+  font-size: var(--type-sm);
+  font-weight: 500;
+  line-height: var(--lh-tight);
+  color: var(--text-main);
+}
+
+.row-sub {
+  font-family: var(--font-display);
+  font-size: var(--type-xs);
+  line-height: var(--lh-tight);
+  color: var(--text-dim);
+}
+
+.row-figure {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--type-sm);
+  line-height: var(--lh-tight);
+  text-align: right;
+  color: var(--text-muted);
+}
+
+.row-figure.is-lead {
+  font-size: var(--type-md);
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.row-meta {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.6875rem;
+  line-height: var(--lh-tight);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.25rem;
+}
+
+/* ── Grouped rows ──────────────────────────────────────────────────
+   Parlays. The head IS the toggle; the body is tied back to it by a
+   left hairline rather than by indentation alone. */
+
+.row-group { border-bottom: 1px solid var(--border-mid); }
+
+.row-group-head {
+  display: grid;
+  grid-template-columns: var(--cols);
+  align-items: baseline;
+  column-gap: 0.75rem;
+  width: 100%;
+  padding: 0.75rem 1rem;
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-soft);
+  font-family: var(--font-display);
+  font-size: var(--type-sm);
+  text-align: left;
+  color: var(--text-main);
+  cursor: pointer;
+}
+
+.row-group-head::before {
+  content: "\203a";
+  display: inline-block;
+  margin-inline-end: 0.5rem;
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+  transition: transform var(--sheet-dur-fast) var(--sheet-ease);
+}
+
+.row-group-head[aria-expanded="true"]::before { transform: rotate(90deg); }
+
+.row-group-body {
+  padding-inline-start: 1rem;
+  border-inline-start: 1px solid var(--border-mid);
+  margin-inline-start: 1rem;
+}
+
+.row-group-body .row-line:last-child { border-bottom: 0; }
+
+/* ── In-row disclosure ─────────────────────────────────────────────
+   Level 2 of 2, and there is no level 3. The label carries scent —
+   "why this edge", "3 legs" — never the word "More". */
+
+.row-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0;
+  border: 0;
+  background: none;
+  font-family: var(--font-display);
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  cursor: pointer;
+  list-style: none;
+  transition: color var(--sheet-dur-fast) var(--sheet-ease);
+}
+
+.row-more::-webkit-details-marker { display: none; }
+
+.row-more::after {
+  content: "\203a";
+  font-family: var(--font-mono);
+  transition: transform var(--sheet-dur-fast) var(--sheet-ease);
+}
+
+.row-more:hover { color: var(--text-main); }
+
+[open] > .row-more::after { transform: rotate(90deg); }
+
+.row-detail {
+  padding: 0.75rem 1rem;
+  margin: 0 0 0.75rem;
+  border-inline-start: 1px solid var(--border-mid);
+  background: var(--bg-soft);
+  font-family: var(--font-display);
+  font-size: var(--type-xs);
+  line-height: var(--lh-body);
+  color: var(--text-muted);
+}
+
+/* ── The slip ──────────────────────────────────────────────────────
+   At most one raised surface IN THE DOCUMENT FLOW. Overlays (modal,
+   toast) are a separate layer and do not count against it. Raised
+   means one luminance step, --bg-elev; it does not mean a shadow. */
+
+.slip {
+  padding: 1rem;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-elev);
+}
+
+.slip-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding-bottom: 0.75rem;
+  margin-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border-mid);
+  font-family: var(--font-display);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.slip-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
+  gap: 0.75rem 1rem;
+}
+
+.slip-fact {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+/* Label above, figure below. Addressed structurally so the contract
+   stays at four names instead of six. */
+.slip-fact > :first-child {
+  font-family: var(--font-display);
+  font-size: 0.625rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.slip-fact > :last-child {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--type-md);
+  line-height: var(--lh-tight);
+  color: var(--text-main);
+}
+
+/* ── Pace axis ─────────────────────────────────────────────────────
+   Three facts in one strip: how far along the fill is, where the pace
+   needed to land sits (.pace-mark), and whether that is good news.
+   Custom-property hooks, settable inline:
+     --v  fill width, a percentage       (default 0%)
+     --x  mark position, a percentage    (default 50%)
+   The fill colour must AGREE with the trend verdict; a green fill on a
+   bad trend is a lie the eye believes before it reads the number. */
+
+.pace {
+  position: relative;
+  height: 0.25rem;
+  background: rgba(var(--tint), 0.10);
+}
+
+.pace-fill {
+  display: block;
+  width: var(--v, 0%);
+  max-width: 100%;
+  height: 100%;
+  background: var(--text-dim);
+}
+
+.pace-fill.pace-good,    .pace.pace-good    .pace-fill { background: var(--win); }
+.pace-fill.pace-warn,    .pace.pace-warn    .pace-fill { background: var(--amber); }
+.pace-fill.pace-bad,     .pace.pace-bad     .pace-fill { background: var(--loss); }
+.pace-fill.pace-neutral, .pace.pace-neutral .pace-fill { background: var(--text-dim); }
+
+.pace-mark {
+  position: absolute;
+  top: -0.25rem;
+  bottom: -0.25rem;
+  left: var(--x, 50%);
+  width: 1px;
+  background: var(--text-main);
+}
+
+/* ── Signature display ─────────────────────────────────────────────
+   .pp — the past-performance strip, in the Daily Racing Form sense.
+   One cell per game, oldest at the left, newest at the right, read as
+   a single block inside the row.
+
+   The betting line is not a label here, it is a DATUM: one continuous
+   hairline running the full width of the strip at the middle of the
+   mark track. Each cell's mark is placed above or below that hairline
+   in proportion to how far that game landed over or under it, so the
+   run of marks is itself a sparkline of margins against the line, and
+   the figure underneath gives the number. Result is therefore encoded
+   twice — by colour AND by vertical position — which is what keeps it
+   readable in greyscale and under every form of colour-blindness. No
+   gaps, no boxes, no per-cell borders except the hairline that divides
+   one game from the next.
+
+   Custom-property hooks, settable inline:
+     --o       margin vs the line, normalised to -1..1
+               (+1 = over by the cap, 0 = pushed, -1 = under by the cap)
+     --pp-ink  var(--win) | var(--loss) | var(--push)
+     --pp-w    cell width override, for stat lines with wider figures
+
+   Degradation: cells are dropped from the OLD end, never the new one,
+   at two breakpoints, so the strip never overflows 320px and never
+   drops the most recent game. */
+
+.pp {
+  position: relative;
+  display: flex;
+  width: max-content;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+/* The line itself. One rule, the whole width of the run. */
+.pp::before {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  top: calc(var(--pp-track) / 2);
+  height: 1px;
+  background: var(--border-mid);
+}
+
+.pp-cell {
+  position: relative;
+  flex: 0 0 var(--pp-w);
+  width: var(--pp-w);
+  padding-top: var(--pp-track);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.6875rem;
+  line-height: 1.3;
+  letter-spacing: 0;
+  text-align: center;
+  color: var(--pp-ink, var(--text-muted));
+}
+
+/* Hairline separation only — the divider, never a box. */
+.pp-cell + .pp-cell { border-inline-start: 1px solid var(--border-subtle); }
+
+/* The result mark. Position is the non-chromatic channel. */
+.pp-cell::after {
+  content: "";
+  position: absolute;
+  left: 22%;
+  right: 22%;
+  top: calc(
+    (var(--pp-track) / 2) - (var(--o, 0) * ((var(--pp-track) / 2) - 2px))
+  );
+  height: 2px;
+  transform: translateY(-1px);
+  background: var(--pp-ink, var(--push));
+}
+
+@media (max-width: 26.25rem) {
+  .pp-cell:nth-last-child(n + 6) { display: none; }
+}
+@media (max-width: 22.5rem) {
+  .pp-cell:nth-last-child(n + 5) { display: none; }
+}
+
+/* .fan — the distribution display. A horizontal band carrying the
+   interquartile block and any number of positioned ticks (the line,
+   the median, the projection). Percentages arrive as custom
+   properties so a server-computed simulation can be rendered without a
+   single utility class:
+     --a  IQR start, a percentage   (default 25%)
+     --b  IQR end, a percentage     (default 75%)
+     --x  tick position, per tick   (default 50%)
+     --tick-ink  tick colour override */
+
+.fan {
+  position: relative;
+  height: 1.25rem;
+  background: rgba(var(--tint), 0.05);
+}
+
+.fan::before {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  top: 50%;
+  height: 1px;
+  background: var(--border-subtle);
+}
+
+.fan-iqr {
+  position: absolute;
+  top: 0.25rem;
+  bottom: 0.25rem;
+  left: var(--a, 25%);
+  right: calc(100% - var(--b, 75%));
+  background: rgba(var(--tint), 0.14);
+  border-inline: 1px solid var(--border-mid);
+}
+
+.fan-tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--x, 50%);
+  width: 1px;
+  background: var(--tick-ink, var(--text-main));
+}
+
+/* ── Status ────────────────────────────────────────────────────────
+   Word labels, tinted, non-interactive. Tints are pinned at 7% — see
+   the contrast note in the banner; 8% puts --loss below AA. */
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.125rem 0.375rem;
+  border: 1px solid var(--border-subtle);
+  font-family: var(--font-display);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  line-height: var(--lh-tight);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.tag-win {
+  background: rgba(var(--win-rgb), 0.07);
+  border-color: rgba(var(--win-rgb), 0.30);
+  color: var(--win);
+}
+
+.tag-loss {
+  background: rgba(var(--loss-rgb), 0.07);
+  border-color: rgba(var(--loss-rgb), 0.30);
+  color: var(--loss);
+}
+
+.tag-push {
+  background: rgba(var(--push-rgb), 0.07);
+  border-color: rgba(var(--push-rgb), 0.30);
+  color: var(--push);
+}
+
+.tag-live {
+  background: rgba(var(--amber-rgb), 0.07);
+  border-color: rgba(var(--amber-rgb), 0.30);
+  color: var(--amber);
+}
+
+/* The only animated thing in the grammar, and it earns it: a live game
+   is the one row whose numbers are still moving. */
+.tag-live::before {
+  content: "";
+  width: 0.25rem;
+  height: 0.25rem;
+  background: currentColor;
+  animation: sheet-live-pulse 1.8s var(--sheet-ease) infinite;
+}
+
+@keyframes sheet-live-pulse {
+  50% { opacity: 0.3; }
+}
+
+.tag-pending {
+  background: transparent;
+  border-color: var(--border-subtle);
+  color: var(--text-dim);
+}
+
+/* ── States ────────────────────────────────────────────────────────
+   "No data yet" must not look like "filtered to zero". The two are
+   distinguished by what is around them, not by a second class: a
+   filtered-empty result keeps the control bar's active chips and its
+   Clear-N in view directly above, so the cause is on screen. Keep
+   .state-empty quiet — a loud empty state reads as an error. */
+
+.state-empty {
+  padding: 2rem 1rem;
+  border: 1px solid var(--border-subtle);
+  background: var(--state-empty-bg);
+  font-family: var(--font-display);
+  font-size: var(--type-sm);
+  line-height: var(--lh-body);
+  color: var(--text-muted);
+}
+
+.state-loading {
+  padding: 2rem 1rem;
+  font-family: var(--font-mono);
+  font-size: var(--type-xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  animation: sheet-loading-pulse 1.4s var(--sheet-ease) infinite;
+}
+
+@keyframes sheet-loading-pulse {
+  50% { opacity: 0.45; }
+}
+
+.state-error {
+  padding: 1rem;
+  border: 1px solid var(--state-error-border);
+  background: var(--state-error-bg);
+  font-family: var(--font-display);
+  font-size: var(--type-sm);
+  line-height: var(--lh-body);
+  color: var(--text-main);
+}
+
+/* ── Pagination ────────────────────────────────────────────────────
+   Current page marked by [aria-current="page"] — the attribute already
+   has to be there for screen readers, so it does not also need a
+   class. */
+
+.pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 1rem 0;
+}
+
+.pager-item {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--border-subtle);
+  background: transparent;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--type-xs);
+  line-height: var(--lh-tight);
+  color: var(--text-muted);
+  text-decoration: none;
+  cursor: pointer;
+  transition: color var(--sheet-dur-fast) var(--sheet-ease);
+}
+
+.pager-item:hover { color: var(--text-main); }
+
+.pager-item[aria-current="page"] {
+  border-color: var(--border-mid);
+  background: var(--accent-soft);
+  color: var(--text-main);
+  font-weight: 600;
+}
+
+.pager-item[aria-disabled="true"] {
+  color: var(--text-dim);
+  pointer-events: none;
+}
+
+/* ── Notice ────────────────────────────────────────────────────────
+   Page-level alert bar. Direction comes from --notice-ink, set inline
+   to var(--win) | var(--loss) | var(--amber) | var(--info). */
+
+.notice {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border-subtle);
+  border-inline-start: 2px solid var(--notice-ink, var(--info));
+  background: var(--bg-soft);
+  font-family: var(--font-display);
+  font-size: var(--type-sm);
+  line-height: var(--lh-body);
+  color: var(--text-main);
+}
+
+/* ── Actions ───────────────────────────────────────────────────────
+   Row actions recede until wanted, but a keyboard user must NEVER lose
+   one: they are revealed by :focus-visible and by :focus-within on the
+   row, and they are never hidden at all on a coarse pointer, where
+   there is no hover to reveal them with. */
+
+.act {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid transparent;
+  background: none;
+  font-family: var(--font-display);
+  font-size: var(--type-xs);
+  line-height: var(--lh-tight);
+  color: var(--text-muted);
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    opacity var(--sheet-dur-fast) var(--sheet-ease),
+    color   var(--sheet-dur-fast) var(--sheet-ease);
+}
+
+.act:hover {
+  color: var(--text-main);
+  border-color: var(--border-subtle);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .row-line .act,
+  .row-group-head .act { opacity: 0; }
+
+  .row-line:hover .act,
+  .row-line:focus-within .act,
+  .row-group-head:hover .act,
+  .row-group-head:focus-within .act,
+  .act:focus-visible { opacity: 1; }
+}
+
+.act-menu {
+  position: absolute;
+  z-index: 20;
+  min-width: 10rem;
+  padding: 0.25rem 0;
+  border: 1px solid var(--border-mid);
+  background: var(--bg-elev);
+}
+
+.act-menu .act {
+  width: 100%;
+  justify-content: flex-start;
+  opacity: 1;
+  border: 0;
+}
+
+.act-menu .act:hover { background: var(--bg-soft); }
+
+/* ── Focus ─────────────────────────────────────────────────────────
+   Every interactive part of the grammar, in one place, so a new
+   component cannot be added without one. */
+
+.chip:focus-visible,
+.chip-clear:focus-visible,
+.row-group-head:focus-visible,
+.row-more:focus-visible,
+.pager-item:focus-visible,
+.act:focus-visible {
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: 2px;
+  opacity: 1;
+}
+
+/* ── Reduced motion ────────────────────────────────────────────────
+   The grammar carries no information in motion, so all of it can go. */
+
+@media (prefers-reduced-motion: reduce) {
+  .chip,
+  .chip-clear,
+  .row-group-head::before,
+  .row-more,
+  .row-more::after,
+  .pager-item,
+  .act {
+    transition: none;
+  }
+
+  .tag-live::before,
+  .state-loading {
+    animation: none;
+  }
+}
