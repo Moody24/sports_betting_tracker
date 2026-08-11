@@ -270,3 +270,49 @@ class TestScenarioContextPack(BaseTestCase):
             db.session.commit()
             row = ScenarioContextPack.query.filter_by(sport='nba').first()
             self.assertEqual(json.loads(row.payload)['season'], '2025-26')
+
+
+class TestClosingLineValue(BaseTestCase):
+    """CLV is the sharp bettor's scoreboard, so its sign must never be wrong."""
+
+    def _bet(self, **kw):
+        base = dict(american_odds=-110, bet_type='over', player_name='LeBron James',
+                    prop_type='player_points', prop_line=25.5)
+        base.update(kw)
+        return Bet(**base)
+
+    def test_beating_the_close_is_positive(self):
+        # Took +150 (decimal 2.5), closed +120 (decimal 2.2): 2.5/2.2 - 1.
+        self.assertAlmostEqual(
+            self._bet(american_odds=150, closing_odds=120).clv_pct, 13.64, places=2)
+
+    def test_losing_to_the_close_is_negative(self):
+        self.assertLess(self._bet(american_odds=120, closing_odds=150).clv_pct, 0)
+
+    def test_no_move_is_exactly_zero(self):
+        self.assertEqual(self._bet(american_odds=-110, closing_odds=-110).clv_pct, 0.0)
+
+    def test_unknown_close_is_none_not_zero(self):
+        """'Never captured' and 'did not move' are different facts."""
+        self.assertIsNone(self._bet(closing_odds=None).clv_pct)
+        self.assertIsNotNone(self._bet(closing_odds=-110).clv_pct)
+
+    def test_clv_spans_the_american_odds_discontinuity(self):
+        # -110 -> +110 crosses zero, where American odds are not divisible;
+        # computing in decimal is the whole reason this is not a raw subtraction.
+        self.assertGreater(self._bet(american_odds=110, closing_odds=-110).clv_pct, 0)
+
+    def test_line_move_is_signed_from_the_bettors_side(self):
+        over = self._bet(bet_type='over', prop_line=25.5, closing_line=24.5)
+        under = self._bet(bet_type='under', prop_line=25.5, closing_line=24.5)
+        # The same market move is good for the over and bad for the under.
+        self.assertEqual(over.line_move, 1.0)
+        self.assertEqual(under.line_move, -1.0)
+
+    def test_line_move_uses_the_total_for_non_prop_bets(self):
+        bet = Bet(american_odds=-110, bet_type='over', over_under_line=224.5,
+                  closing_line=222.5)
+        self.assertEqual(bet.line_move, 2.0)
+
+    def test_line_move_unknown_when_close_missing(self):
+        self.assertIsNone(self._bet(closing_line=None).line_move)

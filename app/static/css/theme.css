@@ -4334,9 +4334,11 @@ a:hover {
    would otherwise out-specify a bare `.is-up`, so a positive P/L rendered in
    plain ink and the direction cue silently vanished. */
 .row-figure.is-up,
-.slip-fact > .is-up   { color: var(--win); }
+.slip-fact > .is-up,
+.row-meta .is-up   { color: var(--win); }
 .row-figure.is-down,
-.slip-fact > .is-down { color: var(--loss); }
+.slip-fact > .is-down,
+.row-meta .is-down { color: var(--loss); }
 
 .row-meta {
   font-family: var(--font-mono);

@@ -188,6 +188,15 @@
           {# Below 48rem the stake and odds columns are dropped, so they
              reappear here rather than becoming unreachable. #}
           <span class="is-compact-only">${{ '%.2f'|format(b.bet_amount) }} · {{ b.odds_display }}</span>
+          {# CLV renders only when a close was actually captured. Nothing
+             populates closing_odds yet, so today this is silent on every row
+             — which is correct. An unknown close is not a CLV of zero. #}
+          {% if b.clv_pct is not none %}
+            <span class="{{ 'is-up' if b.clv_pct >= 0 else 'is-down' }}">CLV {{ '+' if b.clv_pct >= 0 else '' }}{{ '%.1f'|format(b.clv_pct) }}%</span>
+          {% endif %}
+          {% if b.line_move is not none and b.line_move != 0 %}
+            <span class="{{ 'is-up' if b.line_move > 0 else 'is-down' }}">Line {{ '+' if b.line_move > 0 else '' }}{{ b.line_move }}</span>
+          {% endif %}
           {% if b.actual_total is not none %}
             {% if b.is_player_prop %}
               Final {{ b.actual_total }} vs {{ b.prop_line }}

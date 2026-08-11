@@ -6,9 +6,21 @@ const runLocalServer = !process.env.E2E_BASE_URL;
 const e2eSecret = E2E_SECRET_KEY;
 const e2eDatabaseUrl = E2E_DATABASE_URL;
 const rateLimitEnabled = E2E_RATELIMIT_ENABLED;
-const bootstrapCommand = e2eDatabaseUrl.startsWith('sqlite:')
-  ? `SECRET_KEY=${e2eSecret} DATABASE_URL=${e2eDatabaseUrl} RATELIMIT_ENABLED=${rateLimitEnabled} ./.venv/bin/python -c "from app import create_app, db; app = create_app(); ctx = app.app_context(); ctx.push(); db.create_all(); ctx.pop()"`
-  : `SECRET_KEY=${e2eSecret} DATABASE_URL=${e2eDatabaseUrl} RATELIMIT_ENABLED=${rateLimitEnabled} ./.venv/bin/python -c "from app import create_app; from flask_migrate import upgrade; app = create_app();\nwith app.app_context(): upgrade(directory='migrations')"`;
+// The sqlite branch used to call `db.create_all()`, which creates missing
+// TABLES but never adds columns to one that already exists. /tmp/e2e.sqlite
+// survives between runs, so the first migration that added a column failed the
+// whole suite with `no such column`, pointing nowhere near the actual change.
+//
+// Dropping the file and replaying the migrations fixes that and buys something
+// else: the migration chain is now exercised on every e2e run, so a migration
+// that drifts from the models is caught here instead of on a real database.
+const sqlitePath = e2eDatabaseUrl.startsWith('sqlite:///')
+  ? e2eDatabaseUrl.replace(/^sqlite:\/\/\//, '')
+  : null;
+const migrateCommand = `SECRET_KEY=${e2eSecret} DATABASE_URL=${e2eDatabaseUrl} RATELIMIT_ENABLED=${rateLimitEnabled} ./.venv/bin/python -c "from app import create_app; from flask_migrate import upgrade; app = create_app();\nwith app.app_context(): upgrade(directory='migrations')"`;
+const bootstrapCommand = sqlitePath
+  ? `rm -f ${sqlitePath} && ${migrateCommand}`
+  : migrateCommand;
 
 const runServerCommand = `SECRET_KEY=${e2eSecret} DATABASE_URL=${e2eDatabaseUrl} RATELIMIT_ENABLED=${rateLimitEnabled} ./.venv/bin/flask run --host 127.0.0.1 --port 5010`;
 

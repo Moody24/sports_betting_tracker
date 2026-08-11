@@ -137,6 +137,17 @@ class Bet(db.Model):
     parlay_id = db.Column(db.String(40), nullable=True, index=True)
     parlay_leg_count = db.Column(db.Integer, nullable=True)
     picked_team = db.Column(db.String(80), nullable=True)
+    # Closing line value. CLV is the sharp bettor's actual scoreboard: over any
+    # meaningful sample it predicts profitability far better than win rate,
+    # because it measures whether you bought a price the market later agreed
+    # was wrong. Two distinct facts, so two columns:
+    #   closing_odds — the PRICE at close, which is what CLV is computed from
+    #   closing_line — the NUMBER at close (a prop or total), i.e. line movement
+    # Both nullable and both unpopulated for now: nothing captures closing
+    # prices yet, so every existing row is legitimately unknown, and the UI
+    # must render absence rather than invent a zero.
+    closing_odds = db.Column(db.Integer, nullable=True)
+    closing_line = db.Column(db.Float, nullable=True)
 
     __table_args__ = (
         Index('ix_bet_user_outcome', 'user_id', 'outcome'),
@@ -237,6 +248,46 @@ class Bet(db.Model):
         if self.over_under_line is not None:
             return round(self.actual_total - self.over_under_line, 1)
         return None
+
+    @property
+    def clv_pct(self) -> Optional[float]:
+        """Closing-line value, as a percentage of the closing price.
+
+        Positive means the price taken was better than the price the market
+        settled on. Computed in decimal odds, which is the only form where the
+        ratio is meaningful — American odds are discontinuous across zero and
+        cannot be divided.
+
+        Returns None when the close is unknown. That is a real state, not a
+        zero: "we never captured the close" and "the line did not move" are
+        different facts and must not render the same way.
+        """
+        if self.closing_odds is None or self.american_odds is None:
+            return None
+        close = american_to_decimal(int(self.closing_odds))
+        if close <= 1.0:
+            return None
+        taken = american_to_decimal(int(self.american_odds))
+        return round((taken / close - 1.0) * 100.0, 2)
+
+    @property
+    def line_move(self) -> Optional[float]:
+        """Movement of the NUMBER, signed so positive is always in your favour.
+
+        Direction matters and is easy to get backwards: on an over, the line
+        falling means you bought a cheaper number and the move is good; on an
+        under, the line rising is good. Reported from the bettor's side so a
+        caller never has to reason about it.
+        """
+        if self.closing_line is None:
+            return None
+        opened = self.prop_line if self.is_player_prop else self.over_under_line
+        if opened is None:
+            return None
+        delta = opened - self.closing_line
+        if self.bet_type == BetType.UNDER.value:
+            delta = -delta
+        return round(delta, 1)
 
     @property
     def is_player_prop(self) -> bool:
