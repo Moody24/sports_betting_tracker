@@ -1,0 +1,712 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Edge Tracker — sheet direction</title>
+
+<style>
+/* ───────────────────────────── type ───────────────────────────── */
+@font-face{
+  font-family:'Bricolage Grotesque';
+  src:url('./fonts/bricolage-grotesque-latin-variable.woff2') format('woff2');
+  font-weight:200 800; font-display:swap;
+}
+@font-face{
+  font-family:'JetBrains Mono';
+  src:url('./fonts/jetbrains-mono-v24-latin-regular.woff2') format('woff2');
+  font-weight:400; font-display:swap;
+}
+@font-face{
+  font-family:'JetBrains Mono';
+  src:url('./fonts/jetbrains-mono-v24-latin-500.woff2') format('woff2');
+  font-weight:500; font-display:swap;
+}
+@font-face{
+  font-family:'JetBrains Mono';
+  src:url('./fonts/jetbrains-mono-v24-latin-600.woff2') format('woff2');
+  font-weight:600; font-display:swap;
+}
+
+/* ───────────────────────── system tokens ──────────────────────── */
+:root{
+  /* chrome — the desk. the darkest step; the sheet sits on top of it. */
+  --chrome:#0E0D0B;
+  --chrome-2:#262219;
+  --chrome-ink:#E8E4DA;
+  --chrome-mut:#A29B8D;
+  --chrome-dim:#968F81;
+
+  /* the data sheet. NBA tips off 7-10:30pm ET, so this is read in the dark:
+     the ground is graphite, not paper. Elevation runs UP the luminance
+     ladder — sheet < band < slip — which is why no surface needs a shadow. */
+  --paper:#171511;
+  --band:#201D18;
+  --slip:#262219;
+  --ink:#E8E4DA;
+  --ink-2:#A29B8D;
+  --ink-3:#968F81;
+  --rule:#2E2C27;
+  --rule-2:#45433D;
+
+  /* semantics — the only chromatic ink on the sheet.
+     All six inks clear 4.5:1 against the WORST surface, which on a dark
+     ground is the LIGHTEST one (--slip): min ratio 4.94:1 (--ink-3). */
+  --up:#4FB07A;
+  --down:#E8695C;
+  --pend:#D9A03C;
+
+  --display:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif;
+  --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+
+  /* two durations, one easing — the whole motion system */
+  --fast:120ms; --slow:180ms; --ease:cubic-bezier(.2,0,.2,1);
+}
+
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0}
+body{
+  background:var(--chrome);
+  color:var(--chrome-ink);
+  font-family:var(--display);
+  font-size:15px;
+  line-height:1.45;
+  -webkit-font-smoothing:antialiased;
+}
+/* Zero radius everywhere. Print has sharp corners; a rounded edge here
+   would be decoration with no referent. */
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer;border-radius:0}
+a{color:inherit;text-decoration:none}
+
+:focus-visible{outline:2px solid currentColor;outline-offset:2px}
+
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+/* ──────────────────────────── masthead ────────────────────────── */
+.masthead{padding:18px 22px 0}
+.nameplate{
+  display:flex;align-items:baseline;justify-content:space-between;
+  gap:16px;flex-wrap:wrap;
+}
+.wordmark{
+  font-family:var(--display);
+  font-weight:800;
+  font-size:26px;
+  letter-spacing:-.022em;      /* negative tracking at display size */
+  font-variation-settings:'opsz' 40;
+  margin:0;
+  text-transform:uppercase;
+}
+.dateline{
+  font-family:var(--mono);font-size:11.5px;font-weight:500;
+  color:var(--chrome-mut);letter-spacing:.06em;text-transform:uppercase;
+  font-variant-numeric:tabular-nums;
+}
+/* the heavy nameplate rule — the one thing a masthead always has */
+.rule-heavy{height:2px;background:var(--chrome-ink);margin:10px 0 0}
+.rule-hair{height:1px;background:var(--chrome-2)}
+
+.sections{
+  display:flex;align-items:center;
+  padding:0;margin:0;list-style:none;
+}
+.sections li{display:flex;align-items:center}
+.sections li + li::before{
+  content:"";width:1px;height:11px;background:var(--chrome-2);margin:0 14px;flex:none;
+}
+.sec{
+  font-size:11.5px;font-weight:500;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--chrome-dim);
+  padding:11px 0;white-space:nowrap;
+  transition:color var(--fast) var(--ease);
+}
+.sec:hover{color:var(--chrome-ink)}
+/* Active state is weight + full contrast ONLY. No pill, no rail, no
+   underline bar, no background — the highlight was the tell. */
+.sec[aria-current="page"]{color:var(--chrome-ink);font-weight:700}
+
+.mast-row{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.cmd{
+  display:flex;align-items:center;gap:8px;
+  font-family:var(--mono);font-size:11px;color:var(--chrome-dim);
+  letter-spacing:.04em;white-space:nowrap;
+}
+.key{
+  border:1px solid var(--chrome-2);padding:2px 5px;font-size:10px;
+  color:var(--chrome-mut);
+  /* the ⌘ glyph lives in the system face, not in either of ours */
+  font-family:system-ui,-apple-system,var(--mono);
+}
+
+/* ───────────────────────────── sheet ──────────────────────────── */
+/* A sheet of paper has an edge. Capping the measure keeps the name
+   column from stranding the numerics on a 1440px desk. */
+.masthead,.desk{max-width:1240px;margin-inline:auto}
+.desk{padding:22px;display:flex;flex-direction:column;gap:22px}
+.sheet{
+  background:var(--paper);
+  color:var(--ink);
+  padding:22px 24px 26px;      /* outer padding ≥ inner gaps */
+}
+.sheet-head{
+  display:flex;align-items:flex-end;justify-content:space-between;
+  gap:16px;flex-wrap:wrap;
+}
+.sheet-title{
+  font-family:var(--display);font-weight:700;font-size:21px;
+  letter-spacing:-.014em;font-variation-settings:'opsz' 28;
+  margin:0;text-transform:uppercase;
+}
+.sheet-sub{
+  font-family:var(--mono);font-size:11px;color:var(--ink-2);
+  letter-spacing:.04em;text-transform:uppercase;
+  font-variant-numeric:tabular-nums;
+}
+
+/* filter chips — square, ink-only, Stripe unset(+)/active(×) semantics */
+.filters{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0 0}
+.chip{
+  font-size:11.5px;letter-spacing:.04em;text-transform:uppercase;font-weight:500;
+  border:1px solid var(--rule-2);color:var(--ink-2);
+  padding:4px 8px;display:inline-flex;align-items:center;gap:6px;
+  background:transparent;
+  transition:border-color var(--fast) var(--ease),color var(--fast) var(--ease),background var(--fast) var(--ease);
+}
+.chip:hover{border-color:var(--ink-2);color:var(--ink)}
+.chip[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:var(--paper)}
+.chip .mk{font-family:var(--mono);opacity:.7}
+.chip-clear{border-style:dashed;color:var(--ink-3)}
+
+/* ────────────────────── the alignment matrix ──────────────────── */
+.board{margin-top:18px}
+
+.ghead,.grow{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) 70px 60px 74px 68px 66px 62px 20px;
+  gap:14px;
+  align-items:baseline;
+}
+.ghead{
+  background:var(--band);
+  padding:6px 10px;
+  margin:0 -10px;
+  border-bottom:1px solid var(--rule-2);
+}
+.ghead span{
+  font-size:10px;font-weight:600;letter-spacing:.11em;text-transform:uppercase;
+  color:var(--ink-2);
+  font-variation-settings:'opsz' 12;   /* ink traps bite hardest down here */
+}
+.r{text-align:right}
+
+.grow{
+  padding:9px 10px;margin:0 -10px;
+  border-bottom:1px solid var(--rule);
+  width:calc(100% + 20px);
+  text-align:left;
+  transition:background var(--fast) var(--ease);
+}
+.grow:hover{background:var(--band)}
+.grow[aria-expanded="true"]{background:var(--band)}
+
+.who{min-width:0}
+.nm{
+  font-weight:600;font-size:14.5px;letter-spacing:-.006em;
+  display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.pr{
+  display:block;font-family:var(--mono);font-size:11.5px;color:var(--ink-2);
+  letter-spacing:.02em;margin-top:1px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.val{font-family:var(--mono);font-size:13px;font-variant-numeric:tabular-nums;font-weight:500}
+.val-lead{font-weight:600;font-size:13.5px}
+.up{color:var(--up)} .down{color:var(--down)} .pend{color:var(--pend)}
+.mut{color:var(--ink-2)}
+
+.caret{
+  font-family:var(--mono);font-size:11px;color:var(--ink-3);
+  transition:transform var(--fast) var(--ease);
+  display:inline-block;text-align:right;
+}
+.grow[aria-expanded="true"] .caret{transform:rotate(90deg)}
+
+/* ─────────────── the one real surface: the slip ───────────────── */
+.slip{
+  background:var(--slip);
+  border:1px solid var(--rule-2);
+  /* No shadow. On a dark ground the slip reads as raised because it is the
+     lightest step on the ladder — a cast shadow would be inventing a light
+     source the rest of the interface does not have. */
+  padding:18px 20px 20px;
+  margin:12px 0 16px;
+}
+.slip-head{
+  display:flex;align-items:baseline;justify-content:space-between;
+  gap:14px;flex-wrap:wrap;
+  border-bottom:1px solid var(--rule);padding-bottom:10px;margin-bottom:14px;
+}
+.slip-title{font-weight:700;font-size:15px;letter-spacing:-.008em;margin:0}
+.slip-tag{
+  font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+  border:1px solid var(--rule-2);color:var(--ink-2);padding:2px 6px;white-space:nowrap;
+}
+
+.readout{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(128px,1fr));
+  gap:16px 22px;margin-bottom:16px;
+}
+.ro-k{
+  font-size:10px;font-weight:600;letter-spacing:.11em;text-transform:uppercase;
+  color:var(--ink-3);display:block;margin-bottom:2px;
+  font-variation-settings:'opsz' 12;
+}
+.ro-v{font-family:var(--mono);font-size:17px;font-weight:600;font-variant-numeric:tabular-nums;display:block;line-height:1.2}
+.ro-n{font-size:11.5px;color:var(--ink-2);display:block;margin-top:1px}
+
+/* the signature display: the outcome scale, set like a speed-figure line.
+   Built from positioned elements rather than a stretched SVG so the
+   labels never distort and the ticks stay 1px at every width. */
+.fan{margin:2px 0 18px}
+.fan-cap{
+  font-size:10px;font-weight:600;letter-spacing:.11em;text-transform:uppercase;
+  color:var(--ink-3);margin-bottom:9px;font-variation-settings:'opsz' 12;
+}
+.fan-plot{position:relative;height:38px;max-width:760px}
+.fan-band{position:absolute;left:0;right:0;top:19px;height:8px;background:var(--band);border:1px solid var(--rule)}
+.fan-iqr{
+  position:absolute;top:15px;height:16px;
+  left:var(--a);width:calc(var(--b) - var(--a));
+  background:var(--rule);border:1px solid var(--rule-2);
+}
+.fan-tick{position:absolute;top:12px;height:22px;width:1px;left:var(--x)}
+.fan-tick.is-proj{background:var(--ink);width:2px}
+.fan-tick.is-line{background:var(--down)}
+.fan-lab{
+  position:absolute;top:-2px;left:var(--x);
+  font-family:var(--mono);font-size:9.5px;font-variant-numeric:tabular-nums;
+  white-space:nowrap;
+}
+.fan-lab.to-left{transform:translateX(-100%);padding-right:5px}
+.fan-lab.to-right{padding-left:5px}
+.fan-lab.is-line{color:var(--down)}
+.fan-lab.is-proj{color:var(--ink);font-weight:600}
+.fan-axis{
+  display:flex;justify-content:space-between;max-width:760px;
+  font-family:var(--mono);font-size:9px;color:var(--ink-3);
+  font-variant-numeric:tabular-nums;margin-top:1px;
+}
+
+/* plain-language layer — jargon carries a uniform dotted affordance */
+abbr[title]{
+  text-decoration:underline dotted var(--ink-3);
+  text-underline-offset:3px;cursor:help;
+}
+.why{
+  border-top:1px solid var(--rule);padding-top:12px;
+  font-size:13px;color:var(--ink-2);line-height:1.55;
+}
+.why b{color:var(--ink);font-weight:600}
+.why ul{margin:8px 0 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:5px}
+/* NOT flex on the li — flex would promote each inline <span> inside the
+   sentence to a flex item and shatter the prose into columns. */
+.why li{position:relative;padding-left:18px}
+.why li::before{
+  content:"—";position:absolute;left:0;top:0;
+  font-family:var(--mono);color:var(--ink-3);
+}
+
+/* ───────────────────── live rows (position log) ───────────────── */
+.subhead{
+  display:flex;align-items:center;gap:10px;
+  margin:22px 0 0;padding-bottom:7px;
+  border-bottom:1px solid var(--rule-2);
+}
+.subhead h3{
+  font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;
+  margin:0;font-variation-settings:'opsz' 12;
+  white-space:nowrap;flex:none;   /* the legend wraps, the label never does */
+}
+.subhead .n{font-family:var(--mono);font-size:11px;color:var(--ink-2)}
+
+.lrow{padding:10px;margin:0 -10px;border-bottom:1px solid var(--rule)}
+.ltop{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) 70px 70px 86px 78px;
+  gap:12px;align-items:baseline;
+}
+/* live telemetry line — every field the definition-of-done requires */
+.tele{
+  display:flex;flex-wrap:wrap;gap:0 14px;align-items:center;
+  margin-top:7px;font-family:var(--mono);font-size:11.5px;color:var(--ink-2);
+  font-variant-numeric:tabular-nums;
+}
+.tele b{color:var(--ink);font-weight:600}
+.tele .sep{color:var(--rule-2)}
+.pace-up{color:var(--up);font-weight:600}
+.pace-dn{color:var(--down);font-weight:600}
+
+/* pace track — flat, ink-on-paper, no gloss.
+   One axis carries three facts: bar = where he is now, solid rule = the
+   line to beat, hollow rule = where the model says he finishes. */
+.track{
+  position:relative;height:6px;background:var(--band);
+  border:1px solid var(--rule);margin-top:10px;max-width:520px;
+}
+.fill{position:absolute;inset:0 auto 0 0;width:var(--now);background:var(--ink-2)}
+.fill.is-up{background:var(--up)}
+.fill.is-dn{background:var(--down)}
+.mark{position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--ink);left:var(--line)}
+.mark-proj{
+  position:absolute;top:-3px;bottom:-3px;width:1px;left:var(--proj);
+  background:var(--ink-3);
+}
+
+.tag{
+  font-family:var(--mono);font-size:10px;letter-spacing:.09em;text-transform:uppercase;
+  padding:2px 6px;border:1px solid currentColor;white-space:nowrap;
+}
+.tag-live{color:var(--pend)}
+.tag-win{color:var(--up)} .tag-loss{color:var(--down)} .tag-push{color:var(--ink-2)}
+
+.foot{
+  max-width:1240px;margin-inline:auto;
+  padding:0 22px 26px;font-family:var(--mono);font-size:10.5px;
+  color:var(--chrome-dim);letter-spacing:.05em;text-transform:uppercase;
+}
+
+/* ──────────────────────────── mobile ──────────────────────────── */
+@media (max-width:860px){
+  .masthead{padding:14px 14px 0}
+  .wordmark{font-size:21px;font-variation-settings:'opsz' 28}
+  .desk{padding:14px;gap:14px}
+  .sheet{padding:16px 14px 18px}
+
+  /* nav scrolls horizontally rather than collapsing behind a hamburger —
+     four sections don't earn a drawer. The nav must be allowed to shrink
+     below its content width or the flex parent pushes the page wide. */
+  .mast-row{min-width:0}
+  .mast-row nav{min-width:0;max-width:100%}
+  .sections{overflow-x:auto;scrollbar-width:none}
+  .sections::-webkit-scrollbar{display:none}
+  .cmd{display:none}
+
+  .ghead{display:none}
+  .grow{grid-template-columns:minmax(0,1fr) 62px 18px;gap:10px}
+  /* only the headline number survives; the rest lives in the slip */
+  .grow .r{display:none}
+  .grow .r[data-keep]{display:block}
+
+  .ltop{grid-template-columns:minmax(0,1fr) 74px;gap:8px}
+  .ltop .r[data-drop]{display:none}
+
+  .readout{grid-template-columns:repeat(auto-fit,minmax(108px,1fr));gap:13px 16px}
+  .ro-v{font-size:15.5px}
+  .slip{padding:15px 14px 16px}
+}
+@media (max-width:360px){
+  .sheet{padding:14px 11px 16px}
+  .grow{grid-template-columns:minmax(0,1fr) 56px 16px;gap:8px}
+  .nm{font-size:13.5px}
+}
+
+@media (prefers-reduced-motion:reduce){
+  *{transition:none!important;animation:none!important}
+}
+</style>
+</head>
+<body>
+
+<!-- ════════════════════ chrome: the desk ════════════════════ -->
+<header class="masthead">
+  <div class="nameplate">
+    <h1 class="wordmark">Edge Tracker</h1>
+    <span class="dateline">Sat 8 Aug 2026 · 7:10p ET</span>
+  </div>
+  <div class="rule-heavy"></div>
+  <div class="mast-row">
+    <nav aria-label="Sections">
+      <ul class="sections">
+        <li><a class="sec" href="#board" aria-current="page">Board</a></li>
+        <li><a class="sec" href="#log">Position Log</a></li>
+        <li><a class="sec" href="#board">Models</a></li>
+        <li><a class="sec" href="#board">Bankroll</a></li>
+      </ul>
+    </nav>
+    <div class="cmd"><span class="key">⌘K</span><span>jump to player or prop</span></div>
+  </div>
+  <div class="rule-hair"></div>
+</header>
+
+<main class="desk">
+
+  <!-- ═══════════════════ sheet 1 — the board ═══════════════════ -->
+  <section class="sheet" id="board" aria-labelledby="board-t">
+    <div class="sheet-head">
+      <h2 class="sheet-title" id="board-t">Tonight's Board</h2>
+      <span class="sheet-sub">14 games · 386 props scanned · prices 41s old</span>
+    </div>
+
+    <div class="filters">
+      <button class="chip" aria-pressed="true">Edge ≥ 2% <span class="mk">×</span></button>
+      <button class="chip" aria-pressed="true">DraftKings <span class="mk">×</span></button>
+      <button class="chip" aria-pressed="false">Points <span class="mk">+</span></button>
+      <button class="chip" aria-pressed="false">Rebounds <span class="mk">+</span></button>
+      <button class="chip" aria-pressed="false">Assists <span class="mk">+</span></button>
+      <button class="chip chip-clear">Clear 2</button>
+    </div>
+
+    <div class="board">
+      <div class="ghead">
+        <span>Player / Prop</span>
+        <span class="r">Model</span>
+        <span class="r">Line</span>
+        <span class="r">Price</span>
+        <span class="r">Fair</span>
+        <span class="r">Edge</span>
+        <span class="r">Stake</span>
+        <span></span>
+      </div>
+
+      <button class="grow" aria-expanded="false">
+        <span class="who"><span class="nm">Shai Gilgeous-Alexander</span><span class="pr">points · over 31.5 · OKC vs DEN</span></span>
+        <span class="r val mut">33.4</span>
+        <span class="r val mut">31.5</span>
+        <span class="r val">−112</span>
+        <span class="r val mut">−134</span>
+        <span class="r val val-lead" data-keep>+5.8%</span>
+        <span class="r val">1.4u</span>
+        <span class="caret">›</span>
+      </button>
+
+      <button class="grow" aria-expanded="true">
+        <span class="who"><span class="nm">Anthony Edwards</span><span class="pr">rebounds · over 5.5 · MIN vs GSW</span></span>
+        <span class="r val mut">7.2</span>
+        <span class="r val mut">5.5</span>
+        <span class="r val">−148</span>
+        <span class="r val mut">−216</span>
+        <span class="r val val-lead" data-keep>+7.1%</span>
+        <span class="r val">1.7u</span>
+        <span class="caret">›</span>
+      </button>
+
+      <!-- expanded: the ONE raised surface on the sheet -->
+      <div class="slip">
+        <div class="slip-head">
+          <h3 class="slip-title">Anthony Edwards — rebounds, over 5.5</h3>
+          <span class="slip-tag">MIN vs GSW · 9:40p ET</span>
+        </div>
+
+        <div class="readout">
+          <div>
+            <span class="ro-k">Model says</span>
+            <span class="ro-v">7 in 10</span>
+            <span class="ro-n">68.4% chance of going over</span>
+          </div>
+          <div>
+            <span class="ro-k"><abbr title="The price with the sportsbook's built-in margin removed — what the odds would be in a fair market.">Fair line</abbr></span>
+            <span class="ro-v">−216</span>
+            <span class="ro-n">book is offering −148</span>
+          </div>
+          <div>
+            <span class="ro-k"><abbr title="How much better the book's price is than what the model thinks it should be.">Edge</abbr></span>
+            <span class="ro-v">+7.1%</span>
+            <span class="ro-n">expected +$7.10 per $100</span>
+          </div>
+          <div>
+            <span class="ro-k"><abbr title="A staking formula sized to your bankroll. We use one quarter of it, the conservative standard.">¼ Kelly</abbr></span>
+            <span class="ro-v">$34</span>
+            <span class="ro-n">1.7u of a $2,000 roll</span>
+          </div>
+        </div>
+
+        <!-- scale runs 2→14 rebounds, so a value v sits at (v−2)/12 -->
+        <div class="fan">
+          <div class="fan-cap">Where he lands — 10 000 simulations</div>
+          <div class="fan-plot" role="img"
+               aria-label="Simulated rebound outcomes run from 2 to 14. The middle half of them fall between 5.9 and 8.4, the projection is 7.2, and the book line of 5.5 sits below the middle half — which is why the over is priced too long.">
+            <span class="fan-band"></span>
+            <span class="fan-iqr" style="--a:32.5%;--b:53.3%"></span>
+            <span class="fan-tick is-line" style="--x:29.2%"></span>
+            <span class="fan-tick is-proj" style="--x:43.3%"></span>
+            <span class="fan-lab is-line to-left" style="--x:29.2%">line 5.5</span>
+            <span class="fan-lab is-proj to-right" style="--x:43.3%">proj 7.2</span>
+          </div>
+          <div class="fan-axis"><span>2</span><span>middle half 5.9 – 8.4</span><span>14</span></div>
+        </div>
+
+        <div class="why">
+          <b>Why the model likes it</b>
+          <ul>
+            <li>Golden State plays at the 3rd-fastest pace in the league — more possessions, more rebounds to go around.</li>
+            <li>Edwards has cleared 5.5 in 11 of his last 14 against bottom-10 rebounding teams.</li>
+            <li>Draymond Green is out. With him off the floor, Edwards' rebound share rises <span class="num">+3.8</span> points across <span class="num">41</span> matched situations.</li>
+          </ul>
+        </div>
+      </div>
+
+      <button class="grow" aria-expanded="false">
+        <span class="who"><span class="nm">Nikola Jokić</span><span class="pr">assists · under 9.5 · DEN at OKC</span></span>
+        <span class="r val mut">8.4</span>
+        <span class="r val mut">9.5</span>
+        <span class="r val">+104</span>
+        <span class="r val mut">−108</span>
+        <span class="r val val-lead" data-keep>+4.2%</span>
+        <span class="r val">1.0u</span>
+        <span class="caret">›</span>
+      </button>
+
+      <button class="grow" aria-expanded="false">
+        <span class="who"><span class="nm">Jayson Tatum</span><span class="pr">points · over 27.5 · BOS vs MIA</span></span>
+        <span class="r val mut">29.1</span>
+        <span class="r val mut">27.5</span>
+        <span class="r val">−110</span>
+        <span class="r val mut">−126</span>
+        <span class="r val val-lead" data-keep>+3.4%</span>
+        <span class="r val">0.8u</span>
+        <span class="caret">›</span>
+      </button>
+
+      <button class="grow" aria-expanded="false">
+        <span class="who"><span class="nm">Derrick White</span><span class="pr">3-pointers · over 2.5 · BOS vs MIA</span></span>
+        <span class="r val mut">3.1</span>
+        <span class="r val mut">2.5</span>
+        <span class="r val">+100</span>
+        <span class="r val mut">−118</span>
+        <span class="r val val-lead" data-keep>+2.7%</span>
+        <span class="r val">0.6u</span>
+        <span class="caret">›</span>
+      </button>
+
+      <button class="grow" aria-expanded="false">
+        <span class="who"><span class="nm">Luka Dončić</span><span class="pr">assists · over 8.5 · LAL at PHX</span></span>
+        <span class="r val mut">9.3</span>
+        <span class="r val mut">8.5</span>
+        <span class="r val">−120</span>
+        <span class="r val mut">−133</span>
+        <span class="r val val-lead" data-keep>+2.1%</span>
+        <span class="r val">0.5u</span>
+        <span class="caret">›</span>
+      </button>
+    </div>
+  </section>
+
+  <!-- ═════════════════ sheet 2 — position log ═════════════════ -->
+  <section class="sheet" id="log" aria-labelledby="log-t">
+    <div class="sheet-head">
+      <h2 class="sheet-title" id="log-t">Position Log</h2>
+      <span class="sheet-sub">Aug · 23 settled · +4.6u · <abbr title="Closing line value: whether you beat the final price the market settled on. It is the standard measure of whether a bet was sharp.">CLV</abbr> +1.9%</span>
+    </div>
+
+    <div class="subhead">
+      <h3>In play</h3>
+      <span class="n">2 positions · 3.1u at risk · bar now, rule line, hairline projected</span>
+    </div>
+
+    <div class="lrow">
+      <div class="ltop">
+        <span class="who"><span class="nm">Jalen Brunson</span><span class="pr">points · over 24.5 · NYK vs CLE</span></span>
+        <span class="r val mut" data-drop>1.5u</span>
+        <span class="r val" data-drop>−115</span>
+        <span class="r" data-drop><span class="tag tag-live">Live</span></span>
+        <span class="r val val-lead up">+0.9u</span>
+      </div>
+      <div class="tele">
+        <span><b>21</b> pts</span><span class="sep">│</span>
+        <span>line <b>24.5</b></span><span class="sep">│</span>
+        <span>Q3 <b>4:12</b></span><span class="sep">│</span>
+        <span>NYK 78–71</span><span class="sep">│</span>
+        <span>proj <b>29.4</b></span><span class="sep">│</span>
+        <span class="pace-up">▲ on pace, +4.9 over</span>
+      </div>
+      <!-- axis 0→33.8 pts: now 21, line 24.5, projected 29.4 -->
+      <div class="track"><span class="fill is-up" style="--now:62.1%"></span><span class="mark-proj" style="--proj:87.0%"></span><span class="mark" style="--line:72.5%"></span></div>
+    </div>
+
+    <div class="lrow">
+      <div class="ltop">
+        <span class="who"><span class="nm">Domantas Sabonis</span><span class="pr">rebounds · under 12.5 · SAC at HOU</span></span>
+        <span class="r val mut" data-drop>1.6u</span>
+        <span class="r val" data-drop>−105</span>
+        <span class="r" data-drop><span class="tag tag-live">Live</span></span>
+        <span class="r val val-lead down">−0.4u</span>
+      </div>
+      <div class="tele">
+        <span><b>10</b> reb</span><span class="sep">│</span>
+        <span>line <b>12.5</b></span><span class="sep">│</span>
+        <span>Q3 <b>7:48</b></span><span class="sep">│</span>
+        <span>SAC 66–70</span><span class="sep">│</span>
+        <span>proj <b>14.1</b></span><span class="sep">│</span>
+        <span class="pace-dn">▼ off pace, 1.6 past the under</span>
+      </div>
+      <!-- axis 0→16.2 reb: now 10, line 12.5, projected 14.1 — projection
+           clears the under, which is why this one is red -->
+      <div class="track"><span class="fill is-dn" style="--now:61.7%"></span><span class="mark-proj" style="--proj:87.0%"></span><span class="mark" style="--line:77.2%"></span></div>
+    </div>
+
+    <div class="subhead">
+      <h3>Settled</h3>
+      <span class="n">last 4 · 2–1–1</span>
+    </div>
+
+    <div class="ghead">
+      <span>Player / Prop</span>
+      <span class="r">Stake</span>
+      <span class="r">Price</span>
+      <span class="r">Close</span>
+      <span class="r">CLV</span>
+      <span class="r">Result</span>
+      <span class="r">P / L</span>
+      <span></span>
+    </div>
+
+    <button class="grow" aria-expanded="false">
+      <span class="who"><span class="nm">Tyrese Haliburton</span><span class="pr">assists · over 9.5 · 7 Aug</span></span>
+      <span class="r val mut">1.2u</span>
+      <span class="r val">−118</span>
+      <span class="r val mut">−140</span>
+      <span class="r val up">+3.6%</span>
+      <span class="r"><span class="tag tag-win">Won</span></span>
+      <span class="r val val-lead up" data-keep>+1.02u</span>
+      <span class="caret">›</span>
+    </button>
+
+    <button class="grow" aria-expanded="false">
+      <span class="who"><span class="nm">Victor Wembanyama</span><span class="pr">blocks · over 3.5 · 7 Aug</span></span>
+      <span class="r val mut">0.8u</span>
+      <span class="r val">+105</span>
+      <span class="r val mut">−102</span>
+      <span class="r val up">+5.1%</span>
+      <span class="r"><span class="tag tag-win">Won</span></span>
+      <span class="r val val-lead up" data-keep>+0.84u</span>
+      <span class="caret">›</span>
+    </button>
+
+    <button class="grow" aria-expanded="false">
+      <span class="who"><span class="nm">Paolo Banchero</span><span class="pr">points · over 22.5 · 6 Aug</span></span>
+      <span class="r val mut">1.0u</span>
+      <span class="r val">−110</span>
+      <span class="r val mut">−104</span>
+      <span class="r val down">−1.4%</span>
+      <span class="r"><span class="tag tag-loss">Lost</span></span>
+      <span class="r val val-lead down" data-keep>−1.00u</span>
+      <span class="caret">›</span>
+    </button>
+
+    <button class="grow" aria-expanded="false">
+      <span class="who"><span class="nm">Alperen Şengün</span><span class="pr">rebounds · over 10.5 · 6 Aug</span></span>
+      <span class="r val mut">0.9u</span>
+      <span class="r val">−108</span>
+      <span class="r val mut">−108</span>
+      <span class="r val mut">0.0%</span>
+      <span class="r"><span class="tag tag-push">Push</span></span>
+      <span class="r val val-lead mut" data-keep>0.00u</span>
+      <span class="caret">›</span>
+    </button>
+  </section>
+</main>
+
+<div class="foot">Mock — sheet direction · not wired to the app</div>
+
+</body>
+</html>
