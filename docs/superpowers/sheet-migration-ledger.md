@@ -130,7 +130,7 @@ component-inventory pass, not from whichever page goes first.
       Shared Shell section, which still required the sidebar Phase 0 deleted.
 - [x] Component-inventory pass across all six page templates; union frozen
       at 16 capabilities. See the contract table above.
-- [ ] **User decision required:** commit Phase 0 before Phase 1 opens.
+- [x] Commit Phase 0 before Phase 1 opens. Landed as `5125b8a` + `cd91bdd`.
 
 ## Frozen class contracts
 
@@ -211,9 +211,11 @@ four raised surfaces on the page the rule was being invented on. Corrected:
 
 ## Open decisions owned by the user
 
-- **Commit Phase 0.** 30 modified files including 12 regenerated snapshots sit
-  uncommitted on `sheet-phase-0`. Until they are committed there is no revert
-  granularity across a five-phase rewrite and no phase's diff is attributable.
+- **How do closing prices get captured?** `closing_odds` / `closing_line` now
+  exist on `Bet` with `clv_pct` and `line_move`, but nothing populates them, so
+  CLV is dark on every row. Options: a scheduled snapshot near tip-off (the
+  scheduler already has an event-relative prop-close capture pattern to copy),
+  or manual entry on the bet form.
 - Whether Home becomes a real public landing page while the app is local-only.
   If it stays private, Phase 5 shrinks to the `noindex` work alone.
 - Whether the tier scales (`value` / `slight` / `avoid`) keep amber for the top
