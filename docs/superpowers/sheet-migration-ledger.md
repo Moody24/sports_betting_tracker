@@ -18,7 +18,7 @@ a file or what a class means, this file settles it.
 | `app/templates/_macros.html`, `_icons.html` | `sheet-css-steward` |
 | `app/templates/bets/_workflow_nav.html` | `sheet-css-steward` |
 | `app/static/js/script.js` (global behaviour) | `sheet-css-steward` |
-| `app/templates/_head.html` *(to be extracted)* | `sheet-seo-steward` |
+| `app/templates/_head.html` | `sheet-seo-steward` (extracted `53f6d9b`) |
 | `app/templates/<one page>.html` | `sheet-page-migrator`, one page per dispatch |
 | that page's JS **and** its `tests/e2e` selectors | the same `sheet-page-migrator` |
 | snapshot **regeneration** only | `sheet-gate-runner` |
@@ -55,8 +55,8 @@ are not disjoint and the parallel-dispatch precondition is not met.
 
 | Phase | Surfaces | State | Notes |
 |---|---|---|---|
-| 0 | Shell, tokens, masthead | **Complete, uncommitted** | Dark ground, zero radius, zero chromatic accent. Branch `sheet-phase-0`. |
-| 0.5 | Ownership, contracts, shared-layer debt | **In progress** | See checklist below. Must land before any page work. |
+| 0 | Shell, tokens, masthead | **Complete** (`5125b8a`) | Dark ground, zero radius, zero chromatic accent. |
+| 0.5 | Ownership, contracts, shared-layer debt | **Complete** (`cd91bdd`) | Checklist below, all items closed. |
 | 1 | **My Bets → the Position Log** | **Complete** | Grammar shipped end to end; pace axis is its signature display. Five contract amendments, below. |
 | 2 | **Prop Analysis → the Board** | Not started | Consumes Phase 1's vocabulary; adds the dense-table variant and the modal. |
 | 3 | NBA Today + Dashboard | Not started | **Serial.** Dashboard's KPI row becomes the ledger band. |
