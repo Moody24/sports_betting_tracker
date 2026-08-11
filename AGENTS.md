@@ -25,6 +25,7 @@ source .venv/bin/activate && bandit -q -r app -x tests -ll
 - Run both before every commit — CI enforces them on push
 
 ## Key Conventions
+- Architecture SSOT: `docs/architecture/system-contract.md` — read before changing modules, schemas, APIs, caches, jobs, or cross-module state
 - All dates/times use **ET** (`ZoneInfo("America/New_York")`) — critical for freshness checks and snapshot reads/writes
 - `_is_non_server_invocation()` in `app/__init__.py` guards scheduler startup — never start APScheduler in pytest/alembic/CLI contexts
 - Scheduler has 22 registered jobs as of 2026-08-09 (event-relative prop decision/close capture added)

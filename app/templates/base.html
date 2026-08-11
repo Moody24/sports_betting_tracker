@@ -11,91 +11,60 @@
   <a class="skip-link" href="#main-content">Skip to main content</a>
   <div class="app-shell">
 
-    {# ── Sidebar ────────────────────────────────────────────────── #}
-    <aside class="sidebar" id="sidebar" aria-label="Primary">
-      <div>
+    {# ── Masthead ───────────────────────────────────────────────── #}
+    <header class="masthead">
+      <div class="masthead-inner">
 
-        {# Brand #}
-        <div class="brand-mark">
-          <div class="brand-icon">
-            <svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
-              <path d="M2 12 L6 4 L10 9 L12 6 L14 8" stroke="#06090F" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-          </div>
-          <div>
+        <div class="nameplate">
+          <div class="brand-mark">
+            <div class="brand-icon">
+              <svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <path d="M2 12 L6 4 L10 9 L12 6 L14 8" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </div>
             <div class="brand-name">Edge Tracker</div>
-            <div class="brand-sub">NBA Analytics</div>
           </div>
+          <span class="brand-sub">NBA Analytics</span>
         </div>
 
-        <nav class="nav nav-pills flex-column gap-1">
-          <a class="nav-link {% if request.endpoint == 'main.home' %}active{% endif %}" href="{{ url_for('main.home') }}">
-            {{ icon('house') }}<span>Home</span>
-          </a>
+        <div class="mast-rule"></div>
+
+        <div class="mast-row">
+          <nav aria-label="Primary">
+            <ul class="sections">
+              <li><a class="nav-link {% if request.endpoint == 'main.home' %}active{% endif %}"
+                     href="{{ url_for('main.home') }}"
+                     {% if request.endpoint == 'main.home' %}aria-current="page"{% endif %}>Home</a></li>
+              {% if current_user.is_authenticated %}
+              <li><a class="nav-link {% if request.endpoint == 'main.dashboard' %}active{% endif %}"
+                     href="{{ url_for('main.dashboard') }}"
+                     {% if request.endpoint == 'main.dashboard' %}aria-current="page"{% endif %}>Dashboard</a></li>
+              <li><a class="nav-link {% if request.endpoint == 'bet.nba_today' %}active{% endif %}"
+                     href="{{ url_for('bet.nba_today') }}"
+                     {% if request.endpoint == 'bet.nba_today' %}aria-current="page"{% endif %}>NBA Today</a></li>
+              <li><a class="nav-link {% if request.endpoint == 'bet.nba_analysis' %}active{% endif %}"
+                     href="{{ url_for('bet.nba_analysis') }}"
+                     {% if request.endpoint == 'bet.nba_analysis' %}aria-current="page"{% endif %}>Prop Analysis</a></li>
+              <li><a class="nav-link {% if request.endpoint == 'bet.nba_stat_analysis' %}active{% endif %}"
+                     href="{{ url_for('bet.nba_stat_analysis') }}"
+                     {% if request.endpoint == 'bet.nba_stat_analysis' %}aria-current="page"{% endif %}>Stat Analysis</a></li>
+              <li><a class="nav-link {% if request.endpoint == 'bet.place_bet' %}active{% endif %}"
+                     href="{{ url_for('bet.place_bet') }}"
+                     {% if request.endpoint == 'bet.place_bet' %}aria-current="page"{% endif %}>My Bets</a></li>
+              <li><a class="nav-link {% if request.endpoint == 'bet.new_bet' %}active{% endif %}"
+                     href="{{ url_for('bet.new_bet') }}"
+                     {% if request.endpoint == 'bet.new_bet' %}aria-current="page"{% endif %}>Add Bet</a></li>
+              {% else %}
+              <li><a class="nav-link {% if request.endpoint == 'auth.login' %}active{% endif %}"
+                     href="{{ url_for('auth.login') }}"
+                     {% if request.endpoint == 'auth.login' %}aria-current="page"{% endif %}>Login</a></li>
+              <li><a class="nav-link {% if request.endpoint == 'auth.register' %}active{% endif %}"
+                     href="{{ url_for('auth.register') }}"
+                     {% if request.endpoint == 'auth.register' %}aria-current="page"{% endif %}>Register</a></li>
+              {% endif %}
+            </ul>
+          </nav>
           {% if current_user.is_authenticated %}
-          <a class="nav-link {% if request.endpoint == 'main.dashboard' %}active{% endif %}" href="{{ url_for('main.dashboard') }}">
-            {{ icon('grid-1x2') }}<span>Dashboard</span>
-          </a>
-
-          <span class="nav-section-label">Betting</span>
-          <a class="nav-link {% if request.endpoint == 'bet.place_bet' %}active{% endif %}" href="{{ url_for('bet.place_bet') }}">
-            {{ icon('journal-text') }}<span>My Bets</span>
-          </a>
-          <a class="nav-link {% if request.endpoint == 'bet.new_bet' %}active{% endif %}" href="{{ url_for('bet.new_bet') }}">
-            {{ icon('plus-circle') }}<span>Add Bet</span>
-          </a>
-          <a class="nav-link {% if request.endpoint == 'bet.nba_today' %}active{% endif %}" href="{{ url_for('bet.nba_today') }}">
-            {{ icon('dribbble') }}<span>NBA Today</span>
-          </a>
-
-          <span class="nav-section-label">Analysis</span>
-          <a class="nav-link {% if request.endpoint == 'bet.nba_analysis' %}active{% endif %}" href="{{ url_for('bet.nba_analysis') }}">
-            {{ icon('bullseye') }}<span>Prop Analysis</span>
-          </a>
-          <a class="nav-link {% if request.endpoint == 'bet.nba_stat_analysis' %}active{% endif %}" href="{{ url_for('bet.nba_stat_analysis') }}">
-            {{ icon('bar-chart-line') }}<span>Stat Analysis</span>
-          </a>
-          {% endif %}
-        </nav>
-
-        {% if current_user.is_authenticated %}
-        <div class="mt-3 pt-3 border-top border-secondary-subtle">
-          <form action="{{ url_for('auth.logout') }}" method="POST">
-            {{ logout_form.hidden_tag() }}
-            <button type="submit" class="nav-link text-danger-emphasis w-100 border-0 bg-transparent">
-              {{ icon('box-arrow-right') }}<span>Sign Out</span>
-            </button>
-          </form>
-        </div>
-        {% else %}
-        <div class="mt-3 pt-3 border-top border-secondary-subtle">
-          <a class="nav-link {% if request.endpoint == 'auth.login' %}active{% endif %}" href="{{ url_for('auth.login') }}">
-            {{ icon('box-arrow-in-right') }}<span>Login</span>
-          </a>
-          <a class="nav-link {% if request.endpoint == 'auth.register' %}active{% endif %}" href="{{ url_for('auth.register') }}">
-            {{ icon('person-plus') }}<span>Register</span>
-          </a>
-        </div>
-        {% endif %}
-      </div>
-
-      <div class="small px-2 sidebar-copyright">&copy; {{ current_year }} Edge Tracker</div>
-    </aside>
-
-    {# ── Main content ───────────────────────────────────────────── #}
-    <main class="main-content" id="main-content" tabindex="-1">
-      <header class="topbar d-flex justify-content-between align-items-center">
-        <div class="d-flex align-items-center gap-3">
-          <button class="sidebar-toggle d-lg-none" id="sidebar-toggle" type="button" aria-label="Toggle navigation" aria-controls="sidebar" aria-expanded="false">
-            {{ icon('list') }}
-          </button>
-          <div>
-            {% block topbar_breadcrumb %}{% endblock %}
-            <h1 class="h4 mb-0">{% block page_title %}Overview{% endblock %}</h1>
-            <p class="mb-0 topbar-subtitle">{% block page_subtitle %}Track your edge.{% endblock %}</p>
-          </div>
-        </div>
-        {% if current_user.is_authenticated %}
         <div class="dropdown">
           <button class="user-btn dropdown-toggle" data-ui-toggle="dropdown" aria-expanded="false" aria-label="Account menu for {{ current_user.username }}">
             {{ icon('person-circle') }}
@@ -118,7 +87,19 @@
             </li>
           </ul>
         </div>
-        {% endif %}
+          {% endif %}
+        </div>{# /.mast-row #}
+      </div>{# /.masthead-inner #}
+    </header>
+
+    {# ── Main content ───────────────────────────────────────────── #}
+    <main class="main-content" id="main-content" tabindex="-1">
+      <div class="sheet">
+
+      <header class="topbar">
+        {% block topbar_breadcrumb %}{% endblock %}
+        <h1 class="h4 mb-0">{% block page_title %}Overview{% endblock %}</h1>
+        <p class="mb-0 topbar-subtitle">{% block page_subtitle %}Track your edge.{% endblock %}</p>
       </header>
 
       {% with messages = get_flashed_messages(with_categories=true) %}
@@ -145,7 +126,10 @@
       {% endwith %}
 
       {% block content %}{% endblock %}
+      </div>{# /.sheet #}
     </main>
+
+    <div class="colophon">&copy; {{ current_year }} Edge Tracker</div>
   </div>
 
   <script src="{{ url_for('static', filename='js/ux_telemetry.js') }}"></script>
@@ -154,7 +138,7 @@
   <script src="{{ url_for('static', filename='js/utils.js') }}"></script>
   <script src="{{ url_for('static', filename='js/script.js') }}"></script>
   {% block scripts %}{% endblock %}
-  <script>
+  <script nonce="{{ csp_nonce }}">
     // Toast auto-dismiss
     document.querySelectorAll('.toast-item').forEach(function(toast) {
       var DURATION = 4000;
@@ -196,7 +180,7 @@
       toast.addEventListener('animationend', function() { toast.remove(); }, { once: true });
     }
   </script>
-  <script>
+  <script nonce="{{ csp_nonce }}">
     // Clear parlay queue from storage on logout to avoid stale state for the next session
     document.querySelectorAll('form[action*="logout"]').forEach(function(form) {
       form.addEventListener('submit', function() {

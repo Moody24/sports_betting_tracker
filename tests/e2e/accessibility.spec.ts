@@ -14,6 +14,10 @@ const auditedPaths = [
 test.describe('Accessibility Audit', () => {
   for (const path of auditedPaths) {
     test(`no serious or critical axe issues: ${path}`, async ({ page }) => {
+      // Freeze fade-in animations before scanning — otherwise axe can catch a
+      // staggered card mid-transition and report its transient low-opacity
+      // text as a contrast violation even though the settled color passes.
+      await page.emulateMedia({ reducedMotion: 'reduce' });
       await registerAndLogin(page);
       await page.goto(path);
       const results = await new AxeBuilder({ page }).analyze();

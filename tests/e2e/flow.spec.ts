@@ -19,7 +19,7 @@ test.describe('Sportsbook Flow', () => {
     await registerAndLogin(page);
 
     await page.goto('/bets/new');
-    await expect(page.locator('#ub-root')).toBeVisible();
+    await expect(page.locator('[data-testid="bet-builder"]')).toBeVisible();
     await expect(page.locator('#ub-stake')).toBeVisible();
     await expect(page.locator('#ub-submit-btn')).toBeVisible();
   });

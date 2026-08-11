@@ -11,7 +11,7 @@
 {% include 'bets/_workflow_nav.html' %}
 
 {# ── Summary Cards ────────────────────────────────────────── #}
-<div class="row g-3 mb-4 fade-up fade-up-1" id="analysis-kpis">
+<div class="row g-3 mb-4 fade-up fade-up-1" id="analysis-kpis" data-testid="analysis-summary">
   <div class="col-sm-6 col-xl-3">
     <div class="card-soft kpi-card h-100">
       <p class="kpi-label mb-1">Value Plays Found</p>
@@ -186,7 +186,7 @@
     <button class="btn btn-sm btn-outline-danger" type="button" id="analysis-refresh-retry">Retry</button>
   </div>
 
-  <div class="table-wrap refresh-content" id="analysis-table-wrap">
+  <div class="table-wrap refresh-content" id="analysis-table-wrap" data-testid="analysis-table">
     <table class="table table-dark table-hover align-middle mb-0" id="analysis-table">
       <thead>
         <tr>
@@ -313,7 +313,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
+<script nonce="{{ csp_nonce }}">
 // Client-side filtering
 document.addEventListener('DOMContentLoaded', function() {
   function esc(value) {
@@ -372,7 +372,7 @@ document.addEventListener('DOMContentLoaded', function() {
       btnRefresh.disabled = isLoading;
       btnRefresh.innerHTML = isLoading
         ? '<span class="spinner-border spinner-border-sm me-1"></span>Refreshing...'
-        : '{{ icon('arrow-repeat', classes='me-1') }}Refresh';
+        : `{{ icon('arrow-repeat', classes='me-1') }}Refresh`;
     }
   }
 
@@ -476,7 +476,7 @@ document.addEventListener('DOMContentLoaded', function() {
           // Game log
           if (data.game_log && data.game_log.length > 0) {
             html += '<h6 class="text-info">Recent Game Log</h6>';
-            html += '<div class="table-wrap"><table class="table table-dark table-sm mb-0"><thead><tr>';
+            html += '<div class="table-wrap" data-testid="player-detail-table"><table class="table table-dark table-sm mb-0"><thead><tr>';
             html += '<th>Date</th><th>Opp</th><th>MIN</th><th>PTS</th><th>REB</th><th>AST</th><th>3PM</th>';
             html += '</tr></thead><tbody>';
             data.game_log.forEach(g => {

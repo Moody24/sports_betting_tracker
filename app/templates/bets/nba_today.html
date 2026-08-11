@@ -39,7 +39,7 @@
 </div>
 {% endif %}
 
-<div id="active-games-section" class="loading-shell">
+<div id="active-games-section" class="loading-shell" data-testid="today-active-games">
 {% if games %}
 <h2 class="h5 mb-3">
   {{ icon('broadcast', classes='me-2 text-success') }}Active Games
@@ -527,7 +527,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
+<script nonce="{{ csp_nonce }}">
 var CSRF_TOKEN = '{{ csrf_token() }}';
 var PROPS_URL  = '{{ url_for("bet.nba_props", espn_id="__ESPN_ID__") }}';
 var PLACE_URL  = '{{ url_for("bet.nba_place_bets") }}';
@@ -553,7 +553,7 @@ document.addEventListener('DOMContentLoaded', function () {
       refreshBtn.disabled = isLoading;
       refreshBtn.innerHTML = isLoading
         ? '<span class="spinner-border spinner-border-sm me-1"></span>Refreshing...'
-        : '{{ icon('arrow-repeat', classes='me-1') }}Refresh Live Games';
+        : `{{ icon('arrow-repeat', classes='me-1') }}Refresh Live Games`;
     }
     if (!isLoading && errorEl) errorEl.hidden = true;
   }

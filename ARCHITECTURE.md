@@ -1,5 +1,10 @@
 # Edge Tracker — Architecture
 
+> **Canonical contract:** [`docs/architecture/system-contract.md`](docs/architecture/system-contract.md)
+> is the single source of truth for dependency direction, shared schemas, and
+> state ownership. This file is a descriptive overview and may lag current
+> implementation counts; the system contract wins if the two disagree.
+
 ## Overview
 
 Edge Tracker is a Flask application for tracking sports bets, projecting player props using XGBoost ML models, and grading bets automatically against live results. It is currently NBA-focused and runs locally, with the codebase designed for multi-sport expansion.

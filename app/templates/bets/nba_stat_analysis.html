@@ -126,7 +126,7 @@
 </div>
 
 {# ── Matchup Cards ────────────────────────────────────────────── #}
-<div id="stat-analysis-results-shell" class="stat-analysis-results-shell">
+<div id="stat-analysis-results-shell" class="stat-analysis-results-shell" data-testid="stat-results">
 <div id="stat-analysis-loading" class="card-soft p-3 mb-4" hidden>
   <div class="placeholder-glow">
     <p class="placeholder col-12 mb-2"></p>
@@ -387,7 +387,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
+<script nonce="{{ csp_nonce }}">
 // Use centralized display_config.js globals
 const SA_PROP_LABELS = MARKET_LABELS_SHORT;
 SA_PROP_LABELS['player_points_rebounds_assists'] = 'PRA';
@@ -395,7 +395,7 @@ const SA_BADGE_CLASS = INDICATOR_CLASSES;
 const SA_BADGE_TEXT  = INDICATOR_LABELS;
 const SA_PROP_TO_COL = PROP_TO_STAT_COL;
 </script>
-<script>
+<script nonce="{{ csp_nonce }}">
 (function () {
   const panel    = document.getElementById('stat-panel');
   const backdrop = document.getElementById('stat-panel-backdrop');
@@ -425,7 +425,7 @@ const SA_PROP_TO_COL = PROP_TO_STAT_COL;
       refreshBtn.disabled = isLoading;
       refreshBtn.innerHTML = isLoading
         ? '<span class="spinner-border spinner-border-sm me-1"></span>Refreshing...'
-        : '{{ icon('arrow-repeat', classes='me-1') }}Refresh';
+        : `{{ icon('arrow-repeat', classes='me-1') }}Refresh`;
     }
   }
 

@@ -93,7 +93,7 @@
 </div>
 {% endif %}
 
-<div class="card-soft p-3 bets-list-wrap">
+<div class="card-soft p-3 bets-list-wrap" data-testid="bets-list">
   <div class="section-title-row mb-3">
     <h3 class="h6 mb-0">
       {% if filters.status or filters.type or filters.q or filters.start_date or filters.end_date %}
@@ -387,7 +387,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
+<script nonce="{{ csp_nonce }}">
   var CSRF_TOKEN = '{{ csrf_token() }}';
 </script>
 <script src="{{ url_for('static', filename='js/bets_list.js') }}"></script>

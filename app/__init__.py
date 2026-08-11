@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import logging
 import os
+import secrets
 import sys
 from time import perf_counter
 from datetime import datetime, timezone
 
-from flask import Flask, g, render_template, request
+from flask import Flask, g, get_template_attribute, render_template, request
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_login import LoginManager, current_user
@@ -145,6 +146,21 @@ def create_app(testing=False):
     from app.config_display import get_template_display_config
     _display_config = get_template_display_config()
 
+    def _csp_nonce() -> str:
+        if not getattr(g, '_csp_nonce', None):
+            g._csp_nonce = secrets.token_urlsafe(16)
+        return g._csp_nonce
+
+    # ``icon()`` is used by twelve templates, only one of which imports it.
+    # The rest resolved it because ``base.html``'s top-level import leaked into
+    # their block context — so any reordering of base.html silently degraded
+    # every icon in the app to an HTML comment, which renders as nothing and
+    # passes every Python test. Bind it as a global so it no longer depends on
+    # a Jinja scoping accident.
+    @app.template_global('icon')
+    def _icon(name, size=16, classes=''):
+        return get_template_attribute('_macros.html', 'icon')(name, size, classes)
+
     @app.context_processor
     def inject_user():
         if request.endpoint in ('health', 'ready', 'healthcheck', None):
@@ -153,6 +169,7 @@ def create_app(testing=False):
             'current_user': current_user,
             'current_year': datetime.now(timezone.utc).year,
             'logout_form': LogoutForm(),
+            'csp_nonce': _csp_nonce(),
             **_display_config,
         }
 
@@ -166,12 +183,20 @@ def create_app(testing=False):
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['X-Frame-Options'] = 'SAMEORIGIN'
         response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
-        # unsafe-inline required for Jinja2 inline scripts; no user-controlled content in script-src
+        # Per-request nonce lets Jinja2 inline <script nonce="{{ csp_nonce }}">
+        # blocks execute without weakening script-src with 'unsafe-inline'.
+        #
+        # The jsDelivr, Google Fonts, and gstatic allowances are gone: the app
+        # self-hosts its CSS, JS, and WOFF2 and makes zero external requests, so
+        # those origins only widened the attack surface. style-src keeps
+        # 'unsafe-inline' because data-driven CSS custom properties are set via
+        # style attributes (see test_template_inline_styles.py, which restricts
+        # them to custom properties only).
         response.headers['Content-Security-Policy'] = (
             "default-src 'self'; "
-            "script-src 'self' https://cdn.jsdelivr.net; "
-            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; "
-            "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; "
+            f"script-src 'self' 'nonce-{_csp_nonce()}'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "font-src 'self'; "
             "img-src 'self' data: https://a.espncdn.com; "
             "connect-src 'self'; "
             "frame-ancestors 'none';"

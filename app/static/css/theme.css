@@ -1,44 +1,9 @@
 @font-face {
-  font-family: 'Syne';
+  font-family: 'Bricolage Grotesque';
   font-style: normal;
-  font-weight: 600;
+  font-weight: 200 800;
   font-display: swap;
-  src: url('../fonts/syne-v24-latin-600.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Syne';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url('../fonts/syne-v24-latin-700.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Syne';
-  font-style: normal;
-  font-weight: 800;
-  font-display: swap;
-  src: url('../fonts/syne-v24-latin-800.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Outfit';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url('../fonts/outfit-v15-latin-regular.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Outfit';
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url('../fonts/outfit-v15-latin-500.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Outfit';
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url('../fonts/outfit-v15-latin-600.woff2') format('woff2');
+  src: url('../fonts/bricolage-grotesque-latin-variable.woff2') format('woff2');
 }
 @font-face {
   font-family: 'JetBrains Mono';
@@ -63,62 +28,111 @@
 }
 
 /* ══════════════════════════════════════════════════════════════════
-   Edge Tracker — Design System
-   Obsidian Terminal aesthetic: dark, data-dense, amber-gold accents
-   Fonts: Syne (headings) · JetBrains Mono (data) · Outfit (body)
+   Edge Tracker — Design System · "the Sheet"
+   A data sheet laid on a desk: warm graphite surfaces, ink hierarchy,
+   agate rules, zero radius, and colour only where it means direction.
+   Fonts: Bricolage Grotesque (all UI text) · JetBrains Mono (all data)
+
+   The sheet was warm paper until it was tested at night. NBA tips off
+   between 7 and 10:30pm ET, so this thing is read in the dark; a bright
+   ground was uncomfortable in real use. The stock is now warm graphite.
+   Nothing else changed — same grammar, same layout, same type — because
+   the whole point of the token layer is that polarity is one edit.
+
+   Token names are deliberately unchanged from the previous system so the
+   component layers below keep working while pages are restructured one at
+   a time. Only the VALUES moved. Two rules matter when editing:
+     1. --desk is the chrome; the sheet sits ON it and is therefore
+        LIGHTER. Elevation is a luminance step, never a shadow. Alpha
+        tints lighten (--tint), because the ground is dark.
+     2. Every ink value below clears WCAG AA on the WORST surface — which
+        on a dark ground is the LIGHTEST one (--bg-elev, the slip), not
+        --bg. Check against that, not the base.
 ══════════════════════════════════════════════════════════════════ */
 
 :root {
-  /* Backgrounds */
-  --bg:       #0D0B08;
-  --bg-panel: #141210;
-  --bg-elev:  #1A1714;
-  --bg-soft:  #211E1A;
-  --bg-hover: #272320;
+  /* The desk — chrome only. The darkest thing on screen. */
+  --desk:       #0E0D0B;
+  --desk-2:     #262219;
+  --desk-ink:   #E8E4DA;
+  --desk-muted: #A29B8D;
+  --desk-dim:   #968F81;
 
-  /* Text */
-  --text-main:  #EEF0F5;
-  --text-muted: #8F9AB4;
-  --text-dim:   #7483A0;
+  /* Sheet surfaces, warm graphite. Each step up the ladder is closer to
+     the reader: sheet → band → slip. */
+  --bg:       #171511;
+  --bg-panel: #171511;
+  --bg-elev:  #262219;
+  --bg-soft:  #201D18;
+  --bg-hover: #201D18;
 
-  /* Accent // warm amber-gold */
-  --accent:      #F5A623;
-  --accent-soft: rgba(245, 166, 35, 0.10);
-  --accent-glow: rgba(245, 166, 35, 0.25);
+  /* Ink. Alpha tints lighten the graphite; --tint is the rgb triplet. */
+  --tint:       232, 228, 218;
+  --text-main:  #E8E4DA;
+  --text-muted: #A29B8D;
+  --text-dim:   #968F81;
+
+  /* No chromatic accent. Emphasis IS ink at full contrast. */
+  --accent:      #E8E4DA;
+  --accent-soft: rgba(232, 228, 218, 0.07);
+  --accent-glow: rgba(232, 228, 218, 0.12);
   --focus-ring-color: var(--accent);
-  --focus-ring-shadow: rgba(245, 166, 35, 0.18);
+  --focus-ring-shadow: rgba(232, 228, 218, 0.20);
 
-  /* Semantic */
-  --win:     #22C55E;
-  --win-bg:  rgba(34, 197, 94, 0.10);
-  --loss:    #F04438;
-  --loss-bg: rgba(240, 68, 56, 0.10);
-  --push:    #94A3B8;
-  --push-bg: rgba(148, 163, 184, 0.10);
-  --amber:   #F5A623;
-  --info:    #60A5FA;
-  --live:    #34D399;
+  /* Semantic — the only colour in the system. Direction, never decoration.
+     Tints are 7%, not 12%. At 12%, --loss text on --loss-bg measures 4.22:1
+     against --bg-elev (the lightest surface, and therefore the worst case on a
+     dark ground) — an AA failure that shipped. 8% is already 4.47. At 7% the
+     floor is --loss at 4.54:1, and every other pairing clears comfortably:
+     win 5.30, push 5.16, amber 6.02, info 5.49. Do not raise these. */
+  --win:     #4FB07A;
+  --win-bg:  rgba(79, 176, 122, 0.07);
+  --loss:    #E8695C;
+  --loss-bg: rgba(232, 105, 92, 0.07);
+  --push:    #A29B8D;
+  --push-bg: rgba(162, 155, 141, 0.07);
+  --amber:   #D9A03C;
+  --info:    #8FA3BE;
+  --live:    #D9A03C;
 
-  /* Borders */
-  --border-subtle: rgba(255,255,255, 0.055);
-  --border-mid:    rgba(255,255,255, 0.10);
+  /* rgb triplets for the alpha tints below. Kept beside their hex twins so
+     the two can never drift; rgba(var(--win-rgb), .1) is the only correct
+     way to tint a semantic colour. */
+  --accent-rgb: 232, 228, 218;
+  --amber-rgb:  217, 160, 60;
+  --win-rgb:    79, 176, 122;
+  --loss-rgb:   232, 105, 92;
+  --push-rgb:   162, 155, 141;
+  --info-rgb:   143, 163, 190;
 
-  /* Radius */
-  --r-sm:  6px;
-  --r-md:  10px;
-  --r-lg:  14px;
-  --r-xl:  20px;
+  /* Rules. Hairlines, in ink — a white border is invisible on paper. */
+  --border-subtle: rgba(232, 228, 218, 0.11);
+  --border-mid:    rgba(232, 228, 218, 0.22);
 
-  /* Shadows */
-  --shadow-card: 0 1px 3px rgba(0,0,0,.45), 0 4px 16px rgba(0,0,0,.30);
-  --shadow-pop:  0 8px 32px rgba(0,0,0,.60);
+  /* Radius — print has sharp corners. Kept as tokens so the component
+     layer needs no edits; every role simply resolves to zero. */
+  --r-sm:  0;
+  --r-md:  0;
+  --r-lg:  0;
+  --r-xl:  0;
+
+  /* Shadows: both inert. On a dark ground a drop shadow reads as grime —
+     elevation is carried entirely by the luminance ladder above. The one
+     shadow the paper version used for the slip went with the paper. */
+  --shadow-card: none;
+  --shadow-pop:  none;
+
+  /* Type. Named so the component layer stops hardcoding the stacks, and so
+     this file and design-mock/index.html can converge on one vocabulary. */
+  --font-display: 'Bricolage Grotesque', ui-sans-serif, system-ui, sans-serif;
+  --font-mono:    'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
   --space-2: 0.5rem;
   --space-3: 0.75rem;
   --space-4: 1rem;
   --space-5: 1.25rem;
-  --state-empty-bg: rgba(255,255,255,.012);
-  --state-error-bg: rgba(240,68,56,.06);
-  --state-error-border: rgba(240,68,56,.24);
+  --state-empty-bg: rgba(232,228,218,.025);
+  --state-error-bg: rgba(var(--loss-rgb),.06);
+  --state-error-border: rgba(var(--loss-rgb),.24);
   --type-2xs: 0.68rem;
   --type-xs: 0.75rem;
   --type-sm: 0.84rem;
@@ -133,14 +147,13 @@
 *, *::before, *::after { box-sizing: border-box; }
 
 * {
-  font-family: 'Outfit', system-ui, -apple-system, sans-serif;
+  font-family: 'Bricolage Grotesque', system-ui, -apple-system, sans-serif;
 }
 
 body {
-  background: var(--bg);
-  background-image:
-    radial-gradient(ellipse 70vw 50vh at 20% -5%, rgba(245, 166, 35,.03) 0%, transparent 60%),
-    radial-gradient(ellipse 50vw 40vh at 85% 90%, rgba(96,165,250,.03) 0%, transparent 60%);
+  /* The desk. Sheets sit on top of it; the atmospheric radial gradients
+     that used to live here are gone — they were decoration. */
+  background: var(--desk);
   color: var(--text-main);
   margin: 0;
   min-height: 100vh;
@@ -171,7 +184,7 @@ svg {
   left: 0.75rem;
   z-index: 2100;
   background: var(--accent);
-  color: #0D0B08;
+  color: var(--bg);
   border-radius: var(--r-sm);
   padding: 0.45rem 0.7rem;
   font-weight: 700;
@@ -189,13 +202,13 @@ svg {
 
 h1, h2, h3, h4, h5, h6,
 .h1, .h2, .h3, .h4, .h5, .h6 {
-  font-family: 'Syne', sans-serif;
+  font-family: 'Bricolage Grotesque', sans-serif;
   letter-spacing: -0.02em;
   font-weight: 700;
 }
 
 .mono, .tabular-num {
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 
@@ -207,134 +220,168 @@ h1, h2, h3, h4, h5, h6,
 
 /* ── Layout ────────────────────────────────────────────────────── */
 
+/* Masthead over sheets. The 252px sidebar is gone: it cost a third of the
+   width on a data-dense page, and its active-item rail was the most
+   templated component in the whole interface. */
 .app-shell {
-  display: grid;
-  grid-template-columns: 252px 1fr;
+  display: flex;
+  flex-direction: column;
   min-height: 100vh;
 }
 
-/* ── Sidebar ───────────────────────────────────────────────────── */
+/* ── Masthead (chrome) ─────────────────────────────────────────── */
 
-.sidebar {
-  background: var(--bg-panel);
-  border-right: 1px solid var(--border-subtle);
-  padding: 1.25rem 0.875rem;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
+.masthead {
+  background: var(--desk);
+  color: var(--desk-ink);
+  padding: 1.125rem 1.375rem 0;
   position: sticky;
   top: 0;
-  height: 100vh;
-  overflow-y: auto;
   z-index: 100;
-  transition: transform .25s ease;
+}
+
+/* A sheet of paper has an edge; so does the masthead above it. Both share
+   this measure so the nameplate aligns with the sheet below it. */
+.masthead-inner {
+  width: 100%;
+  max-width: 1240px;
+  margin-inline: auto;
+}
+
+.nameplate {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
 }
 
 /* Brand */
 .brand-mark {
   display: flex;
   align-items: center;
-  gap: 0.625rem;
-  padding: 0.25rem 0.5rem 1.25rem;
-  border-bottom: 1px solid var(--border-subtle);
-  margin-bottom: 1rem;
+  gap: 0.55rem;
+  min-width: 0;
 }
 
 .brand-icon {
-  width: 30px;
-  height: 30px;
-  background: var(--accent);
+  width: 24px;
+  height: 24px;
+  background: var(--desk-ink);
   border-radius: var(--r-sm);
   display: grid;
   place-items: center;
   flex-shrink: 0;
+  /* the mark is a stroked path, so it needs `color`, not `fill` */
+  color: var(--desk);
 }
 
 .brand-icon svg {
-  width: 16px;
-  height: 16px;
-  fill: #0D0B08;
+  width: 14px;
+  height: 14px;
+  fill: none;
 }
 
 .brand-name {
-  font-family: 'Syne', sans-serif;
+  font-family: 'Bricolage Grotesque', sans-serif;
   font-weight: 800;
-  font-size: 1rem;
-  letter-spacing: -0.02em;
-  color: var(--text-main);
-  line-height: 1.1;
+  font-size: 1.32rem;
+  letter-spacing: -0.022em;
+  font-variation-settings: 'opsz' 40;   /* ink traps open up at display size */
+  text-transform: uppercase;
+  color: var(--desk-ink);
+  line-height: 1.05;
 }
 
 .brand-sub {
-  font-size: 0.65rem;
-  color: var(--text-muted);
-  letter-spacing: 0.08em;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.66rem;
+  color: var(--desk-muted);
+  letter-spacing: 0.09em;
   text-transform: uppercase;
   font-weight: 500;
-  margin-top: 1px;
-}
-.sidebar-copyright {
-  color: var(--text-dim);
 }
 
-/* Nav section label */
-.nav-section-label {
-  display: block;
-  font-size: 0.65rem;
-  font-weight: 600;
-  letter-spacing: 0.12em;
+/* The colophon — a newspaper's imprint line, set at the foot of the desk. */
+.colophon {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--text-dim);
-  padding: 0.75rem 0.75rem 0.25rem;
-  margin-top: 0.25rem;
+  color: var(--desk-dim);
+  /* aligns to the same gutter as the sheet above it */
+  padding: 1rem clamp(0.875rem, 2.5vw, 1.375rem) 1.25rem;
+  max-width: 1240px;
+  width: 100%;
+  margin-inline: auto;
+  text-align: left;
+}
+
+/* the heavy nameplate rule — the thing every masthead has */
+.mast-rule {
+  height: 2px;
+  background: var(--desk-ink);
+  margin-top: 0.625rem;
+}
+
+.mast-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-width: 0;
+  border-bottom: 1px solid var(--desk-2);
+}
+
+/* Section list — separated by hairlines, never by pills */
+.sections {
+  display: flex;
+  align-items: center;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+.sections li { display: flex; align-items: center; }
+.sections li + li::before {
+  content: '';
+  width: 1px;
+  height: 11px;
+  background: var(--desk-2);
+  margin: 0 0.875rem;
+  flex: none;
 }
 
 /* Nav links */
 .nav-link {
-  font-family: 'Outfit', sans-serif;
-  font-size: 0.875rem;
+  font-family: 'Bricolage Grotesque', sans-serif;
+  font-size: 0.72rem;
   font-weight: 500;
-  color: var(--text-muted);
-  border-radius: var(--r-md);
-  display: flex;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--desk-dim);
+  border-radius: 0;
+  display: inline-flex;
   align-items: center;
-  gap: 0.625rem;
-  padding: 0.55rem 0.75rem;
+  gap: 0.4rem;
+  padding: 0.72rem 0;
+  white-space: nowrap;
   text-decoration: none;
   cursor: pointer;
-  transition: all 0.15s ease;
-  position: relative;
+  transition: color 0.12s ease;
 }
 
-.nav-link i { font-size: 0.95rem; opacity: 0.7; transition: opacity 0.15s; }
+.nav-link:hover { color: var(--desk-ink); background: none; }
 
-.nav-link:hover {
-  color: var(--text-main);
-  background: var(--bg-soft);
-}
-.nav-link:hover i { opacity: 1; }
-
+/* Active is weight and contrast. Nothing else. No pill, no rail, no bar. */
 .nav-link.active {
-  background: rgba(245, 166, 35, 0.12);
-  color: var(--accent);
-  font-weight: 600;
-}
-.nav-link.active i { opacity: 1; color: var(--accent); }
-.nav-link.active::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 3px;
-  height: 60%;
-  background: var(--accent);
-  border-radius: 0 3px 3px 0;
+  color: var(--desk-ink);
+  font-weight: 700;
+  background: none;
 }
 
 
 .nav-link:focus-visible,
-.sidebar-toggle:focus-visible,
 .user-btn:focus-visible,
 .toast-close:focus-visible,
 .parlay-toggle-btn:focus-visible,
@@ -350,29 +397,44 @@ h1, h2, h3, h4, h5, h6,
   box-shadow: 0 0 0 3px var(--focus-ring-shadow);
 }
 
-/* ── Main content ──────────────────────────────────────────────── */
+/* ── Main content: the desk that the sheet lies on ─────────────── */
 
 .main-content {
-  padding: 1.5rem clamp(1rem, 2.5vw, 2rem);
+  width: 100%;
+  max-width: 1240px;
+  margin-inline: auto;
+  padding: 1.375rem clamp(0.875rem, 2.5vw, 1.375rem) 0;
   min-width: 0;
 }
 
-/* ── Topbar ────────────────────────────────────────────────────── */
+/* The sheet. Every page's content sits on one, which is what makes the
+   whole app read as one system while individual pages are still being
+   restructured. */
+.sheet {
+  background: var(--bg);
+  color: var(--text-main);
+  padding: 1.375rem clamp(0.875rem, 2vw, 1.5rem) 1.75rem;
+}
+
+/* ── Sheet head (was a floating, blurred topbar) ───────────────── */
 
 .topbar {
-  background: rgba(13, 18, 25, 0.7);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--r-lg);
-  padding: 0.875rem 1.125rem;
-  backdrop-filter: blur(8px);
-  margin-bottom: 1.5rem;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--border-mid);
+  border-radius: 0;
+  padding: 0 0 0.875rem;
+  margin-bottom: 1.25rem;
+  backdrop-filter: none;
 }
 
 .topbar h1 {
-  font-family: 'Syne', sans-serif;
+  font-family: 'Bricolage Grotesque', sans-serif;
   font-size: var(--type-xl);
   font-weight: 700;
-  letter-spacing: -0.025em;
+  letter-spacing: -0.02em;
+  font-variation-settings: 'opsz' 28;
+  text-transform: uppercase;
   line-height: var(--lh-tight);
   margin: 0;
 }
@@ -382,30 +444,34 @@ h1, h2, h3, h4, h5, h6,
   color: var(--text-muted) !important;
 }
 .topbar-subtitle {
+  font-family: 'JetBrains Mono', monospace;
   font-size: var(--type-xs);
+  letter-spacing: 0.03em;
   line-height: 1.35;
   color: var(--text-muted);
 }
 
-/* User button */
+/* User button — lives on the masthead, so it wears chrome colours */
 .user-btn {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  background: var(--bg-soft);
-  border: 1px solid var(--border-mid);
-  border-radius: var(--r-md);
-  color: var(--text-main);
-  padding: 0.4rem 0.75rem;
-  font-size: 0.875rem;
+  gap: 0.45rem;
+  background: none;
+  border: 1px solid var(--desk-2);
+  border-radius: 0;
+  color: var(--desk-muted);
+  padding: 0.3rem 0.6rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: color 0.12s ease, border-color 0.12s ease;
 }
 .user-btn:hover {
-  background: var(--bg-hover);
-  border-color: rgba(255,255,255,0.18);
-  color: var(--text-main);
+  background: none;
+  border-color: var(--desk-dim);
+  color: var(--desk-ink);
 }
 .user-menu-header {
   border-color: var(--border-subtle) !important;
@@ -418,21 +484,9 @@ h1, h2, h3, h4, h5, h6,
   font-size: 0.875rem;
 }
 
-/* Sidebar toggle (mobile) */
-.sidebar-toggle {
-  background: var(--bg-soft);
-  border: 1px solid var(--border-mid);
-  border-radius: var(--r-sm);
-  color: var(--text-main);
-  width: 36px;
-  height: 36px;
-  display: grid;
-  place-items: center;
-  font-size: 1.1rem;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-.sidebar-toggle:hover { background: var(--bg-hover); }
+/* The mobile sidebar drawer and its toggle are gone. Four to seven
+   sections in a scrolling masthead do not earn a drawer, and deleting it
+   removed a focus trap, an overlay, and a whole class of a11y bugs. */
 
 /* ── Card base ─────────────────────────────────────────────────── */
 
@@ -489,12 +543,12 @@ h1, h2, h3, h4, h5, h6,
 .kpi-value-net-neg { color: var(--loss); }
 
 /* KPI card — uniform border, no colored outlines */
-.kpi-card { padding: 0.875rem 1rem; border: 1px solid rgba(255,255,255,0.08) !important; }
+.kpi-card { padding: 0.875rem 1rem; border: 1px solid rgba(var(--tint), 0.08) !important; }
 .kpi-card-pl-pos  { background: var(--win-bg); }
 .kpi-card-pl-neg  { background: var(--loss-bg); }
-.kpi-card-roi-pos { background: rgba(34,197,94,.05); }
-.kpi-card-roi-neg { background: rgba(240,68,56,.05); }
-.kpi-card-wins    { background: rgba(34,197,94,.05); }
+.kpi-card-roi-pos { background: rgba(var(--win-rgb),.05); }
+.kpi-card-roi-neg { background: rgba(var(--loss-rgb),.05); }
+.kpi-card-wins    { background: rgba(var(--win-rgb),.05); }
 .kpi-card-neutral { }
 .kpi-card-value   { }
 .text-amber { color: var(--amber) !important; }
@@ -522,21 +576,10 @@ h1, h2, h3, h4, h5, h6,
   position: relative;
 }
 
-.bet-row-card::before {
-  content: '';
-  width: 3px;
-  flex-shrink: 0;
-  background: var(--text-dim);
-}
-
-/* Outcome left-border colors */
-.bet-row-card:has(.badge.text-bg-success)::before,
-.bet-row-card.outcome-win::before   { background: var(--win); }
-.bet-row-card:has(.badge.bg-win)::before { background: var(--win); }
-.bet-row-card.outcome-lose::before  { background: var(--loss); }
-.bet-row-card.outcome-push::before  { background: var(--push); }
-.bet-row-card.is-pending::before    { background: var(--amber); }
-.bet-row-card.is-overdue::before    { background: var(--loss); }
+/* The coloured left edge-stripe is gone. Outcome is already carried by the
+   status pill and by the sign and colour of the P/L figure; the stripe was
+   a third encoding of the same fact, and a decorated card edge is the same
+   device as the nav rail this redesign removed. */
 
 .bet-row-card:hover {
   border-color: var(--border-mid);
@@ -559,7 +602,7 @@ h1, h2, h3, h4, h5, h6,
 }
 
 .bet-primary {
-  font-family: 'Syne', sans-serif;
+  font-family: 'Bricolage Grotesque', sans-serif;
   font-size: var(--type-md);
   font-weight: 700;
   color: var(--text-main);
@@ -589,9 +632,9 @@ h1, h2, h3, h4, h5, h6,
 }
 
 .chip-kind {
-  background: rgba(245, 166, 35,.08);
-  border-color: rgba(245, 166, 35,.18);
-  color: rgba(245, 166, 35,.9);
+  background: rgba(var(--accent-rgb),.08);
+  border-color: rgba(var(--accent-rgb),.18);
+  color: rgba(var(--accent-rgb),.9);
 }
 
 .bet-matchup {
@@ -656,8 +699,8 @@ h1, h2, h3, h4, h5, h6,
 /* ── Live progress card ────────────────────────────────────────── */
 
 .live-progress-card {
-  background: rgba(52, 211, 153, 0.06);
-  border: 1px solid rgba(52, 211, 153, 0.18);
+  background: rgba(var(--amber-rgb), 0.06);
+  border: 1px solid rgba(var(--amber-rgb), 0.18);
   border-radius: var(--r-sm);
   padding: 0.5rem 0.625rem;
   margin-top: 0.5rem;
@@ -680,7 +723,7 @@ h1, h2, h3, h4, h5, h6,
 }
 .live-progress-track {
   height: 4px;
-  background: rgba(255,255,255,.08);
+  background: rgba(var(--tint), .08);
   border-radius: 2px;
 }
 .live-progress-bar {
@@ -723,7 +766,7 @@ h1, h2, h3, h4, h5, h6,
 /* ── Postmortem block ──────────────────────────────────────────── */
 
 .postmortem-block {
-  background: rgba(255,255,255,.02);
+  background: rgba(var(--tint), .02);
   border: 1px solid var(--border-subtle);
   border-radius: var(--r-sm);
   padding: 0.5rem 0.625rem;
@@ -744,7 +787,7 @@ h1, h2, h3, h4, h5, h6,
 .postmortem-icon { font-size: 0.85rem; }
 
 .postmortem-pill {
-  background: rgba(255,255,255,.06);
+  background: rgba(var(--tint), .06);
   border: 1px solid var(--border-subtle);
   border-radius: 4px;
   padding: 0.1rem 0.4rem;
@@ -785,10 +828,10 @@ h1, h2, h3, h4, h5, h6,
 /* ── Parlay group ──────────────────────────────────────────────── */
 
 .parlay-group {
-  border: 1px solid rgba(96,165,250,.18);
+  border: 1px solid rgba(var(--info-rgb),.18);
   border-radius: var(--r-lg);
   overflow: hidden;
-  background: rgba(96,165,250,.03);
+  background: rgba(var(--info-rgb),.03);
 }
 
 .parlay-header {
@@ -796,8 +839,8 @@ h1, h2, h3, h4, h5, h6,
   justify-content: space-between;
   align-items: center;
   padding: 0.625rem 0.875rem;
-  background: rgba(96,165,250,.06);
-  border-bottom: 1px solid rgba(96,165,250,.12);
+  background: rgba(var(--info-rgb),.06);
+  border-bottom: 1px solid rgba(var(--info-rgb),.12);
   cursor: pointer;
   gap: 0.5rem;
   flex-wrap: wrap;
@@ -864,15 +907,15 @@ h1, h2, h3, h4, h5, h6,
 .btn-primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #0D0B08;
+  color: var(--bg);
   font-weight: 600;
   border-radius: var(--r-sm);
 }
 .btn-primary:hover, .btn-primary:focus {
-  background: #e0a820;
-  border-color: #e0a820;
-  color: #0D0B08;
-  box-shadow: 0 0 0 2px rgba(245, 166, 35, 0.30);
+  /* lift the ink rather than glow around it */
+  background: #FFFCF2;
+  border-color: #FFFCF2;
+  color: var(--bg);
 }
 .btn {
   transition: transform 0.12s ease, box-shadow 0.12s ease, background-color 0.12s ease, border-color 0.12s ease;
@@ -887,14 +930,14 @@ h1, h2, h3, h4, h5, h6,
 
 /* Toolbar/button hierarchy helpers */
 .btn-toolbar-primary {
-  border-color: rgba(96,165,250,.36);
+  border-color: rgba(var(--info-rgb),.36);
   color: var(--info);
 }
 .btn-toolbar-primary:hover,
 .btn-toolbar-primary:focus {
-  background: rgba(96,165,250,.13);
+  background: rgba(var(--info-rgb),.13);
   border-color: var(--info);
-  color: #cfe3ff;
+  color: var(--info);
 }
 .btn-toolbar-secondary {
   border-color: var(--border-mid);
@@ -902,8 +945,8 @@ h1, h2, h3, h4, h5, h6,
 }
 .btn-toolbar-secondary:hover,
 .btn-toolbar-secondary:focus {
-  background: rgba(255,255,255,.05);
-  border-color: rgba(255,255,255,.22);
+  background: rgba(var(--tint), .05);
+  border-color: rgba(var(--tint), .22);
   color: var(--text-main);
 }
 
@@ -929,12 +972,12 @@ h1, h2, h3, h4, h5, h6,
 }
 .btn-outline-secondary:hover {
   background: var(--bg-soft);
-  border-color: rgba(255,255,255,.2);
+  border-color: rgba(var(--tint), .2);
   color: var(--text-main);
 }
 
 .btn-outline-danger {
-  border-color: rgba(240,68,56,.35);
+  border-color: rgba(var(--loss-rgb),.35);
   color: var(--loss);
   border-radius: var(--r-sm);
 }
@@ -945,12 +988,12 @@ h1, h2, h3, h4, h5, h6,
 }
 
 .btn-outline-warning {
-  border-color: rgba(245,158,11,.35);
+  border-color: rgba(var(--amber-rgb),.35);
   color: var(--amber);
   border-radius: var(--r-sm);
 }
 .btn-outline-warning:hover {
-  background: rgba(245,158,11,.1);
+  background: rgba(var(--amber-rgb),.1);
   border-color: var(--amber);
   color: var(--amber);
 }
@@ -964,7 +1007,7 @@ h1, h2, h3, h4, h5, h6,
 /* ── Badges ────────────────────────────────────────────────────── */
 
 .badge {
-  font-family: 'Outfit', sans-serif;
+  font-family: 'Bricolage Grotesque', sans-serif;
   font-size: 0.68rem;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -976,22 +1019,22 @@ h1, h2, h3, h4, h5, h6,
 .badge-outcome-win {
   background: var(--win-bg);
   color: var(--win);
-  border: 1px solid rgba(34,197,94,.25);
+  border: 1px solid rgba(var(--win-rgb),.25);
 }
 .badge-outcome-lose {
   background: var(--loss-bg);
   color: var(--loss);
-  border: 1px solid rgba(240,68,56,.25);
+  border: 1px solid rgba(var(--loss-rgb),.25);
 }
 .badge-outcome-push {
   background: var(--push-bg);
   color: var(--push);
-  border: 1px solid rgba(148,163,184,.2);
+  border: 1px solid rgba(var(--push-rgb),.2);
 }
 .badge-outcome-pending {
-  background: rgba(245,158,11,.1);
+  background: rgba(var(--amber-rgb),.1);
   color: var(--amber);
-  border: 1px solid rgba(245,158,11,.25);
+  border: 1px solid rgba(var(--amber-rgb),.25);
 }
 
 /* ── Tables ────────────────────────────────────────────────────── */
@@ -1004,7 +1047,7 @@ h1, h2, h3, h4, h5, h6,
 
 .table {
   --bs-table-bg: transparent;
-  --bs-table-striped-bg: rgba(255,255,255,.015);
+  --bs-table-striped-bg: rgba(var(--tint), .015);
   color: var(--text-main);
 }
 
@@ -1013,7 +1056,7 @@ h1, h2, h3, h4, h5, h6,
   top: 0;
   z-index: 2;
   background: var(--bg-panel);
-  font-family: 'Outfit', sans-serif;
+  font-family: 'Bricolage Grotesque', sans-serif;
   font-size: 0.72rem;
   font-weight: 600;
   letter-spacing: 0.08em;
@@ -1024,7 +1067,7 @@ h1, h2, h3, h4, h5, h6,
 }
 
 .table tbody tr { border-color: var(--border-subtle); }
-.table tbody tr:hover td { background: rgba(245, 166, 35,.04); }
+.table tbody tr:hover td { background: rgba(var(--accent-rgb),.04); }
 .table td { padding: 0.55rem 0.75rem; font-size: 0.875rem; line-height: 1.4; vertical-align: middle; }
 .ctx-note-badge { font-size: 0.65rem; }
 
@@ -1040,8 +1083,7 @@ a:hover {
 .btn,
 .dropdown-item,
 .nav-link,
-.user-btn,
-.sidebar-toggle {
+.user-btn {
   min-height: 2.25rem;
 }
 .dropdown-item {
@@ -1162,7 +1204,7 @@ a:hover {
   text-align: center;
 }
 .empty-state-icon { font-size: 2.5rem; color: var(--text-dim); margin-bottom: 0.5rem; }
-.empty-state-title { font-family: 'Syne', sans-serif; font-size: 1.1rem; font-weight: 700; }
+.empty-state-title { font-family: 'Bricolage Grotesque', sans-serif; font-size: 1.1rem; font-weight: 700; }
 .empty-state-sub   { color: var(--text-muted); font-size: 0.875rem; max-width: 360px; }
 
 .divide-x > *:not(:last-child) { border-right: 1px solid var(--border-subtle); }
@@ -1237,8 +1279,8 @@ a:hover {
 }
 .bb-mode-btn[aria-selected="true"],
 .bb-mode-btn.active {
-  background: rgba(245, 166, 35,.12);
-  border-color: rgba(245, 166, 35,.25);
+  background: rgba(var(--accent-rgb),.12);
+  border-color: rgba(var(--accent-rgb),.25);
   color: var(--accent);
 }
 
@@ -1247,7 +1289,7 @@ a:hover {
   display: block;
 }
 .bb-mode-label {
-  font-family: 'Syne', sans-serif;
+  font-family: 'Bricolage Grotesque', sans-serif;
   font-size: 0.78rem;
   font-weight: 700;
   letter-spacing: -0.01em;
@@ -1259,7 +1301,7 @@ a:hover {
   color: var(--text-dim);
   display: block;
 }
-.bb-mode-btn.active .bb-mode-sub { color: rgba(245, 166, 35,.6); }
+.bb-mode-btn.active .bb-mode-sub { color: rgba(var(--accent-rgb),.6); }
 
 /* Section label divider */
 .bb-section-label {
@@ -1314,15 +1356,15 @@ a:hover {
 }
 
 .bb-ticket-head {
-  background: rgba(245, 166, 35,.08);
-  border-bottom: 1px solid rgba(245, 166, 35,.15);
+  background: rgba(var(--accent-rgb),.08);
+  border-bottom: 1px solid rgba(var(--accent-rgb),.15);
   padding: 0.75rem 1rem;
   display: flex;
   align-items: center;
   gap: 0.5rem;
 }
 .bb-ticket-head-title {
-  font-family: 'Syne', sans-serif;
+  font-family: 'Bricolage Grotesque', sans-serif;
   font-size: 0.8rem;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -1383,12 +1425,12 @@ a:hover {
 }
 .prop-browser-card:last-child { border-bottom: none; }
 .prop-browser-card:hover { background: var(--bg-soft); }
-.prop-browser-card.selected { background: rgba(245, 166, 35,.08); border-left: 2px solid var(--accent); }
+.prop-browser-card.selected { background: rgba(var(--accent-rgb),.08); border-left: 2px solid var(--accent); }
 
 /* Selected prop display */
 .selected-prop-display {
   background: var(--bg-soft);
-  border: 1px solid rgba(245, 166, 35,.2);
+  border: 1px solid rgba(var(--accent-rgb),.2);
   border-radius: var(--r-md);
   padding: 0.625rem 0.875rem;
   margin-bottom: 0.875rem;
@@ -1409,15 +1451,15 @@ a:hover {
   transition: all 0.15s;
   text-align: center;
 }
-.bb-side-btn:hover { border-color: rgba(255,255,255,.2); color: var(--text-main); }
+.bb-side-btn:hover { border-color: rgba(var(--tint), .2); color: var(--text-main); }
 .bb-side-btn.active-over {
-  background: rgba(34,197,94,.12);
-  border-color: rgba(34,197,94,.35);
+  background: rgba(var(--win-rgb),.12);
+  border-color: rgba(var(--win-rgb),.35);
   color: var(--win);
 }
 .bb-side-btn.active-under {
-  background: rgba(240,68,56,.12);
-  border-color: rgba(240,68,56,.35);
+  background: rgba(var(--loss-rgb),.12);
+  border-color: rgba(var(--loss-rgb),.35);
   color: var(--loss);
 }
 
@@ -1446,12 +1488,12 @@ a:hover {
   background: linear-gradient(90deg, var(--win), transparent);
 }
 .featured-play-card:hover {
-  border-color: rgba(34,197,94,.35);
-  box-shadow: 0 0 0 1px rgba(34,197,94,.1), var(--shadow-card);
+  border-color: rgba(var(--win-rgb),.35);
+  box-shadow: 0 0 0 1px rgba(var(--win-rgb),.1), var(--shadow-card);
 }
 
 .featured-player-name {
-  font-family: 'Syne', sans-serif;
+  font-family: 'Bricolage Grotesque', sans-serif;
   font-size: 1rem;
   font-weight: 700;
   letter-spacing: -0.02em;
@@ -1493,10 +1535,10 @@ a:hover {
   cursor: pointer;
   transition: all 0.12s;
 }
-.filter-btn:hover { border-color: rgba(255,255,255,.25); color: var(--text-main); }
+.filter-btn:hover { border-color: rgba(var(--tint), .25); color: var(--text-main); }
 .filter-btn.active {
-  background: rgba(245, 166, 35,.12);
-  border-color: rgba(245, 166, 35,.3);
+  background: rgba(var(--accent-rgb),.12);
+  border-color: rgba(var(--accent-rgb),.3);
   color: var(--accent);
 }
 
@@ -1518,7 +1560,7 @@ a:hover {
   padding: 0.5rem 0.75rem;
   border-color: var(--border-subtle);
 }
-.analysis-table tr:hover td { background: rgba(245, 166, 35,.03); }
+.analysis-table tr:hover td { background: rgba(var(--accent-rgb),.03); }
 .analysis-filter-select { width: auto; }
 .analysis-table-shell {
   min-height: 460px;
@@ -1559,10 +1601,10 @@ a:hover {
   padding: 0.2em 0.5em;
   text-transform: uppercase;
 }
-.conf-pill.strong   { background: rgba(34,197,94,.15);   color: var(--win);  border: 1px solid rgba(34,197,94,.3); }
-.conf-pill.moderate { background: rgba(245, 166, 35,.12);  color: var(--accent); border: 1px solid rgba(245, 166, 35,.25); }
-.conf-pill.slight   { background: rgba(96,165,250,.1);   color: var(--info); border: 1px solid rgba(96,165,250,.2); }
-.conf-pill.no_edge  { background: rgba(255,255,255,.05); color: var(--text-muted); border: 1px solid var(--border-subtle); }
+.conf-pill.strong   { background: rgba(var(--win-rgb),.15);   color: var(--win);  border: 1px solid rgba(var(--win-rgb),.3); }
+.conf-pill.moderate { background: rgba(var(--amber-rgb),.12);  color: var(--amber); border: 1px solid rgba(var(--amber-rgb),.25); }
+.conf-pill.slight   { background: rgba(var(--info-rgb),.1);   color: var(--info); border: 1px solid rgba(var(--info-rgb),.2); }
+.conf-pill.no_edge  { background: rgba(var(--tint), .05); color: var(--text-muted); border: 1px solid var(--border-subtle); }
 
 /* Edge badge */
 .edge-badge {
@@ -1573,10 +1615,10 @@ a:hover {
   border-radius: 4px;
   border: 1px solid transparent;
 }
-.edge-badge.strong   { background: rgba(34,197,94,.12);  color: var(--win);    border-color: rgba(34,197,94,.25); }
-.edge-badge.moderate { background: rgba(245, 166, 35,.1);  color: var(--accent); border-color: rgba(245, 166, 35,.22); }
-.edge-badge.slight   { background: rgba(96,165,250,.08); color: var(--info);   border-color: rgba(96,165,250,.18); }
-.edge-badge.no_edge  { background: rgba(255,255,255,.04); color: var(--text-muted); }
+.edge-badge.strong   { background: rgba(var(--win-rgb),.12);  color: var(--win);    border-color: rgba(var(--win-rgb),.25); }
+.edge-badge.moderate { background: rgba(var(--amber-rgb),.1);  color: var(--amber); border-color: rgba(var(--amber-rgb),.22); }
+.edge-badge.slight   { background: rgba(var(--info-rgb),.08); color: var(--info);   border-color: rgba(var(--info-rgb),.18); }
+.edge-badge.no_edge  { background: rgba(var(--tint), .04); color: var(--text-muted); }
 
 /* Side badge */
 .side-badge {
@@ -1588,8 +1630,8 @@ a:hover {
   align-items: center;
   gap: 0.25rem;
 }
-.side-badge.over  { background: rgba(34,197,94,.1);  color: var(--win);  border: 1px solid rgba(34,197,94,.25); }
-.side-badge.under { background: rgba(96,165,250,.1); color: var(--info); border: 1px solid rgba(96,165,250,.2); }
+.side-badge.over  { background: rgba(var(--win-rgb),.1);  color: var(--win);  border: 1px solid rgba(var(--win-rgb),.25); }
+.side-badge.under { background: rgba(var(--info-rgb),.1); color: var(--info); border: 1px solid rgba(var(--info-rgb),.2); }
 
 /* ══════════════════════════════════════════════════════════════════
    STAT ANALYSIS — nba_stat_analysis.html
@@ -1605,7 +1647,7 @@ a:hover {
 .stat-matchup-card:hover { border-color: var(--border-mid); }
 
 .matchup-header {
-  background: rgba(255,255,255,.025);
+  background: rgba(var(--tint), .025);
   border-bottom: 1px solid var(--border-subtle);
   padding: 0.625rem 0.875rem;
   display: flex;
@@ -1619,7 +1661,7 @@ a:hover {
   display: flex;
   align-items: center;
   gap: 0.625rem;
-  font-family: 'Syne', sans-serif;
+  font-family: 'Bricolage Grotesque', sans-serif;
   font-size: 1rem;
   font-weight: 800;
   letter-spacing: -0.02em;
@@ -1628,7 +1670,7 @@ a:hover {
   font-size: 0.65rem;
   color: var(--text-muted);
   font-weight: 400;
-  font-family: 'Outfit', sans-serif;
+  font-family: 'Bricolage Grotesque', sans-serif;
 }
 
 .matchup-meta {
@@ -1653,10 +1695,10 @@ a:hover {
   padding: 0.18em 0.45em;
   white-space: nowrap;
 }
-.indicator-badge.strong { background: rgba(34,197,94,.15);    color: var(--win);    border: 1px solid rgba(34,197,94,.3); }
-.indicator-badge.value  { background: rgba(245, 166, 35,.12);   color: var(--accent); border: 1px solid rgba(245, 166, 35,.25); }
-.indicator-badge.slight { background: rgba(96,165,250,.1);    color: var(--info);   border: 1px solid rgba(96,165,250,.2); }
-.indicator-badge.avoid  { background: rgba(240,68,56,.1);     color: var(--loss);   border: 1px solid rgba(240,68,56,.22); }
+.indicator-badge.strong { background: rgba(var(--win-rgb),.15);    color: var(--win);    border: 1px solid rgba(var(--win-rgb),.3); }
+.indicator-badge.value  { background: rgba(var(--amber-rgb),.12);   color: var(--amber); border: 1px solid rgba(var(--amber-rgb),.25); }
+.indicator-badge.slight { background: rgba(var(--info-rgb),.1);    color: var(--info);   border: 1px solid rgba(var(--info-rgb),.2); }
+.indicator-badge.avoid  { background: rgba(var(--loss-rgb),.1);     color: var(--loss);   border: 1px solid rgba(var(--loss-rgb),.22); }
 
 /* Player row in matchup */
 .stat-player-row {
@@ -1670,8 +1712,8 @@ a:hover {
   gap: 0.5rem;
 }
 .stat-player-row:last-child { border-bottom: none; }
-.stat-player-row:hover { background: rgba(245, 166, 35,.04); }
-.stat-player-row.active { background: rgba(245, 166, 35,.07); }
+.stat-player-row:hover { background: rgba(var(--accent-rgb),.04); }
+.stat-player-row.active { background: rgba(var(--accent-rgb),.07); }
 
 .stat-player-name {
   font-size: 0.82rem;
@@ -1701,7 +1743,7 @@ a:hover {
 }
 
 .stat-panel-head {
-  background: rgba(255,255,255,.02);
+  background: rgba(var(--tint), .02);
   border-bottom: 1px solid var(--border-subtle);
   padding: 0.875rem 1rem;
 }
@@ -1745,8 +1787,8 @@ a:hover {
 }
 .stat-toggle-btn:hover { border-color: var(--border-mid); color: var(--text-main); }
 .stat-toggle-btn.active {
-  background: rgba(245, 166, 35,.12);
-  border-color: rgba(245, 166, 35,.3);
+  background: rgba(var(--accent-rgb),.12);
+  border-color: rgba(var(--accent-rgb),.3);
   color: var(--accent);
 }
 
@@ -1859,9 +1901,8 @@ a:hover {
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  background: rgba(245,158,11,.06);
-  border: 1px solid rgba(245,158,11,.2);
-  border-left: 3px solid var(--amber);
+  background: rgba(var(--amber-rgb),.07);
+  border: 1px solid rgba(var(--amber-rgb),.28);
   border-radius: var(--r-md);
   padding: 0.75rem 1rem;
   margin-bottom: 1.25rem;
@@ -1878,34 +1919,21 @@ a:hover {
 ══════════════════════════════════════════════════════════════════ */
 
 @media (max-width: 991.98px) {
-  .app-shell {
-    grid-template-columns: 1fr;
+  /* The masthead is the same component at every width. Sections scroll
+     sideways rather than hiding behind a drawer, so navigation is never
+     more than one tap away and there is no focus trap to get wrong. */
+  .masthead { padding: 0.875rem 0.875rem 0; }
+  .brand-name { font-size: 1.12rem; font-variation-settings: 'opsz' 28; }
+  .mast-row { min-width: 0; }
+  .mast-row nav { min-width: 0; max-width: 100%; }
+  .sections {
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
   }
-  .sidebar {
-    position: fixed;
-    left: 0; top: 0; bottom: 0;
-    width: 252px;
-    transform: translateX(-100%);
-    z-index: 1000;
-    box-shadow: var(--shadow-pop);
-  }
-  .sidebar.open {
-    transform: translateX(0);
-  }
-  .sidebar-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(3, 6, 10, 0.55);
-    opacity: 0;
-    pointer-events: none;
-    border: 0;
-    transition: opacity 0.2s ease;
-    z-index: 999;
-  }
-  .sidebar-overlay.show {
-    opacity: 1;
-    pointer-events: auto;
-  }
+  .sections::-webkit-scrollbar { display: none; }
+  .sections li + li::before { margin: 0 0.7rem; }
+
   .bb-shell {
     grid-template-columns: 1fr;
   }
@@ -1950,9 +1978,9 @@ a:hover {
   .kpi-strip .kpi-cell:nth-child(5) { border-top: 1px solid var(--border-subtle); border-right: 1px solid var(--border-subtle); }
   .kpi-strip .kpi-cell:nth-child(6) { border-top: 1px solid var(--border-subtle); border-right: none; }
 
-  .topbar { padding: 0.625rem 0.75rem; }
-  .main-content { padding: 1rem 0.75rem; }
-  .sidebar-toggle,
+  .topbar { padding: 0 0 0.7rem; }
+  .main-content { padding: 0.75rem 0.5rem 0; }
+  .sheet { padding: 1rem 0.875rem 1.25rem; }
   .user-btn,
   .nav-link,
   .form-control,
@@ -1960,10 +1988,6 @@ a:hover {
   .btn,
   .dropdown-item {
     min-height: 2.75rem;
-  }
-  .sidebar-toggle {
-    width: 2.75rem;
-    height: 2.75rem;
   }
 
   .bet-row-card { flex-wrap: wrap; }
@@ -2020,7 +2044,7 @@ a:hover {
   border-bottom: 1px solid var(--border-subtle);
 }
 .bb-form-section:last-of-type { border-bottom: none; }
-.bb-form-section--muted { background: rgba(255,255,255,.01); }
+.bb-form-section--muted { background: rgba(var(--tint), .01); }
 
 .bb-form-section-label {
   display: flex;
@@ -2041,7 +2065,7 @@ a:hover {
   justify-content: flex-end;
   gap: 0.5rem;
   padding: 1rem 1.25rem;
-  background: rgba(255,255,255,.015);
+  background: rgba(var(--tint), .015);
   border-top: 1px solid var(--border-subtle);
 }
 
@@ -2054,7 +2078,7 @@ a:hover {
 }
 .bb-team-input { min-width: 0; }
 .bb-at-divider {
-  font-family: 'Syne', sans-serif;
+  font-family: 'Bricolage Grotesque', sans-serif;
   font-size: 0.8rem;
   font-weight: 700;
   color: var(--text-muted);
@@ -2087,16 +2111,16 @@ a:hover {
 
 /* Selected prop card */
 .bb-selected-prop {
-  background: rgba(245, 166, 35,.06);
-  border: 1px solid rgba(245, 166, 35,.2);
+  background: rgba(var(--accent-rgb),.06);
+  border: 1px solid rgba(var(--accent-rgb),.2);
   border-radius: var(--r-md);
   padding: 0.625rem 0.875rem;
 }
-.bb-prop-sel-player { font-family: 'Syne', sans-serif; font-size: 0.95rem; }
+.bb-prop-sel-player { font-family: 'Bricolage Grotesque', sans-serif; font-size: 0.95rem; }
 .bb-prop-sel-badge {
-  background: rgba(245, 166, 35,.12);
+  background: rgba(var(--accent-rgb),.12);
   color: var(--accent);
-  border: 1px solid rgba(245, 166, 35,.25);
+  border: 1px solid rgba(var(--accent-rgb),.25);
 }
 .bb-prop-sel-line { font-size: 1.1rem; }
 .bb-clear-link {
@@ -2105,9 +2129,9 @@ a:hover {
 }
 .bb-date-input { max-width: 180px; }
 .bb-count-badge {
-  background: rgba(245, 166, 35,.15);
+  background: rgba(var(--accent-rgb),.15);
   color: var(--accent);
-  border: 1px solid rgba(245, 166, 35,.25);
+  border: 1px solid rgba(var(--accent-rgb),.25);
 }
 .bb-legs-label { padding: 0.75rem 1rem 0; }
 .bb-legs-empty-icon {
@@ -2123,7 +2147,7 @@ a:hover {
 .bb-preview-img { max-height: 180px; }
 .bb-form-section-label-tight { margin-bottom: 0.75rem; }
 .bb-ocr-raw {
-  background: rgba(255,255,255,.04);
+  background: rgba(var(--tint), .04);
   color: var(--text-muted);
   max-height: 130px;
   overflow-y: auto;
@@ -2159,7 +2183,7 @@ a:hover {
   border-bottom: 1px solid var(--border-subtle);
 }
 .bb-browser-title {
-  font-family: 'Syne', sans-serif;
+  font-family: 'Bricolage Grotesque', sans-serif;
   font-size: 0.8rem;
   font-weight: 700;
   letter-spacing: 0.02em;
@@ -2255,15 +2279,15 @@ a:hover {
 .ub-game-select {
   padding-left: 2rem;
   min-height: 2.35rem;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02)), var(--bg-panel);
+  background: linear-gradient(180deg, rgba(var(--tint), 0.04), rgba(var(--tint), 0.02)), var(--bg-panel);
   border: 1px solid var(--border-mid);
   color: var(--text-main);
   font-size: 0.86rem;
 }
 
 .ub-game-select:focus {
-  border-color: rgba(245, 166, 35, 0.4);
-  box-shadow: 0 0 0 0.2rem rgba(245, 166, 35, 0.14);
+  border-color: rgba(var(--accent-rgb), 0.4);
+  box-shadow: 0 0 0 0.2rem rgba(var(--accent-rgb), 0.14);
 }
 
 .ub-market-row {
@@ -2309,7 +2333,7 @@ a:hover {
 #props-browser .prop-card:last-child,
 #parlay-prop-grid .prop-card:last-child { border-bottom: none !important; }
 #props-browser .prop-card:hover,
-#parlay-prop-grid .prop-card:hover { background: rgba(255,255,255,.025) !important; }
+#parlay-prop-grid .prop-card:hover { background: rgba(var(--tint), .025) !important; }
 
 /* Player name — takes remaining space, truncates */
 #props-browser .prop-card-player,
@@ -2388,33 +2412,33 @@ a:hover {
 /* Over btn */
 #props-browser .btn-outline-success,
 #parlay-prop-grid .btn-outline-success {
-  border-color: rgba(34,197,94,.35) !important;
+  border-color: rgba(var(--win-rgb),.35) !important;
   color: var(--win) !important;
 }
 #props-browser .btn-outline-success:hover,
 #parlay-prop-grid .btn-outline-success:hover {
-  background: rgba(34,197,94,.12) !important;
+  background: rgba(var(--win-rgb),.12) !important;
   border-color: var(--win) !important;
 }
 #props-browser .btn-outline-success.active,
 #parlay-prop-grid .btn-outline-success.active {
-  background: rgba(34,197,94,.2) !important;
+  background: rgba(var(--win-rgb),.2) !important;
 }
 
 /* Under btn */
 #props-browser .btn-outline-danger,
 #parlay-prop-grid .btn-outline-danger {
-  border-color: rgba(96,165,250,.35) !important;
+  border-color: rgba(var(--info-rgb),.35) !important;
   color: var(--info) !important;
 }
 #props-browser .btn-outline-danger:hover,
 #parlay-prop-grid .btn-outline-danger:hover {
-  background: rgba(96,165,250,.12) !important;
+  background: rgba(var(--info-rgb),.12) !important;
   border-color: var(--info) !important;
 }
 #props-browser .btn-outline-danger.active,
 #parlay-prop-grid .btn-outline-danger.active {
-  background: rgba(96,165,250,.2) !important;
+  background: rgba(var(--info-rgb),.2) !important;
 }
 
 /* ── Parlay split panel ────────────────────────────────────────── */
@@ -2534,15 +2558,15 @@ a:hover {
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--accent);
-  background: rgba(245, 166, 35,.08);
-  border: 1px solid rgba(245, 166, 35,.2);
+  background: rgba(var(--accent-rgb),.08);
+  border: 1px solid rgba(var(--accent-rgb),.2);
   border-radius: 100px;
   padding: 0.3em 0.9em;
   margin-bottom: 1.25rem;
 }
 
 .home-hero-headline {
-  font-family: 'Syne', sans-serif;
+  font-family: 'Bricolage Grotesque', sans-serif;
   font-size: clamp(1.95rem, 4vw, 2.95rem);
   font-weight: 800;
   letter-spacing: -0.03em;
@@ -2575,7 +2599,7 @@ a:hover {
   gap: 0;
   border-top: 1px solid var(--border-subtle);
   border-bottom: 1px solid var(--border-subtle);
-  background: rgba(255,255,255,.01);
+  background: rgba(var(--tint), .01);
   margin-bottom: 2rem;
 }
 
@@ -2629,7 +2653,7 @@ a:hover {
 }
 
 .home-feature-title {
-  font-family: 'Syne', sans-serif;
+  font-family: 'Bricolage Grotesque', sans-serif;
   font-size: 0.92rem;
   font-weight: 700;
   color: var(--text-main);
@@ -2664,8 +2688,8 @@ a:hover {
 ══════════════════════════════════════════════════════════════════ */
 
 .auth-brand-header {
-  background: rgba(245, 166, 35,.06);
-  border-bottom: 1px solid rgba(245, 166, 35,.12);
+  background: rgba(var(--accent-rgb),.06);
+  border-bottom: 1px solid rgba(var(--accent-rgb),.12);
   padding: 1.25rem 1.5rem;
   display: flex;
   align-items: center;
@@ -2681,7 +2705,7 @@ a:hover {
 }
 
 .auth-brand-title {
-  font-family: 'Syne', sans-serif;
+  font-family: 'Bricolage Grotesque', sans-serif;
   font-size: 1.02rem;
   font-weight: 800;
   letter-spacing: -0.02em;
@@ -2754,7 +2778,7 @@ a:hover {
 .skeleton-card { min-height: 260px; }
 .skeleton-block {
   border-radius: 0.4rem;
-  background: linear-gradient(90deg, rgba(255,255,255,.05) 25%, rgba(255,255,255,.12) 37%, rgba(255,255,255,.05) 63%);
+  background: linear-gradient(90deg, rgba(var(--tint), .05) 25%, rgba(var(--tint), .12) 37%, rgba(var(--tint), .05) 63%);
   background-size: 400% 100%;
   animation: loadingShimmer 1.2s ease-in-out infinite;
 }
@@ -2792,40 +2816,47 @@ a:hover {
 
 .today-empty-icon { font-size: 2rem; }
 .today-count-badge { font-size: 0.75rem; }
+/* The flow strip — a jump line, not a tab bar.
+   It was four equal-width bordered tiles, each an icon plus a label: three
+   slop-blacklist hits at once (rows of identical icon tiles, boxed containers,
+   and `transition: all`, which animates layout properties). A newspaper moves a
+   reader between parts of one story with a ruled jump line, so that is what
+   this is. Order is the information here — these four pages are one task in
+   four rooms — and the chevrons carry it. Active is weight and contrast only,
+   exactly as the masthead marks the active section. No box, no fill, no rail. */
 .ux-flow-nav {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0.5rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border-subtle);
 }
 .ux-flow-link {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.45rem;
-  padding: 0.55rem 0.65rem;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--r-md);
-  background: rgba(255,255,255,0.01);
+  display: inline-block;
+  padding: 0.25rem 0;
   color: var(--text-muted);
   text-decoration: none;
-  font-size: 0.8rem;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.6875rem;   /* 11px — positive tracking is only licensed here */
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   font-weight: 500;
-  transition: all 0.15s ease;
-}
-.ux-flow-link > span {
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  transition: color 120ms cubic-bezier(.2, 0, .2, 1);
 }
-.ux-flow-link:hover {
-  border-color: var(--border-mid);
-  color: var(--text-main);
-  background: var(--bg-soft);
+/* Chevrons are generated between steps, so the markup stays a plain list and
+   the separator can never be read aloud as content. */
+.ux-flow-link + .ux-flow-link::before {
+  content: "\203A";
+  margin-right: 0.5rem;
+  color: var(--text-dim);
+  letter-spacing: 0;
 }
+.ux-flow-link:hover { color: var(--text-main); }
 .ux-flow-link.is-active {
-  border-color: rgba(245, 166, 35, .35);
-  background: rgba(245, 166, 35, 0.12);
-  color: var(--accent);
+  color: var(--text-main);
+  font-weight: 700;
 }
 .today-toolbar {
   display: flex;
@@ -2833,7 +2864,7 @@ a:hover {
   align-items: center;
   gap: 0.75rem;
   margin-bottom: 1.25rem;
-  background: rgba(255,255,255,.015);
+  background: rgba(var(--tint), .015);
   border: 1px solid var(--border-subtle);
   border-radius: var(--r-md);
   padding: 0.75rem 0.85rem;
@@ -2861,10 +2892,10 @@ a:hover {
   color: var(--text-muted);
 }
 .today-completed-card {
-  border-color: rgba(255,255,255,.05);
+  border-color: rgba(var(--tint), .05);
   opacity: 0.92;
 }
-.today-upcoming-card { border-color: rgba(255,255,255,.06); }
+.today-upcoming-card { border-color: rgba(var(--tint), .06); }
 .today-mini-label { font-size: 0.7rem; }
 .today-mini-chevron { font-size: 0.7rem; }
 .today-slip-empty-icon { font-size: 1.2rem; }
@@ -2924,7 +2955,7 @@ a:hover {
   gap: 0.6rem;
   padding: 0.7rem 0.9rem;
   border-bottom: 1px solid var(--border-subtle);
-  background: rgba(255,255,255,.018);
+  background: rgba(var(--tint), .018);
 }
 .sa-team-block {
   display: flex;
@@ -2934,7 +2965,7 @@ a:hover {
 .sa-team-away { text-align: left; }
 .sa-team-home { text-align: right; }
 .sa-team-abbr {
-  font-family: 'Syne', sans-serif;
+  font-family: 'Bricolage Grotesque', sans-serif;
   font-size: 1rem;
   font-weight: 700;
   letter-spacing: -0.02em;
@@ -2968,7 +2999,7 @@ a:hover {
   color: var(--text-muted);
   padding: 0.5rem 0.85rem 0.25rem;
   border-top: 1px solid var(--border-subtle);
-  background: rgba(255,255,255,.012);
+  background: rgba(var(--tint), .012);
 }
 .sa-team-col .sa-pos-header:first-child {
   border-top: 0;
@@ -2991,7 +3022,7 @@ a:hover {
   border-top: 0;
 }
 .sa-player-row:hover {
-  background: rgba(255,255,255,.02);
+  background: rgba(var(--tint), .02);
 }
 .sa-player-info {
   min-width: 0;
@@ -3015,10 +3046,10 @@ a:hover {
 .sa-player-row .indicator-badge {
   flex-shrink: 0;
 }
-.sa-ind-strong { border-left: 2px solid rgba(34,197,94,.4); }
-.sa-ind-value  { border-left: 2px solid rgba(245,166,35,.4); }
-.sa-ind-slight { border-left: 2px solid rgba(96,165,250,.4); }
-.sa-ind-avoid  { border-left: 2px solid rgba(240,68,56,.4); }
+.sa-ind-strong { border-left: 2px solid rgba(var(--win-rgb),.4); }
+.sa-ind-value  { border-left: 2px solid rgba(var(--amber-rgb),.4); }
+.sa-ind-slight { border-left: 2px solid rgba(var(--info-rgb),.4); }
+.sa-ind-avoid  { border-left: 2px solid rgba(var(--loss-rgb),.4); }
 
 /* ── Stat side panel (drawer) ─────────────────────────────────── */
 .stat-panel {
@@ -3040,7 +3071,7 @@ a:hover {
   position: fixed;
   inset: 0;
   z-index: 1080;
-  background: rgba(3, 6, 10, 0.55);
+  background: rgba(var(--tint), 0.42);
 }
 .stat-panel-backdrop[hidden] { display: none !important; }
 .stat-panel-header {
@@ -3049,7 +3080,7 @@ a:hover {
   gap: 0.75rem;
   padding: 0.9rem 1rem;
   border-bottom: 1px solid var(--border-subtle);
-  background: rgba(255,255,255,.015);
+  background: rgba(var(--tint), .015);
 }
 .stat-panel-body {
   height: calc(100vh - 74px);
@@ -3066,7 +3097,7 @@ a:hover {
   line-height: 1;
 }
 .sp-name {
-  font-family: 'Syne', sans-serif;
+  font-family: 'Bricolage Grotesque', sans-serif;
   font-size: 1.05rem;
   font-weight: 700;
 }
@@ -3105,8 +3136,8 @@ a:hover {
   font-family: 'JetBrains Mono', monospace;
 }
 .sp-tog-btn.active {
-  background: rgba(245,166,35,.12);
-  border-color: rgba(245,166,35,.25);
+  background: rgba(var(--accent-rgb),.12);
+  border-color: rgba(var(--accent-rgb),.25);
   color: var(--accent);
 }
 .sp-barchart {
@@ -3125,8 +3156,8 @@ a:hover {
   border-radius: 3px 3px 0 0;
   position: relative;
 }
-.sp-bar-over { background: rgba(34,197,94,.85); }
-.sp-bar-under { background: rgba(240,68,56,.75); }
+.sp-bar-over { background: rgba(var(--win-rgb),.85); }
+.sp-bar-under { background: rgba(var(--loss-rgb),.75); }
 .sp-bar-label {
   position: absolute;
   top: -1rem;
@@ -3139,7 +3170,7 @@ a:hover {
   position: absolute;
   left: 0;
   right: 0;
-  border-top: 1px dashed rgba(245,166,35,.55);
+  border-top: 1px dashed rgba(var(--accent-rgb),.55);
 }
 .sp-gamelog-wrap {
   border: 1px solid var(--border-subtle);
@@ -3380,8 +3411,8 @@ a:hover {
   color: var(--text-main);
 }
 .pagination .page-item.active .page-link {
-  background: rgba(245, 166, 35, 0.18);
-  border-color: rgba(245, 166, 35, 0.35);
+  background: rgba(var(--accent-rgb), 0.18);
+  border-color: rgba(var(--accent-rgb), 0.35);
   color: var(--accent);
 }
 
@@ -3554,22 +3585,22 @@ a:hover {
 }
 .btn-link:hover { color: var(--text-main); }
 .btn-outline-info {
-  border-color: rgba(96,165,250,.48);
+  border-color: rgba(var(--info-rgb),.48);
   color: var(--info);
 }
 .btn-outline-info:hover,
 .btn-outline-info:focus-visible {
-  background: rgba(96,165,250,.13);
+  background: rgba(var(--info-rgb),.13);
   border-color: var(--info);
   color: var(--text-main);
 }
 .btn-outline-light {
-  border-color: rgba(238,240,245,.55);
+  border-color: rgba(var(--tint),.55);
   color: var(--text-main);
 }
 .btn-outline-light:hover,
 .btn-outline-light:focus-visible {
-  background: rgba(238,240,245,.09);
+  background: rgba(var(--tint),.09);
   border-color: var(--text-main);
 }
 .btn-success {
@@ -3579,8 +3610,8 @@ a:hover {
 }
 .btn-success:hover,
 .btn-success:focus-visible {
-  background: #1eb055;
-  border-color: #1eb055;
+  background: #62C08D;
+  border-color: #62C08D;
   color: var(--bg);
 }
 .btn-group {
@@ -3690,9 +3721,9 @@ a:hover {
   border-radius: var(--r-md);
 }
 .alert-warning {
-  border-color: rgba(245,166,35,.28);
-  background: var(--accent-soft);
-  color: var(--accent);
+  border-color: rgba(var(--amber-rgb),.28);
+  background: rgba(var(--amber-rgb),.08);
+  color: var(--amber);
 }
 
 .nav {
@@ -3702,12 +3733,6 @@ a:hover {
   margin-bottom: 0;
   list-style: none;
 }
-.nav-pills .nav-link.active,
-.nav-pills .show > .nav-link {
-  background: rgba(245,166,35,.12);
-  color: var(--accent);
-}
-
 .dropdown { position: relative; }
 .dropdown-toggle::after {
   display: inline-block;
@@ -3753,7 +3778,7 @@ a:hover {
   z-index: 1060;
   display: none;
   overflow: hidden auto;
-  background: rgba(0,0,0,.66);
+  background: rgba(var(--tint), 0.42);
   outline: 0;
 }
 .modal.show { display: block; }
@@ -3816,12 +3841,20 @@ a:hover {
   border-radius: 999px;
   background: var(--bg-soft);
 }
+/* Pace fills. A near-white bar is the brightest thing on a dark row, so it
+   has to earn that weight by saying something: the fill carries the same
+   verdict as the trend badge beside it. */
+.live-progress-bar.pace-good    { background: var(--win); }
+.live-progress-bar.pace-warn    { background: var(--amber); }
+.live-progress-bar.pace-bad     { background: var(--loss); }
+.live-progress-bar.pace-neutral { background: var(--text-dim); }
+
 .progress-bar {
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  background: var(--accent);
+  background: var(--text-dim);
   color: var(--bg);
   text-align: center;
   white-space: nowrap;
@@ -3848,7 +3881,7 @@ a:hover {
   vertical-align: top;
 }
 .table > :not(caption) > * > * { border-bottom: 1px solid var(--border-subtle); }
-.table-hover > tbody > tr:hover > * { background: rgba(245,166,35,.04); }
+.table-hover > tbody > tr:hover > * { background: rgba(var(--accent-rgb),.04); }
 .table-sm > :not(caption) > * > * { padding: 0.3rem; }
 .table-dark { color: var(--text-main); background: var(--bg-panel); }
 
@@ -4007,3 +4040,4 @@ a:hover {
 @media (min-width: 992px) {
   .d-lg-none { display: none !important; }
 }
+

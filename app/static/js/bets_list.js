@@ -4,6 +4,16 @@
     return Number(value).toFixed(1).replace(/\.0$/, '');
   }
 
+  // Maps a trend badge's colour to the pace bar's fill, so the badge and the
+  // bar can never disagree about whether a bet is going well.
+  const PACE_FILL = {
+    'text-bg-success': 'pace-good',
+    'text-bg-info': 'pace-neutral',
+    'text-bg-warning text-dark': 'pace-warn',
+    'text-bg-danger': 'pace-bad',
+    'text-bg-secondary': 'pace-neutral',
+  };
+
   function trendMessage(data) {
     const isOver = data.bet_type === 'over';
     const projected = Number(data.projected_final || 0);
@@ -44,13 +54,13 @@
     // Reveal detail sections once real data arrives
     card.querySelectorAll('[data-live-details],[data-live-details-bar],[data-live-details-meta]').forEach(function (el) { el.removeAttribute('hidden'); });
 
-    // Upgrade header to live style once we have data
-    var headerLabel = card.querySelector('.text-secondary .bi-clock-history');
-    if (headerLabel) {
-      var parent = headerLabel.parentElement;
-      parent.className = parent.className.replace('text-secondary', 'text-info');
-      headerLabel.className = headerLabel.className.replace('bi-clock-history', 'bi-broadcast');
-    }
+    // NOTE: a block here used to "upgrade the header to live style" by finding
+    // a Bootstrap clock-history icon and swapping it for a broadcast one. No
+    // Bootstrap Icons stylesheet or font is loaded, and the icon macro emits
+    // <svg class="icon">, so no such class has ever been in the DOM — the
+    // selector matched nothing and the block never ran. Removed rather than
+    // half-fixed: the intent (mark a row as gone-live) is real and belongs to
+    // the Position Log row component, which owns that state.
 
     if (currentEl) currentEl.textContent = formatNum(data.current_stat);
     if (statusEl) statusEl.textContent = data.status_text || 'Live';
@@ -63,15 +73,21 @@
       deltaEl.textContent = `Δ line: ${delta >= 0 ? '+' : ''}${formatNum(delta)}`;
     }
 
+    // The pace verdict is computed once and drives both the badge and the
+    // bar. Previously only the badge used it, so "on pace" and "pace under
+    // line" rendered as the same full-contrast bar — the loudest element on
+    // the row saying nothing.
+    const trend = trendMessage(data);
+
     if (barEl) {
       const pct = Math.max(0, Math.min(100, Number(data.progress_pct || 0)));
       barEl.style.width = `${pct}%`;
+      barEl.className = `progress-bar live-progress-bar ${PACE_FILL[trend.cls] || 'pace-neutral'}`;
       const progressEl = card.querySelector('[data-live-progress]');
       if (progressEl) progressEl.setAttribute('aria-valuenow', String(Math.round(pct)));
     }
 
     if (trendEl) {
-      const trend = trendMessage(data);
       trendEl.className = `badge live-trend ${trend.cls}`;
       trendEl.textContent = trend.text;
     }

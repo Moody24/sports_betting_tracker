@@ -1,10 +1,11 @@
 import { defineConfig, devices } from '@playwright/test';
+import { E2E_SECRET_KEY, E2E_DATABASE_URL, E2E_RATELIMIT_ENABLED } from './tests/e2e/helpers/env';
 
 const baseURL = process.env.E2E_BASE_URL || 'http://127.0.0.1:5010';
 const runLocalServer = !process.env.E2E_BASE_URL;
-const e2eSecret = process.env.SECRET_KEY || 'e2e-dev-secret';
-const e2eDatabaseUrl = process.env.DATABASE_URL || 'sqlite:////tmp/e2e.sqlite';
-const rateLimitEnabled = process.env.RATELIMIT_ENABLED || 'false';
+const e2eSecret = E2E_SECRET_KEY;
+const e2eDatabaseUrl = E2E_DATABASE_URL;
+const rateLimitEnabled = E2E_RATELIMIT_ENABLED;
 const bootstrapCommand = e2eDatabaseUrl.startsWith('sqlite:')
   ? `SECRET_KEY=${e2eSecret} DATABASE_URL=${e2eDatabaseUrl} RATELIMIT_ENABLED=${rateLimitEnabled} ./.venv/bin/python -c "from app import create_app, db; app = create_app(); ctx = app.app_context(); ctx.push(); db.create_all(); ctx.pop()"`
   : `SECRET_KEY=${e2eSecret} DATABASE_URL=${e2eDatabaseUrl} RATELIMIT_ENABLED=${rateLimitEnabled} ./.venv/bin/python -c "from app import create_app; from flask_migrate import upgrade; app = create_app();\nwith app.app_context(): upgrade(directory='migrations')"`;

@@ -1,14 +1,26 @@
+{#
+  The flow strip: NBA Today -> Prop Analysis -> Stat Analysis -> Bet Builder,
+  the canonical path in docs/ux_ops_playbook.md. Included by exactly these four
+  templates and deliberately by no others — showing it elsewhere would claim a
+  page is part of the workflow when it isn't.
+
+  Rendered as a ruled jump line rather than a tab bar. It previously emitted an
+  icon plus a label inside a bordered tile, four across, which was three
+  separate slop-blacklist hits. The icons carried no information the labels
+  didn't, so they are gone; order is carried by generated chevrons in CSS, and
+  the active step by weight and contrast alone.
+#}
 <nav class="ux-flow-nav mb-4 fade-up fade-up-1" aria-label="Sportsbook workflow">
-  <a class="ux-flow-link{% if flow_active == 'today' %} is-active{% endif %}" href="{{ url_for('bet.nba_today') }}">
-    {{ icon('dribbble') }}<span>NBA Today</span>
-  </a>
-  <a class="ux-flow-link{% if flow_active == 'analysis' %} is-active{% endif %}" href="{{ url_for('bet.nba_analysis') }}">
-    {{ icon('bullseye') }}<span>Prop Analysis</span>
-  </a>
-  <a class="ux-flow-link{% if flow_active == 'stat' %} is-active{% endif %}" href="{{ url_for('bet.nba_stat_analysis') }}">
-    {{ icon('bar-chart-line') }}<span>Stat Analysis</span>
-  </a>
-  <a class="ux-flow-link{% if flow_active == 'builder' %} is-active{% endif %}" href="{{ url_for('bet.new_bet', current_tab=flow_builder_tab|default('prop')) }}#{{ flow_builder_tab|default('prop') }}">
-    {{ icon('plus-circle') }}<span>Bet Builder</span>
-  </a>
+  <a class="ux-flow-link{% if flow_active == 'today' %} is-active{% endif %}"
+     {% if flow_active == 'today' %}aria-current="page"{% endif %}
+     href="{{ url_for('bet.nba_today') }}">NBA Today</a>
+  <a class="ux-flow-link{% if flow_active == 'analysis' %} is-active{% endif %}"
+     {% if flow_active == 'analysis' %}aria-current="page"{% endif %}
+     href="{{ url_for('bet.nba_analysis') }}">Prop Analysis</a>
+  <a class="ux-flow-link{% if flow_active == 'stat' %} is-active{% endif %}"
+     {% if flow_active == 'stat' %}aria-current="page"{% endif %}
+     href="{{ url_for('bet.nba_stat_analysis') }}">Stat Analysis</a>
+  <a class="ux-flow-link{% if flow_active == 'builder' %} is-active{% endif %}"
+     {% if flow_active == 'builder' %}aria-current="page"{% endif %}
+     href="{{ url_for('bet.new_bet', current_tab=flow_builder_tab|default('prop')) }}#{{ flow_builder_tab|default('prop') }}">Bet Builder</a>
 </nav>

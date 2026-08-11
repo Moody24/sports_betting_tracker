@@ -38,3 +38,6 @@ venv310/
 instance.bak/
 tests/helpers.py.backup
 .claude/worktrees/
+
+# Mock fonts are byte-copies of app/static/fonts — no need to version twice.
+design-mock/fonts/

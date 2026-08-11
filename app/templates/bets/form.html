@@ -17,7 +17,7 @@
   {# ─── Main column ──────────────────────────────────────────────── #}
   <div class="bb-main">
 
-    <div class="card-soft mb-3" id="ub-root">
+    <div class="card-soft mb-3" id="ub-root" data-testid="bet-builder">
       <div class="bb-form-section">
         <div class="bb-form-section-label">{{ icon('layout-wtf') }} Unified Bet Slip <span class="badge text-bg-info ms-1">Primary</span></div>
         <div class="small text-secondary mb-2">
@@ -134,7 +134,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
+<script nonce="{{ csp_nonce }}">
   var CSRF_TOKEN         = '{{ csrf_token() }}';
   var UPCOMING_GAMES_URL = '{{ url_for("bet.nba_upcoming_games") }}';
   var PARLAY_URL         = '{{ url_for("bet.manual_parlay") }}';
