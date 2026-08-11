@@ -4107,8 +4107,11 @@ a:hover {
 
   /* Column vocabulary. A stake, a price, an edge and a P/L land in the
      same place on every surface because the band and the rows read the
-     same --cols. Set it once on the wrapping element. */
-  --cols: 1fr auto;
+     same --cols. Set it once on the wrapping element.
+     minmax(0, 1fr), never a bare 1fr: a bare 1fr resolves min-width to auto,
+     so the identity column refuses to shrink below its longest word and the
+     row pushes the document sideways at narrow widths. */
+  --cols: minmax(0, 1fr) auto;
 
   /* Signature display geometry. */
   --pp-w:     2.5rem;
@@ -4166,6 +4169,26 @@ a:hover {
   gap: 0.5rem;
   padding: 0.75rem 0;
   border-bottom: 1px solid var(--border-subtle);
+}
+
+/* CONTRACT AMENDMENT, 2026-08-11 — a control bar may carry real form
+   controls, not only chips. The pre-migration `.form-select` / `.form-control`
+   rules set width:100%, so each control claimed its own row and the bar became
+   a tall stack of full-width inputs. Label-wraps-control keeps the pair
+   together as one flex item, so the bar wraps in whole controls. */
+.control-bar label {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: baseline;
+  gap: 0.375rem;
+  min-width: 0;
+}
+
+.control-bar label > .form-select,
+.control-bar label > .form-control {
+  width: auto;
+  min-width: 0;
+  max-width: 11rem;
 }
 
 .chip {
@@ -4266,6 +4289,12 @@ a:hover {
 .row-line:hover { background: var(--bg-soft); }
 
 .row-lead {
+  /* min-width: 0 is load-bearing, not tidiness. A grid item defaults to
+     min-width: auto, so constraining the TRACK with minmax(0, 1fr) is not
+     enough — the item still refuses to shrink below its longest run of
+     unbroken text and pushes the whole document sideways at 320px. */
+  min-width: 0;
+  overflow-wrap: anywhere;
   font-family: var(--font-display);
   font-size: var(--type-sm);
   font-weight: 500;
@@ -4295,6 +4324,20 @@ a:hover {
   color: var(--text-main);
 }
 
+/* CONTRACT AMENDMENT, 2026-08-11 — direction on a FIGURE is colour only.
+   The tag classes were the nearest existing thing and were briefly misused
+   here, which painted every P/L as a filled chip: a row of boxes is exactly
+   the container-per-datum look this grammar exists to remove. A tag is a
+   status pill; a figure is a number that happens to have a sign.
+
+   Scoped to the slip too: `.slip-fact > :last-child` sets its own colour and
+   would otherwise out-specify a bare `.is-up`, so a positive P/L rendered in
+   plain ink and the direction cue silently vanished. */
+.row-figure.is-up,
+.slip-fact > .is-up   { color: var(--win); }
+.row-figure.is-down,
+.slip-fact > .is-down { color: var(--loss); }
+
 .row-meta {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
@@ -4311,6 +4354,54 @@ a:hover {
   justify-content: flex-end;
   gap: 0.25rem;
 }
+
+/* CONTRACT AMENDMENT, 2026-08-11 — a row is a grid, so anything belonging
+   to the whole row rather than to one column (the pace axis, a disclosure,
+   a past-performance strip) was otherwise trapped in column one. */
+.row-full {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+/* Column collapse. CONTRACT AMENDMENT, 2026-08-11 — the frozen contract
+   had no responsive rule for --cols, so any sheet declaring more than two
+   columns overflowed at 320px. A generic media query cannot know a page's
+   desktop --cols value, so it resets to the two-column default instead:
+   identity on the left, the one lead figure on the right.
+
+   Columns are DROPPED, not squeezed — a five-column band crushed into
+   360px is unreadable, and the figures it drops are secondary by
+   definition. Mark those cells `.is-optional` in BOTH the band and the
+   rows, or the header will stop lining up with its own column. Anything
+   dropped here must remain reachable in the row's disclosure. */
+
+/* Declared BEFORE the media query on purpose: a media query adds no
+   specificity, so if this sat after it, `display: none` would win at every
+   width and the collapsed figures would never appear. */
+.is-compact-only { display: none; }
+
+@media (max-width: 47.99rem) {
+  .band,
+  .row-line,
+  .row-group-head { --cols: minmax(0, 1fr) auto; }
+
+  .band-cell.is-optional,
+  .row-figure.is-optional,
+  .row-meta.is-optional { display: none; }
+
+  /* The other half of the bargain: what the columns drop, the meta line
+     picks up. Without this the figures are not "secondary", they are gone. */
+  .is-compact-only { display: inline; }
+
+  /* Actions are the fifth child of a now two-column grid, so they wrapped to
+     their own row and sat right-aligned under an empty cell. Give them the
+     full width and start them at the text edge. */
+  .row-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+}
+
 
 /* ── Grouped rows ──────────────────────────────────────────────────
    Parlays. The head IS the toggle; the body is tied back to it by a

@@ -57,7 +57,7 @@ are not disjoint and the parallel-dispatch precondition is not met.
 |---|---|---|---|
 | 0 | Shell, tokens, masthead | **Complete, uncommitted** | Dark ground, zero radius, zero chromatic accent. Branch `sheet-phase-0`. |
 | 0.5 | Ownership, contracts, shared-layer debt | **In progress** | See checklist below. Must land before any page work. |
-| 1 | **My Bets → the Position Log** | Not started | Reordered — see below. Richest structural source; ships the shared vocabulary. |
+| 1 | **My Bets → the Position Log** | **Complete** | Grammar shipped end to end; pace axis is its signature display. Five contract amendments, below. |
 | 2 | **Prop Analysis → the Board** | Not started | Consumes Phase 1's vocabulary; adds the dense-table variant and the modal. |
 | 3 | NBA Today + Dashboard | Not started | **Serial.** Dashboard's KPI row becomes the ledger band. |
 | 4 | Stat Analysis + Bet Builder | Not started | **Serial.** Need new thinking, not new paint. |
@@ -171,6 +171,25 @@ as one scannable block per row. This is the test of whether the direction has
 an argument or only a vocabulary. Hairlines, a column band, and a slip could be
 on any dashboard; this could not. If it cannot be made to work, that is a
 finding about the direction and must surface now, not in Phase 5.
+
+### Contract amendments from Phase 1
+
+The frozen contract survived contact largely intact, but five gaps only a real
+page could expose. All are generic, not page-specific:
+
+| Amendment | Why it was needed |
+|---|---|
+| `--cols` collapses to two columns below 48rem | The contract had no responsive rule at all, so any sheet with more than two columns overflowed at 320px. |
+| `.is-optional` / `.is-compact-only` | Columns are *dropped* at narrow widths, not squeezed. The pair is the bargain: what the band drops, the meta line picks up, so a figure is never simply unreachable. |
+| `.row-full` | A row is a grid, so anything belonging to the whole row (pace axis, disclosure) was trapped in column one. |
+| `.row-figure.is-up` / `.is-down` | Direction on a *figure* is colour only. The tag classes were the nearest existing thing and painted every P/L as a filled chip — a row of boxes, which is what this grammar exists to remove. |
+| `.control-bar label` sizing | A control bar may carry real form controls, not only chips. The pre-migration `width:100%` rules turned the bar into a tall stack of full-width inputs. |
+
+Three bugs found by rendering rather than by reasoning, each worth remembering:
+`minmax(0,1fr)` on the track is not enough without `min-width:0` on the grid
+*item*; a media query adds no specificity, so a base rule placed after it wins
+at every width; and a status tag must never receive free text — the server's
+error sentence inside a `nowrap` pill was what pushed the document sideways.
 
 ## Elevation rule (restated)
 

@@ -4,14 +4,15 @@
     return Number(value).toFixed(1).replace(/\.0$/, '');
   }
 
-  // Maps a trend badge's colour to the pace bar's fill, so the badge and the
-  // bar can never disagree about whether a bet is going well.
-  const PACE_FILL = {
-    'text-bg-success': 'pace-good',
-    'text-bg-info': 'pace-neutral',
-    'text-bg-warning text-dark': 'pace-warn',
-    'text-bg-danger': 'pace-bad',
-    'text-bg-secondary': 'pace-neutral',
+  // One verdict, two renderings. The tag and the pace fill both derive from
+  // `tone`, so they cannot disagree about whether a bet is going well — a
+  // green bar under a losing trend is a lie the eye believes before it reads
+  // the number, and that bug has already shipped here once.
+  const TONE = {
+    good: { tag: 'tag-win', pace: 'pace-good' },
+    neutral: { tag: 'tag-push', pace: 'pace-neutral' },
+    warn: { tag: 'tag-live', pace: 'pace-warn' },
+    bad: { tag: 'tag-loss', pace: 'pace-bad' },
   };
 
   function trendMessage(data) {
@@ -20,19 +21,19 @@
     const line = Number(data.line || 0);
     const diff = projected - line;
 
-    if (!line) return { text: 'Tracking', cls: 'text-bg-secondary' };
+    if (!line) return { text: 'Tracking', tone: 'neutral' };
 
     if (isOver) {
-      if (diff >= 2.5) return { text: 'On pace to clear', cls: 'text-bg-success' };
-      if (diff >= 0.5) return { text: 'Close to line', cls: 'text-bg-info' };
-      if (diff > -1.5) return { text: 'Borderline pace', cls: 'text-bg-warning text-dark' };
-      return { text: 'Pace against over', cls: 'text-bg-danger' };
+      if (diff >= 2.5) return { text: 'On pace to clear', tone: 'good' };
+      if (diff >= 0.5) return { text: 'Close to line', tone: 'neutral' };
+      if (diff > -1.5) return { text: 'Borderline pace', tone: 'warn' };
+      return { text: 'Pace against over', tone: 'bad' };
     }
 
-    if (diff <= -2.5) return { text: 'Comfortably below line', cls: 'text-bg-success' };
-    if (diff <= -0.5) return { text: 'Pace under line', cls: 'text-bg-info' };
-    if (diff < 1.5) return { text: 'Close to line', cls: 'text-bg-warning text-dark' };
-    return { text: 'Pace against under', cls: 'text-bg-danger' };
+    if (diff <= -2.5) return { text: 'Comfortably below line', tone: 'good' };
+    if (diff <= -0.5) return { text: 'Pace under line', tone: 'neutral' };
+    if (diff < 1.5) return { text: 'Close to line', tone: 'warn' };
+    return { text: 'Pace against under', tone: 'bad' };
   }
 
   function applyProgressCard(card, data) {
@@ -47,7 +48,19 @@
     const stateEl = card.querySelector('[data-live-state]');
 
     if (!data.ok) {
-      if (trendEl) { trendEl.className = 'badge live-trend text-bg-secondary'; trendEl.textContent = data.error || 'Unavailable'; }
+      if (trendEl) {
+        // The tag is a closed vocabulary of short labels, so it gets a fixed
+        // one. The server's reason can be a whole sentence ("Player not found
+        // in boxscore for ...") and putting that inside a nowrap pill pushed
+        // the document sideways at 320px. It goes to its own wrapping line.
+        trendEl.className = `tag ${TONE.neutral.tag}`;
+        trendEl.textContent = 'Unavailable';
+      }
+      const errEl = card.querySelector('[data-live-error]');
+      if (errEl && data.error) {
+        errEl.textContent = data.error;
+        errEl.removeAttribute('hidden');
+      }
       return false;
     }
 
@@ -78,17 +91,32 @@
     // line" rendered as the same full-contrast bar — the loudest element on
     // the row saying nothing.
     const trend = trendMessage(data);
+    const tone = TONE[trend.tone] || TONE.neutral;
 
     if (barEl) {
-      const pct = Math.max(0, Math.min(100, Number(data.progress_pct || 0)));
-      barEl.style.width = `${pct}%`;
-      barEl.className = `progress-bar live-progress-bar ${PACE_FILL[trend.cls] || 'pace-neutral'}`;
+      // The axis carries three facts, so it cannot simply be "percent of the
+      // line": that would pin the line at the right edge, where it says
+      // nothing. Instead the axis spans far enough to hold both where the
+      // player is and where they project to finish; the fill is the current
+      // stat, and .pace-mark sits at the line. The gap between mark and fill
+      // is then readable as the margin, in either direction.
+      const pct = Math.max(0, Number(data.progress_pct || 0));
+      const line = Number(data.line || 0);
+      const projectedPct = line ? (Number(data.projected_final || 0) / line) * 100 : 0;
+      const scale = Math.max(pct, projectedPct, 100) * 1.05;
+
+      barEl.style.setProperty('--v', `${(pct / scale) * 100}%`);
+      barEl.className = `pace-fill ${tone.pace}`;
+
       const progressEl = card.querySelector('[data-live-progress]');
-      if (progressEl) progressEl.setAttribute('aria-valuenow', String(Math.round(pct)));
+      if (progressEl) {
+        progressEl.style.setProperty('--x', `${(100 / scale) * 100}%`);
+        progressEl.setAttribute('aria-valuenow', String(Math.round(pct)));
+      }
     }
 
     if (trendEl) {
-      trendEl.className = `badge live-trend ${trend.cls}`;
+      trendEl.className = `tag ${tone.tag}`;
       trendEl.textContent = trend.text;
     }
 

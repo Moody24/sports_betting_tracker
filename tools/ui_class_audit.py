@@ -17,6 +17,16 @@ THEME = REPO / 'app' / 'static' / 'css' / 'theme.css'
 # Everything below this banner in theme.css is the owned Bootstrap
 # replacement this audit drives — never counted as pre-existing custom CSS.
 FRAMEWORK_MARKER = 'FRAMEWORK LAYER (Phase 2 Increment A)'
+# theme.css has THREE regions, not two. Above FRAMEWORK_MARKER is
+# pre-existing custom CSS; between the markers is the owned Bootstrap
+# replacement this audit drives; below SHEET_MARKER is the Sheet design
+# system — the app's own deliberate vocabulary, frozen in the migration
+# ledger. The Sheet layer is OURS in exactly the sense the custom region is,
+# so it is excluded from the buckets too. Without this its class names fall
+# through to `unmatched` and then trip the "framework layer must not
+# implement JS hooks" invariant, which is aimed at accidental growth of the
+# Bootstrap replacement — not at a design system that is supposed to exist.
+SHEET_MARKER = 'THE SHEET GRAMMAR LAYER'
 
 GRID_RE = re.compile(
     r'^(row|col(-(sm|md|lg|xl))?(-\d{1,2}|-auto)?|g-\d|gx-\d|gy-\d|container(-fluid)?)$')
@@ -100,7 +110,10 @@ def scan() -> dict:
     # from every bucket. The framework layer (everything below the marker)
     # is the OUTPUT of this audit and must not feed back into it, or the
     # manifest would erase itself as Tasks 2-4 implement it.
-    theme_text = THEME.read_text().split(FRAMEWORK_MARKER)[0]
+    theme_full = THEME.read_text()
+    theme_text = theme_full.split(FRAMEWORK_MARKER)[0]
+    if SHEET_MARKER in theme_full:
+        theme_text += theme_full.split(SHEET_MARKER, 1)[1]
     custom = set(re.findall(r'\.([a-zA-Z][\w-]*)', theme_text))
     remaining = {c for c in classes if c not in custom and not c.startswith('bi')}
 

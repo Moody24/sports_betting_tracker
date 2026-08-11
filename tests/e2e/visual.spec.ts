@@ -68,7 +68,7 @@ test.describe('Visual Regression', () => {
 
     await page.goto('/bets');
     await expect(page.locator('[data-testid="bets-list"]')).toBeVisible();
-    await expect(page.locator('.bet-row-card')).toHaveCount(6);
+    await expect(page.locator('.row-line')).toHaveCount(6);
     // Live cards resolve async via the batch fetch above; wait for both to
     // leave their "Checking…" placeholder before shooting.
     await expect(page.locator('[data-live-trend]').first()).not.toHaveText('Checking…');
@@ -77,7 +77,7 @@ test.describe('Visual Regression', () => {
     await expect(page).toHaveScreenshot('bets-populated.png', {
       fullPage: true,
       animations: 'disabled',
-      mask: [...dynamicMasks(page), page.locator('.bet-matchup')],
+      mask: [...dynamicMasks(page), page.locator('.row-sub')],
     });
   });
 

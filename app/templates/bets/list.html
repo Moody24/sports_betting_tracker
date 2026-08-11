@@ -1,388 +1,358 @@
 {% extends "base.html" %}
-{% from "_macros.html" import outcome_badge %}
 
 {% block title %}My Bets · Edge Tracker{% endblock %}
-{% block page_title %}My Bets{% endblock %}
-{% block page_subtitle %}Review and manage your wagers.{% endblock %}
+{% block page_title %}Position Log{% endblock %}
+{% block page_subtitle %}Every wager, what it is doing now, and what it settled at.{% endblock %}
+
+{#
+  The Position Log. Sheet grammar: notice -> control bar -> slip -> band ->
+  rows -> pager. Rows are hairline-separated and never boxed; the old
+  .bet-row-card containers are gone.
+
+  Two deliberate departures from the design mock, both forced by the data:
+
+  1. The mock splits IN PLAY and SETTLED into two sections. This list is a
+     single date-ordered, paginated query, so splitting it would either break
+     pagination or reorder rows across pages. Instead every row carries its
+     own register — live rows get the pace axis, settled rows get the result
+     figure — under one column band.
+  2. The mock shows a CLV column. There is no closing-line or CLV field
+     anywhere on the Bet model, so there is nothing to render. It is omitted
+     rather than faked; see the ledger's data-gap note.
+#}
+
+{% set has_filters = filters.status or filters.type or filters.q or filters.start_date or filters.end_date %}
+{% set active_filters = [] %}
+{% if filters.status %}{% set _ = active_filters.append(('status', 'Status: ' ~ filters.status|title)) %}{% endif %}
+{% if filters.type %}{% set _ = active_filters.append(('type', 'Type: ' ~ filters.type|replace('_', ' ')|title)) %}{% endif %}
+{% if filters.start_date %}{% set _ = active_filters.append(('start_date', 'From ' ~ filters.start_date)) %}{% endif %}
+{% if filters.end_date %}{% set _ = active_filters.append(('end_date', 'To ' ~ filters.end_date)) %}{% endif %}
+{% if filters.q %}{% set _ = active_filters.append(('q', 'Search: ' ~ filters.q)) %}{% endif %}
+
+{% macro tag(outcome) -%}
+  {%- set label = {'win': 'Won', 'lose': 'Lost', 'push': 'Push', 'pending': 'Pending'}.get(outcome, outcome|title) -%}
+  {%- set kind  = {'win': 'win', 'lose': 'loss', 'push': 'push', 'pending': 'pending'}.get(outcome, 'push') -%}
+  <span class="tag tag-{{ kind }}">{{ label }}</span>
+{%- endmacro %}
 
 {% block content %}
 {% set pending_bets = bets | selectattr('outcome', 'equalto', 'pending') | list %}
 {% if pending_bets %}
-<div class="pending-alert-bar">
-  <div class="d-flex align-items-center gap-2">
-    {{ icon('hourglass-split', classes='fs-5 pending-alert-icon') }}
-    <div>
-      <span class="fw-semibold pending-alert-count">{{ pending_bets|length }} pending bet{{ 's' if pending_bets|length != 1 else '' }}</span>
-      <span class="d-none d-sm-inline ms-2 pending-alert-note">— auto-grades run at 1 AM ET</span>
-    </div>
-  </div>
-  <form action="{{ url_for('bet.nba_update_results') }}" method="POST" class="d-inline">
+<div class="notice">
+  <span>
+    <strong>{{ pending_bets|length }} pending bet{{ 's' if pending_bets|length != 1 else '' }}</strong>
+    — auto-grades run at 1 AM ET
+  </span>
+  <form action="{{ url_for('bet.nba_update_results') }}" method="POST">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <button type="submit" class="btn btn-sm btn-warning text-dark fw-semibold">
-      {{ icon('arrow-repeat', classes='me-1') }}Check Now
-    </button>
+    <button type="submit" class="act">Check now</button>
   </form>
 </div>
 {% endif %}
 
-<div class="card-soft p-3 mb-3">
-  <form method="GET" class="row g-2 align-items-end">
-    <div class="col-6 col-sm-4 col-lg-2">
-      <label class="form-label small mb-1" for="filter-status">Status</label>
-      <select id="filter-status" class="form-select form-select-sm" name="status">
-        <option value="" {% if not filters.status %}selected{% endif %}>All</option>
-        <option value="pending" {% if filters.status == 'pending' %}selected{% endif %}>Pending</option>
-        <option value="win" {% if filters.status == 'win' %}selected{% endif %}>Win</option>
-        <option value="lose" {% if filters.status == 'lose' %}selected{% endif %}>Loss</option>
-        <option value="push" {% if filters.status == 'push' %}selected{% endif %}>Push</option>
-      </select>
-    </div>
-    <div class="col-6 col-sm-4 col-lg-2">
-      <label class="form-label small mb-1" for="filter-type">Type</label>
-      <select id="filter-type" class="form-select form-select-sm" name="type">
-        <option value="" {% if not filters.type %}selected{% endif %}>All Types</option>
-        <option value="player_prop" {% if filters.type == 'player_prop' %}selected{% endif %}>Player Props</option>
-        <option value="straight" {% if filters.type == 'straight' %}selected{% endif %}>Game Bets</option>
-        <option value="parlay" {% if filters.type == 'parlay' %}selected{% endif %}>Parlays</option>
-      </select>
-    </div>
-    <div class="col-6 col-sm-4 col-lg-2">
-      <label class="form-label small mb-1" for="filter-start-date">From</label>
-      <input id="filter-start-date" type="date" class="form-control form-control-sm" name="start_date" value="{{ filters.start_date }}">
-    </div>
-    <div class="col-6 col-sm-4 col-lg-2">
-      <label class="form-label small mb-1" for="filter-end-date">To</label>
-      <input id="filter-end-date" type="date" class="form-control form-control-sm" name="end_date" value="{{ filters.end_date }}">
-    </div>
-    <div class="col-sm-8 col-lg-3">
-      <label class="form-label small mb-1" for="filter-q">Search</label>
-      <input id="filter-q" type="search" class="form-control form-control-sm" name="q" value="{{ filters.q }}" placeholder="Player, team…">
-    </div>
-    <div class="col-sm-4 col-lg-1 d-grid">
-      <button class="btn btn-primary btn-sm" type="submit">Apply</button>
-    </div>
-  </form>
-</div>
+{# ── Control bar ─────────────────────────────────────────────────────
+   The form sets filters; the chips show which are currently applied and
+   remove themselves. Clear-N appears only when something is active. #}
+<form method="GET" class="control-bar">
+    <label class="band-cell" for="filter-status">Status
+      <select id="filter-status" name="status" class="form-select form-select-sm">
+      <option value="" {% if not filters.status %}selected{% endif %}>All</option>
+      <option value="pending" {% if filters.status == 'pending' %}selected{% endif %}>Pending</option>
+      <option value="win" {% if filters.status == 'win' %}selected{% endif %}>Win</option>
+      <option value="lose" {% if filters.status == 'lose' %}selected{% endif %}>Loss</option>
+      <option value="push" {% if filters.status == 'push' %}selected{% endif %}>Push</option>
+    </select>
+    </label>
 
-{% if filter_stats.count > 0 %}
-<div class="kpi-strip mb-3 fade-up fade-up-1">
-  <div class="kpi-cell">
-    <span class="kpi-label">Bets</span>
-    <span class="kpi-value">{{ filter_stats.count }}</span>
-  </div>
-  <div class="kpi-cell">
-    <span class="kpi-label">Wins</span>
-    <span class="kpi-value kpi-value-win">{{ filter_stats.wins }}</span>
-  </div>
-  <div class="kpi-cell">
-    <span class="kpi-label">Losses</span>
-    <span class="kpi-value kpi-value-loss">{{ filter_stats.losses }}</span>
-  </div>
-  <div class="kpi-cell">
-    <span class="kpi-label">Pending</span>
-    <span class="kpi-value kpi-value-pending">{{ filter_stats.pending }}</span>
-  </div>
-  <div class="kpi-cell d-none d-sm-flex">
-    <span class="kpi-label">Wagered</span>
-    <span class="kpi-value">${{ '%.2f'|format(filter_stats.wagered) }}</span>
-  </div>
-  <div class="kpi-cell">
-    <span class="kpi-label">Net P/L</span>
-    <span class="kpi-value {{ 'kpi-value-net-pos' if filter_stats.net >= 0 else 'kpi-value-net-neg' }}">{{ '+' if filter_stats.net >= 0 else '' }}${{ '%.2f'|format(filter_stats.net) }}</span>
-  </div>
-</div>
-{% endif %}
+    <label class="band-cell" for="filter-type">Type
+      <select id="filter-type" name="type" class="form-select form-select-sm">
+      <option value="" {% if not filters.type %}selected{% endif %}>All types</option>
+      <option value="player_prop" {% if filters.type == 'player_prop' %}selected{% endif %}>Player props</option>
+      <option value="straight" {% if filters.type == 'straight' %}selected{% endif %}>Game bets</option>
+      <option value="parlay" {% if filters.type == 'parlay' %}selected{% endif %}>Parlays</option>
+    </select>
+    </label>
 
-<div class="card-soft p-3 bets-list-wrap" data-testid="bets-list">
-  <div class="section-title-row mb-3">
-    <h3 class="h6 mb-0">
-      {% if filters.status or filters.type or filters.q or filters.start_date or filters.end_date %}
-        Filtered Results
-        <a href="{{ url_for('bet.place_bet') }}" class="btn btn-link btn-sm text-secondary p-0 ms-2">Clear</a>
-      {% else %}
-        All Bets
-      {% endif %}
-    </h3>
-    <div class="section-action-row">
-      <a href="{{ url_for('bet.export_bets', **filters) }}" class="btn btn-outline-secondary btn-sm btn-toolbar-secondary">{{ icon('download', classes='me-1') }}CSV</a>
-      <a href="{{ url_for('bet.new_bet') }}" class="btn btn-primary btn-sm">{{ icon('plus-lg', classes='me-1') }}Add Bet</a>
-    </div>
-  </div>
+    <label class="band-cell" for="filter-start-date">From
+      <input id="filter-start-date" type="date" name="start_date" class="form-control form-control-sm" value="{{ filters.start_date }}">
+    </label>
 
-  <div class="bets-list-stack">
-    {% for b in bets %}
-      {% if b.is_parlay and b.parlay_id and (loop.first or bets[loop.index0 - 1].parlay_id != b.parlay_id) %}
-        {% set p_status = parlay_status.get(b.parlay_id, 'pending') %}
-        {% set p_pl = parlay_pl_map.get(b.parlay_id, 0) %}
-        <section class="parlay-group mb-3">
-          <div class="parlay-header" data-parlay-id="{{ b.parlay_id }}">
-            <div class="parlay-summary">
-              <div class="d-flex align-items-center gap-2 flex-wrap">
-                <span class="badge text-bg-info text-dark">Parlay</span>
-                <strong>{{ b._parlay_legs_count or 0 }} legs</strong>
-                <span class="text-secondary small">{{ parlay_game_count.get(b.parlay_id, 1) }} game{{ '' if parlay_game_count.get(b.parlay_id, 1) == 1 else 's' }}</span>
-              </div>
-              <div class="small text-secondary">{{ b.match_date.strftime('%b %d, %Y') }} · ${{ '%.2f'|format(b.bet_amount) }} staked</div>
-            </div>
-            <div class="parlay-meta">
-              {{ outcome_badge(p_status) }}
-              <div class="fw-semibold {{ 'text-success' if p_status == 'win' else 'text-danger' if p_status == 'lose' else 'text-secondary' }}">
-                {% if p_status == 'win' %}+${{ '%.2f'|format(p_pl) }}
-                {% elif p_status == 'lose' %}Lost · -${{ '%.2f'|format(b.bet_amount) }}
-                {% elif p_status == 'push' %}$0.00
-                {% else %}—{% endif %}
-              </div>
-              <button class="parlay-toggle-btn btn btn-sm btn-outline-secondary" data-parlay-id="{{ b.parlay_id }}" aria-expanded="true" aria-controls="parlay-legs-{{ b.parlay_id }}" aria-label="Collapse parlay legs" type="button">
-                {{ icon('chevron-up', classes='toggle-icon') }}
-              </button>
-            </div>
-          </div>
-          <div class="parlay-legs" id="parlay-legs-{{ b.parlay_id }}" data-parlay-legs="{{ b.parlay_id }}">
-      {% endif %}
+    <label class="band-cell" for="filter-end-date">To
+      <input id="filter-end-date" type="date" name="end_date" class="form-control form-control-sm" value="{{ filters.end_date }}">
+    </label>
 
-      {% set is_overdue = (b.outcome == 'pending' and b.match_date.date() < now_date) %}
-      <article class="bet-row-card outcome-{{ b.outcome }} {{ 'is-parlay-leg' if b.is_parlay else '' }} {{ 'is-overdue' if is_overdue else '' }} {{ 'is-pending' if b.outcome == 'pending' else '' }}">
-        <div class="bet-main">
-          <div class="bet-main-head">
-            <h4 class="bet-primary mb-0">{{ b.primary_display_name }}</h4>
-            {% if b.source == 'auto_generated' %}<span class="badge text-bg-dark">Auto</span>{% endif %}
-            {% if b.is_parlay and b.parlay_id %}<span class="badge text-bg-secondary">Leg</span>{% endif %}
-            {% if is_overdue %}<span class="badge text-bg-danger">Past</span>{% endif %}
-          </div>
+    <label class="band-cell" for="filter-q">Search
+      <input id="filter-q" type="search" name="q" class="form-control form-control-sm" value="{{ filters.q }}" placeholder="Player, team…">
+    </label>
 
-          <div class="bet-chip-row">
-            <span class="bet-chip">{{ b.market_display }}</span>
-            <span class="bet-chip">{{ b.selection_display }}</span>
-            <span class="bet-chip">{{ b.odds_display }}</span>
-            <span class="bet-chip chip-kind">{{ b.bet_kind_display }}</span>
-          </div>
+    <button class="act" type="submit">Apply</button>
 
-          <p class="bet-matchup mb-1">{{ b.matchup_display }} · {{ b.match_date.strftime('%b %d, %Y') }}</p>
-
-          {% if b.actual_total is not none %}
-            <div class="small text-secondary mb-1">
-              {% if b.is_player_prop %}
-                Final: <strong class="text-light">{{ b.actual_total }}</strong> vs {{ b.prop_line }}
-              {% elif b.over_under_line is not none %}
-                Total: <strong class="text-light">{{ b.actual_total }}</strong> vs {{ b.over_under_line }}
-              {% endif %}
-            </div>
-          {% endif %}
-
-          {# ── Postmortem summary (settled player props only) ── #}
-          {% if b.is_player_prop and b.outcome in ('win', 'lose') and b.postmortem %}
-            {% set pm = b.postmortem %}
-            <details class="postmortem-block mt-2">
-              <summary class="postmortem-summary small">
-                <span class="postmortem-icon">🔍</span>
-                <span class="fw-semibold">Why it
-                  {% if b.outcome == 'win' %}won{% else %}lost{% endif %}:
-                </span>
-                <span class="postmortem-pill postmortem-pill--{{ pm.primary_reason_code }}">
-                  {{ pm.primary_reason_label }}
-                </span>
-                {% if pm.secondary_reason_code %}
-                  <span class="postmortem-pill postmortem-pill--secondary">
-                    {{ pm.secondary_reason_code | replace('_', ' ') | title }}
-                  </span>
-                {% endif %}
-                <span class="postmortem-conf text-secondary ms-1">({{ pm.confidence_label }})</span>
-              </summary>
-
-              <div class="postmortem-detail mt-2">
-                {# Stat comparison row #}
-                <div class="postmortem-row">
-                  <span class="postmortem-label">Projected</span>
-                  <span class="postmortem-value">
-                    {% if pm.projected_stat is not none %}
-                      {{ '%.1f'|format(pm.projected_stat) }}
-                    {% else %}—{% endif %}
-                  </span>
-                  <span class="postmortem-label">Actual</span>
-                  <span class="postmortem-value {{ 'text-success' if b.outcome == 'win' else 'text-danger' }}">
-                    {{ '%.1f'|format(pm.actual_stat) if pm.actual_stat is not none else '—' }}
-                  </span>
-                  <span class="postmortem-label">Error</span>
-                  <span class="postmortem-value">
-                    {% if pm.projection_error is not none %}
-                      {{ '+' if pm.projection_error > 0 else '' }}{{ '%.1f'|format(pm.projection_error) }}
-                    {% else %}—{% endif %}
-                  </span>
-                </div>
-
-                {# Minutes row (when data available) #}
-                {% if pm.expected_minutes is not none or pm.actual_minutes is not none %}
-                <div class="postmortem-row">
-                  <span class="postmortem-label">Min exp.</span>
-                  <span class="postmortem-value">
-                    {{ '%.0f'|format(pm.expected_minutes) if pm.expected_minutes is not none else '—' }}
-                  </span>
-                  <span class="postmortem-label">Min actual</span>
-                  <span class="postmortem-value {% if pm.minutes_delta and pm.minutes_delta | abs > 4 %}text-warning{% endif %}">
-                    {{ '%.0f'|format(pm.actual_minutes) if pm.actual_minutes is not none else '—' }}
-                  </span>
-                  {% if pm.minutes_delta is not none %}
-                  <span class="postmortem-label">Δ</span>
-                  <span class="postmortem-value {% if pm.minutes_delta > 0 %}text-success{% elif pm.minutes_delta < 0 %}text-danger{% endif %}">
-                    {{ '+' if pm.minutes_delta > 0 else '' }}{{ '%.0f'|format(pm.minutes_delta) }}
-                  </span>
-                  {% endif %}
-                </div>
-                {% endif %}
-
-                {# Attempts row (points/threes only) #}
-                {% if pm.expected_attempts is not none or pm.actual_attempts is not none %}
-                <div class="postmortem-row">
-                  <span class="postmortem-label">Att. exp.</span>
-                  <span class="postmortem-value">
-                    {{ '%.1f'|format(pm.expected_attempts) if pm.expected_attempts is not none else '—' }}
-                  </span>
-                  <span class="postmortem-label">Att. actual</span>
-                  <span class="postmortem-value {% if pm.attempts_delta and pm.attempts_delta | abs > 3 %}text-warning{% endif %}">
-                    {{ '%.0f'|format(pm.actual_attempts) if pm.actual_attempts is not none else '—' }}
-                  </span>
-                  {% if pm.attempts_delta is not none %}
-                  <span class="postmortem-label">Δ</span>
-                  <span class="postmortem-value {% if pm.attempts_delta > 0 %}text-success{% elif pm.attempts_delta < 0 %}text-danger{% endif %}">
-                    {{ '+' if pm.attempts_delta > 0 else '' }}{{ '%.0f'|format(pm.attempts_delta) }}
-                  </span>
-                  {% endif %}
-                </div>
-                {% endif %}
-
-                {# Context flags #}
-                {% if pm.overtime_flag or pm.blowout_flag %}
-                <div class="postmortem-flags mt-1">
-                  {% if pm.overtime_flag %}
-                    <span class="badge text-bg-info text-dark">OT</span>
-                  {% endif %}
-                  {% if pm.blowout_flag %}
-                    <span class="badge text-bg-warning text-dark">Blowout</span>
-                  {% endif %}
-                </div>
-                {% endif %}
-
-                {# Secondary/tertiary reasons #}
-                {% if pm.secondary_reason_code %}
-                <div class="postmortem-reasons mt-1 small text-secondary">
-                  Also:
-                  {{ pm.secondary_reason_code | replace('_', ' ') | title }}
-                  {% if pm.tertiary_reason_code %}
-                    · {{ pm.tertiary_reason_code | replace('_', ' ') | title }}
-                  {% endif %}
-                </div>
-                {% endif %}
-              </div>
-            </details>
-          {% endif %}
-
-          {% if b.notes and not b.notes.startswith('AUTO_BOOTSTRAP_HIDDEN') %}
-            {% set _note_clean = b.notes.replace('straight · Auto', 'Auto pick').replace('3leg_parlay · Auto', 'Auto pick').replace('2leg_parlay · Auto', 'Auto pick').replace('straight', '').strip(' ·') %}
-            {% if _note_clean %}
-            <p class="bet-note mb-0">{{ icon('chat-left-text', classes='me-1 opacity-50') }}{{ _note_clean }}</p>
-            {% endif %}
-          {% endif %}
-
-          {% if b.outcome == 'pending' and b.live_trackable and b.match_date.date() <= now_date %}
-            <div class="live-progress-card mt-2 check-prop-progress-btn" data-live-prop-card data-game-state="unknown"
-                 data-url="{{ url_for('bet.nba_prop_progress', espn_id=b.external_game_id, player=b.player_name, prop_type=b.prop_type, line=b.prop_line, bet_type=b.bet_type) }}">
-              <div class="d-flex align-items-center justify-content-between gap-2 mb-1">
-                <div class="small live-label"><span class="live-dot"></span>Live Tracker</div>
-                <span class="badge text-bg-secondary live-trend" data-live-trend>Checking…</span>
-              </div>
-              <div class="live-topline small" data-live-details hidden>
-                <span>Current: <strong class="live-current" data-live-current>—</strong> / <span class="mono">{{ b.prop_line }}</span></span>
-                <span data-live-status></span>
-              </div>
-              <div class="progress mt-1 live-progress-track" role="progressbar" aria-label="Prop progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" data-live-progress data-live-details-bar hidden>
-                <div class="progress-bar live-progress-bar" data-live-bar></div>
-              </div>
-              <div class="live-meta small mt-1" data-live-details-meta hidden>
-                <span>Proj: <strong class="mono live-proj" data-live-proj>—</strong></span>
-                <span data-live-delta>—</span>
-                <span data-live-period>—</span>
-                <span data-live-clock>—</span>
-                <span data-live-state>—</span>
-              </div>
-            </div>
-          {% endif %}
-        </div>
-
-        <div class="bet-meta">
-          <div class="meta-box">
-            <span class="meta-label">Stake</span>
-            <span class="meta-value">${{ '%.2f'|format(b.bet_amount) }}</span>
-          </div>
-          <div class="meta-box">
-            <span class="meta-label">Status</span>
-            <span>{{ outcome_badge(b.outcome) }}</span>
-          </div>
-          <div class="meta-box">
-            <span class="meta-label">P/L</span>
-            <span class="meta-value {% if b.outcome == 'win' %}text-success{% elif b.outcome == 'lose' %}text-danger{% else %}text-secondary{% endif %}">
-              {% if b.outcome == 'win' %}+{% endif %}${{ '%.2f'|format(b.profit_loss()) }}
-            </span>
-          </div>
-          <div class="meta-actions">
-            {% if b.outcome == 'pending' %}
-              <div class="dropdown d-inline-block">
-                <button class="btn btn-sm btn-outline-warning dropdown-toggle" data-ui-toggle="dropdown" aria-expanded="false" title="Grade this bet">Grade</button>
-                <ul class="dropdown-menu dropdown-menu-end dropdown-menu-dark">
-                  <li><form action="{{ url_for('bet.grade_bet', bet_id=b.id) }}" method="POST"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit" name="outcome" value="win" class="dropdown-item text-success">{{ icon('check-circle', classes='me-2') }}Win</button></form></li>
-                  <li><form action="{{ url_for('bet.grade_bet', bet_id=b.id) }}" method="POST"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit" name="outcome" value="lose" class="dropdown-item text-danger">{{ icon('x-circle', classes='me-2') }}Loss</button></form></li>
-                  <li><form action="{{ url_for('bet.grade_bet', bet_id=b.id) }}" method="POST"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit" name="outcome" value="push" class="dropdown-item text-warning">{{ icon('dash-circle', classes='me-2') }}Push</button></form></li>
-                </ul>
-              </div>
-            {% endif %}
-            <form action="{{ url_for('bet.delete_bet', bet_id=b.id) }}" method="POST" class="d-inline delete-bet-form">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <button type="submit" class="btn btn-sm btn-outline-danger" aria-label="Delete bet {{ b.id }}" title="Delete">{{ icon('trash') }}</button>
-            </form>
-          </div>
-        </div>
-      </article>
-
-      {% if b.is_parlay and b.parlay_id and (loop.last or bets[loop.index0 + 1].parlay_id != b.parlay_id) %}
-          </div>
-        </section>
-      {% endif %}
-    {% else %}
-      <div class="empty-state">
-        {{ icon('journal-x', classes='empty-state-icon') }}
-        {% if filters.status or filters.type or filters.q or filters.start_date or filters.end_date %}
-          <div class="empty-state-title">No matching bets</div>
-          <p class="empty-state-sub">No bets match the current filters. Try adjusting your search criteria.</p>
-          <a href="{{ url_for('bet.place_bet') }}" class="btn btn-outline-secondary btn-sm mt-2">Clear Filters</a>
-        {% else %}
-          <div class="empty-state-title">No bets yet</div>
-          <p class="empty-state-sub">Start tracking your wagers to see performance analytics and trends.</p>
-          <a href="{{ url_for('bet.new_bet') }}" class="btn btn-primary btn-sm mt-2">{{ icon('plus-lg', classes='me-1') }}Add First Bet</a>
-        {% endif %}
-      </div>
+    {# Active filters live in the same bar as the controls that set them,
+       each removing only itself; Clear-N appears only while one is active.
+       Links inside the form are valid and keep this to one control bar. #}
+    {% for key, label in active_filters %}
+      {% set stripped = dict(filters, **{key: ''}) %}
+      <a class="chip is-active" href="{{ url_for('bet.place_bet', **stripped) }}"
+         aria-label="Remove filter {{ label }}">{{ label }}</a>
     {% endfor %}
+    {% if active_filters %}
+      <a class="chip-clear" href="{{ url_for('bet.place_bet') }}">Clear {{ active_filters|length }}</a>
+    {% endif %}
+</form>
+
+{# ── The slip: what the current filter adds up to ─────────────────── #}
+{% if filter_stats.count > 0 %}
+<div class="slip">
+  <div class="slip-head">
+    <span>{{ 'Filtered' if has_filters else 'All positions' }}</span>
+    <span class="row-meta">{{ filter_stats.count }} bet{{ 's' if filter_stats.count != 1 else '' }}</span>
   </div>
-  {% if pagination and pagination.pages > 1 %}
-  <nav aria-label="Bet list pages" class="mt-3">
-    <ul class="pagination pagination-sm mb-0 justify-content-end">
-      <li class="page-item {{ 'disabled' if not pagination.has_prev else '' }}">
-        <a class="page-link" href="{{ url_for('bet.place_bet', page=pagination.prev_num, **filters) if pagination.has_prev else '#' }}">Previous</a>
-      </li>
-      {% for page_num in pagination.iter_pages(left_edge=1, right_edge=1, left_current=1, right_current=1) %}
-        {% if page_num %}
-          <li class="page-item {{ 'active' if page_num == pagination.page else '' }}">
-            <a class="page-link" href="{{ url_for('bet.place_bet', page=page_num, **filters) }}">{{ page_num }}</a>
-          </li>
-        {% else %}
-          <li class="page-item disabled"><span class="page-link">…</span></li>
-        {% endif %}
-      {% endfor %}
-      <li class="page-item {{ 'disabled' if not pagination.has_next else '' }}">
-        <a class="page-link" href="{{ url_for('bet.place_bet', page=pagination.next_num, **filters) if pagination.has_next else '#' }}">Next</a>
-      </li>
-    </ul>
-  </nav>
+  <div class="slip-grid">
+    <div class="slip-fact"><span>Won</span><span>{{ filter_stats.wins }}</span></div>
+    <div class="slip-fact"><span>Lost</span><span>{{ filter_stats.losses }}</span></div>
+    <div class="slip-fact"><span>Pending</span><span>{{ filter_stats.pending }}</span></div>
+    <div class="slip-fact"><span>Staked</span><span>${{ '%.2f'|format(filter_stats.wagered) }}</span></div>
+    <div class="slip-fact">
+      <span>Net P/L</span>
+      <span class="{{ 'is-up' if filter_stats.net >= 0 else 'is-down' }}">
+        {{ '+' if filter_stats.net >= 0 else '' }}${{ '%.2f'|format(filter_stats.net) }}
+      </span>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<div class="bets-list-wrap" data-testid="bets-list" style="--cols: minmax(0, 1fr) 5rem 5rem 5.5rem auto">
+  {# No second title here. base.html already sets the page title; repeating
+     it as "All bets" directly beneath "Position Log" was one heading saying
+     the same thing twice. This row is the dateline — state on the left,
+     actions on the right. #}
+  <div class="sheet-head">
+    <span class="sheet-dateline">
+      {{ 'Filtered results' if has_filters else 'All bets' }} · {{ bets|length }} shown
+      {%- if pagination and pagination.pages > 1 %} · page {{ pagination.page }} of {{ pagination.pages }}{% endif %}
+    </span>
+    <span class="sheet-dateline">
+      <a class="act" href="{{ url_for('bet.export_bets', **filters) }}">CSV</a>
+      <a class="act" href="{{ url_for('bet.new_bet') }}">Add bet</a>
+    </span>
+  </div>
+
+  {% if bets %}
+  <div class="band">
+    <span class="band-cell">Player / Prop</span>
+    <span class="band-cell is-num is-optional">Stake</span>
+    <span class="band-cell is-num is-optional">Odds</span>
+    <span class="band-cell is-num">P / L</span>
+    <span class="band-cell"><span class="visually-hidden">Actions</span></span>
+  </div>
   {% endif %}
 
+  {% for b in bets %}
+    {% if b.is_parlay and b.parlay_id and (loop.first or bets[loop.index0 - 1].parlay_id != b.parlay_id) %}
+      {% set p_status = parlay_status.get(b.parlay_id, 'pending') %}
+      {% set p_pl = parlay_pl_map.get(b.parlay_id, 0) %}
+      <section class="row-group">
+        <button class="row-group-head parlay-toggle-btn" type="button"
+                data-parlay-id="{{ b.parlay_id }}" aria-expanded="true"
+                aria-controls="parlay-legs-{{ b.parlay_id }}"
+                aria-label="Collapse parlay legs">
+          <span class="row-lead">
+            {{ b._parlay_legs_count or 0 }}-leg parlay
+            <span class="row-sub">{{ parlay_game_count.get(b.parlay_id, 1) }} game{{ '' if parlay_game_count.get(b.parlay_id, 1) == 1 else 's' }} · {{ b.match_date.strftime('%b %d, %Y') }}</span>
+          </span>
+          <span class="row-figure is-optional">${{ '%.2f'|format(b.bet_amount) }}</span>
+          <span class="row-figure is-optional">{{ tag(p_status) }}</span>
+          <span class="row-figure is-lead">
+            {% if p_status == 'win' %}+${{ '%.2f'|format(p_pl) }}
+            {% elif p_status == 'lose' %}-${{ '%.2f'|format(b.bet_amount) }}
+            {% elif p_status == 'push' %}$0.00
+            {% else %}—{% endif %}
+          </span>
+          <span></span>
+        </button>
+        <div class="row-group-body" id="parlay-legs-{{ b.parlay_id }}" data-parlay-legs="{{ b.parlay_id }}">
+    {% endif %}
+
+    {% set is_overdue = (b.outcome == 'pending' and b.match_date.date() < now_date) %}
+    <article class="row-line">
+      <div class="row-lead">
+        {{ b.primary_display_name }}
+        <span class="row-sub">
+          {{ b.market_display }} · {{ b.selection_display }} · {{ b.matchup_display }} · {{ b.match_date.strftime('%b %d, %Y') }}
+        </span>
+        <span class="row-meta">
+          {{ tag(b.outcome) }}
+          {% if b.source == 'auto_generated' %}<span class="tag tag-push">Auto</span>{% endif %}
+          {% if is_overdue %}<span class="tag tag-loss">Past due</span>{% endif %}
+          {# Below 48rem the stake and odds columns are dropped, so they
+             reappear here rather than becoming unreachable. #}
+          <span class="is-compact-only">${{ '%.2f'|format(b.bet_amount) }} · {{ b.odds_display }}</span>
+          {% if b.actual_total is not none %}
+            {% if b.is_player_prop %}
+              Final {{ b.actual_total }} vs {{ b.prop_line }}
+            {% elif b.over_under_line is not none %}
+              Total {{ b.actual_total }} vs {{ b.over_under_line }}
+            {% endif %}
+          {% endif %}
+        </span>
+      </div>
+
+      <span class="row-figure is-optional">${{ '%.2f'|format(b.bet_amount) }}</span>
+      <span class="row-figure is-optional">{{ b.odds_display }}</span>
+      <span class="row-figure is-lead {{ 'is-up' if b.outcome == 'win' else 'is-down' if b.outcome == 'lose' else '' }}">
+        {% if b.outcome == 'pending' %}—{% else %}{{ '+' if b.outcome == 'win' else '' }}${{ '%.2f'|format(b.profit_loss()) }}{% endif %}
+      </span>
+
+      <span class="row-actions">
+        {% if b.outcome == 'pending' %}
+          <span class="dropdown">
+            <button class="act" data-ui-toggle="dropdown" aria-expanded="false" title="Grade this bet" type="button">Grade</button>
+            <ul class="dropdown-menu dropdown-menu-end act-menu">
+              {% for value, label in [('win', 'Win'), ('lose', 'Loss'), ('push', 'Push')] %}
+              <li>
+                <form action="{{ url_for('bet.grade_bet', bet_id=b.id) }}" method="POST">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <button type="submit" name="outcome" value="{{ value }}" class="dropdown-item">{{ label }}</button>
+                </form>
+              </li>
+              {% endfor %}
+            </ul>
+          </span>
+        {% endif %}
+        <form action="{{ url_for('bet.delete_bet', bet_id=b.id) }}" method="POST" class="delete-bet-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="act" aria-label="Delete bet {{ b.id }}" title="Delete">Delete</button>
+        </form>
+      </span>
+
+      {# ── Live: the pace axis. All seven definition-of-done fields live
+           here — current stat, line, period, clock, game state, projection,
+           trend — and the fill colour is driven by the same verdict as the
+           trend label, never computed twice. ── #}
+      {% if b.outcome == 'pending' and b.live_trackable and b.match_date.date() <= now_date %}
+        <div class="row-full" data-live-prop-card data-game-state="unknown"
+             data-url="{{ url_for('bet.nba_prop_progress', espn_id=b.external_game_id, player=b.player_name, prop_type=b.prop_type, line=b.prop_line, bet_type=b.bet_type) }}">
+          <span class="row-meta">
+            <span data-live-trend>Checking…</span>
+            <span data-live-details hidden>
+              · <strong data-live-current>—</strong> / {{ b.prop_line }}
+              · <span data-live-status></span>
+            </span>
+          </span>
+          {# Reasons are sentences, not labels, so they get a line that wraps
+             rather than being crammed into the status tag. #}
+          <p class="row-sub" data-live-error hidden></p>
+          <div class="pace" role="progressbar" aria-label="Prop progress"
+               aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"
+               data-live-progress data-live-details-bar hidden>
+            <span class="pace-fill pace-neutral" data-live-bar></span>
+            <span class="pace-mark"></span>
+          </div>
+          <span class="row-meta" data-live-details-meta hidden>
+            Proj <strong data-live-proj>—</strong>
+            · <span data-live-delta>—</span>
+            · <span data-live-period>—</span>
+            · <span data-live-clock>—</span>
+            · <span data-live-state>—</span>
+          </span>
+        </div>
+      {% endif %}
+
+      {# ── Disclosure: level 2 of 2. The label carries scent. ── #}
+      {% if b.is_player_prop and b.outcome in ('win', 'lose') and b.postmortem %}
+        {% set pm = b.postmortem %}
+        <details class="row-full">
+          <summary class="row-more">
+            Why it {{ 'won' if b.outcome == 'win' else 'lost' }} — {{ pm.primary_reason_label }}
+          </summary>
+          <div class="row-detail">
+            <div class="slip-grid">
+              <div class="slip-fact"><span>Projected</span><span>{{ '%.1f'|format(pm.projected_stat) if pm.projected_stat is not none else '—' }}</span></div>
+              <div class="slip-fact"><span>Actual</span><span>{{ '%.1f'|format(pm.actual_stat) if pm.actual_stat is not none else '—' }}</span></div>
+              <div class="slip-fact"><span>Error</span><span>{% if pm.projection_error is not none %}{{ '+' if pm.projection_error > 0 else '' }}{{ '%.1f'|format(pm.projection_error) }}{% else %}—{% endif %}</span></div>
+              {% if pm.expected_minutes is not none or pm.actual_minutes is not none %}
+                <div class="slip-fact"><span>Min exp.</span><span>{{ '%.0f'|format(pm.expected_minutes) if pm.expected_minutes is not none else '—' }}</span></div>
+                <div class="slip-fact"><span>Min actual</span><span>{{ '%.0f'|format(pm.actual_minutes) if pm.actual_minutes is not none else '—' }}</span></div>
+                {% if pm.minutes_delta is not none %}
+                <div class="slip-fact"><span>Min Δ</span><span>{{ '+' if pm.minutes_delta > 0 else '' }}{{ '%.0f'|format(pm.minutes_delta) }}</span></div>
+                {% endif %}
+              {% endif %}
+              {% if pm.expected_attempts is not none or pm.actual_attempts is not none %}
+                <div class="slip-fact"><span>Att. exp.</span><span>{{ '%.1f'|format(pm.expected_attempts) if pm.expected_attempts is not none else '—' }}</span></div>
+                <div class="slip-fact"><span>Att. actual</span><span>{{ '%.0f'|format(pm.actual_attempts) if pm.actual_attempts is not none else '—' }}</span></div>
+                {% if pm.attempts_delta is not none %}
+                <div class="slip-fact"><span>Att. Δ</span><span>{{ '+' if pm.attempts_delta > 0 else '' }}{{ '%.0f'|format(pm.attempts_delta) }}</span></div>
+                {% endif %}
+              {% endif %}
+            </div>
+            <p class="row-meta">
+              {{ pm.confidence_label }}
+              {% if pm.secondary_reason_code %} · Also {{ pm.secondary_reason_code | replace('_', ' ') | title }}{% endif %}
+              {% if pm.tertiary_reason_code %} · {{ pm.tertiary_reason_code | replace('_', ' ') | title }}{% endif %}
+              {% if pm.overtime_flag %} · Overtime{% endif %}
+              {% if pm.blowout_flag %} · Blowout{% endif %}
+            </p>
+          </div>
+        </details>
+      {% endif %}
+
+      {% if b.notes and not b.notes.startswith('AUTO_BOOTSTRAP_HIDDEN') %}
+        {% set _note_clean = b.notes.replace('straight · Auto', 'Auto pick').replace('3leg_parlay · Auto', 'Auto pick').replace('2leg_parlay · Auto', 'Auto pick').replace('straight', '').strip(' ·') %}
+        {% if _note_clean %}
+          <p class="row-sub row-full">{{ _note_clean }}</p>
+        {% endif %}
+      {% endif %}
+    </article>
+
+    {% if b.is_parlay and b.parlay_id and (loop.last or bets[loop.index0 + 1].parlay_id != b.parlay_id) %}
+        </div>
+      </section>
+    {% endif %}
+  {% else %}
+    {# "No data yet" and "filtered to zero" are genuinely different states
+       and must not look alike: one is a starting point, the other is a
+       dead end you can back out of. #}
+    {% if has_filters %}
+      <div class="state-empty">
+        <p><strong>No bets match these filters.</strong></p>
+        <p>{{ active_filters|length }} filter{{ 's' if active_filters|length != 1 else '' }} applied. Removing one may bring rows back.</p>
+        <a class="act" href="{{ url_for('bet.place_bet') }}">Clear {{ active_filters|length }}</a>
+      </div>
+    {% else %}
+      <div class="state-empty">
+        <p><strong>No bets yet.</strong></p>
+        <p>Track a wager and this log fills with what it did, not just what it cost.</p>
+        <a class="act" href="{{ url_for('bet.new_bet') }}">Add first bet</a>
+      </div>
+    {% endif %}
+  {% endfor %}
+
+  {% if pagination and pagination.pages > 1 %}
+  <nav class="pager" aria-label="Bet list pages">
+    {% if pagination.has_prev %}
+      <a class="pager-item" href="{{ url_for('bet.place_bet', page=pagination.prev_num, **filters) }}">Previous</a>
+    {% else %}
+      <span class="pager-item" aria-disabled="true">Previous</span>
+    {% endif %}
+    {% for page_num in pagination.iter_pages(left_edge=1, right_edge=1, left_current=1, right_current=1) %}
+      {% if page_num %}
+        {% if page_num == pagination.page %}
+          <a class="pager-item" href="{{ url_for('bet.place_bet', page=page_num, **filters) }}" aria-current="page">{{ page_num }}</a>
+        {% else %}
+          <a class="pager-item" href="{{ url_for('bet.place_bet', page=page_num, **filters) }}">{{ page_num }}</a>
+        {% endif %}
+      {% else %}
+        <span class="pager-item" aria-disabled="true">…</span>
+      {% endif %}
+    {% endfor %}
+    {% if pagination.has_next %}
+      <a class="pager-item" href="{{ url_for('bet.place_bet', page=pagination.next_num, **filters) }}">Next</a>
+    {% else %}
+      <span class="pager-item" aria-disabled="true">Next</span>
+    {% endif %}
+  </nav>
+  {% endif %}
 </div>
 {% endblock %}
 

@@ -709,7 +709,16 @@ class TestBetRoutes(BaseTestCase):
             db.session.commit()
         resp = self.client.get("/bets")
         self.assertEqual(resp.status_code, 200)
-        self.assertIn(b"check-prop-progress-btn", resp.data)
+        # Assert the behavioural hook, not a presentational class. This used to
+        # check for `check-prop-progress-btn`, which the Sheet migration
+        # removed along with the card container; `data-live-prop-card` is what
+        # bets_list.js actually binds to, so it is the durable contract.
+        self.assertIn(b"data-live-prop-card", resp.data)
+        # All seven definition-of-done fields must be present on a live row.
+        self.assertIn(b"data-live-current", resp.data)
+        self.assertIn(b"data-live-bar", resp.data)
+        self.assertIn(b"data-live-proj", resp.data)
+        self.assertIn(b"data-live-trend", resp.data)
         self.assertIn(b"data-live-period", resp.data)
         self.assertIn(b"data-live-clock", resp.data)
         self.assertIn(b"data-live-state", resp.data)
