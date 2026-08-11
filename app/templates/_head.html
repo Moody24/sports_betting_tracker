@@ -1,0 +1,19 @@
+{#
+  Crawler and metadata block. Owned by the SEO steward; base.html owns the
+  rest of the shell.
+
+  The boundary is deliberate: `<title>` and the stylesheet link stay in
+  base.html because a Jinja `{% block %}` cannot be overridden from inside an
+  `{% include %}`, and every page template overrides `{% block title %}`.
+  Everything a crawler reads that is NOT the title lives here.
+
+  The register (`page_is_public`) is computed in app/__init__.py from an
+  explicit allowlist and FAILS CLOSED: a route nobody classified is treated as
+  private. Getting this backwards leaks user-specific betting data into a
+  search index, and that is not recoverable by fixing it later.
+#}
+{% if page_is_public %}
+  <meta name="robots" content="index, follow">
+{% else %}
+  <meta name="robots" content="noindex, nofollow">
+{% endif %}

@@ -51,6 +51,21 @@ def _is_non_server_invocation(argv: list[str] | None = None) -> bool:
     )
 
 
+# Endpoints a search engine may index. Everything else renders
+# `noindex, nofollow`.
+#
+# This is an allowlist rather than a blocklist on purpose: it FAILS CLOSED, so
+# a route added later is private until somebody deliberately publishes it. The
+# opposite default leaks user-specific betting data — bet history, stakes,
+# P/L — into a search index, and no later fix un-indexes it.
+#
+# Adding to this set is a publishing decision. `tests/test_crawler_register.py`
+# asserts every HTML-rendering GET route resolves to exactly one register.
+PUBLIC_ENDPOINTS = frozenset({
+    'main.home',
+})
+
+
 def create_app(testing=False):
     app = Flask(__name__)
     secret_key = os.getenv('SECRET_KEY')
@@ -170,6 +185,7 @@ def create_app(testing=False):
             'current_year': datetime.now(timezone.utc).year,
             'logout_form': LogoutForm(),
             'csp_nonce': _csp_nonce(),
+            'page_is_public': request.endpoint in PUBLIC_ENDPOINTS,
             **_display_config,
         }
 
