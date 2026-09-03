@@ -13,9 +13,10 @@ from datetime import datetime, timezone, date
 
 from tests.helpers import BaseTestCase, make_bet, make_user
 from app import db
-from app.enums import BetType, PostmortemReason
+from app.enums import PostmortemReason
 from app.models import Bet, BetPostmortem, PlayerGameLog, GameSnapshot, PickContext
 from app.services.postmortem_service import (
+    PostmortemEvidence,
     _assign_reasons,
     create_or_update_postmortem,
     backfill_postmortems,
@@ -100,7 +101,6 @@ class TestAssignReasons(unittest.TestCase):
 
     BASE_KWARGS = dict(
         ctx={},
-        bet_type=BetType.OVER.value,
         actual_stat=2.0,
         projected_stat=1.2,
         projection_error=0.8,
@@ -113,13 +113,14 @@ class TestAssignReasons(unittest.TestCase):
         attempts_delta=None,
         overtime_flag=False,
         blowout_flag=False,
+        line=1.5,
         miss_margin=0.5,
     )
 
     def _call(self, **overrides):
         kwargs = dict(self.BASE_KWARGS)
         kwargs.update(overrides)
-        return _assign_reasons(**kwargs)
+        return _assign_reasons(PostmortemEvidence(**kwargs))
 
     def test_ot_variance_flagged(self):
         reasons = self._call(overtime_flag=True)

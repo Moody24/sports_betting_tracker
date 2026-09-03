@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from dataclasses import dataclass
 from datetime import datetime, timezone, date as date_type
 from typing import Optional
 
@@ -43,6 +44,27 @@ PROP_TO_ATTEMPTS_KEY: dict[str, str] = {
 _OT_TOTAL_SCORE_THRESHOLD = 230
 # Blowout when score differential exceeds this.
 _BLOWOUT_DIFF_THRESHOLD = 22
+
+
+@dataclass(frozen=True)
+class PostmortemEvidence:
+    """All measured evidence consumed by diagnosis and reason rules."""
+
+    ctx: dict
+    actual_stat: float
+    projected_stat: Optional[float]
+    projection_error: Optional[float]
+    player_variance: float
+    expected_minutes: Optional[float]
+    actual_minutes: Optional[float]
+    minutes_delta: Optional[float]
+    expected_attempts: Optional[float]
+    actual_attempts: Optional[float]
+    attempts_delta: Optional[float]
+    overtime_flag: bool
+    blowout_flag: bool
+    line: float
+    miss_margin: float
 
 
 # ---------------------------------------------------------------------------
@@ -116,9 +138,8 @@ def create_or_update_postmortem(bet: Bet) -> Optional[BetPostmortem]:
     )
 
     # ── Reason assignment ────────────────────────────────────────────
-    reasons = _assign_reasons(
+    evidence = PostmortemEvidence(
         ctx=ctx,
-        bet_type=bet.bet_type,
         actual_stat=actual_stat,
         projected_stat=projected_stat,
         projection_error=projection_error,
@@ -131,8 +152,10 @@ def create_or_update_postmortem(bet: Bet) -> Optional[BetPostmortem]:
         attempts_delta=attempts_delta,
         overtime_flag=overtime_flag,
         blowout_flag=blowout_flag,
+        line=line,
         miss_margin=miss_margin,
     )
+    reasons = _assign_reasons(evidence)
 
     primary = reasons[0][0] if len(reasons) >= 1 else PostmortemReason.UNKNOWN.value
     secondary = reasons[1][0] if len(reasons) >= 2 else None
@@ -140,24 +163,7 @@ def create_or_update_postmortem(bet: Bet) -> Optional[BetPostmortem]:
     confidence = reasons[0][1] if reasons else 0.5
 
     # ── Full diagnosis payload ──────────────────────────────────────
-    diagnosis = _build_diagnosis(
-        ctx=ctx,
-        actual_stat=actual_stat,
-        projected_stat=projected_stat,
-        projection_error=projection_error,
-        line=line,
-        miss_margin=miss_margin,
-        expected_minutes=expected_minutes,
-        actual_minutes=actual_minutes,
-        minutes_delta=minutes_delta,
-        expected_attempts=expected_attempts,
-        actual_attempts=actual_attempts,
-        attempts_delta=attempts_delta,
-        player_variance=player_variance,
-        overtime_flag=overtime_flag,
-        blowout_flag=blowout_flag,
-        reasons=reasons,
-    )
+    diagnosis = _build_diagnosis(evidence, reasons)
 
     # ── Upsert ───────────────────────────────────────────────────────
     pm = BetPostmortem.query.filter_by(bet_id=bet.id).first()
@@ -214,137 +220,135 @@ def create_or_update_postmortem(bet: Bet) -> Optional[BetPostmortem]:
 # Reason-code assignment engine
 # ---------------------------------------------------------------------------
 
-def _assign_reasons(
-    *,
-    ctx: dict,
-    bet_type: str,
-    actual_stat: float,
-    projected_stat: Optional[float],
-    projection_error: Optional[float],
-    player_variance: float,
-    actual_minutes: Optional[float],
-    expected_minutes: Optional[float],
-    minutes_delta: Optional[float],
-    actual_attempts: Optional[float],
-    expected_attempts: Optional[float],
-    attempts_delta: Optional[float],
-    overtime_flag: bool,
-    blowout_flag: bool,
-    miss_margin: float,
-) -> list[tuple[str, float]]:
+ScoredReason = tuple[str, float]
+
+
+def _reason(code: PostmortemReason, score: float) -> ScoredReason:
+    return code.value, round(min(score, 0.95), 3)
+
+
+def _game_context_reasons(evidence: PostmortemEvidence) -> list[ScoredReason]:
+    reasons = []
+    if evidence.overtime_flag:
+        reasons.append(_reason(PostmortemReason.OT_VARIANCE, 0.82))
+    if evidence.blowout_flag:
+        reasons.append(_reason(PostmortemReason.BLOWOUT_DISTORTION, 0.78))
+    return reasons
+
+
+def _minutes_reasons(evidence: PostmortemEvidence) -> list[ScoredReason]:
+    if evidence.minutes_delta is None:
+        return []
+    absolute_delta = abs(evidence.minutes_delta)
+    if absolute_delta < 4:
+        return []
+    if absolute_delta < 8:
+        return [_reason(PostmortemReason.MINUTES_MISS, 0.55)]
+    reasons = [_reason(
+        PostmortemReason.MINUTES_MISS,
+        min(0.90, 0.62 + absolute_delta / 35.0),
+    )]
+    stable_role = evidence.ctx.get('minutes_trend', 'stable') == 'stable'
+    if stable_role and absolute_delta >= 10:
+        reasons.append(_reason(PostmortemReason.ROLE_CHANGE, 0.72))
+    return reasons
+
+
+def _volume_reasons(evidence: PostmortemEvidence) -> list[ScoredReason]:
+    if evidence.attempts_delta is None or not evidence.expected_attempts:
+        return []
+    if evidence.expected_attempts <= 1.0:
+        return []
+    swing = evidence.attempts_delta / evidence.expected_attempts
+    score = min(0.88, 0.60 + abs(swing) * 0.55)
+    if swing >= 0.35:
+        return [_reason(PostmortemReason.VOLUME_SPIKE, score)]
+    if swing <= -0.35:
+        return [_reason(PostmortemReason.VOLUME_DROP, score)]
+    return []
+
+
+def _efficiency_reasons(
+    evidence: PostmortemEvidence,
+    volume_reasons: list[ScoredReason],
+) -> list[ScoredReason]:
+    if volume_reasons or not evidence.actual_attempts or not evidence.expected_attempts:
+        return []
+    if evidence.projected_stat is None:
+        return []
+    expected_rate = evidence.projected_stat / evidence.expected_attempts
+    actual_rate = evidence.actual_stat / evidence.actual_attempts
+    delta = actual_rate - expected_rate
+    if delta > 0.15:
+        return [_reason(PostmortemReason.EFFICIENCY_SPIKE, 0.68)]
+    if delta < -0.15:
+        return [_reason(PostmortemReason.EFFICIENCY_DROP, 0.68)]
+    return []
+
+
+def _edge_reasons(evidence: PostmortemEvidence) -> list[ScoredReason]:
+    projected_edge = float(evidence.ctx.get('projected_edge', 0) or 0)
+    if projected_edge < 0:
+        return [_reason(PostmortemReason.INSUFFICIENT_EDGE, 0.65)]
+    if abs(projected_edge) < 0.05:
+        return [_reason(PostmortemReason.LINE_VALUE_MISS, 0.58)]
+    return []
+
+
+def _model_miss_reasons(
+    evidence: PostmortemEvidence,
+    accumulated: list[ScoredReason],
+) -> list[ScoredReason]:
+    if evidence.projection_error is None or evidence.player_variance <= 0:
+        return []
+    structural_codes = {
+        PostmortemReason.VOLUME_SPIKE.value,
+        PostmortemReason.VOLUME_DROP.value,
+        PostmortemReason.MINUTES_MISS.value,
+        PostmortemReason.OT_VARIANCE.value,
+        PostmortemReason.BLOWOUT_DISTORTION.value,
+    }
+    has_structural_driver = any(code in structural_codes for code, _ in accumulated)
+    z_error = abs(evidence.projection_error) / evidence.player_variance
+    if z_error <= 2.0 or has_structural_driver:
+        return []
+    return [_reason(
+        PostmortemReason.PROJECTION_MODEL_MISS,
+        min(0.80, 0.50 + z_error * 0.06),
+    )]
+
+
+def _variance_reasons(evidence: PostmortemEvidence) -> list[ScoredReason]:
+    reasons = []
+    error = evidence.projection_error
+    variance = evidence.player_variance
+    if error is not None and variance >= 4.0 and abs(error) > variance:
+        reasons.append(_reason(PostmortemReason.HIGH_VARIANCE_EVENT, 0.62))
+    if error is not None and variance > 0:
+        z_error = abs(error) / variance
+        if z_error <= 1.0 and abs(evidence.miss_margin) <= 1.5:
+            reasons.append(_reason(PostmortemReason.NORMAL_VARIANCE, 0.75))
+    elif error is None and abs(evidence.miss_margin) <= 1.0:
+        reasons.append(_reason(PostmortemReason.NORMAL_VARIANCE, 0.55))
+    return reasons
+
+def _assign_reasons(evidence: PostmortemEvidence) -> list[tuple[str, float]]:
     """Return a deduplicated, confidence-sorted list of (reason_code, confidence).
 
     Uses deterministic business rules.  Scores are 0–1; higher = more confident.
     At most the top 3 reasons are used by the caller.
     """
-    scored: list[tuple[str, float]] = []
-
-    def _add(code: PostmortemReason, score: float) -> None:
-        scored.append((code.value, round(min(score, 0.95), 3)))
-
-    # ── 1. Game-context flags (high confidence when present) ─────────
-    if overtime_flag:
-        _add(PostmortemReason.OT_VARIANCE, 0.82)
-    if blowout_flag:
-        _add(PostmortemReason.BLOWOUT_DISTORTION, 0.78)
-
-    # ── 2. Minutes variance ──────────────────────────────────────────
-    if minutes_delta is not None:
-        abs_min = abs(minutes_delta)
-        if abs_min >= 8:
-            # Large change — very likely a primary driver
-            score = min(0.90, 0.62 + abs_min / 35.0)
-            _add(PostmortemReason.MINUTES_MISS, score)
-            # If minutes trend was stable pre-game, this is an unexpected role shift
-            if ctx.get('minutes_trend', 'stable') == 'stable' and abs_min >= 10:
-                _add(PostmortemReason.ROLE_CHANGE, 0.72)
-        elif abs_min >= 4:
-            # Moderate change — worth flagging as secondary
-            _add(PostmortemReason.MINUTES_MISS, 0.55)
-
-    # ── 3. Volume (attempt) variance ─────────────────────────────────
-    if (
-        attempts_delta is not None
-        and expected_attempts is not None
-        and expected_attempts > 1.0
-    ):
-        pct_swing = attempts_delta / expected_attempts
-        if pct_swing >= 0.35:
-            score = min(0.88, 0.60 + abs(pct_swing) * 0.55)
-            _add(PostmortemReason.VOLUME_SPIKE, score)
-        elif pct_swing <= -0.35:
-            score = min(0.88, 0.60 + abs(pct_swing) * 0.55)
-            _add(PostmortemReason.VOLUME_DROP, score)
-
-    # ── 4. Efficiency variance ────────────────────────────────────────
-    # Only meaningful when attempts data is available and volume was NOT the driver
-    volume_was_driver = any(
-        c in (PostmortemReason.VOLUME_SPIKE.value, PostmortemReason.VOLUME_DROP.value)
-        for c, _ in scored
-    )
-    if (
-        not volume_was_driver
-        and actual_attempts is not None
-        and actual_attempts > 0
-        and expected_attempts is not None
-        and expected_attempts > 0
-        and projected_stat is not None
-    ):
-        expected_rate = projected_stat / expected_attempts
-        actual_rate = actual_stat / actual_attempts
-        eff_delta = actual_rate - expected_rate
-        if eff_delta > 0.15:
-            _add(PostmortemReason.EFFICIENCY_SPIKE, 0.68)
-        elif eff_delta < -0.15:
-            _add(PostmortemReason.EFFICIENCY_DROP, 0.68)
-
-    # ── 5. Line / edge quality ────────────────────────────────────────
-    projected_edge = float(ctx.get('projected_edge', 0) or 0)
-    if projected_edge < 0:
-        _add(PostmortemReason.INSUFFICIENT_EDGE, 0.65)
-    elif abs(projected_edge) < 0.05:
-        _add(PostmortemReason.LINE_VALUE_MISS, 0.58)
-
-    # ── 6. Projection model miss ──────────────────────────────────────
-    # Large residual that cannot be explained by volume or minutes changes
-    if projection_error is not None and player_variance and player_variance > 0:
-        z_error = abs(projection_error) / player_variance
-        structural_driver = any(
-            c in (
-                PostmortemReason.VOLUME_SPIKE.value,
-                PostmortemReason.VOLUME_DROP.value,
-                PostmortemReason.MINUTES_MISS.value,
-                PostmortemReason.OT_VARIANCE.value,
-                PostmortemReason.BLOWOUT_DISTORTION.value,
-            )
-            for c, _ in scored
-        )
-        if z_error > 2.0 and not structural_driver:
-            score = min(0.80, 0.50 + z_error * 0.06)
-            _add(PostmortemReason.PROJECTION_MODEL_MISS, score)
-
-    # ── 7. High-variance event (big miss for a volatile player) ───────
-    if (
-        projection_error is not None
-        and player_variance >= 4.0
-        and abs(projection_error) > player_variance
-    ):
-        _add(PostmortemReason.HIGH_VARIANCE_EVENT, 0.62)
-
-    # ── 8. Normal variance (everything within expected band) ──────────
-    if projection_error is not None and player_variance and player_variance > 0:
-        z_error = abs(projection_error) / player_variance
-        if z_error <= 1.0 and abs(miss_margin) <= 1.5:
-            _add(PostmortemReason.NORMAL_VARIANCE, 0.75)
-    elif projection_error is None and abs(miss_margin) <= 1.0:
-        # No projection context but loss was narrow — assume normal variance
-        _add(PostmortemReason.NORMAL_VARIANCE, 0.55)
-
-    # ── Fallback ──────────────────────────────────────────────────────
+    scored = _game_context_reasons(evidence)
+    scored.extend(_minutes_reasons(evidence))
+    volume_reasons = _volume_reasons(evidence)
+    scored.extend(volume_reasons)
+    scored.extend(_efficiency_reasons(evidence, volume_reasons))
+    scored.extend(_edge_reasons(evidence))
+    scored.extend(_model_miss_reasons(evidence, scored))
+    scored.extend(_variance_reasons(evidence))
     if not scored:
-        _add(PostmortemReason.UNKNOWN, 0.40)
+        scored.append(_reason(PostmortemReason.UNKNOWN, 0.40))
 
-    # Deduplicate keeping highest score per code, then sort desc by score
     best: dict[str, float] = {}
     for code, score in scored:
         if score > best.get(code, -1):
@@ -357,54 +361,46 @@ def _assign_reasons(
 # ---------------------------------------------------------------------------
 
 def _build_diagnosis(
-    *,
-    ctx: dict,
-    actual_stat: float,
-    projected_stat: Optional[float],
-    projection_error: Optional[float],
-    line: float,
-    miss_margin: float,
-    expected_minutes: Optional[float],
-    actual_minutes: Optional[float],
-    minutes_delta: Optional[float],
-    expected_attempts: Optional[float],
-    actual_attempts: Optional[float],
-    attempts_delta: Optional[float],
-    player_variance: float,
-    overtime_flag: bool,
-    blowout_flag: bool,
+    evidence: PostmortemEvidence,
     reasons: list[tuple[str, float]],
 ) -> dict:
     """Assemble the full diagnostic payload stored as JSON."""
+    ctx = evidence.ctx
     return {
         # Core stat comparison
-        'projected_stat': projected_stat,
-        'actual_stat': actual_stat,
-        'prop_line': line,
-        'miss_margin': miss_margin,
+        'projected_stat': evidence.projected_stat,
+        'actual_stat': evidence.actual_stat,
+        'prop_line': evidence.line,
+        'miss_margin': evidence.miss_margin,
         'projection_error': (
-            round(projection_error, 2) if projection_error is not None else None
+            round(evidence.projection_error, 2)
+            if evidence.projection_error is not None else None
         ),
         # Minutes
         'expected_minutes': (
-            round(expected_minutes, 1) if expected_minutes is not None else None
+            round(evidence.expected_minutes, 1)
+            if evidence.expected_minutes is not None else None
         ),
         'actual_minutes': (
-            round(actual_minutes, 1) if actual_minutes is not None else None
+            round(evidence.actual_minutes, 1)
+            if evidence.actual_minutes is not None else None
         ),
         'minutes_delta': (
-            round(minutes_delta, 1) if minutes_delta is not None else None
+            round(evidence.minutes_delta, 1)
+            if evidence.minutes_delta is not None else None
         ),
         # Attempts / volume
         'expected_attempts': (
-            round(expected_attempts, 1) if expected_attempts is not None else None
+            round(evidence.expected_attempts, 1)
+            if evidence.expected_attempts is not None else None
         ),
-        'actual_attempts': actual_attempts,
+        'actual_attempts': evidence.actual_attempts,
         'attempts_delta': (
-            round(attempts_delta, 1) if attempts_delta is not None else None
+            round(evidence.attempts_delta, 1)
+            if evidence.attempts_delta is not None else None
         ),
         # Model uncertainty
-        'player_variance': player_variance,
+        'player_variance': evidence.player_variance,
         'projected_edge': float(ctx.get('projected_edge', 0) or 0),
         'confidence_tier': ctx.get('confidence_tier'),
         # Contextual flags at bet placement time
@@ -413,8 +409,8 @@ def _build_diagnosis(
         'pregame_back_to_back': ctx.get('back_to_back'),
         'pregame_injury_returning': ctx.get('injury_returning'),
         # Game-context
-        'overtime_flag': overtime_flag,
-        'blowout_flag': blowout_flag,
+        'overtime_flag': evidence.overtime_flag,
+        'blowout_flag': evidence.blowout_flag,
         # Scored reasons with confidence
         'reason_scores': [(code, round(score, 3)) for code, score in reasons[:5]],
     }
