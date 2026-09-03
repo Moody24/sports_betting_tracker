@@ -1134,19 +1134,153 @@ def fetch_player_props_for_event(odds_event_id: str, critical: bool = False) -> 
     return props
 
 
+def _prop_snapshot_event_start(game: dict) -> datetime | None:
+    try:
+        event_start = datetime.fromisoformat(
+            str(game.get('start_time') or '').replace('Z', '+00:00')
+        )
+        if event_start.tzinfo is None:
+            event_start = event_start.replace(tzinfo=APP_TIMEZONE)
+        return event_start.astimezone(timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
+def _prop_snapshot_is_due(
+    event_start: datetime | None,
+    snapshot_kind: str,
+    now_utc: datetime,
+) -> bool:
+    if snapshot_kind == 'scheduled':
+        return True
+    if event_start is None:
+        return False
+    minutes_to_tip = (event_start - now_utc).total_seconds() / 60.0
+    if snapshot_kind == 'decision':
+        return 55 <= minutes_to_tip <= 65
+    return 5 <= minutes_to_tip <= 15
+
+
+def _recent_prop_snapshot_keys(today, cutoff) -> set:
+    from app.models import OddsSnapshot
+
+    return {
+        (
+            row.game_id,
+            row.player_name,
+            row.market,
+            row.bookmaker,
+            row.snapshot_kind,
+        )
+        for row in OddsSnapshot.query
+        .filter(
+            OddsSnapshot.game_date == today,
+            OddsSnapshot.snapped_at >= cutoff,
+        )
+        .all()
+    }
+
+
+def _snapshot_prop_book_rows(
+    *,
+    prop: dict,
+    market_key: str,
+    game_id: str,
+    event_id: str,
+    event_start: datetime | None,
+    today,
+    snapshot_kind: str,
+    recent_snapped: set,
+) -> int:
+    from app import db
+    from app.models import OddsSnapshot
+    from app.services.player_crosswalk import normalize_name, resolve_espn_id
+
+    eligible_books = [
+        (book_name, book_data)
+        for book_name, book_data in prop.get('books', {}).items()
+        if book_name in _TARGET_BOOKMAKERS
+        and (
+            game_id,
+            prop['player'],
+            market_key,
+            book_name,
+            snapshot_kind,
+        ) not in recent_snapped
+    ]
+    if not eligible_books:
+        return 0
+    player_key = normalize_name(prop['player'])
+    try:
+        player_id = resolve_espn_id(prop['player'])
+    except RuntimeError:
+        player_id = None
+    for book_name, book_data in eligible_books:
+        db.session.add(OddsSnapshot(
+            game_id=game_id,
+            source_event_id=event_id,
+            game_date=today,
+            event_start_time=event_start,
+            player_id=player_id,
+            player_name=prop['player'],
+            player_key=player_key,
+            market=market_key,
+            bookmaker=book_name,
+            line=book_data.get('line', prop.get('line')),
+            over_odds=book_data.get('over_odds'),
+            under_odds=book_data.get('under_odds'),
+            source='odds_api',
+            snapshot_kind=snapshot_kind,
+        ))
+    return len(eligible_books)
+
+
+def _snapshot_game_props(
+    game: dict,
+    *,
+    today,
+    now_utc: datetime,
+    snapshot_kind: str,
+    recent_snapped: set,
+) -> int:
+    event_start = _prop_snapshot_event_start(game)
+    if not _prop_snapshot_is_due(event_start, snapshot_kind, now_utc):
+        return 0
+    event_id = (game.get('odds_event_id') or '').strip()
+    if not event_id:
+        return 0
+    props = fetch_player_props_for_event(
+        event_id,
+        critical=snapshot_kind == 'close',
+    )
+    game_id = game.get('espn_id', '')
+    return sum(
+        _snapshot_prop_book_rows(
+            prop=prop,
+            market_key=market_key,
+            game_id=game_id,
+            event_id=event_id,
+            event_start=event_start,
+            today=today,
+            snapshot_kind=snapshot_kind,
+            recent_snapped=recent_snapped,
+        )
+        for market_key, market_props in props.items()
+        for prop in market_props
+    )
+
+
 def snapshot_todays_props(snapshot_kind: str = 'scheduled') -> int:
     """Snapshot today's player props odds into OddsSnapshot for line movement tracking.
 
     Skips a (game_id, player, market, bookmaker) combo if already snapped within 90 min.
     Returns count of rows inserted.
     """
-    from datetime import timedelta
     from app import db
-    from app.models import OddsSnapshot
 
-    ET_NOW = datetime.now(APP_TIMEZONE)
-    today = ET_NOW.date()
-    cutoff = ET_NOW - timedelta(minutes=90)
+    et_now = datetime.now(APP_TIMEZONE)
+    today = et_now.date()
+    cutoff = et_now - timedelta(minutes=90)
 
     games = get_todays_games()
     if not games:
@@ -1155,83 +1289,17 @@ def snapshot_todays_props(snapshot_kind: str = 'scheduled') -> int:
     if snapshot_kind not in {'scheduled', 'decision', 'close'}:
         raise ValueError(f'Unsupported snapshot kind: {snapshot_kind}')
 
-    # Pre-load all recent snapshots for today in one query to avoid N+1.
-    # Include the kind so a T-60 decision quote never suppresses the T-10 close.
-    recent_snapped: set = {
-        (row.game_id, row.player_name, row.market, row.bookmaker, row.snapshot_kind)
-        for row in OddsSnapshot.query
-        .filter(OddsSnapshot.game_date == today, OddsSnapshot.snapped_at >= cutoff)
-        .all()
-    }
-
-    inserted = 0
-    for game in games:
-        event_start = None
-        try:
-            event_start = datetime.fromisoformat(
-                str(game.get('start_time') or '').replace('Z', '+00:00')
-            )
-            if event_start.tzinfo is None:
-                event_start = event_start.replace(tzinfo=APP_TIMEZONE)
-            event_start = event_start.astimezone(timezone.utc)
-        except (TypeError, ValueError):
-            pass
-        if snapshot_kind in {'decision', 'close'}:
-            if event_start is None:
-                continue
-            minutes_to_tip = (event_start - datetime.now(timezone.utc)).total_seconds() / 60.0
-            due = (
-                55 <= minutes_to_tip <= 65
-                if snapshot_kind == 'decision'
-                else 5 <= minutes_to_tip <= 15
-            )
-            if not due:
-                continue
-
-        event_id = (game.get("odds_event_id") or "").strip()
-        if not event_id:
-            continue
-
-        props = fetch_player_props_for_event(event_id, critical=snapshot_kind == 'close')
-        game_id = game.get("espn_id", "")
-
-        for market_key, market_props in props.items():
-            for prop in market_props:
-                books = prop.get("books", {})
-                for book_name, book_data in books.items():
-                    if book_name not in _TARGET_BOOKMAKERS:
-                        continue
-
-                    if (
-                        game_id, prop["player"], market_key, book_name, snapshot_kind
-                    ) in recent_snapped:
-                        continue
-
-                    from app.services.player_crosswalk import normalize_name, resolve_espn_id
-                    player_key = normalize_name(prop['player'])
-                    try:
-                        player_id = resolve_espn_id(prop['player'])
-                    except RuntimeError:
-                        player_id = None
-
-                    snap = OddsSnapshot(
-                        game_id=game_id,
-                        source_event_id=event_id,
-                        game_date=today,
-                        event_start_time=event_start,
-                        player_id=player_id,
-                        player_name=prop["player"],
-                        player_key=player_key,
-                        market=market_key,
-                        bookmaker=book_name,
-                        line=book_data.get('line', prop.get('line')),
-                        over_odds=book_data.get("over_odds"),
-                        under_odds=book_data.get("under_odds"),
-                        source='odds_api',
-                        snapshot_kind=snapshot_kind,
-                    )
-                    db.session.add(snap)
-                    inserted += 1
+    recent_snapped = _recent_prop_snapshot_keys(today, cutoff)
+    inserted = sum(
+        _snapshot_game_props(
+            game,
+            today=today,
+            now_utc=et_now.astimezone(timezone.utc),
+            snapshot_kind=snapshot_kind,
+            recent_snapped=recent_snapped,
+        )
+        for game in games
+    )
 
     if inserted:
         db.session.commit()

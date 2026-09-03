@@ -179,6 +179,63 @@ class TestProfitabilityMetrics(BaseTestCase):
 
 
 class TestRealQuoteSelection(BaseTestCase):
+    def test_run_rolling_backtest_records_no_quote_failure(self):
+        from app.services.rolling_backtest import run_rolling_backtest
+
+        with self.app.app_context(), patch(
+            'app.services.rolling_backtest._quote_groups',
+            return_value=([], {}),
+        ):
+            result = run_rolling_backtest(
+                'player_points',
+                date(2025, 1, 1),
+                date(2025, 2, 1),
+            )
+            run = ModelEvaluationRun.query.one()
+
+        self.assertIn('No resolvable real-line', result['error'])
+        self.assertEqual(run.status, 'failed')
+
+    @patch(
+        'app.services.rolling_backtest.replay_running_baseline',
+        return_value=(10.0, 2.0),
+    )
+    @patch('app.services.rolling_backtest._model_probability', return_value=None)
+    def test_score_fold_quote_falls_back_to_incumbent(
+        self,
+        _model_probability,
+        _baseline,
+    ):
+        from app.services.rolling_backtest import _score_fold_quote
+
+        game_date = date(2025, 1, 2)
+        quote = {
+            'game_date': game_date,
+            'player_id': '123',
+            'line': 10.0,
+        }
+        scored = _score_fold_quote(
+            quote,
+            stat_type='player_points',
+            fold_start=date(2025, 1, 1),
+            bundle=('model', [], None, None, {}),
+            row_lookup={(game_date, '123'): (
+                game_date,
+                '123',
+                {'feature': 1.0},
+                11.0,
+            )},
+            baseline_cache={},
+        )
+
+        self.assertIsNotNone(scored)
+        self.assertEqual(
+            scored['challenger_probability'],
+            scored['incumbent_probability'],
+        )
+        self.assertEqual(scored['target'], 11.0)
+        self.assertEqual(scored['fold'], '2025-01-01')
+
     def test_selects_like_for_like_consensus_and_close(self):
         from app.services.rolling_backtest import _quote_groups
 

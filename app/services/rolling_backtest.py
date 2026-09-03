@@ -480,6 +480,158 @@ def _consecutive_verdict(stat_type: str, verdict: str) -> str:
     return 'PROMOTE' if previous and previous.verdict == 'PROMOTE_CANDIDATE' else verdict
 
 
+def _rolling_training_rows(stat_type: str):
+    rows = _build_dist_training_rows(stat_type) if stat_type in DIST_STAT_TYPES else None
+    if rows is None:
+        from app.services.ml_model import _build_training_rows
+
+        rows = _build_training_rows(stat_type, min_train_samples=0)
+    return _point_in_time_rows(rows) if rows else []
+
+
+def _score_fold_quote(
+    quote: dict,
+    *,
+    stat_type: str,
+    fold_start: date,
+    bundle,
+    row_lookup: dict,
+    baseline_cache: dict,
+) -> dict | None:
+    from scipy.stats import norm
+
+    training_row = row_lookup.get((quote['game_date'], quote['player_id']))
+    if training_row is None:
+        return None
+    baseline_key = (training_row[0], str(training_row[1]))
+    if baseline_key not in baseline_cache:
+        baseline_cache[baseline_key] = replay_running_baseline(
+            training_row,
+            stat_type,
+        )
+    baseline = baseline_cache[baseline_key]
+    if baseline is None:
+        return None
+    baseline_over = float(1.0 - norm.cdf(
+        quote['line'],
+        loc=baseline[0],
+        scale=baseline[1],
+    ))
+    challenger_over = _model_probability(bundle, training_row[2], quote['line'])
+    return {
+        **quote,
+        'target': float(training_row[3]),
+        'challenger_probability': (
+            baseline_over if challenger_over is None else challenger_over
+        ),
+        'incumbent_probability': baseline_over,
+        'fold': fold_start.isoformat(),
+    }
+
+
+def _score_rolling_folds(
+    stat_type: str,
+    date_from: date,
+    date_to: date,
+    opportunities: list[dict],
+    rows,
+) -> tuple[list[dict], list[dict]]:
+    row_lookup = {(row[0], str(row[1])): row for row in rows}
+    baseline_cache = {}
+    scored = []
+    fold_reports = []
+    for fold_start, fold_end in _folds(date_from, date_to):
+        fold_quotes = [
+            quote
+            for quote in opportunities
+            if fold_start <= quote['game_date'] < fold_end
+        ]
+        if not fold_quotes:
+            continue
+        pretest = [row for row in rows if row[0] and row[0] < fold_start]
+        if not pretest or (fold_start - pretest[0][0]).days < 365:
+            fold_reports.append({
+                'start': fold_start.isoformat(),
+                'end': fold_end.isoformat(),
+                'status': 'skipped',
+                'reason': 'less_than_365_days_training_history',
+            })
+            continue
+        bundle = _fit_fold_model(stat_type, pretest)
+        fold_scored = [
+            result
+            for quote in fold_quotes
+            if (result := _score_fold_quote(
+                quote,
+                stat_type=stat_type,
+                fold_start=fold_start,
+                bundle=bundle,
+                row_lookup=row_lookup,
+                baseline_cache=baseline_cache,
+            )) is not None
+        ]
+        scored.extend(fold_scored)
+        fold_reports.append({
+            'start': fold_start.isoformat(),
+            'end': fold_end.isoformat(),
+            'status': 'scored',
+            'joined_quotes': len(fold_scored),
+            'training': bundle[4],
+        })
+    return scored, fold_reports
+
+
+def _threshold_comparison(scored: list[dict], threshold: float) -> dict:
+    challenger_bets = _select_bets(scored, 'challenger', threshold)
+    incumbent_bets = _select_bets(scored, 'incumbent', threshold)
+    return {
+        'challenger': {
+            **summarize_bets(challenger_bets),
+            'segments': summarize_segments(challenger_bets),
+        },
+        'incumbent': {
+            **summarize_bets(incumbent_bets),
+            'segments': summarize_segments(incumbent_bets),
+        },
+    }
+
+
+def _rolling_thresholds(scored: list[dict], selected_threshold: float) -> dict:
+    thresholds = {
+        str(threshold): _threshold_comparison(scored, threshold)
+        for threshold in EDGE_THRESHOLDS
+    }
+    selected_key = str(float(selected_threshold))
+    if selected_key not in thresholds:
+        thresholds[selected_key] = _threshold_comparison(
+            scored,
+            selected_threshold,
+        )
+    return thresholds
+
+
+def _write_rolling_report_artifact(
+    report: dict,
+    stat_type: str,
+    date_from: date,
+    date_to: date,
+    run_id: int,
+) -> str:
+    artifact_dir = os.path.join(
+        os.path.dirname(os.path.dirname(__file__)),
+        'ml_models',
+        'evaluations',
+    )
+    os.makedirs(artifact_dir, exist_ok=True)
+    artifact_path = os.path.join(
+        artifact_dir,
+        f'rolling_{stat_type}_{date_from.isoformat()}_{date_to.isoformat()}_{run_id}.json',
+    )
+    with open(artifact_path, 'w', encoding='utf-8') as handle:
+        json.dump(report, handle, sort_keys=True, indent=2, default=str)
+    return artifact_path
+
+
 def run_rolling_backtest(
     stat_type: str,
     date_from: date,
@@ -510,64 +662,16 @@ def run_rolling_backtest(
         opportunities, coverage = _quote_groups(stat_type, date_from, date_to)
         if not opportunities:
             raise ValueError('No resolvable real-line decision quotes in the requested range')
-        rows = _build_dist_training_rows(stat_type) if stat_type in DIST_STAT_TYPES else None
-        if rows is None:
-            from app.services.ml_model import _build_training_rows
-            rows = _build_training_rows(stat_type, min_train_samples=0)
+        rows = _rolling_training_rows(stat_type)
         if not rows:
             raise ValueError('No historical training rows available')
-        rows = _point_in_time_rows(rows)
-        row_lookup = {(row[0], str(row[1])): row for row in rows}
-        scored = []
-        baseline_cache = {}
-        fold_reports = []
-        for fold_start, fold_end in _folds(date_from, date_to):
-            fold_quotes = [
-                quote for quote in opportunities if fold_start <= quote['game_date'] < fold_end
-            ]
-            if not fold_quotes:
-                continue
-            pretest = [row for row in rows if row[0] and row[0] < fold_start]
-            if not pretest or (fold_start - pretest[0][0]).days < 365:
-                fold_reports.append({
-                    'start': fold_start.isoformat(), 'end': fold_end.isoformat(),
-                    'status': 'skipped', 'reason': 'less_than_365_days_training_history',
-                })
-                continue
-            bundle = _fit_fold_model(stat_type, pretest)
-            joined = 0
-            for quote in fold_quotes:
-                training_row = row_lookup.get((quote['game_date'], quote['player_id']))
-                if training_row is None:
-                    continue
-                baseline_key = (training_row[0], str(training_row[1]))
-                if baseline_key not in baseline_cache:
-                    baseline_cache[baseline_key] = replay_running_baseline(
-                        training_row, stat_type,
-                    )
-                baseline = baseline_cache[baseline_key]
-                if baseline is None:
-                    continue
-                from scipy.stats import norm
-                baseline_over = float(1.0 - norm.cdf(
-                    quote['line'], loc=baseline[0], scale=baseline[1],
-                ))
-                challenger_over = _model_probability(bundle, training_row[2], quote['line'])
-                if challenger_over is None:
-                    challenger_over = baseline_over
-                scored.append({
-                    **quote,
-                    'target': float(training_row[3]),
-                    'challenger_probability': challenger_over,
-                    'incumbent_probability': baseline_over,
-                    'fold': fold_start.isoformat(),
-                })
-                joined += 1
-            fold_reports.append({
-                'start': fold_start.isoformat(), 'end': fold_end.isoformat(),
-                'status': 'scored', 'joined_quotes': joined,
-                'training': bundle[4],
-            })
+        scored, fold_reports = _score_rolling_folds(
+            stat_type,
+            date_from,
+            date_to,
+            opportunities,
+            rows,
+        )
 
         coverage['settled_joined'] = len({
             (row['event_key'], row['player_id']) for row in scored
@@ -578,34 +682,8 @@ def run_rolling_backtest(
         )
         if not scored:
             raise ValueError('No quotes joined to leakage-safe historical feature rows')
-        thresholds = {}
-        for threshold in EDGE_THRESHOLDS:
-            challenger_bets = _select_bets(scored, 'challenger', threshold)
-            incumbent_bets = _select_bets(scored, 'incumbent', threshold)
-            thresholds[str(threshold)] = {
-                'challenger': {
-                    **summarize_bets(challenger_bets),
-                    'segments': summarize_segments(challenger_bets),
-                },
-                'incumbent': {
-                    **summarize_bets(incumbent_bets),
-                    'segments': summarize_segments(incumbent_bets),
-                },
-            }
+        thresholds = _rolling_thresholds(scored, selected_threshold)
         selected_key = str(float(selected_threshold))
-        if selected_key not in thresholds:
-            challenger_bets = _select_bets(scored, 'challenger', selected_threshold)
-            incumbent_bets = _select_bets(scored, 'incumbent', selected_threshold)
-            thresholds[selected_key] = {
-                'challenger': {
-                    **summarize_bets(challenger_bets),
-                    'segments': summarize_segments(challenger_bets),
-                },
-                'incumbent': {
-                    **summarize_bets(incumbent_bets),
-                    'segments': summarize_segments(incumbent_bets),
-                },
-            }
         selected = thresholds[selected_key]
         verdict = _consecutive_verdict(
             stat_type,
@@ -619,14 +697,13 @@ def run_rolling_backtest(
             'selected_threshold': selected_threshold,
             'verdict': verdict,
         }
-        artifact_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'ml_models', 'evaluations')
-        os.makedirs(artifact_dir, exist_ok=True)
-        artifact_path = os.path.join(
-            artifact_dir,
-            f'rolling_{stat_type}_{date_from.isoformat()}_{date_to.isoformat()}_{run.id}.json',
+        artifact_path = _write_rolling_report_artifact(
+            report,
+            stat_type,
+            date_from,
+            date_to,
+            run.id,
         )
-        with open(artifact_path, 'w', encoding='utf-8') as handle:
-            json.dump(report, handle, sort_keys=True, indent=2, default=str)
         finish_evaluation(run, report, verdict=verdict, artifact_path=artifact_path)
         return report
     except Exception as exc:

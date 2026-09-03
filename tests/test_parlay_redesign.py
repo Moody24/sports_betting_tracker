@@ -235,6 +235,33 @@ class TestMovementCalc(BaseTestCase):
 class TestSnapshotJob(BaseTestCase):
     """snapshot_todays_props runs without error in app context."""
 
+    def test_snapshot_due_windows(self):
+        from app.services.nba_service import _prop_snapshot_is_due
+
+        now = datetime(2026, 1, 1, 18, 0, tzinfo=timezone.utc)
+        self.assertTrue(_prop_snapshot_is_due(None, 'scheduled', now))
+        self.assertFalse(_prop_snapshot_is_due(None, 'decision', now))
+        self.assertTrue(_prop_snapshot_is_due(
+            now + timedelta(minutes=60),
+            'decision',
+            now,
+        ))
+        self.assertFalse(_prop_snapshot_is_due(
+            now + timedelta(minutes=54),
+            'decision',
+            now,
+        ))
+        self.assertTrue(_prop_snapshot_is_due(
+            now + timedelta(minutes=10),
+            'close',
+            now,
+        ))
+        self.assertFalse(_prop_snapshot_is_due(
+            now + timedelta(minutes=16),
+            'close',
+            now,
+        ))
+
     def test_snapshot_todays_props_inserts_rows(self):
         from app.services.nba_service import snapshot_todays_props
 
