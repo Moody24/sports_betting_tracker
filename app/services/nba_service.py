@@ -1167,16 +1167,8 @@ def _compute_bet_outcome(bet_type: str, line: float, actual: float) -> str:
     return Outcome.WIN.value if actual < line else Outcome.LOSE.value
 
 
-def resolve_pending_bets(pending_bets: list) -> list[tuple]:
-    """Check ESPN for final scores and resolve all pending bet types.
-
-    Handles over/under, moneyline, and player prop bets.
-    Returns list of (bet, new_outcome, actual_value) for bets that can be graded.
-    """
-    # Collect scoreboards for relevant bet dates so older pending bets can settle.
-    # Fallback to "today" when no usable bet dates are present.
-    scoreboards: list[dict] = []
-    date_keys: set[str] = set()
+def _relevant_scoreboard_dates(pending_bets: list) -> set[str]:
+    date_keys = set()
     for bet in pending_bets:
         match_dt = getattr(bet, "match_date", None)
         if not match_dt:
@@ -1184,104 +1176,128 @@ def resolve_pending_bets(pending_bets: list) -> list[tuple]:
         try:
             match_date = match_dt.date() if isinstance(match_dt, datetime) else match_dt
             for delta_days in (-1, 0, 1):
-                day = match_date + timedelta(days=delta_days)
-                date_keys.add(day.strftime("%Y%m%d"))
-        except Exception:
-            logger.debug("Skipping bet row due to unexpected error", exc_info=True)
-            continue
+                date_keys.add(
+                    (match_date + timedelta(days=delta_days)).strftime("%Y%m%d")
+                )
+        except (AttributeError, OverflowError, TypeError, ValueError):
+            logger.debug("Skipping bet with invalid match_date", exc_info=True)
+    return date_keys
 
-    if date_keys:
-        for date_key in sorted(date_keys):
-            scoreboards.extend(fetch_espn_scoreboard(date_str=date_key))
-    else:
-        scoreboards = fetch_espn_scoreboard()
 
-    espn_lookup: dict = {}
-    for g in scoreboards:
-        espn_lookup[g["espn_id"]] = g
+def _fetch_relevant_scoreboards(pending_bets: list) -> list[dict]:
+    date_keys = _relevant_scoreboard_dates(pending_bets)
+    if not date_keys:
+        return fetch_espn_scoreboard()
+    scoreboards = []
+    for date_key in sorted(date_keys):
+        scoreboards.extend(fetch_espn_scoreboard(date_str=date_key))
+    return scoreboards
 
-    # Cache box scores so we only fetch each game once
-    boxscore_cache: dict = {}
 
+def _resolve_total_bet(bet, game: dict):
+    if bet.over_under_line is None:
+        return None
+    actual_total = float(game["total_score"])
+    outcome = _compute_bet_outcome(
+        bet.bet_type, float(bet.over_under_line), actual_total
+    )
+    return bet, outcome, actual_total
+
+
+def _resolve_moneyline_bet(bet, game: dict):
+    if not bet.picked_team:
+        return None
+    home = game["home"]
+    away = game["away"]
+    if home["score"] == away["score"]:
+        return bet, Outcome.PUSH.value, 0.0
+    winner = home if home["score"] > away["score"] else away
+    picked_name = bet.picked_team.lower().strip()
+    winner_name = winner["name"].lower().strip()
+    outcome = (
+        Outcome.WIN.value
+        if picked_name in winner_name or winner_name in picked_name
+        else Outcome.LOSE.value
+    )
+    return bet, outcome, float(winner["score"])
+
+
+def _normalized_boxscore_name(name: str) -> str:
+    return re.sub(r"[.'-]", "", name).lower().strip()
+
+
+def _find_player_stat(boxscore: dict, player_name: str, prop_type: str):
+    target = _normalized_boxscore_name(player_name)
+    for candidate_name, stats in boxscore.items():
+        candidate = _normalized_boxscore_name(candidate_name)
+        if target in candidate or candidate in target:
+            return True, stats.get(prop_type)
+    return False, None
+
+
+def _resolve_player_prop_bet(bet, game: dict, boxscore_cache: dict):
+    if not bet.player_name or not bet.prop_type or bet.prop_line is None:
+        return None
+    espn_id = game.get("espn_id", "")
+    if not espn_id:
+        return None
+    if espn_id not in boxscore_cache:
+        boxscore_cache[espn_id] = fetch_espn_boxscore(espn_id)
+    boxscore = boxscore_cache[espn_id]
+    matched, actual_stat = _find_player_stat(
+        boxscore, bet.player_name, bet.prop_type
+    )
+    if not matched and boxscore:
+        logger.warning(
+            "Player %s not in boxscore for game %s (DNP) — voiding as push",
+            bet.player_name,
+            espn_id,
+        )
+        return bet, Outcome.PUSH.value, 0.0
+    if actual_stat is None:
+        logger.warning(
+            "Could not find stat %s for player %s in game %s",
+            bet.prop_type,
+            bet.player_name,
+            espn_id,
+        )
+        return None
+    outcome = _compute_bet_outcome(
+        bet.bet_type, float(bet.prop_line), float(actual_stat)
+    )
+    return bet, outcome, actual_stat
+
+
+def _resolve_final_bet(bet, game: dict, boxscore_cache: dict):
+    if (
+        bet.bet_type in (BetType.OVER.value, BetType.UNDER.value)
+        and not bet.is_player_prop
+    ):
+        return _resolve_total_bet(bet, game)
+    if bet.bet_type == BetType.MONEYLINE.value:
+        return _resolve_moneyline_bet(bet, game)
+    if bet.is_player_prop:
+        return _resolve_player_prop_bet(bet, game, boxscore_cache)
+    return None
+
+
+def resolve_pending_bets(pending_bets: list) -> list[tuple]:
+    """Check ESPN for final scores and resolve all pending bet types.
+
+    Handles over/under, moneyline, and player prop bets.
+    Returns list of (bet, new_outcome, actual_value) for bets that can be graded.
+    """
+    scoreboards = _fetch_relevant_scoreboards(pending_bets)
+    espn_lookup = {game["espn_id"]: game for game in scoreboards}
+    boxscore_cache = {}
     results = []
     for bet in pending_bets:
         game = _choose_game_for_bet(bet, scoreboards, espn_lookup)
-        if not game:
+        if not game or game["status"] != _STATUS_FINAL:
             continue
-        if game["status"] != _STATUS_FINAL:
-            continue
-
-        # ── Over / Under ─────────────────────────────────────────────
-        if bet.bet_type in (BetType.OVER.value, BetType.UNDER.value) and not bet.is_player_prop:
-            if bet.over_under_line is None:
-                continue
-            actual_total = float(game["total_score"])
-            outcome = _compute_bet_outcome(bet.bet_type, float(bet.over_under_line), actual_total)
-            results.append((bet, outcome, actual_total))
-
-        # ── Moneyline ────────────────────────────────────────────────
-        elif bet.bet_type == BetType.MONEYLINE.value:
-            if not bet.picked_team:
-                continue
-            home = game["home"]
-            away = game["away"]
-            if home["score"] > away["score"]:
-                winner = home["name"]
-            elif away["score"] > home["score"]:
-                winner = away["name"]
-            else:
-                # Tie (unlikely in NBA)
-                results.append((bet, Outcome.PUSH.value, 0.0))
-                continue
-            picked_lower = bet.picked_team.lower().strip()
-            winner_lower = winner.lower().strip()
-            outcome = Outcome.WIN.value if picked_lower in winner_lower or winner_lower in picked_lower else Outcome.LOSE.value
-            results.append((bet, outcome, float(home["score"] if home["name"] == winner else away["score"])))
-
-        # ── Player Prop ──────────────────────────────────────────────
-        elif bet.is_player_prop:
-            if not bet.player_name or not bet.prop_type or bet.prop_line is None:
-                continue
-            espn_id = game.get("espn_id", "")
-            if not espn_id:
-                continue
-            if espn_id not in boxscore_cache:
-                boxscore_cache[espn_id] = fetch_espn_boxscore(espn_id)
-            boxscore = boxscore_cache[espn_id]
-
-            # Fuzzy match player name — normalise away periods/apostrophes first
-            import re as _re
-            def _norm(n: str) -> str:
-                return _re.sub(r"[.\'\-]", "", n).lower().strip()
-
-            actual_stat = None
-            bet_norm = _norm(bet.player_name)
-            matched_player = None
-            for player_name, stats in boxscore.items():
-                p_norm = _norm(player_name)
-                if bet_norm in p_norm or p_norm in bet_norm:
-                    actual_stat = stats.get(bet.prop_type)
-                    matched_player = player_name
-                    break
-
-            if matched_player is None and boxscore:
-                # Player not in boxscore for a final game → DNP; void the bet (push)
-                logger.warning(
-                    "Player %s not in boxscore for game %s (DNP) — voiding as push",
-                    bet.player_name, espn_id,
-                )
-                results.append((bet, Outcome.PUSH.value, 0.0))
-                continue
-
-            if actual_stat is None:
-                logger.warning(
-                    "Could not find stat %s for player %s in game %s",
-                    bet.prop_type, bet.player_name, espn_id,
-                )
-                continue
-
-            outcome = _compute_bet_outcome(bet.bet_type, float(bet.prop_line), float(actual_stat))
-            results.append((bet, outcome, actual_stat))
+        resolved = _resolve_final_bet(bet, game, boxscore_cache)
+        if resolved is not None:
+            results.append(resolved)
 
     return results
 
