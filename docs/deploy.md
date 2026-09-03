@@ -3,6 +3,31 @@
 > ⚠️ **This runbook documents the former Railway + Neon deployment stack, which is currently disconnected.**
 > For local development, see [`README.md`](../README.md). The canonical architecture
 > contract is [`docs/architecture/system-contract.md`](architecture/system-contract.md).
+
+## SQLite to PostgreSQL data copy
+
+Run Alembic against an empty PostgreSQL target before copying any rows. Then use
+the guarded application command; it refuses a non-SQLite source, a non-PostgreSQL
+target, identical endpoints, an outdated schema, or a non-empty target.
+
+```bash
+flask db upgrade
+flask migrate-sqlite-to-postgres \
+  --source instance/app.db \
+  --target "$DATABASE_URL" \
+  --dry-run
+flask migrate-sqlite-to-postgres \
+  --source instance/app.db \
+  --target "$DATABASE_URL" \
+  --batch-size 500 \
+  --report database-copy-report.json
+```
+
+The copy preserves primary keys, resets PostgreSQL sequences, runs in one target
+transaction, and validates per-table counts, foreign keys, wager totals, bets by
+user/outcome, historical-log groups, and available quote groups. Re-run with
+`--validate-only` after the cutover smoke test. Reports contain counts and derived
+metrics, never connection URLs.
 > This file is preserved as a reference for when external deployment is restored.
 
 ---

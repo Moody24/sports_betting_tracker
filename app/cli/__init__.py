@@ -102,6 +102,7 @@ def register_cli(app):
     from app.cli.prop_odds_import import register_prop_odds_import_commands
     from app.cli.scenario_commands import register_scenario_commands
     from app.cli.e2e_commands import register_e2e_commands
+    from app.cli.database_commands import register_database_commands
     register_stats_commands(app)
     register_model_commands(app)
     register_market_commands(app)
@@ -113,6 +114,7 @@ def register_cli(app):
     register_prop_odds_import_commands(app)
     register_scenario_commands(app)
     register_e2e_commands(app)
+    register_database_commands(app)
     # Commands registered via add_command() don't get an app context
     # automatically (unlike @app.cli.command()). Wrap each registered
     # command to push this specific app's context before running.
