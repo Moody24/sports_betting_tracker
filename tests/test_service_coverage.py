@@ -117,6 +117,49 @@ class TestValueDetectorMath(BaseTestCase):
 class TestFeatureEngine(BaseTestCase):
     """Tests for feature_engine pure utility functions."""
 
+    def test_context_flags_preserve_stable_order(self):
+        from app.services.feature_engine import derive_context_flags_from_snapshot
+
+        flags = derive_context_flags_from_snapshot({
+            'opp_matchup_adj': 1.1,
+            'opp_positional_matchup_adj': 0.9,
+            'player_last5_trend': 'hot',
+            'opp_pace_factor': 1.1,
+            'back_to_back': True,
+            'minutes_trend': 'decreasing',
+            'injury_returning': True,
+            'projected_edge': 0.12,
+            'confidence_tier': 'strong',
+            'player_hit_rate_vs_line': 0.7,
+            'line_vs_season_avg': -2.5,
+            'player_variance': 9,
+            'days_rest': 3,
+        })
+
+        self.assertEqual(flags, [
+            'favorable_matchup',
+            'tough_positional_matchup',
+            'hot_streak',
+            'pace_boost',
+            'back_to_back',
+            'minutes_down',
+            'injury_returning',
+            'high_edge',
+            'strong_confidence',
+            'high_hit_rate',
+            'line_discount',
+            'high_variance',
+            'extra_rest',
+        ])
+
+    def test_context_flags_default_to_neutral(self):
+        from app.services.feature_engine import derive_context_flags_from_snapshot
+
+        self.assertEqual(
+            derive_context_flags_from_snapshot({}),
+            ['neutral_context'],
+        )
+
     def test_prop_to_stat_key_mapping(self):
         from app.services.feature_engine import _prop_to_stat_key
         self.assertEqual(_prop_to_stat_key('player_points'), 'pts')

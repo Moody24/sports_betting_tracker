@@ -24,78 +24,98 @@ def _append_unique_flag(flags: list[str], flag: str) -> None:
         flags.append(flag)
 
 
-def derive_context_flags_from_snapshot(ctx: dict) -> list[str]:
-    """Derive stable context flags from a PickContext-like payload."""
-    flags: list[str] = []
-
+def _matchup_context_flags(ctx: dict) -> list[str]:
+    flags = []
     matchup_adj = float(ctx.get('opp_matchup_adj', 1.0) or 1.0)
     if matchup_adj > 1.05:
-        _append_unique_flag(flags, 'favorable_matchup')
+        flags.append('favorable_matchup')
     elif matchup_adj < 0.95:
-        _append_unique_flag(flags, 'tough_matchup')
+        flags.append('tough_matchup')
 
-    pos_adj = float(ctx.get('opp_positional_matchup_adj', 1.0) or 1.0)
-    if pos_adj > 1.05:
-        _append_unique_flag(flags, 'favorable_positional_matchup')
-    elif pos_adj < 0.95:
-        _append_unique_flag(flags, 'tough_positional_matchup')
+    positional_adj = float(ctx.get('opp_positional_matchup_adj', 1.0) or 1.0)
+    if positional_adj > 1.05:
+        flags.append('favorable_positional_matchup')
+    elif positional_adj < 0.95:
+        flags.append('tough_positional_matchup')
 
+    return flags
+
+
+def _player_state_flags(ctx: dict) -> list[str]:
+    flags = []
     trend = str(ctx.get('player_last5_trend', 'neutral') or 'neutral')
     if trend == 'hot':
-        _append_unique_flag(flags, 'hot_streak')
+        flags.append('hot_streak')
     elif trend == 'cold':
-        _append_unique_flag(flags, 'cold_streak')
+        flags.append('cold_streak')
 
     pace_factor = float(ctx.get('opp_pace_factor', 1.0) or 1.0)
     if pace_factor > 1.03:
-        _append_unique_flag(flags, 'pace_boost')
+        flags.append('pace_boost')
     elif pace_factor < 0.97:
-        _append_unique_flag(flags, 'pace_slowdown')
-
+        flags.append('pace_slowdown')
     if bool(ctx.get('back_to_back', False)):
-        _append_unique_flag(flags, 'back_to_back')
+        flags.append('back_to_back')
 
     minutes_trend = str(ctx.get('minutes_trend', 'stable') or 'stable')
     if minutes_trend == 'decreasing':
-        _append_unique_flag(flags, 'minutes_down')
+        flags.append('minutes_down')
     elif minutes_trend == 'increasing':
-        _append_unique_flag(flags, 'minutes_up')
-
+        flags.append('minutes_up')
     if bool(ctx.get('injury_returning', False)):
-        _append_unique_flag(flags, 'injury_returning')
+        flags.append('injury_returning')
+    return flags
 
-    projected_edge = float(ctx.get('projected_edge', 0.0) or 0.0)
-    abs_edge = abs(projected_edge)
-    if abs_edge >= 0.10:
-        _append_unique_flag(flags, 'high_edge')
-    elif abs_edge >= 0.05:
-        _append_unique_flag(flags, 'medium_edge')
+
+def _edge_confidence_flags(ctx: dict) -> list[str]:
+    flags = []
+    absolute_edge = abs(float(ctx.get('projected_edge', 0.0) or 0.0))
+    if absolute_edge >= 0.10:
+        flags.append('high_edge')
+    elif absolute_edge >= 0.05:
+        flags.append('medium_edge')
 
     confidence_tier = str(ctx.get('confidence_tier', '') or '')
     if confidence_tier in {'strong', 'moderate', 'slight'}:
-        _append_unique_flag(flags, f'{confidence_tier}_confidence')
+        flags.append(f'{confidence_tier}_confidence')
 
     hit_rate = float(ctx.get('player_hit_rate_vs_line', 0.5) or 0.5)
     if hit_rate >= 0.65:
-        _append_unique_flag(flags, 'high_hit_rate')
+        flags.append('high_hit_rate')
     elif hit_rate <= 0.35:
-        _append_unique_flag(flags, 'low_hit_rate')
+        flags.append('low_hit_rate')
+    return flags
 
-    line_vs_season_avg = float(ctx.get('line_vs_season_avg', 0.0) or 0.0)
-    if line_vs_season_avg <= -2.0:
-        _append_unique_flag(flags, 'line_discount')
-    elif line_vs_season_avg >= 2.0:
-        _append_unique_flag(flags, 'line_premium')
 
-    player_variance = float(ctx.get('player_variance', 0.0) or 0.0)
-    if player_variance >= 8.0:
-        _append_unique_flag(flags, 'high_variance')
-    elif 0 < player_variance <= 3.0:
-        _append_unique_flag(flags, 'low_variance')
+def _line_variance_rest_flags(ctx: dict) -> list[str]:
+    flags = []
+    line_delta = float(ctx.get('line_vs_season_avg', 0.0) or 0.0)
+    if line_delta <= -2.0:
+        flags.append('line_discount')
+    elif line_delta >= 2.0:
+        flags.append('line_premium')
 
-    days_rest = float(ctx.get('days_rest', 0.0) or 0.0)
-    if days_rest >= 3:
-        _append_unique_flag(flags, 'extra_rest')
+    variance = float(ctx.get('player_variance', 0.0) or 0.0)
+    if variance >= 8.0:
+        flags.append('high_variance')
+    elif 0 < variance <= 3.0:
+        flags.append('low_variance')
+    if float(ctx.get('days_rest', 0.0) or 0.0) >= 3:
+        flags.append('extra_rest')
+    return flags
+
+
+def derive_context_flags_from_snapshot(ctx: dict) -> list[str]:
+    """Derive stable context flags from a PickContext-like payload."""
+    flags: list[str] = []
+    for derived_flags in (
+        _matchup_context_flags(ctx),
+        _player_state_flags(ctx),
+        _edge_confidence_flags(ctx),
+        _line_variance_rest_flags(ctx),
+    ):
+        for flag in derived_flags:
+            _append_unique_flag(flags, flag)
 
     if not flags:
         flags.append('neutral_context')
