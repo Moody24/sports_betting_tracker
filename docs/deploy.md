@@ -18,7 +18,11 @@ Set these in Railway service variables:
 - `SECRET_KEY`: Required for Flask app startup and CLI commands.
 - `DATABASE_URL`: Neon Postgres connection string.
 - `FLASK_ENV`: Usually `production`.
-- `AUTO_DB_UPGRADE`: Optional. Keep `false` unless you intentionally want boot-time migrations.
+- `AUTO_DB_UPGRADE=false`: Required for hosted services. `railway.toml` runs the
+  migration chain once as a blocking pre-deploy command.
+- `WEB_CONCURRENCY=1`: Safe baseline while using `RATELIMIT_STORAGE_URI=memory://`.
+- `RATELIMIT_ENABLED=true`: Production startup rejects a disabled limiter.
+- `SCHEDULER_ENABLED=false`: Required on the web service.
 
 Optional model-storage variables (only if using S3 model artifacts):
 
@@ -45,13 +49,13 @@ Neon URL notes:
 3. Push branch and wait for CI to finish.
 4. Deploy to Railway only after CI is green (required gate).
 5. Deploy to Railway staging environment first.
-6. Run migrations on staging:
+6. Confirm Railway's pre-deploy migration completed successfully:
    ```bash
    flask --app run.py db upgrade heads
    ```
 7. Smoke test key pages (`/`, `/bets`, `/bets/nba_today`, auth flow).
 8. Promote to production.
-9. Run migrations on production (if not using controlled boot-time upgrade).
+9. Confirm the production pre-deploy migration completed before traffic shifts.
 
 ## Testing Safety Rules
 

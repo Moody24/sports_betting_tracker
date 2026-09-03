@@ -459,7 +459,20 @@ only with their JavaScript consumers and tests in the same change.
     Secure, HttpOnly, and SameSite=Lax. Logout clears the current and legacy
     user-specific browser-storage keys listed in the persistence inventory.
 
-### 4.3 Time contract
+### 4.3 Hosted process topology
+
+- The web service runs one Gunicorn worker by default with
+  `SCHEDULER_ENABLED=false`. This makes the process-local limiter and advisory
+  caches internally consistent for the launch baseline.
+- A web worker count above one requires a non-`memory://` shared limiter store;
+  production startup fails closed when that contract is violated.
+- Alembic runs as Railway's blocking pre-deploy command, never in each web
+  container entrypoint. `AUTO_DB_UPGRADE` remains a local/manual escape hatch.
+- Scheduler activation belongs to exactly one separately configured process.
+  Provisioning and cross-container singleton proof remain deployment gates while
+  hosting is inactive.
+
+### 4.4 Time contract
 
 - Use `ZoneInfo("America/New_York")` for slate dates, event-relative capture,
   scheduler windows, freshness, and snapshot date selection.

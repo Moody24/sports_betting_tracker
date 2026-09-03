@@ -67,6 +67,7 @@ class TestSecurity(BaseTestCase):
         self.assertEqual(app.config['PERMANENT_SESSION_LIFETIME'], timedelta(minutes=30))
         self.assertEqual(app.config['SESSION_ABSOLUTE_LIFETIME'], timedelta(hours=12))
         self.assertEqual(app.config['SESSION_PROTECTION'], 'strong')
+        self.assertFalse(app.config['RATELIMIT_IN_MEMORY_FALLBACK_ENABLED'])
 
     def test_production_login_sets_hardened_session_and_remember_cookies(self):
         with patch.dict(

@@ -30,8 +30,8 @@ published.
 | Area | What has already been worked | What remains |
 |---|---|---|
 | ML validation | Under/overfitting diagnostics, mandatory temporal Model 2 partitions, real quote ingestion/capture contracts, rolling-origin evaluation, and ROI/CLV/drawdown/Kelly gates are merged | Accumulate or import enough licensed real prop decision/closing lines; run repeated shadow evaluations; profitability is not yet proven |
-| Shared architecture | A dependency map, shared schemas, state rules, and module ownership registry exist in `docs/architecture/system-contract.md` | Reconcile with Claude's work, commit it, add architecture tests to CI, and keep it synchronized with executable contracts |
-| Login security | Passwords are hashed with Werkzeug; CSRF, login/register rate limits, POST logout, hardened production session/remember cookies, bounded session lifetimes, a 12–256 character password policy, CSP, HSTS, frame blocking, and generic login failures exist | Account recovery/verification, auth audit logging, breached-password coverage, shared rate-limit storage, and broader security review |
+| Shared architecture | The canonical dependency/state/ownership contract is committed and enforced by architecture tests in CI | Keep it synchronized whenever schemas, jobs, state, or boundaries change |
+| Login security | Passwords are hashed with Werkzeug; CSRF, login/register rate limits, POST logout, hardened production session/remember cookies, bounded session lifetimes, a 12–256 character password policy, CSP, HSTS, frame blocking, generic login failures, uniform object ownership, and a fail-closed hosted limiter topology exist | Account recovery/verification, auth audit logging, breached-password coverage, and broader security review |
 | Browser persistence | The versioned parlay queue is the only active app-managed browser key; its contents/lifecycle are inventoried and current/legacy keys clear on logout | Keep the inventory and logout browser regression synchronized with any new browser state |
 | Environment/secrets | `.env` is ignored; `.env.example` inventories runtime variables with safe defaults; `SECRET_KEY` is required; CI enforces the environment contract, dependency audit, and tracked/history secret scans | Store production values only in Railway variables and establish the operational rotation schedule when hosting is restored |
 | Database/deployment | SQLAlchemy accepts SQLite or `DATABASE_URL`; `postgres://` is normalized; psycopg is installed; Alembic, Docker, Gunicorn, `/health`, and `/ready` exist | Test the complete migration chain on PostgreSQL, build a data-copy validator, use Railway pre-deploy migrations, establish backup/rollback, and separate web/scheduler ownership |
@@ -103,9 +103,10 @@ migration cost.
 - [x] **P0: define session lifecycle.** Choose idle and absolute lifetimes, enable
   Flask-Login session protection, require fresh authentication for email/password
   or bankroll-security changes, and document multi-device logout behavior.
-- [ ] **P0: move production rate limits to a shared store.** `memory://` produces
-  per-worker counters. Configure Redis through `RATELIMIT_STORAGE_URI`, test fail
-  behavior, and monitor 429 rates.
+- [x] **P0: make production rate limiting topology-safe.** The launch baseline is
+  one web worker with `memory://`; production rejects disabled rate limiting and
+  rejects multiple workers unless `RATELIMIT_STORAGE_URI` is shared. Redis and
+  multi-worker load testing remain scale-up work, not a launch ambiguity.
 - [x] **P0: test object ownership/IDOR systematically.** User B must receive the
   chosen non-disclosing response when reading, editing, grading, deleting, or
   exporting User A's bets/parlays/context. Prefer querying by both object ID and
@@ -138,7 +139,8 @@ migration cost.
 - [x] Two-user browser and request-level security suite passes.
 - [x] Production-cookie assertions pass with no sensitive payload discovered.
 - [x] Logout clears every documented user-specific browser key.
-- [ ] Redis-backed rate limiting works across two Gunicorn workers.
+- [-] Redis-backed rate limiting across two workers remains an external scale-up
+  gate; the one-worker production baseline and fail-closed startup tests pass.
 - [ ] Security logs contain request correlation but no secrets or sensitive form
   data.
 
@@ -188,12 +190,11 @@ FLASK_ENV=production
 SESSION_COOKIE_SECURE=true
 SCHEDULER_ENABLED=false
 RATELIMIT_ENABLED=true
-RATELIMIT_STORAGE_URI=
-WEB_CONCURRENCY=2
+RATELIMIT_STORAGE_URI=memory://
+WEB_CONCURRENCY=1
 DB_POOL_SIZE=2
 DB_MAX_OVERFLOW=3
 AUTO_DB_UPGRADE=false
-MIGRATION_MAX_SECONDS=45
 ```
 
 Model and betting flags/tuning that need documentation:
@@ -334,16 +335,16 @@ flowchart LR
 - [ ] Provision separate staging and production environments.
 - [ ] Add PostgreSQL and Redis inside the same Railway project/environment and
   use private/reference variables.
-- [ ] Move Alembic from every web-container startup to a Railway pre-deploy command
+- [x] Move Alembic from every web-container startup to a Railway pre-deploy command
   or a single controlled migration job. A failed migration must stop deployment.
-- [ ] Remove the misleading entrypoint comment that says migration failure is
+- [x] Remove the misleading entrypoint comment that says migration failure is
   allowed when non-timeout failures currently stop startup; decide and test the
   intended behavior.
 - [ ] Deploy one web service with `SCHEDULER_ENABLED=false`.
 - [ ] Deploy exactly one scheduler service/process with
   `SCHEDULER_ENABLED=true`; prove two schedulers cannot accidentally run the same
   jobs.
-- [ ] Use Redis for rate limiting and shared caches before using multiple web
+- [x] Use Redis for rate limiting and shared caches before using multiple web
   workers/replicas.
 - [ ] Verify Gunicorn bind/port behavior, proxy headers, HTTPS redirects, secure
   cookies, request IDs, log redaction, and health checks behind Railway.

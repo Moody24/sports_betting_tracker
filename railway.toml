@@ -3,6 +3,8 @@ builder = "dockerfile"
 dockerfilePath = "Dockerfile"
 
 [deploy]
+preDeployCommand = "python -m flask --app run db upgrade heads"
+preDeployTimeoutSeconds = 300
 healthcheckPath = "/ready"
 healthcheckTimeout = 120
 restartPolicyType = "on_failure"

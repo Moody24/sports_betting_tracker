@@ -136,6 +136,7 @@ def _configure_app(app: Flask, testing: bool) -> None:
             os.getenv('RATELIMIT_ENABLED', 'true').lower() == 'true'
         ),
         RATELIMIT_STORAGE_URI=os.getenv('RATELIMIT_STORAGE_URI', 'memory://'),
+        RATELIMIT_IN_MEMORY_FALLBACK_ENABLED=False,
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE='Lax',
         SESSION_PROTECTION='strong',
@@ -150,6 +151,8 @@ def _configure_app(app: Flask, testing: bool) -> None:
         bool(os.getenv('RAILWAY_ENVIRONMENT'))
         or os.getenv('FLASK_ENV') == 'production'
     )
+    app.config['DEPLOYMENT_IS_PRODUCTION'] = is_production
+    app.config['WEB_CONCURRENCY'] = _positive_int_env('WEB_CONCURRENCY', 1)
     secure_default = 'true' if is_production else 'false'
     app.config['SESSION_COOKIE_SECURE'] = (
         os.getenv('SESSION_COOKIE_SECURE', secure_default).lower() == 'true'
@@ -170,15 +173,25 @@ def _initialize_extensions(app: Flask) -> None:
     limiter.init_app(app)
 
 
-def _warn_unshared_rate_limit(app: Flask) -> None:
-    web_concurrency = int(os.environ.get('WEB_CONCURRENCY', 1))
+def _validate_rate_limit_topology(app: Flask) -> None:
+    """Fail closed when a hosted topology would weaken authentication limits."""
+    if app.config.get('TESTING'):
+        return
+    web_concurrency = app.config.get('WEB_CONCURRENCY', 1)
     storage_uri = app.config.get('RATELIMIT_STORAGE_URI', 'memory://')
+    rate_limiting_enabled = app.config.get('RATELIMIT_ENABLED', True)
+    is_production = app.config.get('DEPLOYMENT_IS_PRODUCTION', False)
+
+    if is_production and not rate_limiting_enabled:
+        raise RuntimeError('RATELIMIT_ENABLED must be true in production.')
     if web_concurrency > 1 and storage_uri.startswith('memory://'):
-        app.logger.warning(
-            "RATELIMIT_STORAGE_URI is 'memory://' with WEB_CONCURRENCY=%d — "
-            'rate limits are per-worker and NOT shared across processes.',
-            web_concurrency,
+        message = (
+            "RATELIMIT_STORAGE_URI is 'memory://' with WEB_CONCURRENCY="
+            f'{web_concurrency}; use one web worker or a shared limiter store.'
         )
+        if is_production:
+            raise RuntimeError(message)
+        app.logger.warning(message)
 
 
 def _register_login_loader() -> None:
@@ -310,8 +323,8 @@ def _run_startup_tasks(app: Flask) -> None:
 def create_app(testing=False):
     app = Flask(__name__)
     _configure_app(app, testing)
+    _validate_rate_limit_topology(app)
     _initialize_extensions(app)
-    _warn_unshared_rate_limit(app)
     _register_login_loader()
     _register_template_context(app)
     _register_security_hooks(app)

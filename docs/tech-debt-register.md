@@ -36,6 +36,8 @@ and architecture-contract tests are the reproducible measures for this repo.
 - Split development-only coverage tooling from production dependencies.
 - Eliminated all 35 known runtime dependency findings and made dependency,
   environment, and credential scans blocking local/CI gates.
+- Established a one-worker hosted baseline, fail-closed production limiter
+  topology, and blocking Railway pre-deploy migrations.
 - Consolidated two conflicting inactive Railway runbooks.
 - Blocked accidental external HTTP in the shared test fixture.
 - Moved stale virtualenvs and generated test/browser artifacts to Trash,
@@ -45,7 +47,6 @@ and architecture-contract tests are the reproducible measures for this repo.
 
 | Priority | Item | Evidence and exit condition |
 |---|---|---|
-| P1 before hosted deployment | Process-local rate limiting and caches with a default of two Gunicorn workers | `app/__init__.py` warns when `memory://` is combined with `WEB_CONCURRENCY > 1`. Configure shared Redis storage, or deploy one web worker and document the capacity tradeoff. |
 | P1 | Remaining high-complexity workflows | 46 C901 findings remain. Start with `market_recommender.walkforward_market_report` (23), `nba_analysis.nba_all_props` (22), `stats_commands.cli_backfill_player_logs` (22), then the three NBA ingestion/fetch functions at 20. Preserve behavior with focused tests per extraction. |
 | P2 | Oversized service test module | `tests/test_services.py` is 7,613 lines across 55 test classes. Split by service only in a dedicated mechanical commit; do not mix that move with production changes. |
 | P2 | Historical local model artifacts | `app/ml_models/` contains 190 ignored artifacts (about 76 MB). Active database metadata still references July artifacts, so retain them until `flask retrain --force` succeeds and the active paths are re-audited. |
@@ -53,8 +54,7 @@ and architecture-contract tests are the reproducible measures for this repo.
 
 ## Next cleanup order
 
-1. Decide the hosted-process model and shared rate-limit/cache backend.
-2. Refactor the six highest remaining C901 workflows with parity tests.
-3. Split `tests/test_services.py` mechanically by domain.
-4. Retrain models, verify active artifact paths, then prune unreferenced files.
-5. Re-run the canonical guardrail and update this register's dated baseline.
+1. Refactor the six highest remaining C901 workflows with parity tests.
+2. Split `tests/test_services.py` mechanically by domain.
+3. Retrain models, verify active artifact paths, then prune unreferenced files.
+4. Re-run the canonical guardrail and update this register's dated baseline.

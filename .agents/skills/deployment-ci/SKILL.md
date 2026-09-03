@@ -18,6 +18,9 @@ Railway deployment is disconnected. Config files remain in repo for restoration:
 - Former live URL: `https://sportsbettingtracker-production.up.railway.app`
 - Former Railway project: `shimmering-youth` · Service: `sports_betting_tracker`
 - Surviving inactive runbook: `docs/deploy.md`
+- Safe web baseline: one Gunicorn worker with `SCHEDULER_ENABLED=false` and
+  `RATELIMIT_ENABLED=true`. Multiple workers require a shared limiter URI and
+  otherwise fail application startup in production.
 
 ## Model Storage in Production
 - `MODEL_STORAGE=s3` was used when deployed (AWS now disconnected)

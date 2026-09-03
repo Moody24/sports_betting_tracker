@@ -4,9 +4,9 @@ import os
 # Network — Railway sets PORT dynamically; fall back to 8000 for local Docker
 bind = f"0.0.0.0:{os.getenv('PORT', '8000')}"
 
-# Workers: keep low on Railway's hobby tier (512MB RAM)
-# Each sync worker uses ~50-80MB; 2 workers is safe and leaves headroom
-workers = int(os.getenv('WEB_CONCURRENCY', 2))
+# One worker is the safe baseline while the limiter uses memory://. Multiple
+# workers require a shared RATELIMIT_STORAGE_URI and an explicit capacity review.
+workers = int(os.getenv('WEB_CONCURRENCY', 1))
 worker_class = "sync"
 
 # Timeouts

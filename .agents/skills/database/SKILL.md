@@ -5,7 +5,8 @@ description: "INVOKE when working on SQLAlchemy models, database migrations, DB 
 
 ## Database Config
 
-**Local dev:** SQLite — `DATABASE_URL=sqlite:///instance/app.db`
+**Local dev:** SQLite — `DATABASE_URL=sqlite:///app.db` (resolved by Flask to
+`instance/app.db`)
 **Production:** PostgreSQL via `DATABASE_URL` in `.env` (Neon was used; currently disconnected)
 
 - Migrations: `flask --app run.py db upgrade heads`
