@@ -1,6 +1,6 @@
 # Deployment Runbook (Railway + Neon) — INACTIVE
 
-> ⚠️ **This runbook documents the former Railway + Neon deployment stack, which is currently disconnected.**
+> **This runbook documents the former Railway + Neon deployment stack, which is currently disconnected.**
 > For local development, see [`README.md`](../README.md). The canonical architecture
 > contract is [`docs/architecture/system-contract.md`](architecture/system-contract.md).
 
@@ -28,13 +28,8 @@ transaction, and validates per-table counts, foreign keys, wager totals, bets by
 user/outcome, historical-log groups, and available quote groups. Re-run with
 `--validate-only` after the cutover smoke test. Reports contain counts and derived
 metrics, never connection URLs.
-> This file is preserved as a reference for when external deployment is restored.
 
----
-
-# Deployment Runbook (Railway + Neon)
-
-This runbook is for deploying the app on Railway with Neon Postgres.
+The remaining sections are preserved for when external deployment is restored.
 
 ## Environment Variables
 

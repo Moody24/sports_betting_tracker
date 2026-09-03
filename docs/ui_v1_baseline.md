@@ -1,152 +1,131 @@
-# UI V1 Baseline Checklist
+# Edge Tracker UI Release Baseline
 
-This document is the visual QA baseline for the current Sportsbook UI pass.
-Use it before every release to keep cohesion and interaction quality stable.
+Last verified: 2026-09-03
 
-> **Migration status (2026-08-10).** The Sheet migration replaces the card-based
-> vocabulary this checklist is written in. Sections below still describing
-> "KPI cards", "chart cards", "matchup cards", or "strong-play cards" describe
-> the **pre-migration** UI and are superseded page by page as each phase lands.
->
-> Updating the affected section is an **exit criterion of every phase** — see
-> `docs/superpowers/sheet-migration-ledger.md`. Do not audit a migrated page
-> against a section still marked pre-migration; that would fail a page for
-> correctly removing what the migration set out to remove.
->
-> Legend: **[MIGRATED]** current · **[PRE-MIGRATION]** superseded when its phase lands.
+This is the current visual and interaction contract for the completed Sheet UI.
+The previous card-based baseline is retired. Automated enforcement lives in the
+template contract tests and the Playwright accessibility, responsive, functional,
+and visual suites.
 
-## Global Gates (must pass first)
+## Global release gates
 
-1. Inline `style` attributes in templates may set **CSS custom properties only**
-   (e.g. `style="--pace: 62%"`); every real declaration lives in `theme.css`.
-   Server-computed numbers — a pace bar, a distribution's interquartile range —
-   cannot be classed without quantising them into hundreds of buckets, so this
-   is the one sanctioned use. Enforced by `tests/test_template_inline_styles.py`,
-   which replaces the old honour-system grep.
-2. Primary actions use consistent hierarchy (`btn-primary` for primary, toolbar secondary classes for non-primary).
-3. Keyboard focus ring is visible on interactive controls.
-4. Mobile layout remains usable at <= 575px width.
-5. Reduced-motion users are respected via `prefers-reduced-motion`.
+1. Templates may use inline `style` only for server-computed CSS custom
+   properties. `tests/test_template_inline_styles.py` enforces the rule.
+2. Structural surfaces use the shared Sheet vocabulary: sheet head, control
+   bar, column band, ruled rows, slip, states, notices, tags, and actions.
+3. Primary actions use `.act.act-primary`; secondary actions use `.act`.
+4. Focus is visible, semantic labels remain present, and keyboard operation does
+   not depend on hover.
+5. Core, public, authentication, and error pages do not overflow at the supported
+   compact widths. Reduced-motion preferences are respected.
+6. Private pages emit `noindex, nofollow`. Only the deliberate public surface
+   receives canonical metadata and structured data.
+7. Visual baselines are regenerated only for an intentional, reviewed UI change.
 
 Quick checks:
 
 ```bash
-SECRET_KEY=test python -m unittest tests.test_template_inline_styles
+SECRET_KEY=test .venv/bin/python -m unittest \
+  tests.test_template_inline_styles \
+  tests.test_ui_class_audit \
+  tests.test_ui_framework_contract
+PATH=/path/to/node/bin:$PATH npx playwright test
 ```
 
-Expected result: OK. To eyeball what is currently set inline:
-
-```bash
-rg -n 'style="' app/templates
-```
-
-Every match must be custom properties only.
-
-## Page Checklist
+## Surface contracts
 
 ### Dashboard
 
-1. KPI cards read clearly with consistent label/value hierarchy.
-2. Chart cards have stable title/action spacing.
-3. Donut legend dots and values are aligned and readable.
-4. "Top Plays" and "Best Play Of The Day" action rows are consistent.
-5. Recent bets table remains readable on mobile (no clipped labels).
+- The summary is a single ledger band with one lead figure, not a row of cards.
+- Model Recommendations, bankroll, performance, and recent positions have one
+  clear hierarchy and preserve honest empty states.
+- Tables and figures remain readable without horizontal document overflow.
 
-### Bet Builder
+### My Bets — the Position Log
 
-1. Mode tabs are clearly distinguishable and keyboard reachable.
-2. Section labels ("Game", "Market", "Wager", "Advanced") are consistent across tabs.
-3. Primary CTA ("Record Bet/Prop/Submit") remains visually dominant.
-4. Parlay split layout collapses cleanly on mobile.
-5. OCR section spacing and parsed-fields panel remain coherent.
+- Pending, live, won, lost, and push states use the shared tag vocabulary.
+- Live rows expose status, score, stat progress, pace, trend, and freshness.
+- Parlays group related legs and retain keyboard-operable disclosures/actions.
+- CLV is absent when no closing price was captured; absence is never rendered as
+  zero.
 
-### Prop Analysis — **[MIGRATED, Phase 2]**
+### Prop Analysis — the Board
 
-1. The Board leads every row with natural-frequency model probability and the
-   exact percentage; price, fair price, edge, projection, and line remain
-   aligned secondary figures on desktop and readable metadata on mobile.
-2. Every populated row carries a `.pp` recent-form strip: oldest to newest,
-   result position above/below today's line, and win/loss colour relative to
-   the recommended side. Compact widths drop only the oldest cells.
-3. Summary figures use one ledger-style slip. Strong-play cards are gone; a
-   recommendation appears exactly once in the probability-first board.
-4. Stat, minimum-edge, and confidence filters; Refresh; Bet; Parlay; and the
-   parlay count remain keyboard reachable. Bet/Parlay stay visible below 48rem
-   regardless of pointer type.
-5. Loading, error, no-data, and filtered-zero states preserve the board's
-   footprint and use the shared state vocabulary.
-6. The player-detail modal is the separate overlay elevation layer. Projection
-   facts use the slip grid; context uses one ruled disclosure block; recent
-   games use the dense band/row variant with compact numeric metadata.
-7. Rendered gates cover 1440, 412, and 320 with no document overflow and no
-   serious/critical Axe findings. Empty-page and modal Playwright baselines are
-   checked in; a deterministic populated render verifies both over and under
-   recent-form semantics.
-
-### Stat Analysis
-
-1. KPI row, filter toolbar, and refresh controls are cohesive.
-2. Matchup cards maintain clear away/home separation.
-3. Side panel "Case" values remain readable and tone-coded.
-4. Stat toggle, charts, and game-log sections maintain hierarchy.
-5. Panel open/close and backdrop behavior are keyboard-safe and predictable.
+- Model probability is the lead figure; market price, fair price, edge,
+  projection, and line remain aligned secondary facts.
+- Populated rows include the `.pp` recent-form display with truthful direction
+  and result semantics.
+- Loading, provider failure, no-data, and filtered-zero states are distinct.
+- The player modal remains an overlay layer and keeps dense facts accessible.
 
 ### NBA Today
 
-1. Top toolbar uses consistent action hierarchy.
-2. Active/completed/upcoming card styles remain from one visual system.
-3. Live badges, score blocks, and quick actions align consistently.
-4. Loading skeleton and error states are clear and non-jarring.
-5. Mobile action stack remains tap-friendly.
+- Current ET slate, score state, market context, and data freshness are explicit.
+- Upcoming, live, completed, provider-error, and no-game states share the Sheet
+  grammar without fabricating data.
+- Actions remain reachable on pointer, keyboard, and compact layouts.
 
-### My Bets
+### Stat Analysis
 
-1. Pending alert bar has consistent emphasis and spacing.
-2. KPI strip coloring and typography remain token-driven.
-3. Bet rows maintain clear separation between details and meta.
-4. Live tracker card typography/progress remains readable.
-5. Parlay expand/collapse icon and leg state remain intuitive.
+- Filters, refresh, matchup results, conditional context, charts, and game logs
+  follow one information hierarchy.
+- The detail panel and backdrop have predictable open, close, focus, and Escape
+  behavior.
+- Numeric facts use the monospaced figure treatment and preserve their labels at
+  compact widths.
 
-### Auth + Shared Shell — **[MIGRATED, Phase 0]**
+### Bet Builder
 
-The sidebar was removed in Phase 0 and replaced by a horizontal masthead;
-`tests/e2e/responsive.spec.ts` now asserts the same nav component at every
-width, with no drawer, toggle, or overlay. The previous item 1 required
-"sidebar, topbar, and user menu typography are consistent" and is void.
+- Game, market, wager, prop, parlay, round-robin, and import workflows use one
+  builder rather than duplicated legacy implementations.
+- Mode controls are keyboard reachable and the recorded-position action remains
+  visually dominant.
+- The slip stays in document flow, collapses cleanly, and never duplicates its
+  summary.
 
-1. Masthead is byte-identical on every page: nameplate, rule, section row.
-2. The active section is marked by **weight and contrast only** — no pill, no
-   fill, no edge rail — and carries `aria-current="page"`.
-3. Nav is reachable at every width down to 320px with no horizontal overflow.
-   (Seven links at 320px currently fit but are not *designed*; see the ledger.)
-4. The flow strip appears on exactly the four workflow pages, rendered as a
-   ruled jump line — not tiles, not a tab bar.
-5. Colophon and secondary text are readable but de-emphasised.
-6. All dropdown/toolbar actions have sufficient tap-target size.
-7. Auth brand subtitle spacing is consistent on login/register.
-8. Home hero headline/subtitle hierarchy remains strong.
+### Authentication
 
-## Sign-off Record (per release)
+- Login and registration use the same auth sheet, field, validation, and action
+  vocabulary.
+- Every server-side field error is associated by `aria-describedby`; invalid
+  controls expose `aria-invalid`.
+- Password guidance and private-ledger positioning are accurate.
 
-Use this template for each release:
+### Public trust surface
 
-```text
-Release:
-Reviewer:
-Date:
+- Home, methodology, responsible gambling, privacy, terms, data sources, and
+  about pages are deliberately public and linked through accessible breadcrumbs.
+- Copy does not claim proven profitability, professional advice, fabricated
+  accuracy, or fabricated usage.
+- Legal pages are product copy pending jurisdiction-specific legal review before
+  a hosted public launch.
 
-Global Gates: PASS / FAIL
-Dashboard: PASS / FAIL
-Bet Builder: PASS / FAIL
-Prop Analysis: PASS / FAIL
-Stat Analysis: PASS / FAIL
-NBA Today: PASS / FAIL
-My Bets: PASS / FAIL
-Auth + Shared Shell: PASS / FAIL
+### HTTP errors
 
-Open Issues:
-- ...
+- 400, 401, 403, 404, 405, 429, 500, 502, 503, and 505 share one safe Sheet view.
+- Public details never echo exception/provider payloads. Every response displays
+  and returns the same request reference.
+- JSON clients receive `ApiErrorV1`; browser clients receive accessible HTML.
+- Recovery actions reflect authentication state and work at 320px.
 
-Decision:
-- Ship / Hold
-```
+### Shared shell
+
+- One masthead and primary navigation serve every viewport.
+- Current navigation is marked by text weight/contrast and `aria-current`, never
+  color alone.
+- Workflow navigation appears only on workflow pages.
+- Toasts and modals are overlay layers; the document-flow elevation budget is
+  reserved for the slip.
+
+## Release sign-off
+
+The release gate is PASS only when all of the following are green:
+
+- template/style/icon/framework contract tests;
+- Playwright functional and logout-isolation tests;
+- Playwright serious/critical Axe audit;
+- Playwright responsive overflow checks at desktop, 412px, and 320px;
+- reviewed desktop/mobile visual snapshots.
+
+Record failures as test output or a tracked debt item with an owner and exit
+condition; do not keep a second unchecked copy of the same backlog here.

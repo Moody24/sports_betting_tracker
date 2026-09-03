@@ -172,7 +172,8 @@ Note: `pool_size` and `max_overflow` env vars only take effect for PostgreSQL co
 |-------------|---------------|
 | `app/models.py` | All steps (source of truth for schema) |
 | `migrations/versions/` | Migration steps |
-| `docker-entrypoint.sh` | Deploy-time migration invocation (when deploying) |
+| `railway.toml` | Blocking hosted pre-deploy migration invocation |
+| `docker-entrypoint.sh` | Gunicorn process entrypoint; does not run migrations |
 
 ---
 

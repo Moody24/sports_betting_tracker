@@ -59,10 +59,10 @@ are not disjoint and the parallel-dispatch precondition is not met.
 | 0.5 | Ownership, contracts, shared-layer debt | **Complete** (`cd91bdd`) | Checklist below, all items closed. |
 | 1 | **My Bets → the Position Log** | **Complete** | Grammar shipped end to end; pace axis is its signature display. Five contract amendments, below. |
 | 2 | **Prop Analysis → the Board** | **Complete** | Probability-first rows, `.pp` recent form, fair price, dense modal ledger. |
-| 3 | NBA Today + Dashboard | Not started | **Serial.** Dashboard's KPI row becomes the ledger band. |
-| 4 | Stat Analysis + Bet Builder | Not started | **Serial.** Need new thinking, not new paint. |
-| 4.5 | Auth, errors, import | Not started | Added — half the template surface the original plan did not see. |
-| 5 | Public surface + SEO | Not started | Metadata, breadcrumb contract, robots.txt, sitemap.xml, legal pages. |
+| 3 | NBA Today + Dashboard | **Complete** | Dashboard KPI cards became one ledger band; the slate uses ruled game rows and explicit freshness/states. |
+| 4 | Stat Analysis + Bet Builder | **Complete** | Both surfaces now compose the shared grammar; duplicate builder summary and dead implementation were removed. |
+| 4.5 | Auth, errors, import | **Complete** | Auth, import workflow, and the negotiated shared error surface use the Sheet vocabulary. |
+| 5 | Public surface + SEO | **Complete** | Home is deliberately public; trust pages, metadata, breadcrumbs, crawler files, and structured data are implemented. |
 
 ### Why Phase 1 and 2 swapped
 
@@ -211,6 +211,18 @@ four raised surfaces on the page the rule was being invented on. Corrected:
 - 2026-09-03 · Phase 2 · Prop Analysis / the Board · **SHIP** · probability-first
   rows and the last-seven strip survived four shipped-page passes; 1440/412/320
   report no overflow and no serious/critical Axe findings.
+- 2026-09-03 · Phase 1 · My Bets / the Position Log · **SHIP** · grouped positions,
+  disclosures, status tags, and the live pace display pass the functional,
+  accessibility, responsive, and visual suites.
+- 2026-09-03 · Phase 3 · NBA Today + Dashboard · **SHIP** · the slate and ledger
+  summary preserve truthful empty/provider states and compact-width readability.
+- 2026-09-03 · Phase 4 · Stat Analysis + Bet Builder · **SHIP** · dense analysis
+  and the unified slip retain their workflows without card or summary duplication.
+- 2026-09-03 · Phase 4.5 · Auth + errors + import · **SHIP** · shared fields,
+  validation, recovery states, and import actions pass keyboard and browser gates.
+- 2026-09-03 · Phase 5 · Public surface + SEO · **SHIP** · the deliberate public
+  pages have truthful copy, canonical metadata, accessible breadcrumbs, crawler
+  contracts, and no leakage of private routes.
 
 ## Open decisions owned by the user
 
@@ -219,10 +231,11 @@ four raised surfaces on the page the rule was being invented on. Corrected:
   CLV is dark on every row. Options: a scheduled snapshot near tip-off (the
   scheduler already has an event-relative prop-close capture pattern to copy),
   or manual entry on the bet form.
-- Whether Home becomes a real public landing page while the app is local-only.
-  If it stays private, Phase 5 shrinks to the `noindex` work alone.
-- Whether the tier scales (`value` / `slight` / `avoid`) keep amber for the top
-  tier or move to win-green. Decided per page, deliberately not globally.
+- **Resolved:** Home is the deliberate public landing page. The methodology,
+  responsible-gambling, privacy, terms, data-source, and about pages form its
+  trust surface; authenticated product routes remain `noindex, nofollow`.
+- **Resolved:** tier color remains a page-level semantic decision rather than a
+  global scale. This avoids turning every favorable metric into a win claim.
 
 ## Known debt and cleanup status
 
@@ -236,11 +249,10 @@ four raised surfaces on the page the rule was being invented on. Corrected:
 - [x] **Display configuration consolidated 2026-09-03.** Deleted the static
   JavaScript mirror and generate browser globals from `app/config_display.py`;
   Jinja display macros consume the same context mappings.
-- **No mobile navigation design.** The sidebar was deleted in Phase 0 and the
-  responsive spec now asserts one nav at every width. That is seven masthead
-  links at 320px. It fits today; it is not designed, and no phase owns it.
-- **No a11y remediation owner.** axe is a gate but the gate-runner is forbidden
-  to fix what it finds.
+- [x] **Compact navigation verified.** The single masthead remains reachable at
+  320px and the responsive suite fails on document overflow.
+- [x] **Accessibility ownership resolved.** Serious and critical Axe findings
+  block the browser gate; the owner of the changed surface owns remediation.
 - `design-mock/index.html` palette is now in sync with `theme.css`, but the two
   use **different token names** (`--paper`/`--ink`/`--rule` vs
   `--bg`/`--text-main`/`--border-subtle`) and different hairline mechanisms

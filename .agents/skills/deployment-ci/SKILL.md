@@ -8,7 +8,7 @@ description: "INVOKE when working on CI/CD, GitHub Actions, Railway deployment, 
 - Python 3.11; runtime and development requirements are installed separately
 - `SECRET_KEY=ci-test-secret-key-not-for-production`
 - Coverage gate: `python -m coverage report --include="app/*" --fail-under=80`
-- Current displayed coverage: 80%
+- Current application coverage: 85%
 - Lint/security job: Ruff, Bandit, detect-secrets on tracked files, a redacted
   high-confidence Git-history scan, and pip-audit for runtime dependencies
 

@@ -45,7 +45,7 @@ Minimum required values for local development:
 
 ```env
 SECRET_KEY=<generate with: python -c "import secrets; print(secrets.token_hex(32))">
-DATABASE_URL=sqlite:///instance/app.db
+DATABASE_URL=sqlite:///app.db
 ODDS_API_KEY=<your key from the-odds-api.com — optional, needed for live lines>
 FLASK_DEBUG=true
 SCHEDULER_ENABLED=false
@@ -74,7 +74,9 @@ App runs at `http://localhost:5000`.
 docker compose up --build
 ```
 
-The container entrypoint runs migrations before starting Gunicorn.
+Run `flask --app run.py db upgrade heads` before starting a new container image.
+Hosted services use the blocking pre-deploy migration command in `railway.toml`;
+web and scheduler processes never race schema changes at startup.
 
 ## Odds API Setup
 
@@ -108,11 +110,13 @@ SECRET_KEY=test python -m coverage run -m unittest discover -s tests -v
 python -m coverage report --include="app/*"
 ```
 
-CI coverage gate: 75% · current application coverage: 85%. Test runner is
+CI coverage gate: 80% · current application coverage: 85%. Test runner is
 **unittest** (not pytest).
 
 Current cleanup status and deliberately retained follow-up work are tracked in
 [`docs/tech-debt-register.md`](docs/tech-debt-register.md).
+The repository/external launch boundary is tracked in
+[`docs/launch-readiness-and-expansion-todo.md`](docs/launch-readiness-and-expansion-todo.md).
 
 ## Linting
 
@@ -134,7 +138,7 @@ app/
 ├── routes/       Flask blueprints (auth, bets, NBA analysis)
 ├── services/     Business logic (NBA, ML, scheduler, odds, postmortems)
 ├── cli/          Flask CLI commands (retrain, health-report, market-recommend)
-├── models.py     SQLAlchemy models (15 tables)
+├── models.py     SQLAlchemy models (16 tables)
 ├── ml_models/    Local model artifact JSON files (gitignored)
 └── templates/    Jinja2 HTML templates
 docs/

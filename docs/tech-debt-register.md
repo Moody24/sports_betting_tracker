@@ -10,7 +10,7 @@ than remaining as an open checklist.
 
 - Canonical guardrail: `scripts/predeploy_guardrails.sh`
 - Test runner: `unittest`
-- Full verification: 1,300 tests passing, 85% application coverage
+- Full verification: 1,323 tests passing, 85% application coverage
 - Static/security gates: Ruff, Bandit, detect-secrets, Git-history credential
   scanning, and pip-audit passing
 - Ruff C901 inventory: 0 functions, down from 59 before this cleanup
@@ -74,6 +74,25 @@ and architecture-contract tests are the reproducible measures for this repo.
 - Blocked accidental external HTTP in the shared test fixture.
 - Moved stale virtualenvs and generated test/browser artifacts to Trash,
   reclaiming about 525 MB.
+- Completed the Sheet UI migration across the dashboard, position log, NBA
+  Today, analysis, stat analysis, bet builder, authentication, public trust,
+  and shared error surfaces. Retired the superseded card/auth/home CSS and
+  regenerated the checked class and visual contracts.
+- Expanded the browser release gate to 58 functional, user-isolation,
+  responsive, accessibility, and visual tests, including public pages, error
+  pages, and 320px layouts.
+- Added one safe HTML/JSON error contract for 400, 401, 403, 404, 405, 429,
+  500, 502, 503, and 505 responses, including rollback coverage for server
+  errors.
+- Added an explicit 41-route security catalog and a guarded, validated
+  SQLite-to-PostgreSQL cutover command. CI now replays migrations on both
+  SQLite and PostgreSQL 16.
+- Reconciled the architecture, deployment, UI, and launch documents with the
+  executable system contract; removed the redundant dated UI sign-off and
+  replaced the speculative roadmap with repository-complete versus external
+  launch gates.
+- Isolated production-cookie tests from ambient local origin configuration so
+  the full suite is reproducible in a developer shell and CI.
 
 ## Accepted follow-up debt
 
