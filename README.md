@@ -110,6 +110,9 @@ python -m coverage report --include="app/*"
 
 CI coverage gate: 75% · roadmap target: 80%. Test runner is **unittest** (not pytest).
 
+Current cleanup status and deliberately retained follow-up work are tracked in
+[`docs/tech-debt-register.md`](docs/tech-debt-register.md).
+
 ## Linting
 
 ```bash
