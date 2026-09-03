@@ -21,6 +21,7 @@ from app.services.projection_engine import ProjectionEngine
 from app.services.stats_service import find_player_id, get_cached_logs, get_player_stats_summary
 from app.routes.nba_live import _build_stat_context
 from app.routes.bet_import import _POSITION_ORDER
+from app.utils.odds import american_from_decimal
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +66,78 @@ def _compute_hit_rates(player_name: str, prop_type: str, line: float, n: int = 2
             .filter(col.isnot(None))
             .order_by(PlayerGameLog.game_date.desc()).limit(n).all())
     return _hit_rates_from_logs(logs, col_name, line)
+
+
+def _analysis_play_view_models(plays: list[dict]) -> list[dict]:
+    """Copy and enrich analysis plays for the probability-first board.
+
+    Recent form is loaded in one query for every visible player. The cached
+    scored-prop mappings remain untouched so a page render cannot leak
+    presentation-only fields into other consumers of the shared cache.
+    """
+    view_models = [dict(play) for play in plays]
+    player_names = {play.get('player') for play in view_models if play.get('player')}
+
+    logs_by_player: dict[str, list[PlayerGameLog]] = defaultdict(list)
+    if player_names:
+        logs = (
+            PlayerGameLog.query
+            .filter(PlayerGameLog.player_name.in_(list(player_names)))
+            .order_by(PlayerGameLog.player_name, PlayerGameLog.game_date.desc())
+            .all()
+        )
+        for log in logs:
+            if len(logs_by_player[log.player_name]) < 7:
+                logs_by_player[log.player_name].append(log)
+
+    for play in view_models:
+        side = (play.get('recommended_side') or 'over').lower()
+        probability_key = 'model_prob_under' if side == 'under' else 'model_prob_over'
+        probability = play.get(probability_key)
+        if probability is None:
+            probability = play.get('win_probability')
+        try:
+            probability = min(max(float(probability), 0.0), 1.0)
+        except (TypeError, ValueError):
+            probability = 0.5
+
+        play['side_probability'] = probability
+        play['natural_frequency'] = int(probability * 10 + 0.5)
+        play['fair_odds'] = (
+            american_from_decimal(1.0 / probability)
+            if 0.0 < probability < 1.0 else None
+        )
+
+        try:
+            line = float(play.get('line'))
+        except (TypeError, ValueError):
+            line = 0.0
+        try:
+            spread = max(abs(float(play.get('std_dev') or 0.0)) * 2.0, 1.0)
+        except (TypeError, ValueError):
+            spread = 1.0
+
+        stat_col = _STAT_COL.get(play.get('prop_type', ''))
+        recent_form = []
+        # Rows were collected newest-first; the strip reads oldest to newest.
+        for log in reversed(logs_by_player.get(play.get('player', ''), [])):
+            value = getattr(log, stat_col, None) if stat_col else None
+            if value is None:
+                continue
+            value = float(value)
+            margin = value - line
+            result = 'push' if margin == 0 else ('over' if margin > 0 else 'under')
+            won = result == side
+            recent_form.append({
+                'date': log.game_date.strftime('%b %d') if log.game_date else '',
+                'value': value,
+                'margin_normalized': round(max(-1.0, min(1.0, margin / spread)), 3),
+                'tone': 'push' if result == 'push' else ('win' if won else 'loss'),
+                'result': result,
+            })
+        play['recent_form'] = recent_form
+
+    return view_models
 
 
 def _resolve_player_team_abbrs(player_names: set[str]) -> dict[str, str]:
@@ -261,7 +334,7 @@ def nba_analysis():
     try:
         all_scores = get_todays_scores()
         eligible_plays = ValueDetector.filter_plays(all_scores, min_edge=0.03)
-        value_plays = eligible_plays[:50]
+        value_plays = _analysis_play_view_models(eligible_plays[:50])
     except Exception as exc:
         logger.error("Analysis engine error: %s", exc)
         eligible_plays = []

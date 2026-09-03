@@ -182,7 +182,7 @@ a{color:inherit;text-decoration:none}
 
 .ghead,.grow{
   display:grid;
-  grid-template-columns:minmax(0,1fr) 70px 60px 74px 68px 66px 62px 20px;
+  grid-template-columns:minmax(12rem,1fr) 78px 196px 60px 74px 66px 20px;
   gap:14px;
   align-items:baseline;
 }
@@ -230,6 +230,28 @@ a{color:inherit;text-decoration:none}
   display:inline-block;text-align:right;
 }
 .grow[aria-expanded="true"] .caret{transform:rotate(90deg)}
+
+/* Past performance is the board's signature datum: seven actual results
+   plotted against today's line. Colour says whether the recommended side
+   would have won; vertical position says over/under, so the read survives
+   greyscale and colour-vision differences. */
+.pp{position:relative;display:flex;width:196px;overflow:hidden}
+.pp::before{
+  content:"";position:absolute;inset-inline:0;top:10px;height:1px;
+  background:var(--rule-2);
+}
+.pp-cell{
+  position:relative;flex:0 0 28px;width:28px;padding-top:20px;
+  font-family:var(--mono);font-size:10.5px;line-height:1.2;
+  text-align:center;color:var(--pp-ink,var(--ink-2));
+  font-variant-numeric:tabular-nums;
+}
+.pp-cell + .pp-cell{border-inline-start:1px solid var(--rule)}
+.pp-cell::after{
+  content:"";position:absolute;left:22%;right:22%;height:2px;
+  top:calc(10px - (var(--o,0) * 8px));
+  transform:translateY(-1px);background:var(--pp-ink,var(--ink-2));
+}
 
 /* ─────────────── the one real surface: the slip ───────────────── */
 .slip{
@@ -396,6 +418,10 @@ abbr[title]{
   /* only the headline number survives; the rest lives in the slip */
   .grow .r{display:none}
   .grow .r[data-keep]{display:block}
+  .grow .pp{
+    display:flex;grid-column:1 / -1;grid-row:2;
+    margin-top:4px;
+  }
 
   .ltop{grid-template-columns:minmax(0,1fr) 74px;gap:8px}
   .ltop .r[data-drop]{display:none}
@@ -459,34 +485,35 @@ abbr[title]{
     <div class="board">
       <div class="ghead">
         <span>Player / Prop</span>
-        <span class="r">Model</span>
+        <span class="r">Model win</span>
+        <span>Recent 7 vs line</span>
         <span class="r">Line</span>
         <span class="r">Price</span>
-        <span class="r">Fair</span>
         <span class="r">Edge</span>
-        <span class="r">Stake</span>
         <span></span>
       </div>
 
       <button class="grow" aria-expanded="false">
-        <span class="who"><span class="nm">Shai Gilgeous-Alexander</span><span class="pr">points · over 31.5 · OKC vs DEN</span></span>
-        <span class="r val mut">33.4</span>
+        <span class="who"><span class="nm">Shai Gilgeous-Alexander</span><span class="pr">points · over 31.5 · edge +5.8% · OKC vs DEN</span></span>
+        <span class="r val" data-keep>6 in 10</span>
+        <span class="pp" aria-label="Recent results versus today's line: 34, 29, 37, 32, 26, 35, 33">
+          <span class="pp-cell" style="--o:.3;--pp-ink:var(--up)">34</span><span class="pp-cell" style="--o:-.3;--pp-ink:var(--down)">29</span><span class="pp-cell" style="--o:.7;--pp-ink:var(--up)">37</span><span class="pp-cell" style="--o:.1;--pp-ink:var(--up)">32</span><span class="pp-cell" style="--o:-.8;--pp-ink:var(--down)">26</span><span class="pp-cell" style="--o:.5;--pp-ink:var(--up)">35</span><span class="pp-cell" style="--o:.2;--pp-ink:var(--up)">33</span>
+        </span>
         <span class="r val mut">31.5</span>
         <span class="r val">−112</span>
-        <span class="r val mut">−134</span>
-        <span class="r val val-lead" data-keep>+5.8%</span>
-        <span class="r val">1.4u</span>
+        <span class="r val val-lead">+5.8%</span>
         <span class="caret">›</span>
       </button>
 
       <button class="grow" aria-expanded="true">
-        <span class="who"><span class="nm">Anthony Edwards</span><span class="pr">rebounds · over 5.5 · MIN vs GSW</span></span>
-        <span class="r val mut">7.2</span>
+        <span class="who"><span class="nm">Anthony Edwards</span><span class="pr">rebounds · over 5.5 · edge +7.1% · MIN vs GSW</span></span>
+        <span class="r val" data-keep>7 in 10</span>
+        <span class="pp" aria-label="Recent results versus today's line: 7, 8, 4, 9, 6, 7, 8">
+          <span class="pp-cell" style="--o:.4;--pp-ink:var(--up)">7</span><span class="pp-cell" style="--o:.6;--pp-ink:var(--up)">8</span><span class="pp-cell" style="--o:-.5;--pp-ink:var(--down)">4</span><span class="pp-cell" style="--o:.8;--pp-ink:var(--up)">9</span><span class="pp-cell" style="--o:.1;--pp-ink:var(--up)">6</span><span class="pp-cell" style="--o:.4;--pp-ink:var(--up)">7</span><span class="pp-cell" style="--o:.6;--pp-ink:var(--up)">8</span>
+        </span>
         <span class="r val mut">5.5</span>
         <span class="r val">−148</span>
-        <span class="r val mut">−216</span>
-        <span class="r val val-lead" data-keep>+7.1%</span>
-        <span class="r val">1.7u</span>
+        <span class="r val val-lead">+7.1%</span>
         <span class="caret">›</span>
       </button>
 
@@ -546,46 +573,50 @@ abbr[title]{
       </div>
 
       <button class="grow" aria-expanded="false">
-        <span class="who"><span class="nm">Nikola Jokić</span><span class="pr">assists · under 9.5 · DEN at OKC</span></span>
-        <span class="r val mut">8.4</span>
+        <span class="who"><span class="nm">Nikola Jokić</span><span class="pr">assists · under 9.5 · edge +4.2% · DEN at OKC</span></span>
+        <span class="r val" data-keep>6 in 10</span>
+        <span class="pp" aria-label="Recent results versus today's line: 8, 11, 7, 9, 12, 6, 8">
+          <span class="pp-cell" style="--o:-.3;--pp-ink:var(--up)">8</span><span class="pp-cell" style="--o:.4;--pp-ink:var(--down)">11</span><span class="pp-cell" style="--o:-.5;--pp-ink:var(--up)">7</span><span class="pp-cell" style="--o:-.1;--pp-ink:var(--up)">9</span><span class="pp-cell" style="--o:.6;--pp-ink:var(--down)">12</span><span class="pp-cell" style="--o:-.7;--pp-ink:var(--up)">6</span><span class="pp-cell" style="--o:-.3;--pp-ink:var(--up)">8</span>
+        </span>
         <span class="r val mut">9.5</span>
         <span class="r val">+104</span>
-        <span class="r val mut">−108</span>
-        <span class="r val val-lead" data-keep>+4.2%</span>
-        <span class="r val">1.0u</span>
+        <span class="r val val-lead">+4.2%</span>
         <span class="caret">›</span>
       </button>
 
       <button class="grow" aria-expanded="false">
-        <span class="who"><span class="nm">Jayson Tatum</span><span class="pr">points · over 27.5 · BOS vs MIA</span></span>
-        <span class="r val mut">29.1</span>
+        <span class="who"><span class="nm">Jayson Tatum</span><span class="pr">points · over 27.5 · edge +3.4% · BOS vs MIA</span></span>
+        <span class="r val" data-keep>6 in 10</span>
+        <span class="pp" aria-label="Recent results versus today's line: 29, 24, 31, 28, 26, 35, 30">
+          <span class="pp-cell" style="--o:.2;--pp-ink:var(--up)">29</span><span class="pp-cell" style="--o:-.5;--pp-ink:var(--down)">24</span><span class="pp-cell" style="--o:.4;--pp-ink:var(--up)">31</span><span class="pp-cell" style="--o:.1;--pp-ink:var(--up)">28</span><span class="pp-cell" style="--o:-.2;--pp-ink:var(--down)">26</span><span class="pp-cell" style="--o:.8;--pp-ink:var(--up)">35</span><span class="pp-cell" style="--o:.3;--pp-ink:var(--up)">30</span>
+        </span>
         <span class="r val mut">27.5</span>
         <span class="r val">−110</span>
-        <span class="r val mut">−126</span>
-        <span class="r val val-lead" data-keep>+3.4%</span>
-        <span class="r val">0.8u</span>
+        <span class="r val val-lead">+3.4%</span>
         <span class="caret">›</span>
       </button>
 
       <button class="grow" aria-expanded="false">
-        <span class="who"><span class="nm">Derrick White</span><span class="pr">3-pointers · over 2.5 · BOS vs MIA</span></span>
-        <span class="r val mut">3.1</span>
+        <span class="who"><span class="nm">Derrick White</span><span class="pr">3-pointers · over 2.5 · edge +2.7% · BOS vs MIA</span></span>
+        <span class="r val" data-keep>6 in 10</span>
+        <span class="pp" aria-label="Recent results versus today's line: 4, 2, 3, 5, 1, 4, 3">
+          <span class="pp-cell" style="--o:.5;--pp-ink:var(--up)">4</span><span class="pp-cell" style="--o:-.2;--pp-ink:var(--down)">2</span><span class="pp-cell" style="--o:.2;--pp-ink:var(--up)">3</span><span class="pp-cell" style="--o:.8;--pp-ink:var(--up)">5</span><span class="pp-cell" style="--o:-.6;--pp-ink:var(--down)">1</span><span class="pp-cell" style="--o:.5;--pp-ink:var(--up)">4</span><span class="pp-cell" style="--o:.2;--pp-ink:var(--up)">3</span>
+        </span>
         <span class="r val mut">2.5</span>
         <span class="r val">+100</span>
-        <span class="r val mut">−118</span>
-        <span class="r val val-lead" data-keep>+2.7%</span>
-        <span class="r val">0.6u</span>
+        <span class="r val val-lead">+2.7%</span>
         <span class="caret">›</span>
       </button>
 
       <button class="grow" aria-expanded="false">
-        <span class="who"><span class="nm">Luka Dončić</span><span class="pr">assists · over 8.5 · LAL at PHX</span></span>
-        <span class="r val mut">9.3</span>
+        <span class="who"><span class="nm">Luka Dončić</span><span class="pr">assists · over 8.5 · edge +2.1% · LAL at PHX</span></span>
+        <span class="r val" data-keep>6 in 10</span>
+        <span class="pp" aria-label="Recent results versus today's line: 10, 7, 12, 9, 8, 11, 10">
+          <span class="pp-cell" style="--o:.3;--pp-ink:var(--up)">10</span><span class="pp-cell" style="--o:-.4;--pp-ink:var(--down)">7</span><span class="pp-cell" style="--o:.7;--pp-ink:var(--up)">12</span><span class="pp-cell" style="--o:.1;--pp-ink:var(--up)">9</span><span class="pp-cell" style="--o:-.1;--pp-ink:var(--down)">8</span><span class="pp-cell" style="--o:.5;--pp-ink:var(--up)">11</span><span class="pp-cell" style="--o:.3;--pp-ink:var(--up)">10</span>
+        </span>
         <span class="r val mut">8.5</span>
         <span class="r val">−120</span>
-        <span class="r val mut">−133</span>
-        <span class="r val val-lead" data-keep>+2.1%</span>
-        <span class="r val">0.5u</span>
+        <span class="r val val-lead">+2.1%</span>
         <span class="caret">›</span>
       </button>
     </div>

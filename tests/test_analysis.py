@@ -430,6 +430,69 @@ class TestAnalysisRoute(BaseTestCase):
             self.assertIn(b'>1<', resp.data)
             self.assertIn(b'top 50 shown', resp.data)
 
+    def test_analysis_view_model_adds_probability_and_recent_form_without_mutating_score(self):
+        from app.routes.nba_analysis import _analysis_play_view_models
+
+        with self.app.app_context():
+            db.session.add_all([
+                PlayerGameLog(
+                    player_id='board-player', player_name='Board Player',
+                    game_date=date(2026, 2, day), pts=value,
+                )
+                for day, value in ((1, 18), (2, 20), (3, 22))
+            ])
+            db.session.commit()
+
+            score = {
+                'player': 'Board Player', 'prop_type': 'player_points',
+                'line': 20, 'recommended_side': 'under',
+                'model_prob_under': 0.64, 'std_dev': 2,
+            }
+            [view_model] = _analysis_play_view_models([score])
+
+            self.assertNotIn('recent_form', score)
+            self.assertEqual(view_model['natural_frequency'], 6)
+            self.assertEqual(view_model['fair_odds'], -178)
+            self.assertEqual(
+                [game['value'] for game in view_model['recent_form']],
+                [18.0, 20.0, 22.0],
+            )
+            self.assertEqual(
+                [game['tone'] for game in view_model['recent_form']],
+                ['win', 'push', 'loss'],
+            )
+
+    def test_analysis_page_renders_probability_fair_price_and_recent_form(self):
+        self.register_and_login()
+        with self.app.app_context():
+            db.session.add(PlayerGameLog(
+                player_id='render-player', player_name='Render Player',
+                game_date=date(2026, 2, 1), pts=24,
+            ))
+            db.session.commit()
+
+        score = {
+            'player': 'Render Player', 'prop_type': 'player_points',
+            'line': 20.5, 'projection': 23.1, 'edge': 0.071,
+            'recommended_side': 'over', 'recommended_odds': -110,
+            'confidence_tier': 'strong', 'confidence': 'high',
+            'context_notes': ['Rested'], 'game_id': 'game-render',
+            'home_team': 'Celtics', 'away_team': 'Heat',
+            'match_date': '2026-02-27', 'model_prob_over': 0.684,
+            'model_prob_under': 0.316, 'std_dev': 4.2,
+            'games_played': 20,
+        }
+        with patch('app.services.score_cache.get_todays_scores', return_value=[score]):
+            resp = self.client.get('/nba/analysis')
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn(b'Recent 7 vs line', resp.data)
+        self.assertIn(b'7 in 10', resp.data)
+        self.assertIn(b'-216', resp.data)
+        self.assertIn(b'class="pp-cell"', resp.data)
+        self.assertIn(b'class="act quick-add-prop-btn"', resp.data)
+        self.assertIn(b'class="act quick-add-parlay-btn"', resp.data)
+
 
 class TestFeatureEngine(BaseTestCase):
     """Test feature engineering functions."""

@@ -60,13 +60,28 @@ Every match must be custom properties only.
 4. Parlay split layout collapses cleanly on mobile.
 5. OCR section spacing and parsed-fields panel remain coherent.
 
-### Prop Analysis
+### Prop Analysis — **[MIGRATED, Phase 2]**
 
-1. KPI strip and filters feel balanced (no crowding).
-2. Strong-play cards and main table share spacing rhythm.
-3. Refresh/loading states are visible without layout jump.
-4. Table actions (Bet/Parlay) keep consistent size and alignment.
-5. Player detail modal content is readable and grouped logically.
+1. The Board leads every row with natural-frequency model probability and the
+   exact percentage; price, fair price, edge, projection, and line remain
+   aligned secondary figures on desktop and readable metadata on mobile.
+2. Every populated row carries a `.pp` recent-form strip: oldest to newest,
+   result position above/below today's line, and win/loss colour relative to
+   the recommended side. Compact widths drop only the oldest cells.
+3. Summary figures use one ledger-style slip. Strong-play cards are gone; a
+   recommendation appears exactly once in the probability-first board.
+4. Stat, minimum-edge, and confidence filters; Refresh; Bet; Parlay; and the
+   parlay count remain keyboard reachable. Bet/Parlay stay visible below 48rem
+   regardless of pointer type.
+5. Loading, error, no-data, and filtered-zero states preserve the board's
+   footprint and use the shared state vocabulary.
+6. The player-detail modal is the separate overlay elevation layer. Projection
+   facts use the slip grid; context uses one ruled disclosure block; recent
+   games use the dense band/row variant with compact numeric metadata.
+7. Rendered gates cover 1440, 412, and 320 with no document overflow and no
+   serious/critical Axe findings. Empty-page and modal Playwright baselines are
+   checked in; a deterministic populated render verifies both over and under
+   recent-form semantics.
 
 ### Stat Analysis
 

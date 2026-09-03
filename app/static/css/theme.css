@@ -1542,34 +1542,87 @@ a:hover {
   color: var(--accent);
 }
 
-/* Analysis table */
-.analysis-table th {
-  font-size: 0.7rem;
-  font-weight: 600;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  background: var(--bg-panel);
-  border-bottom: 1px solid var(--border-subtle);
-  padding: 0.55rem 0.75rem;
-  white-space: nowrap;
-}
-.analysis-table td {
-  font-size: 0.82rem;
-  vertical-align: middle;
-  padding: 0.5rem 0.75rem;
-  border-color: var(--border-subtle);
-}
-.analysis-table tr:hover td { background: rgba(var(--accent-rgb),.03); }
 .analysis-filter-select { width: auto; }
 .analysis-table-shell {
   min-height: 460px;
   position: relative;
 }
-.analysis-proj-submeta { font-size: 0.65rem; }
-.analysis-empty-icon { font-size: 2rem; }
+.analysis-table-shell .band,
+.analysis-table-shell .row-line {
+  --cols: minmax(12rem, 1fr) 5.25rem 17.5rem 5rem 4.5rem 4.75rem 4.75rem 4.5rem 7.5rem;
+}
+.analysis-table-shell .row-line { align-items: center; }
+.analysis-table-shell .row-lead > .row-sub,
+.analysis-table-shell .row-lead > .row-meta { display: block; }
+.analysis-table-shell .row-figure .row-sub {
+  display: block;
+  margin-top: 0.125rem;
+  text-align: right;
+}
+.analysis-table-shell .pp { justify-self: start; }
+.analysis-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-inline-start: auto;
+}
+.analysis-table-shell .row-lead > button {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-weight: 560;
+  line-height: inherit;
+  text-align: left;
+  color: var(--text-main);
+  cursor: pointer;
+}
+.analysis-table-shell .row-lead > button:hover {
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+.analysis-table-shell .row-lead > button:focus-visible {
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: 2px;
+}
 .analysis-toast-container { z-index: 1080; }
 .analysis-row-hidden { display: none !important; }
+.analysis-detail-heading.sheet-dateline {
+  margin: 1rem 0 0.5rem;
+  text-align: left;
+}
+.analysis-detail-grid {
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.analysis-detail-log .band,
+.analysis-detail-log .row-line {
+  --cols: 5rem minmax(8rem, 1fr) repeat(5, 3.25rem);
+}
+
+@media (max-width: 47.99rem) {
+  .analysis-table-shell .band,
+  .analysis-table-shell .row-line {
+    --cols: minmax(0, 1fr) auto;
+  }
+  .analysis-table-shell .band-cell:nth-child(3),
+  .analysis-table-shell .band-cell:last-child { display: none; }
+  .analysis-table-shell .row-line > .pp {
+    grid-column: 1 / -1;
+    margin-top: 0.25rem;
+  }
+  .analysis-table-shell .row-actions .act { opacity: 1; }
+  .analysis-toolbar-actions {
+    width: 100%;
+    margin-inline-start: 0;
+  }
+  .analysis-detail-log .band,
+  .analysis-detail-log .row-line {
+    --cols: 5rem minmax(0, 1fr);
+  }
+}
 
 /* Shared empty/error state treatment across sportsbook pages */
 .ux-empty-state {

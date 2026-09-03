@@ -58,7 +58,7 @@ are not disjoint and the parallel-dispatch precondition is not met.
 | 0 | Shell, tokens, masthead | **Complete** (`5125b8a`) | Dark ground, zero radius, zero chromatic accent. |
 | 0.5 | Ownership, contracts, shared-layer debt | **Complete** (`cd91bdd`) | Checklist below, all items closed. |
 | 1 | **My Bets → the Position Log** | **Complete** | Grammar shipped end to end; pace axis is its signature display. Five contract amendments, below. |
-| 2 | **Prop Analysis → the Board** | Not started | Consumes Phase 1's vocabulary; adds the dense-table variant and the modal. |
+| 2 | **Prop Analysis → the Board** | **Complete** | Probability-first rows, `.pp` recent form, fair price, dense modal ledger. |
 | 3 | NBA Today + Dashboard | Not started | **Serial.** Dashboard's KPI row becomes the ledger band. |
 | 4 | Stat Analysis + Bet Builder | Not started | **Serial.** Need new thinking, not new paint. |
 | 4.5 | Auth, errors, import | Not started | Added — half the template surface the original plan did not see. |
@@ -208,6 +208,9 @@ four raised surfaces on the page the rule was being invented on. Corrected:
 
 - 2026-08-10 · cold adversarial review · the plan · **RETHINK** · four blockers
   all firing in Phase 1; ordering inverted; Phase 0.5 and 4.5 inserted.
+- 2026-09-03 · Phase 2 · Prop Analysis / the Board · **SHIP** · probability-first
+  rows and the last-seven strip survived four shipped-page passes; 1440/412/320
+  report no overflow and no serious/critical Axe findings.
 
 ## Open decisions owned by the user
 

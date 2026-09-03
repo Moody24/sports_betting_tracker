@@ -17,7 +17,7 @@ A Flask web application for recording bets, tracking outcomes, projecting player
 ## Tech Stack
 
 - **Backend:** Flask, SQLAlchemy, Flask-Login, Flask-Migrate, Gunicorn
-- **Frontend:** Jinja2 templates + Bootstrap
+- **Frontend:** Jinja2 templates + owned CSS design system + vanilla JavaScript
 - **Database:** SQLite for local dev · PostgreSQL when deploying to a hosted environment
 - **ML:** XGBoost, scikit-learn (model artifacts stored locally in `app/ml_models/`)
 - **Odds:** The Odds API (player props, moneyline, totals)
@@ -108,7 +108,7 @@ SECRET_KEY=test python -m coverage run -m unittest discover -s tests -v
 python -m coverage report --include="app/*"
 ```
 
-Coverage gate: 75% current · 80% target (tracked in backlog). Test runner is **unittest** (not pytest).
+CI coverage gate: 75% · roadmap target: 80%. Test runner is **unittest** (not pytest).
 
 ## Linting
 
