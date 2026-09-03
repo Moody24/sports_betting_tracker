@@ -563,189 +563,227 @@ class ValueDetector:
             'game_id': game_id,
         }
 
-    def score_all_todays_props(self, games: list = None) -> list:
-        """Score all available props across today's NBA games.
+    @staticmethod
+    def _cached_daily_scores() -> Optional[list]:
+        cached = _SCORE_CACHE.get(et_date_str())
+        if cached and _time.monotonic() < cached["expires_at"]:
+            return list(cached["scores"])
+        return None
 
-        Returns a list of score dicts sorted by absolute edge descending.
+    @staticmethod
+    def _cache_daily_scores(scores: list) -> None:
+        _SCORE_CACHE.clear()
+        _SCORE_CACHE[et_date_str()] = {
+            "scores": scores,
+            "expires_at": _time.monotonic() + _SCORE_CACHE_TTL,
+        }
 
-        Results are cached for _SCORE_CACHE_TTL seconds (keyed by ET date) when
-        called without an explicit games list, so repeated dashboard/analysis
-        page loads skip the expensive API + DB computation within the TTL window.
-        Pass games explicitly (e.g. in tests or the scheduler) to bypass the cache.
-        """
-        use_cache = games is None
-        _t0 = _time.perf_counter()
-
-        if use_cache:
-            cache_date = et_date_str()
-            cached = _SCORE_CACHE.get(cache_date)
-            if cached and _time.monotonic() < cached["expires_at"]:
-                logger.info("PERF score_all_todays_props: cache_hit scores=%d elapsed=0.00s", len(cached["scores"]))
-                return list(cached["scores"])
-
-            from app.services.nba_service import get_todays_games
-            _t_games = _time.perf_counter()
-            games = get_todays_games()
-            logger.info("PERF get_todays_games: games=%d elapsed=%.2fs", len(games), _time.perf_counter() - _t_games)
-
+    @staticmethod
+    def _fetch_game_props(game_event: tuple) -> tuple:
+        """Fetch one event's props without performing ORM work in the worker."""
         from app.services.nba_service import fetch_player_props_for_event
 
-        all_scores = []
+        game, event_id = game_event
+        started_at = _time.perf_counter()
+        try:
+            props = fetch_player_props_for_event(event_id)
+        except Exception as exc:
+            logger.error("Failed to fetch props for event %s: %s", event_id, exc)
+            props = {}
+        elapsed = _time.perf_counter() - started_at
+        prop_count = sum(len(values) for values in props.values())
+        logger.info(
+            "PERF props_fetch event=%s props=%d elapsed=%.2fs",
+            event_id[:8], prop_count, elapsed,
+        )
+        return game, props
 
-        # Prefetch props for all games in parallel to avoid sequential HTTP stalls.
-        games_with_events = [(g, g.get('odds_event_id', '')) for g in games if g.get('odds_event_id', '')]
-
-        def _fetch(game_event):
-            # Workers do HTTP only — no ORM/DB access inside threads.
-            game, event_id = game_event
-            _t = _time.perf_counter()
-            try:
-                props = fetch_player_props_for_event(event_id)
-            except Exception as exc:
-                logger.error("Failed to fetch props for event %s: %s", event_id, exc)
-                props = {}
-            elapsed = _time.perf_counter() - _t
-            prop_count = sum(len(v) for v in props.values())
-            logger.info("PERF props_fetch event=%s props=%d elapsed=%.2fs", event_id[:8], prop_count, elapsed)
-            return game, props
-
-        raw_results: list[tuple] = []
-        all_player_names: set[str] = set()
-        _t_props = _time.perf_counter()
-        with ThreadPoolExecutor(max_workers=min(8, len(games_with_events) or 1)) as pool:
-            futures = {pool.submit(_fetch, ge): ge for ge in games_with_events}
+    def _fetch_all_game_props(self, games: list) -> list[tuple]:
+        games_with_events = [
+            (game, game.get('odds_event_id', ''))
+            for game in games
+            if game.get('odds_event_id', '')
+        ]
+        raw_results = []
+        max_workers = min(8, len(games_with_events) or 1)
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = [
+                pool.submit(self._fetch_game_props, game_event)
+                for game_event in games_with_events
+            ]
             for future in as_completed(futures):
-                game, props = future.result()
-                raw_results.append((game, props))
+                raw_results.append(future.result())
+        return raw_results
 
-        # Snapshot fallback in main thread — safe DB access, no thread-context issues.
-        # For any game that returned empty props (e.g. 429 rate limit), try the cached
-        # GameSnapshot.props_json written by the scheduler's prefetch job.
+    @staticmethod
+    def _fill_snapshot_prop_fallbacks(raw_results: list[tuple]) -> None:
+        """Fill empty provider results from today's stored game snapshots."""
         from app.models import GameSnapshot
-        today = datetime.now(ET).date()
-        empty_espn_ids = [g.get('espn_id', '') for g, p in raw_results if not p and g.get('espn_id')]
-        if empty_espn_ids:
-            snaps = {
-                s.espn_id: s
-                for s in GameSnapshot.query.filter(
-                    GameSnapshot.espn_id.in_(empty_espn_ids),
-                    GameSnapshot.game_date == today,
-                ).all()
-            }
-            filled = 0
-            for i, (game, props) in enumerate(raw_results):
-                if props:
-                    continue
-                espn_id = game.get('espn_id', '')
-                snap = snaps.get(espn_id)
-                if snap and snap.props_json:
-                    try:
-                        raw_results[i] = (game, json.loads(snap.props_json))
-                        filled += 1
-                        logger.info("PERF props_fetch espn_id=%s using cached snapshot fallback", espn_id[:8])
-                    except (ValueError, TypeError):
-                        pass
-            if filled:
-                logger.info("Snapshot fallback filled props for %d game(s)", filled)
 
-        game_props_payloads = []
+        empty_ids = [
+            game.get('espn_id', '')
+            for game, props in raw_results
+            if not props and game.get('espn_id')
+        ]
+        if not empty_ids:
+            return
+        snapshots = {
+            snapshot.espn_id: snapshot
+            for snapshot in GameSnapshot.query.filter(
+                GameSnapshot.espn_id.in_(empty_ids),
+                GameSnapshot.game_date == datetime.now(ET).date(),
+            ).all()
+        }
+        filled = 0
+        for index, (game, props) in enumerate(raw_results):
+            snapshot = snapshots.get(game.get('espn_id', ''))
+            if props or not snapshot or not snapshot.props_json:
+                continue
+            try:
+                raw_results[index] = (game, json.loads(snapshot.props_json))
+            except (ValueError, TypeError):
+                continue
+            filled += 1
+            logger.info(
+                "PERF props_fetch espn_id=%s using cached snapshot fallback",
+                snapshot.espn_id[:8],
+            )
+        if filled:
+            logger.info("Snapshot fallback filled props for %d game(s)", filled)
+
+    @staticmethod
+    def _collect_prop_payloads(raw_results: list[tuple]) -> tuple[list, set[str]]:
+        payloads = []
+        player_names = set()
         for game, props in raw_results:
             if not props:
                 continue
-            game_props_payloads.append((game, props))
+            payloads.append((game, props))
             for market_props in props.values():
-                for prop in market_props:
-                    player = prop.get('player', '')
-                    if player:
-                        all_player_names.add(player)
-        logger.info("PERF props_fetch_parallel: games=%d wall_elapsed=%.2fs", len(game_props_payloads), _time.perf_counter() - _t_props)
+                player_names.update(
+                    prop.get('player', '')
+                    for prop in market_props
+                    if prop.get('player', '')
+                )
+        return payloads, player_names
 
-        _t_team = _time.perf_counter()
-        player_team_map = self._build_player_team_map(all_player_names)
-        logger.info("PERF player_team_map: players=%d elapsed=%.2fs", len(player_team_map), _time.perf_counter() - _t_team)
+    @staticmethod
+    def _prop_game_date(game: dict) -> tuple[str, Optional[_date]]:
+        start_date = game.get('start_time', '')[:10]
+        try:
+            return start_date, _date.fromisoformat(start_date) if start_date else None
+        except ValueError:
+            return start_date, None
 
-        _t_score = _time.perf_counter()
-        # Fresh per-scan scenario cache — see __init__. Rebuilt every scan so
-        # a refreshed pack/splits set is picked up on the next scan.
+    def _score_game_props(
+        self, game: dict, props: dict, player_team_map: dict[str, str]
+    ) -> list[dict]:
+        espn_id = game.get('espn_id', '')
+        home = game.get('home', {})
+        away = game.get('away', {})
+        home_team = home.get('name', '')
+        away_team = away.get('name', '')
+        start_date, game_date = self._prop_game_date(game)
+        scores = []
+        for market_key, market_props in props.items():
+            for prop in market_props:
+                player = prop.get('player', '')
+                if not player or not is_player_available(player):
+                    continue
+                team_name, opponent_name, is_home = (
+                    self._resolve_game_context_for_player(
+                        player_name=player,
+                        home_team=home_team,
+                        away_team=away_team,
+                        home_abbr=(home.get('abbr') or '').upper(),
+                        away_abbr=(away.get('abbr') or '').upper(),
+                        player_team_map=player_team_map,
+                    )
+                )
+                score = self.score_prop(
+                    player_name=player,
+                    prop_type=market_key,
+                    line=prop.get('line', 0),
+                    over_odds=prop.get('over_odds', -110),
+                    under_odds=prop.get('under_odds', -110),
+                    opponent_name=opponent_name,
+                    team_name=team_name,
+                    is_home=is_home,
+                    game_id=espn_id,
+                    game_date=game_date,
+                    game_total_line=float(game.get('over_under_line') or 0.0),
+                    spread=game.get('spread'),
+                    favored_side=game.get('favored_side'),
+                )
+                score.update({
+                    'home_team': home_team,
+                    'away_team': away_team,
+                    'match_date': start_date,
+                })
+                scores.append(score)
+        return scores
+
+    def score_all_todays_props(self, games: list = None) -> list:
+        """Score all available props across today's NBA games.
+
+        Results are cached by ET date when games are not supplied explicitly.
+        """
+        use_cache = games is None
+        started_at = _time.perf_counter()
+        if use_cache:
+            cached_scores = self._cached_daily_scores()
+            if cached_scores is not None:
+                logger.info(
+                    "PERF score_all_todays_props: cache_hit scores=%d elapsed=0.00s",
+                    len(cached_scores),
+                )
+                return cached_scores
+            from app.services.nba_service import get_todays_games
+            game_fetch_started = _time.perf_counter()
+            games = get_todays_games()
+            logger.info(
+                "PERF get_todays_games: games=%d elapsed=%.2fs",
+                len(games), _time.perf_counter() - game_fetch_started,
+            )
+
+        prop_fetch_started = _time.perf_counter()
+        raw_results = self._fetch_all_game_props(games)
+        self._fill_snapshot_prop_fallbacks(raw_results)
+        payloads, player_names = self._collect_prop_payloads(raw_results)
+        logger.info(
+            "PERF props_fetch_parallel: games=%d wall_elapsed=%.2fs",
+            len(payloads), _time.perf_counter() - prop_fetch_started,
+        )
+
+        team_started = _time.perf_counter()
+        player_team_map = self._build_player_team_map(player_names)
+        logger.info(
+            "PERF player_team_map: players=%d elapsed=%.2fs",
+            len(player_team_map), _time.perf_counter() - team_started,
+        )
+
+        scoring_started = _time.perf_counter()
+        all_scores = []
         self._scenario_scan_cache = {'context': {}, 'splits': {}}
         try:
-            for game, props in game_props_payloads:
-                espn_id = game.get('espn_id', '')
-                home_team = game.get('home', {}).get('name', '')
-                away_team = game.get('away', {}).get('name', '')
-                home_abbr = (game.get('home', {}).get('abbr') or '').upper()
-                away_abbr = (game.get('away', {}).get('abbr') or '').upper()
-
-                for market_key, market_props in props.items():
-                    for prop in market_props:
-                        player = prop.get('player', '')
-                        if not player:
-                            continue
-
-                        # Skip unavailable players
-                        if not is_player_available(player):
-                            continue
-
-                        line = prop.get('line', 0)
-                        over_odds = prop.get('over_odds', -110)
-                        under_odds = prop.get('under_odds', -110)
-
-                        team_name, opponent_name, is_home = self._resolve_game_context_for_player(
-                            player_name=player,
-                            home_team=home_team,
-                            away_team=away_team,
-                            home_abbr=home_abbr,
-                            away_abbr=away_abbr,
-                            player_team_map=player_team_map,
-                        )
-
-                        _start_time_str = game.get('start_time', '')[:10]
-                        try:
-                            _game_date: Optional[_date] = (
-                                _date.fromisoformat(_start_time_str) if _start_time_str else None
-                            )
-                        except ValueError:
-                            _game_date = None
-
-                        score = self.score_prop(
-                            player_name=player,
-                            prop_type=market_key,
-                            line=line,
-                            over_odds=over_odds,
-                            under_odds=under_odds,
-                            opponent_name=opponent_name,
-                            team_name=team_name,
-                            is_home=is_home,
-                            game_id=espn_id,
-                            game_date=_game_date,
-                            game_total_line=float(game.get('over_under_line') or 0.0),
-                            spread=game.get('spread'),
-                            favored_side=game.get('favored_side'),
-                        )
-
-                        # Add game context to score
-                        score['home_team'] = home_team
-                        score['away_team'] = away_team
-                        score['match_date'] = _start_time_str
-
-                        all_scores.append(score)
+            for game, props in payloads:
+                all_scores.extend(
+                    self._score_game_props(game, props, player_team_map)
+                )
         finally:
             self._scenario_scan_cache = None
 
-        # Sort by absolute edge descending
-        all_scores.sort(key=lambda s: abs(s.get('edge', 0)), reverse=True)
-        logger.info("PERF scoring_loop: scored=%d elapsed=%.2fs", len(all_scores), _time.perf_counter() - _t_score)
-
-        # Populate module-level cache for subsequent requests within the TTL window.
+        all_scores.sort(key=lambda score: abs(score.get('edge', 0)), reverse=True)
+        logger.info(
+            "PERF scoring_loop: scored=%d elapsed=%.2fs",
+            len(all_scores), _time.perf_counter() - scoring_started,
+        )
         if use_cache:
-            cache_date = et_date_str()
-            _SCORE_CACHE.clear()  # drop any prior-date entry
-            _SCORE_CACHE[cache_date] = {
-                "scores": all_scores,
-                "expires_at": _time.monotonic() + _SCORE_CACHE_TTL,
-            }
-        logger.info("PERF score_all_todays_props: total_elapsed=%.2fs scores=%d", _time.perf_counter() - _t0, len(all_scores))
-
+            self._cache_daily_scores(all_scores)
+        logger.info(
+            "PERF score_all_todays_props: total_elapsed=%.2fs scores=%d",
+            _time.perf_counter() - started_at, len(all_scores),
+        )
         return all_scores
 
     def get_top_plays(self, min_edge: float = TIER_SLIGHT, max_plays: int = 20) -> list:
