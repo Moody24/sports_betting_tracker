@@ -1,6 +1,6 @@
 # ML Retrain Runbook — Edge Tracker
 **Stack:** XGBoost · scikit-learn · Local model artifacts (`app/ml_models/*.json`)
-**Last verified:** 2026-08-09
+**Last verified:** 2026-09-03
 **Source configs:** `app/services/ml_model.py`, `app/services/ml_feature_builder.py`
 **Est. total time:** 10–15 min
 

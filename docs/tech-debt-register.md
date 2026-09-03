@@ -53,6 +53,10 @@ and architecture-contract tests are the reproducible measures for this repo.
 - Split the 7,613-line service test monolith into seven domain modules plus a
   shared fixture module. All 489 migrated test identities were retained and
   passed together.
+- Retrained all six projection models and seven distributional heads or
+  calibrators against 79,603 permanent historical rows. Retained 17 active and
+  17 rollback artifacts, and moved 163 unreferenced artifacts (58.3 MB) to
+  Trash after verifying every metadata path.
 - Consolidated two conflicting inactive Railway runbooks.
 - Blocked accidental external HTTP in the shared test fixture.
 - Moved stale virtualenvs and generated test/browser artifacts to Trash,
@@ -63,11 +67,9 @@ and architecture-contract tests are the reproducible measures for this repo.
 | Priority | Item | Evidence and exit condition |
 |---|---|---|
 | P1 | Remaining high-complexity workflows | 38 C901 findings remain. The originally prioritized eight workflows are complete. Continue later with the two 18-complexity model commands, then the 17-complexity rolling backtest and prop snapshot workflows. Preserve behavior with focused tests per extraction. |
-| P2 | Historical local model artifacts | `app/ml_models/` contains 190 ignored artifacts (about 76 MB). Active database metadata still references July artifacts, so retain them until `flask retrain --force` succeeds and the active paths are re-audited. |
 | P2 before hosted deployment | Inactive Railway scripts and configuration | They are intentionally retained for restoration work and the surviving runbook is explicitly marked inactive. Revalidate or delete them when a hosting decision is made. |
 
 ## Next cleanup order
 
-1. Retrain models, verify active artifact paths, then prune unreferenced files.
-2. Continue reducing the remaining C901 inventory in focused commits.
-3. Re-run the canonical guardrail and update this register's dated baseline.
+1. Continue reducing the remaining C901 inventory in focused commits.
+2. Re-run the canonical guardrail and update this register's dated baseline.
