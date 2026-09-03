@@ -166,6 +166,42 @@ def _early_stopping_split(train_idx: list[int], eval_frac: float):
     return train_idx[:-eval_count], train_idx[-eval_count:]
 
 
+def _dist_game_total_key(log, using_historical_source: bool):
+    if using_historical_source:
+        return str(getattr(log, '_historical_game_id', '') or '')
+    team_abbr = (getattr(log, 'team_abbr', '') or '').strip().upper()
+    return log.game_date, team_abbr
+
+
+def _dist_player_rows(player_id, logs: list, stat_key: str,
+                      using_historical_source: bool, game_total_lookup: dict,
+                      team_totals: dict, team_counts: dict,
+                      defense_lookup: dict) -> list:
+    logs = sorted(logs, key=lambda log: ((log.game_date is None), log.game_date))
+    if len(logs) < 10:
+        return []
+    rows = []
+    for index in range(10, len(logs)):
+        current = logs[index]
+        target = float(getattr(current, stat_key, 0.0) or 0.0)
+        game_total = game_total_lookup.get(
+            _dist_game_total_key(current, using_historical_source), 0.0,
+        )
+        features = build_ml_features_from_history(
+            prior_logs=logs[:index],
+            current_is_home=(current.home_away or '').lower() == 'home',
+            stat_key=stat_key,
+            team_totals=team_totals,
+            team_counts=team_counts,
+            current_game_date=current.game_date,
+            current_matchup=current.matchup or '',
+            game_total_line=game_total,
+            defense_lookup=defense_lookup,
+        )
+        rows.append((current.game_date, str(player_id), features, target))
+    return rows
+
+
 def _build_dist_training_rows(stat_type: str) -> list:
     """Dated training rows for one distributional stat type.
 
@@ -223,35 +259,11 @@ def _build_dist_training_rows(stat_type: str) -> list:
     )
 
     rows = []
-    for pid, logs in player_logs.items():
-        logs = sorted(logs, key=lambda lg: ((lg.game_date is None), lg.game_date))
-        if len(logs) < 10:
-            continue
-
-        for i in range(10, len(logs)):
-            prior = logs[:i]
-            current = logs[i]
-            target = float(getattr(current, stat_key, 0.0) or 0.0)
-
-            if using_historical_source:
-                game_total_key = str(getattr(current, '_historical_game_id', '') or '')
-            else:
-                team_abbr = (getattr(current, 'team_abbr', '') or '').strip().upper()
-                game_total_key = (current.game_date, team_abbr)
-            game_total = game_total_lookup.get(game_total_key, 0.0)
-
-            features = build_ml_features_from_history(
-                prior_logs=prior,
-                current_is_home=(current.home_away or '').lower() == 'home',
-                stat_key=stat_key,
-                team_totals=team_totals,
-                team_counts=team_counts,
-                current_game_date=current.game_date,
-                current_matchup=current.matchup or '',
-                game_total_line=game_total,
-                defense_lookup=defense_lookup,
-            )
-            rows.append((current.game_date, str(pid), features, target))
+    for player_id, logs in player_logs.items():
+        rows.extend(_dist_player_rows(
+            player_id, logs, stat_key, using_historical_source,
+            game_total_lookup, team_totals, team_counts, defense_lookup,
+        ))
 
     rows.sort(key=lambda r: ((r[0] is None), r[0], r[1]))
     return rows

@@ -180,6 +180,64 @@ def _rows_from_player_box(df, season: str, season_type_code: int,
     return rows, dropped
 
 
+def _import_loaded_hoopr_season(df, season: str, sport: str,
+                                season_type_code: int, max_games,
+                                update_stats: bool) -> tuple:
+    existing = {
+        (player_id, game_id) for player_id, game_id in db.session.query(
+            HistoricalGameLog.player_id,
+            HistoricalGameLog.game_id,
+        ).filter_by(sport=sport, season=season)
+    }
+    existing_rows = {}
+    if update_stats:
+        existing_rows = {
+            (row.player_id, row.game_id): row
+            for row in HistoricalGameLog.query.filter_by(
+                sport=sport, season=season,
+            )
+        }
+    warnings = []
+    if any(game_id.startswith('00') for _, game_id in existing):
+        warning = (
+            f"WARNING: {season} already has stats.nba.com rows; "
+            "importing ESPN rows too would duplicate games. "
+            "New rows are still inserted — clean up one source "
+            "before training."
+        )
+        warnings.append(warning)
+        logger.info("import-hoopr-logs: %s", warning)
+    season_rows, dropped = _rows_from_player_box(
+        df, season, season_type_code, max_games=max_games,
+    )
+    batch = []
+    skipped = updated = 0
+    for kwargs in season_rows:
+        key = kwargs['player_id'], kwargs['game_id']
+        if key not in existing:
+            batch.append(HistoricalGameLog(**kwargs))
+            continue
+        if update_stats:
+            row = existing_rows[key]
+            merged = dict(row.stats or {})
+            missing = {
+                name: value for name, value in kwargs['stats'].items()
+                if name not in merged
+            }
+            if missing:
+                merged.update(missing)
+                row.stats = merged
+                updated += 1
+        skipped += 1
+    db.session.add_all(batch)
+    db.session.commit()
+    message = f"{season}: +{len(batch)} rows ({skipped} already present)"
+    if dropped:
+        message += f"; dropped non-NBA teams: {dropped}"
+    logger.info("import-hoopr-logs: %s", message)
+    return len(batch), skipped, updated, warnings
+
+
 def import_hoopr_seasons(sport='nba', seasons=3,
                          season_type='Regular Season', from_dir=None,
                          max_games=None, update_stats: bool = False) -> dict:
@@ -207,55 +265,14 @@ def import_hoopr_seasons(sport='nba', seasons=3,
                 continue
 
             try:
-                existing = {
-                    (pid, gid) for pid, gid in db.session.query(
-                        HistoricalGameLog.player_id,
-                        HistoricalGameLog.game_id,
-                    ).filter_by(sport=sport, season=season)
-                }
-                existing_rows = {}
-                if update_stats:
-                    existing_rows = {
-                        (r.player_id, r.game_id): r
-                        for r in HistoricalGameLog.query.filter_by(
-                            sport=sport, season=season)
-                    }
-                # NBA game ids are zero-padded ('0022500001'); ESPN ids are
-                # bare ints ('401700001'). Same season + both namespaces =
-                # the same games counted twice in training data.
-                if any(gid.startswith('00') for _, gid in existing):
-                    warning = (
-                        f"WARNING: {season} already has stats.nba.com rows; "
-                        "importing ESPN rows too would duplicate games. "
-                        "New rows are still inserted — clean up one source "
-                        "before training.")
-                    warnings.append(warning)
-                    logger.info("import-hoopr-logs: %s", warning)
-                season_rows, dropped = _rows_from_player_box(
-                    df, season, season_type_code, max_games=max_games)
-                batch = []
-                for kwargs in season_rows:
-                    if (kwargs['player_id'], kwargs['game_id']) in existing:
-                        if update_stats:
-                            row = existing_rows[(kwargs['player_id'],
-                                                 kwargs['game_id'])]
-                            merged = dict(row.stats or {})
-                            missing = {k: v for k, v in kwargs['stats'].items()
-                                       if k not in merged}
-                            if missing:
-                                merged.update(missing)
-                                row.stats = merged   # reassign — JSON no mutation tracking
-                                updated += 1
-                        skipped += 1
-                        continue
-                    batch.append(HistoricalGameLog(**kwargs))
-                db.session.add_all(batch)
-                db.session.commit()
-                inserted += len(batch)
-                msg = f"{season}: +{len(batch)} rows ({skipped} already present)"
-                if dropped:
-                    msg += f"; dropped non-NBA teams: {dropped}"
-                logger.info("import-hoopr-logs: %s", msg)
+                counts = _import_loaded_hoopr_season(
+                    df, season, sport, season_type_code, max_games,
+                    update_stats,
+                )
+                inserted += counts[0]
+                skipped += counts[1]
+                updated += counts[2]
+                warnings.extend(counts[3])
             except Exception as exc:   # malformed rows, DB errors, etc.
                 db.session.rollback()
                 errors.append(f"{season}: {exc}")
@@ -281,4 +298,3 @@ def import_hoopr_seasons(sport='nba', seasons=3,
 
     return {'inserted': inserted, 'skipped': skipped, 'updated': updated,
             'errors': errors, 'warnings': warnings}
-

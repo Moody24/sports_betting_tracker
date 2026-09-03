@@ -332,6 +332,52 @@ def find_player_id(player_name: str) -> Optional[str]:
     return None
 
 
+def _new_player_log(player_id: str, log: dict,
+                    expires: datetime) -> PlayerGameLog:
+    return PlayerGameLog(
+        player_id=str(player_id),
+        player_name=log.get('player_name', ''),
+        team_abbr=log.get('team_abbr', ''),
+        game_date=log['game_date'],
+        matchup=log.get('matchup', ''),
+        minutes=log.get('minutes', 0),
+        pts=log.get('pts', 0),
+        reb=log.get('reb', 0),
+        ast=log.get('ast', 0),
+        stl=log.get('stl', 0),
+        blk=log.get('blk', 0),
+        tov=log.get('tov', 0),
+        fgm=log.get('fgm', 0),
+        fga=log.get('fga', 0),
+        ftm=log.get('ftm', 0),
+        fta=log.get('fta', 0),
+        fg3m=log.get('fg3m', 0),
+        fg3a=log.get('fg3a', 0),
+        plus_minus=log.get('plus_minus', 0),
+        home_away=log.get('home_away', ''),
+        win_loss=log.get('win_loss', ''),
+        cache_expires=expires,
+    )
+
+
+def _upsert_player_logs_sqlite(player_id: str, logs: list,
+                               existing_rows: list,
+                               expires: datetime) -> None:
+    existing_map = {row.game_date: row for row in existing_rows}
+    for log in logs:
+        existing = existing_map.get(log['game_date'])
+        if existing is None:
+            row = _new_player_log(player_id, log, expires)
+            db.session.add(row)
+            existing_map[log['game_date']] = row
+            continue
+        for key, value in log.items():
+            if key not in ('player_id', 'game_date') and hasattr(existing, key):
+                setattr(existing, key, value)
+        existing.cache_expires = expires
+        existing.fetched_at = datetime.now(timezone.utc)
+
+
 def cache_player_logs(
     player_id: str,
     game_logs: list,
@@ -367,43 +413,9 @@ def cache_player_logs(
             if _is_postgres():
                 _upsert_player_logs_postgres(player_id, deduped_logs, expires)
             else:
-                existing_map: dict = {row.game_date: row for row in existing_rows}
-                for log in deduped_logs:
-                    existing = existing_map.get(log['game_date'])
-
-                    if existing:
-                        for key, val in log.items():
-                            if key not in ('player_id', 'game_date') and hasattr(existing, key):
-                                setattr(existing, key, val)
-                        existing.cache_expires = expires
-                        existing.fetched_at = datetime.now(timezone.utc)
-                    else:
-                        row = PlayerGameLog(
-                            player_id=str(player_id),
-                            player_name=log.get('player_name', ''),
-                            team_abbr=log.get('team_abbr', ''),
-                            game_date=log['game_date'],
-                            matchup=log.get('matchup', ''),
-                            minutes=log.get('minutes', 0),
-                            pts=log.get('pts', 0),
-                            reb=log.get('reb', 0),
-                            ast=log.get('ast', 0),
-                            stl=log.get('stl', 0),
-                            blk=log.get('blk', 0),
-                            tov=log.get('tov', 0),
-                            fgm=log.get('fgm', 0),
-                            fga=log.get('fga', 0),
-                            ftm=log.get('ftm', 0),
-                            fta=log.get('fta', 0),
-                            fg3m=log.get('fg3m', 0),
-                            fg3a=log.get('fg3a', 0),
-                            plus_minus=log.get('plus_minus', 0),
-                            home_away=log.get('home_away', ''),
-                            win_loss=log.get('win_loss', ''),
-                            cache_expires=expires,
-                        )
-                        db.session.add(row)
-                        existing_map[log['game_date']] = row
+                _upsert_player_logs_sqlite(
+                    player_id, deduped_logs, existing_rows, expires,
+                )
 
             if commit:
                 db.session.commit()
@@ -689,40 +701,11 @@ def refresh_completed_game_logs(days_back: int = 2) -> dict:
         games_seen += len(games)
 
         for game in games:
-            status = str(game.get('status', '') or '')
-            status_detail = str(game.get('status_detail', '') or '').lower()
-            if status != 'STATUS_FINAL' and 'final' not in status_detail:
-                continue
-            finals_seen += 1
-
-            espn_id = game.get('espn_id')
-            if not espn_id:
-                continue
-
-            try:
-                summary = fetch_summary_payload(espn_id)
-            except EspnClientError as exc:
-                logger.error("ESPN summary fetch failed for completed game %s: %s", espn_id, exc)
-                continue
-
-            rows = _extract_logs_from_espn_summary(summary, game, target_date)
-            if not rows:
-                continue
-
-            grouped: dict[str, list] = {}
-            for row in rows:
-                grouped.setdefault(str(row['player_id']), []).append(row)
-
-            for pid, player_rows in grouped.items():
-                try:
-                    result = cache_player_logs(pid, player_rows, ttl_days=3650, commit=False)
-                    inserted += result['inserted']
-                    updated += result['updated']
-                    if result['total'] > 0:
-                        players_upserted += 1
-                except Exception as exc:
-                    logger.warning("Failed to cache logs for player %s: %s", pid, exc)
-                    db.session.rollback()
+            result = _refresh_completed_game(game, target_date)
+            finals_seen += result['finals']
+            inserted += result['inserted']
+            updated += result['updated']
+            players_upserted += result['players']
 
     db.session.commit()
     summary = {
@@ -734,6 +717,42 @@ def refresh_completed_game_logs(days_back: int = 2) -> dict:
     }
     logger.info("Completed-game log refresh summary: %s", summary)
     return summary
+
+
+def _refresh_completed_game(game: dict, target_date) -> dict:
+    counts = {'finals': 0, 'inserted': 0, 'updated': 0, 'players': 0}
+    status = str(game.get('status', '') or '')
+    status_detail = str(game.get('status_detail', '') or '').lower()
+    if status != 'STATUS_FINAL' and 'final' not in status_detail:
+        return counts
+    counts['finals'] = 1
+    espn_id = game.get('espn_id')
+    if not espn_id:
+        return counts
+    try:
+        summary = fetch_summary_payload(espn_id)
+    except EspnClientError as exc:
+        logger.error("ESPN summary fetch failed for completed game %s: %s",
+                     espn_id, exc)
+        return counts
+    rows = _extract_logs_from_espn_summary(summary, game, target_date)
+    grouped: dict[str, list] = {}
+    for row in rows:
+        grouped.setdefault(str(row['player_id']), []).append(row)
+    for player_id, player_rows in grouped.items():
+        try:
+            result = cache_player_logs(
+                player_id, player_rows, ttl_days=3650, commit=False,
+            )
+        except Exception as exc:
+            logger.warning("Failed to cache logs for player %s: %s",
+                           player_id, exc)
+            db.session.rollback()
+            continue
+        counts['inserted'] += result['inserted']
+        counts['updated'] += result['updated']
+        counts['players'] += int(result['total'] > 0)
+    return counts
 
 
 def prune_expired_cache():

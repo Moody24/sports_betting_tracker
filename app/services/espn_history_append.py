@@ -83,6 +83,64 @@ def _player_records(payload: dict) -> list[dict]:
     return records
 
 
+def _scoreboard_game_date(game: dict, espn_id: str):
+    try:
+        return datetime.fromisoformat(
+            game.get('start_time', '').replace('Z', '+00:00'),
+        ).astimezone(ET).date()
+    except (ValueError, TypeError, AttributeError):
+        logger.warning("history-append: %s bad start_time %r",
+                       espn_id, game.get('start_time'))
+        return None
+
+
+def _record_team_totals(records: list[dict]) -> dict:
+    totals = {}
+    for record in records:
+        team = totals.setdefault(
+            record['team_abbr'],
+            {'minutes': 0.0, 'fga': 0.0, 'fta': 0.0, 'tov': 0.0},
+        )
+        for key in team:
+            team[key] += record[key]
+    return totals
+
+
+def _historical_rows(records: list[dict], *, espn_id: str, game_date,
+                     home_abbr: str, away_abbr: str, home_score: int,
+                     away_score: int) -> list[HistoricalGameLog]:
+    season = season_for_date(game_date)
+    totals = _record_team_totals(records)
+    rows = []
+    stat_keys = (
+        'pts', 'reb', 'ast', 'stl', 'blk', 'tov', 'fgm', 'fga',
+        'fg3m', 'fg3a', 'ftm', 'fta', 'minutes', 'plus_minus',
+    )
+    for record in records:
+        team = record['team_abbr']
+        is_home = team == home_abbr
+        won = home_score > away_score if is_home else away_score > home_score
+        team_totals = totals[team]
+        stats = {key: record[key] for key in stat_keys}
+        stats['usage_pct'] = usage_pct(
+            record['fga'], record['fta'], record['tov'], record['minutes'],
+            team_totals['minutes'], team_totals['fga'], team_totals['fta'],
+            team_totals['tov'],
+        )
+        stats['team_score'] = float(home_score if is_home else away_score)
+        stats['opp_score'] = float(away_score if is_home else home_score)
+        rows.append(HistoricalGameLog(
+            sport='nba', player_id=record['player_id'],
+            player_name=record['player_name'], team_abbr=team,
+            opp_abbr=away_abbr if is_home else home_abbr,
+            game_id=espn_id, game_date=game_date, season=season,
+            home_away='HOME' if is_home else 'AWAY',
+            win_loss='W' if won else 'L', starter=record['starter'],
+            stats=stats,
+        ))
+    return rows
+
+
 def append_final_game(game: dict) -> int:
     """Insert HistoricalGameLog rows for one final scoreboard game dict."""
     espn_id = str(game.get('espn_id') or '')
@@ -107,51 +165,18 @@ def append_final_game(game: dict) -> int:
     if not records:
         return 0
 
-    try:
-        game_date = datetime.fromisoformat(
-            game.get('start_time', '').replace('Z', '+00:00')
-        ).astimezone(ET).date()
-    except (ValueError, TypeError, AttributeError):
-        logger.warning("history-append: %s bad start_time %r",
-                       espn_id, game.get('start_time'))
+    game_date = _scoreboard_game_date(game, espn_id)
+    if game_date is None:
         return 0
 
     try:
-        season = season_for_date(game_date)
         home_score = int(game.get('home', {}).get('score') or 0)
         away_score = int(game.get('away', {}).get('score') or 0)
-
-        totals = {}
-        for rec in records:
-            t = totals.setdefault(rec['team_abbr'],
-                                  {'minutes': 0.0, 'fga': 0.0, 'fta': 0.0,
-                                   'tov': 0.0})
-            for key in t:
-                t[key] += rec[key]
-
-        rows = []
-        for rec in records:
-            team, is_home = rec['team_abbr'], rec['team_abbr'] == home_abbr
-            won = (home_score > away_score) if is_home else \
-                  (away_score > home_score)
-            t = totals[team]
-            stats = {k: rec[k] for k in
-                     ('pts', 'reb', 'ast', 'stl', 'blk', 'tov', 'fgm', 'fga',
-                      'fg3m', 'fg3a', 'ftm', 'fta', 'minutes', 'plus_minus')}
-            stats['usage_pct'] = usage_pct(
-                rec['fga'], rec['fta'], rec['tov'], rec['minutes'],
-                t['minutes'], t['fga'], t['fta'], t['tov'])
-            stats['team_score'] = float(home_score if is_home else away_score)
-            stats['opp_score'] = float(away_score if is_home else home_score)
-            rows.append(HistoricalGameLog(
-                sport='nba', player_id=rec['player_id'],
-                player_name=rec['player_name'], team_abbr=team,
-                opp_abbr=away_abbr if is_home else home_abbr,
-                game_id=espn_id, game_date=game_date, season=season,
-                home_away='HOME' if is_home else 'AWAY',
-                win_loss='W' if won else 'L',
-                starter=rec['starter'], stats=stats,
-            ))
+        rows = _historical_rows(
+            records, espn_id=espn_id, game_date=game_date,
+            home_abbr=home_abbr, away_abbr=away_abbr,
+            home_score=home_score, away_score=away_score,
+        )
         db.session.add_all(rows)
         db.session.commit()
         logger.info("history-append: %s +%d rows", espn_id, len(rows))
