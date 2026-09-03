@@ -925,14 +925,11 @@ class ValueDetector:
         if scores is None:
             scores = self.score_all_todays_props()
 
-        candidates = []
-        for play in self.filter_plays(scores, min_edge=min_edge):
-            if play.get('confidence_tier') != 'strong':
-                continue
-            odds = play.get('recommended_odds')
-            if odds is None:
-                continue
-            candidates.append(play)
+        candidates = [
+            play for play in self.filter_plays(scores, min_edge=min_edge)
+            if play.get('confidence_tier') == 'strong'
+            and play.get('recommended_odds') is not None
+        ]
 
         # Keep search space small and deterministic.
         candidates = sorted(
@@ -947,39 +944,13 @@ class ValueDetector:
         best_score = None
         for legs_count in range(min_legs, max_legs + 1):
             for combo in combinations(candidates, legs_count):
-                unique_keys = {(c.get('player'), c.get('prop_type'), c.get('game_id')) for c in combo}
-                if len(unique_keys) != len(combo):
+                candidate = _build_parlay_candidate(combo, min_odds, max_odds)
+                if candidate is None:
                     continue
-
-                dec_prod = 1.0
-                for leg in combo:
-                    dec_prod *= decimal_odds(int(leg.get('recommended_odds')))
-                parlay_american = american_from_decimal(dec_prod)
-                if parlay_american < min_odds or parlay_american > max_odds:
-                    continue
-
-                combo_edge = sum(float(c.get('edge', 0) or 0) for c in combo)
-                ranking_score = combo_edge + 0.001 * sum(int(c.get('games_played', 0) or 0) for c in combo)
-
+                ranking_score, payload = candidate
                 if best_score is None or ranking_score > best_score:
                     best_score = ranking_score
-                    best_combo = {
-                        'combined_odds': parlay_american,
-                        'legs': [{
-                            'player': c.get('player'),
-                            'prop_type': c.get('prop_type'),
-                            'line': c.get('line'),
-                            'side': c.get('recommended_side'),
-                            'odds': c.get('recommended_odds'),
-                            'edge': c.get('edge'),
-                            'game_id': c.get('game_id'),
-                            'home_team': c.get('home_team'),
-                            'away_team': c.get('away_team'),
-                            'match_date': c.get('match_date'),
-                        } for c in combo],
-                        'total_edge': round(combo_edge, 4),
-                        'confidence': 'high',
-                    }
+                    best_combo = payload
 
         return best_combo
 
@@ -992,6 +963,43 @@ class ValueDetector:
             and s.get('confidence_tier') != 'no_edge'
             and s.get('games_played', 0) >= 10
         ]
+
+
+def _build_parlay_candidate(combo: tuple, min_odds: int,
+                            max_odds: int) -> tuple | None:
+    unique_keys = {
+        (play.get('player'), play.get('prop_type'), play.get('game_id'))
+        for play in combo
+    }
+    if len(unique_keys) != len(combo):
+        return None
+    decimal_product = 1.0
+    for play in combo:
+        decimal_product *= decimal_odds(int(play.get('recommended_odds')))
+    combined_odds = american_from_decimal(decimal_product)
+    if not min_odds <= combined_odds <= max_odds:
+        return None
+    total_edge = sum(float(play.get('edge', 0) or 0) for play in combo)
+    sample_score = sum(int(play.get('games_played', 0) or 0) for play in combo)
+    ranking_score = total_edge + 0.001 * sample_score
+    legs = [{
+        'player': play.get('player'),
+        'prop_type': play.get('prop_type'),
+        'line': play.get('line'),
+        'side': play.get('recommended_side'),
+        'odds': play.get('recommended_odds'),
+        'edge': play.get('edge'),
+        'game_id': play.get('game_id'),
+        'home_team': play.get('home_team'),
+        'away_team': play.get('away_team'),
+        'match_date': play.get('match_date'),
+    } for play in combo]
+    return ranking_score, {
+        'combined_odds': combined_odds,
+        'legs': legs,
+        'total_edge': round(total_edge, 4),
+        'confidence': 'high',
+    }
 
 
 def quarter_kelly(edge: float, american_odds: int, bankroll: float) -> float:

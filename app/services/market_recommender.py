@@ -127,6 +127,14 @@ def _metadata_json(meta: ModelMetadata | None) -> dict:
         return {}
 
 
+def _apply_policy_values(target: dict, values) -> None:
+    if not isinstance(values, dict):
+        return
+    for field in ('min_edge', 'min_confidence'):
+        if values.get(field) is not None:
+            target[field] = float(values[field])
+
+
 def _resolve_market_policy(
     ml_meta: ModelMetadata | None,
     tot_meta: ModelMetadata | None,
@@ -137,39 +145,29 @@ def _resolve_market_policy(
         'total_ou': dict(DEFAULT_POLICY['total_ou']),
     }
 
-    ml_payload = _metadata_json(ml_meta).get('recommended_thresholds', {})
-    tot_payload = _metadata_json(tot_meta).get('recommended_thresholds', {})
-    if isinstance(ml_payload, dict):
-        policy['moneyline']['min_edge'] = float(ml_payload.get('min_edge', policy['moneyline']['min_edge']))
-        policy['moneyline']['min_confidence'] = float(
-            ml_payload.get('min_confidence', policy['moneyline']['min_confidence']),
-        )
-    if isinstance(tot_payload, dict):
-        policy['total_ou']['min_edge'] = float(tot_payload.get('min_edge', policy['total_ou']['min_edge']))
-        policy['total_ou']['min_confidence'] = float(
-            tot_payload.get('min_confidence', policy['total_ou']['min_confidence']),
-        )
-
-    env_ml_edge = _env_float_optional('MARKET_REC_MIN_EDGE_ML')
-    env_ml_conf = _env_float_optional('MARKET_REC_MIN_CONF_ML')
-    env_tot_edge = _env_float_optional('MARKET_REC_MIN_EDGE_TOTAL')
-    env_tot_conf = _env_float_optional('MARKET_REC_MIN_CONF_TOTAL')
-    if env_ml_edge is not None:
-        policy['moneyline']['min_edge'] = env_ml_edge
-    if env_ml_conf is not None:
-        policy['moneyline']['min_confidence'] = env_ml_conf
-    if env_tot_edge is not None:
-        policy['total_ou']['min_edge'] = env_tot_edge
-    if env_tot_conf is not None:
-        policy['total_ou']['min_confidence'] = env_tot_conf
-
+    _apply_policy_values(
+        policy['moneyline'],
+        _metadata_json(ml_meta).get('recommended_thresholds', {}),
+    )
+    _apply_policy_values(
+        policy['total_ou'],
+        _metadata_json(tot_meta).get('recommended_thresholds', {}),
+    )
+    env_values = {
+        'moneyline': {
+            'min_edge': _env_float_optional('MARKET_REC_MIN_EDGE_ML'),
+            'min_confidence': _env_float_optional('MARKET_REC_MIN_CONF_ML'),
+        },
+        'total_ou': {
+            'min_edge': _env_float_optional('MARKET_REC_MIN_EDGE_TOTAL'),
+            'min_confidence': _env_float_optional('MARKET_REC_MIN_CONF_TOTAL'),
+        },
+    }
+    for market, values in env_values.items():
+        _apply_policy_values(policy[market], values)
     if isinstance(override, dict):
-        for key in ('moneyline', 'total_ou'):
-            if isinstance(override.get(key), dict):
-                if override[key].get('min_edge') is not None:
-                    policy[key]['min_edge'] = float(override[key]['min_edge'])
-                if override[key].get('min_confidence') is not None:
-                    policy[key]['min_confidence'] = float(override[key]['min_confidence'])
+        for market in ('moneyline', 'total_ou'):
+            _apply_policy_values(policy[market], override.get(market))
 
     return policy
 
