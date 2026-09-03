@@ -142,6 +142,18 @@ def check_defense_snapshot_staleness() -> dict:
     return {"stale": stale, "days_old": days_old, "latest_date": latest.snapshot_date}
 
 
+def _team_abbreviation(team_name: str, name_to_abbr: dict) -> str:
+    if not team_name:
+        return ''
+    normalized = team_name.lower()
+    if normalized in name_to_abbr:
+        return name_to_abbr[normalized]
+    for stored_name, abbreviation in name_to_abbr.items():
+        if stored_name in normalized or normalized in stored_name:
+            return abbreviation
+    return ''
+
+
 def _build_game_total_lookup() -> dict:
     """Build a {(game_date, team_abbr_upper): over_under_line} lookup.
 
@@ -157,19 +169,6 @@ def _build_game_total_lookup() -> dict:
         if snap.team_name and snap.team_abbr:
             name_to_abbr[snap.team_name.lower()] = snap.team_abbr.strip().upper()
 
-    def _abbr_for(team_name: str) -> str:
-        if not team_name:
-            return ''
-        name_lower = team_name.lower()
-        # Exact match first
-        if name_lower in name_to_abbr:
-            return name_to_abbr[name_lower]
-        # Substring match (handles minor variants)
-        for stored_name, abbr in name_to_abbr.items():
-            if stored_name in name_lower or name_lower in stored_name:
-                return abbr
-        return ''
-
     lookup: dict = {}
     snaps = (
         GameSnapshot.query
@@ -178,8 +177,8 @@ def _build_game_total_lookup() -> dict:
     )
     for snap in snaps:
         line = float(snap.over_under_line)
-        home_abbr = _abbr_for(snap.home_team or '')
-        away_abbr = _abbr_for(snap.away_team or '')
+        home_abbr = _team_abbreviation(snap.home_team or '', name_to_abbr)
+        away_abbr = _team_abbreviation(snap.away_team or '', name_to_abbr)
         if home_abbr:
             lookup[(snap.game_date, home_abbr)] = line
         if away_abbr:

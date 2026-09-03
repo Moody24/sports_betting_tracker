@@ -568,7 +568,43 @@ def backfill_game_snapshots(
     }
 
 
-def _extract_market_lines_from_odds_game(game: dict) -> tuple[float | None, int | None, int | None]:
+def _float_or_none(value) -> float | None:
+    try:
+        return float(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _int_or_none(value) -> int | None:
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _total_line(market: dict) -> float | None:
+    for outcome in market.get('outcomes', []):
+        if outcome.get('name') == 'Over':
+            return _float_or_none(outcome.get('point'))
+    return None
+
+
+def _moneylines(market: dict, home_team: str, away_team: str,
+                home_ml: int | None,
+                away_ml: int | None) -> tuple[int | None, int | None]:
+    for outcome in market.get('outcomes', []):
+        name = outcome.get('name', '')
+        price = _int_or_none(outcome.get('price'))
+        if name == home_team and price is not None:
+            home_ml = price
+        elif name == away_team and price is not None:
+            away_ml = price
+    return home_ml, away_ml
+
+
+def _extract_market_lines_from_odds_game(
+    game: dict,
+) -> tuple[float | None, int | None, int | None]:
     """Extract (ou_line, home_ml, away_ml) from an odds payload game entry."""
     home_team = game.get("home_team", "")
     away_team = game.get("away_team", "")
@@ -578,28 +614,12 @@ def _extract_market_lines_from_odds_game(game: dict) -> tuple[float | None, int 
     for bookmaker in game.get("bookmakers", []):
         for market in bookmaker.get("markets", []):
             mkey = market.get("key", "")
-
             if mkey == "totals" and ou_line is None:
-                for outcome in market.get("outcomes", []):
-                    if outcome.get("name") == "Over" and outcome.get("point") is not None:
-                        try:
-                            ou_line = float(outcome.get("point"))
-                        except (TypeError, ValueError):
-                            ou_line = None
-                        break
-
-            if mkey == "h2h" and (home_ml is None or away_ml is None):
-                for outcome in market.get("outcomes", []):
-                    name = outcome.get("name", "")
-                    price = outcome.get("price")
-                    try:
-                        price_int = int(price) if price is not None else None
-                    except (TypeError, ValueError):
-                        price_int = None
-                    if name == home_team and price_int is not None:
-                        home_ml = price_int
-                    elif name == away_team and price_int is not None:
-                        away_ml = price_int
+                ou_line = _total_line(market)
+            elif mkey == "h2h" and (home_ml is None or away_ml is None):
+                home_ml, away_ml = _moneylines(
+                    market, home_team, away_team, home_ml, away_ml,
+                )
 
         if ou_line is not None and home_ml is not None and away_ml is not None:
             break

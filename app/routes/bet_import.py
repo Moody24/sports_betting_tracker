@@ -24,7 +24,64 @@ from app.services.bet_placement_service import (
 
 logger = logging.getLogger(__name__)
 
+_OCR_STAT_PATTERNS = (
+    (r'\b(?:pra|points?\s*\+\s*rebounds?\s*\+\s*assists?'
+     r'|pts\s*\+\s*reb\s*\+\s*ast)\b',
+     'player_points_rebounds_assists'),
+    (r'\bpoints?\b', 'player_points'),
+    (r'\brebs?\b|\brebounds?\b', 'player_rebounds'),
+    (r'\basts?\b|\bassists?\b', 'player_assists'),
+    (r'\b3[- ]?pointers?\b|\bthrees?\b|\b3pts?\b', 'player_threes'),
+    (r'\bblocks?\b|\bblks?\b', 'player_blocks'),
+    (r'\bsteals?\b|\bstls?\b', 'player_steals'),
+)
+_OCR_NON_PLAYER_LABELS = {
+    'Over', 'Under', 'Game', 'Player', 'Total', 'Points', 'Rebounds',
+    'Assists', 'Parlay', 'Bet', 'Same', 'Alternate', 'Combo', 'Spread',
+}
+
 # ── Helpers ───────────────────────────────────────────────────────────────
+
+
+def _first_valid_number(pattern: str, text: str, minimum: float,
+                        maximum: float, cast=float):
+    matches = re.findall(pattern, text)
+    if not matches:
+        return None
+    value = cast(matches[0])
+    return value if minimum <= value <= maximum and value != 0 else None
+
+
+def _ocr_teams(text: str) -> tuple[str | None, str | None]:
+    match = re.search(
+        r'([A-Za-z][A-Za-z\s]{2,25})\s+(?:@|vs\.?)\s+'
+        r'([A-Za-z][A-Za-z\s]{2,25})',
+        text,
+        re.IGNORECASE,
+    )
+    if not match:
+        return None, None
+    teams = tuple(group.strip() for group in match.groups())
+    if all(3 < len(team) < 30 for team in teams):
+        return teams
+    return None, None
+
+
+def _ocr_prop_type(text: str) -> str | None:
+    for pattern, stat_type in _OCR_STAT_PATTERNS:
+        if re.search(pattern, text, re.IGNORECASE):
+            return stat_type
+    return None
+
+
+def _ocr_player_name(text: str) -> str | None:
+    pattern = r'^([A-Z][a-z]+(?:\s+[A-Z][a-z\']+)+)'
+    for match in re.finditer(pattern, text, re.MULTILINE):
+        candidate = match.group(1).strip()
+        if candidate not in _OCR_NON_PLAYER_LABELS \
+                and len(candidate.split()) >= 2:
+            return candidate
+    return None
 
 def _parse_ocr_text(text: str) -> dict:
     """Parse raw OCR text from a bet screenshot into structured fields."""
@@ -46,54 +103,15 @@ def _parse_ocr_text(text: str) -> dict:
         raw_line = float(ou_match.group(2))
         if 0 < raw_line < 200:  # reject impossible lines (negative, zero, or absurd)
             result['prop_line'] = raw_line
-
-    odds_matches = re.findall(r'([+\-]\d{3,4})', text)
-    if odds_matches:
-        raw_odds = int(odds_matches[0])
-        if raw_odds != 0 and -2500 <= raw_odds <= 2500:  # valid American odds range
-            result['american_odds'] = raw_odds
-
-    stake_matches = re.findall(r'\$\s*([\d]+\.?\d*)', text)
-    if stake_matches:
-        raw_stake = float(stake_matches[0])
-        if 0 < raw_stake <= 10000:  # reject zero, negative, or implausible stakes
-            result['stake'] = raw_stake
-
-    vs_match = re.search(
-        r'([A-Za-z][A-Za-z\s]{2,25})\s+(?:@|vs\.?)\s+([A-Za-z][A-Za-z\s]{2,25})',
-        text, re.IGNORECASE,
+    result['american_odds'] = _first_valid_number(
+        r'([+\-]\d{3,4})', text, -2500, 2500, int,
     )
-    if vs_match:
-        t1 = vs_match.group(1).strip()
-        t2 = vs_match.group(2).strip()
-        if 3 < len(t1) < 30 and 3 < len(t2) < 30:
-            result['team_a'] = t1
-            result['team_b'] = t2
-
-    stat_map = [
-        (r'\b(?:pra|points?\s*\+\s*rebounds?\s*\+\s*assists?|pts\s*\+\s*reb\s*\+\s*ast)\b', 'player_points_rebounds_assists'),
-        (r'\bpoints?\b', 'player_points'),
-        (r'\brebs?\b|\brebounds?\b', 'player_rebounds'),
-        (r'\basts?\b|\bassists?\b', 'player_assists'),
-        (r'\b3[- ]?pointers?\b|\bthrees?\b|\b3pts?\b', 'player_threes'),
-        (r'\bblocks?\b|\bblks?\b', 'player_blocks'),
-        (r'\bsteals?\b|\bstls?\b', 'player_steals'),
-    ]
-    for pattern, stat_type in stat_map:
-        if re.search(pattern, text, re.IGNORECASE):
-            result['prop_type'] = stat_type
-            break
-
-    non_player = {
-        'Over', 'Under', 'Game', 'Player', 'Total', 'Points', 'Rebounds',
-        'Assists', 'Parlay', 'Bet', 'Same', 'Alternate', 'Combo', 'Spread',
-    }
-    for m in re.finditer(r'^([A-Z][a-z]+(?:\s+[A-Z][a-z\']+)+)', text, re.MULTILINE):
-        candidate = m.group(1).strip()
-        if candidate not in non_player and len(candidate.split()) >= 2:
-            result['player_name'] = candidate
-            break
-
+    result['stake'] = _first_valid_number(
+        r'\$\s*([\d]+\.?\d*)', text, 0, 10000,
+    )
+    result['team_a'], result['team_b'] = _ocr_teams(text)
+    result['prop_type'] = _ocr_prop_type(text)
+    result['player_name'] = _ocr_player_name(text)
     return result
 
 
