@@ -728,6 +728,110 @@ def generate_daily_auto_picks():
         )
 
 
+def _bootstrap_tier(edge: float) -> str:
+    if edge >= 0.15:
+        return 'strong'
+    if edge >= 0.08:
+        return 'moderate'
+    return 'slight'
+
+
+def _bootstrap_opponent(log) -> str:
+    matchup = log.matchup or ''
+    if ' vs. ' in matchup:
+        return matchup.split(' vs. ', 1)[1].strip()
+    if ' @ ' in matchup:
+        return matchup.split(' @ ', 1)[1].strip()
+    return ''
+
+
+def _bootstrap_market_values(log, rng, stat_map, Outcome) -> dict | None:
+    prop_type, stat_key, spread = rng.choice(stat_map)
+    actual = float(getattr(log, stat_key, 0) or 0)
+    if actual < 0:
+        return None
+    line = max(0.5, round(actual + rng.uniform(-spread, spread)) + 0.5)
+    bet_type = 'over' if rng.random() >= 0.5 else 'under'
+    is_win = actual > line if bet_type == 'over' else actual < line
+    return {
+        'prop_type': prop_type,
+        'stat_key': stat_key,
+        'actual': actual,
+        'line': line,
+        'bet_type': bet_type,
+        'outcome': Outcome.WIN.value if is_win else Outcome.LOSE.value,
+        'odds': (-110 if rng.random() >= 0.3
+                 else int(rng.choice([100, 105, 110, 115, 120]))),
+    }
+
+
+def _create_bootstrap_example(log, user_id: int, rng, stat_map, *, db,
+                              Bet, PickContext, BetSource, Outcome,
+                              build_features, get_summary) -> bool:
+    if not log.game_date or log.game_date >= datetime.now(timezone.utc).date():
+        return False
+    market = _bootstrap_market_values(log, rng, stat_map, Outcome)
+    if market is None:
+        return False
+    summary = get_summary(str(log.player_id), logs=None)
+    season_avg = float(
+        summary.get('season', {}).get(
+            market['stat_key'], market['actual'],
+        ) or market['actual']
+    )
+    projected_stat = season_avg + rng.uniform(-1.5, 1.5)
+    projected_edge = (
+        (projected_stat - market['line']) / max(market['line'], 1.0)
+    )
+    if market['bet_type'] == 'under':
+        projected_edge = (
+            (market['line'] - projected_stat) / max(market['line'], 1.0)
+        )
+    tier = _bootstrap_tier(abs(projected_edge))
+    context = build_features(
+        player_name=log.player_name,
+        player_id=str(log.player_id),
+        prop_type=market['prop_type'],
+        prop_line=float(market['line']),
+        american_odds=int(market['odds']),
+        projected_stat=float(round(projected_stat, 2)),
+        projected_edge=float(round(projected_edge, 4)),
+        confidence_tier=tier,
+        opponent_name=_bootstrap_opponent(log),
+        team_name=str(log.team_abbr or ''),
+        is_home=(log.home_away or '').lower() == 'home',
+    )
+    bet_obj = Bet(
+        user_id=user_id,
+        team_a=str(log.team_abbr or 'TEAM'),
+        team_b='OPP',
+        match_date=datetime.combine(log.game_date, dt_time.min),
+        bet_amount=10.0,
+        outcome=market['outcome'],
+        american_odds=int(market['odds']),
+        is_parlay=False,
+        source=BetSource.AUTO_GENERATED.value,
+        bet_type=market['bet_type'],
+        over_under_line=None,
+        external_game_id=None,
+        player_name=log.player_name,
+        prop_type=market['prop_type'],
+        prop_line=float(market['line']),
+        actual_total=float(market['actual']),
+        notes='AUTO_BOOTSTRAP_HIDDEN:model2',
+    )
+    db.session.add(bet_obj)
+    db.session.flush()
+    db.session.add(PickContext(
+        bet_id=bet_obj.id,
+        context_json=json.dumps(context),
+        projected_stat=float(round(projected_stat, 2)),
+        projected_edge=float(round(projected_edge, 4)),
+        confidence_tier=tier,
+    ))
+    return True
+
+
 def bootstrap_pick_quality_examples(target_resolved: int = 220, max_logs: int = 10000) -> dict:
     """Backfill hidden resolved auto picks + PickContext for Model 2 bootstrap."""
     from app import db
@@ -782,97 +886,14 @@ def bootstrap_pick_quality_examples(target_resolved: int = 220, max_logs: int = 
             if created >= needed:
                 break
             scan_count += 1
-
-            # Keep bootstrap samples in the past only.
-            if not log.game_date or log.game_date >= datetime.now(timezone.utc).date():
-                continue
-
-            prop_type, stat_key, spread = rng.choice(stat_map)
-            actual = float(getattr(log, stat_key, 0) or 0)
-            if actual < 0:
-                continue
-
-            # Use half-lines to avoid push labels.
-            base_line = actual + rng.uniform(-spread, spread)
-            line = round(base_line) + 0.5
-            if line < 0.5:
-                line = 0.5
-
-            bet_type = 'over' if rng.random() >= 0.5 else 'under'
-            is_win = actual > line if bet_type == 'over' else actual < line
-            outcome = Outcome.WIN.value if is_win else Outcome.LOSE.value
-            odds = -110 if rng.random() >= 0.3 else int(rng.choice([100, 105, 110, 115, 120]))
-
-            summary = get_player_stats_summary(str(log.player_id), logs=None)
-            season_avg = float(summary.get('season', {}).get(stat_key, actual) or actual)
-            projected_stat = season_avg + rng.uniform(-1.5, 1.5)
-            projected_edge = (projected_stat - line) / max(line, 1.0)
-            if bet_type == 'under':
-                projected_edge = (line - projected_stat) / max(line, 1.0)
-            edge_abs = abs(projected_edge)
-            if edge_abs >= 0.15:
-                tier = 'strong'
-            elif edge_abs >= 0.08:
-                tier = 'moderate'
-            else:
-                tier = 'slight'
-
-            # Extract opponent abbreviation from matchup string (e.g. "LAL vs. BOS"
-            # or "LAL @ BOS") so bootstrap rows get real matchup context instead of
-            # zeroed-out features that pollute Model 2 training.
-            matchup = log.matchup or ''
-            is_home = (log.home_away or '').lower() == 'home'
-            opponent_abbr = ''
-            if ' vs. ' in matchup:
-                opponent_abbr = matchup.split(' vs. ', 1)[1].strip()
-            elif ' @ ' in matchup:
-                opponent_abbr = matchup.split(' @ ', 1)[1].strip()
-
-            context = build_pick_context_features(
-                player_name=log.player_name,
-                player_id=str(log.player_id),
-                prop_type=prop_type,
-                prop_line=float(line),
-                american_odds=int(odds),
-                projected_stat=float(round(projected_stat, 2)),
-                projected_edge=float(round(projected_edge, 4)),
-                confidence_tier=tier,
-                opponent_name=opponent_abbr,
-                team_name=str(log.team_abbr or ''),
-                is_home=is_home,
+            was_created = _create_bootstrap_example(
+                log, system_user.id, rng, stat_map, db=db, Bet=Bet,
+                PickContext=PickContext, BetSource=BetSource,
+                Outcome=Outcome, build_features=build_pick_context_features,
+                get_summary=get_player_stats_summary,
             )
-
-            bet_obj = Bet(
-                user_id=system_user.id,
-                team_a=str(log.team_abbr or 'TEAM'),
-                team_b='OPP',
-                match_date=datetime.combine(log.game_date, dt_time.min),
-                bet_amount=10.0,
-                outcome=outcome,
-                american_odds=int(odds),
-                is_parlay=False,
-                source=BetSource.AUTO_GENERATED.value,
-                bet_type=bet_type,
-                over_under_line=None,
-                external_game_id=None,
-                player_name=log.player_name,
-                prop_type=prop_type,
-                prop_line=float(line),
-                actual_total=float(actual),
-                notes='AUTO_BOOTSTRAP_HIDDEN:model2',
-            )
-            db.session.add(bet_obj)
-            db.session.flush()
-
-            db.session.add(PickContext(
-                bet_id=bet_obj.id,
-                context_json=json.dumps(context),
-                projected_stat=float(round(projected_stat, 2)),
-                projected_edge=float(round(projected_edge, 4)),
-                confidence_tier=tier,
-            ))
-            created += 1
-            created_ctx += 1
+            created += int(was_created)
+            created_ctx += int(was_created)
 
             if created % 100 == 0:
                 db.session.commit()
@@ -947,6 +968,61 @@ def resolve_and_grade():
         db.session.commit()
 
 
+def _projection_retrain_allowed(ModelMetadata, PlayerGameLog) -> bool:
+    models = (
+        ModelMetadata.query
+        .filter(ModelMetadata.model_name.like('projection_%'))
+        .filter_by(is_active=True)
+        .all()
+    )
+    latest = max(
+        (model.training_date for model in models if model.training_date),
+        default=None,
+    )
+    points_model = next(
+        (model for model in models
+         if model.model_name == 'projection_player_points'),
+        None,
+    )
+    metadata_source = (
+        points_model.metadata_json if points_model
+        else models[0].metadata_json if models else None
+    )
+    last_logged_rows = None
+    if metadata_source:
+        try:
+            last_logged_rows = json.loads(metadata_source).get(
+                'player_game_log_rows',
+            )
+        except (TypeError, ValueError):
+            pass
+    should_train = True
+    if latest:
+        latest = (latest.replace(tzinfo=timezone.utc)
+                  if latest.tzinfo is None else latest)
+        days_since_train = (datetime.now(timezone.utc) - latest).days
+        if days_since_train < 7:
+            logger.info(
+                "Skipping projection retrain: latest model is %d day(s) old "
+                "(< 7 days).", days_since_train,
+            )
+            should_train = False
+    try:
+        previous_rows = (int(last_logged_rows)
+                         if last_logged_rows is not None else None)
+    except (TypeError, ValueError):
+        previous_rows = None
+    current_rows = PlayerGameLog.query.count()
+    if previous_rows is not None and current_rows <= previous_rows:
+        logger.info(
+            "Skipping projection retrain: no new PlayerGameLog rows since "
+            "last training (current=%d, last=%d).",
+            current_rows, previous_rows,
+        )
+        should_train = False
+    return should_train
+
+
 def retrain_models():
     """Scheduled model retrain using accumulated game log data."""
     app = _get_app()
@@ -955,64 +1031,7 @@ def retrain_models():
         from app.services.ml_model import retrain_all_models
         from app.services.pick_quality_model import train_pick_quality_model
 
-        projection_models = (
-            ModelMetadata.query
-            .filter(ModelMetadata.model_name.like('projection_%'))
-            .filter_by(is_active=True)
-            .all()
-        )
-
-        latest_projection_train = None
-        last_logged_rows = None
-        if projection_models:
-            latest_projection_train = max(
-                (m.training_date for m in projection_models if m.training_date),
-                default=None,
-            )
-
-            # Use points model metadata as canonical snapshot when available.
-            points_model = next(
-                (m for m in projection_models if m.model_name == 'projection_player_points'),
-                None,
-            )
-            metadata_source = points_model.metadata_json if points_model else projection_models[0].metadata_json
-            if metadata_source:
-                try:
-                    metadata = json.loads(metadata_source)
-                    last_logged_rows = metadata.get('player_game_log_rows')
-                except (TypeError, ValueError):
-                    last_logged_rows = None
-
-        projection_should_train = True
-
-        if latest_projection_train:
-            if latest_projection_train.tzinfo is None:
-                latest_projection_train = latest_projection_train.replace(tzinfo=timezone.utc)
-            days_since_train = (datetime.now(timezone.utc) - latest_projection_train).days
-            if days_since_train < 7:
-                logger.info(
-                    "Skipping projection retrain: latest model is %d day(s) old (< 7 days).",
-                    days_since_train,
-                )
-                projection_should_train = False
-
-        current_rows = PlayerGameLog.query.count()
-        last_rows_int = None
-        if last_logged_rows is not None:
-            try:
-                last_rows_int = int(last_logged_rows)
-            except (TypeError, ValueError):
-                last_rows_int = None
-
-        if last_rows_int is not None and current_rows <= last_rows_int:
-            logger.info(
-                "Skipping projection retrain: no new PlayerGameLog rows since last training "
-                "(current=%d, last=%d).",
-                current_rows, last_rows_int,
-            )
-            projection_should_train = False
-
-        if projection_should_train:
+        if _projection_retrain_allowed(ModelMetadata, PlayerGameLog):
             results = retrain_all_models()
             logger.info("Projection model retrain complete: %s", results)
         else:
@@ -1020,6 +1039,45 @@ def retrain_models():
 
         pq_result = train_pick_quality_model()
         logger.info("Pick quality model retrain: %s", pq_result)
+
+
+def _training_pollution(rows: list, is_polluted) -> tuple[int, float]:
+    polluted = 0
+    for _, pick_context in rows:
+        try:
+            context = (json.loads(pick_context.context_json)
+                       if pick_context.context_json else {})
+        except (ValueError, TypeError):
+            polluted += 1
+            continue
+        polluted += int(is_polluted(context))
+    return polluted, polluted / max(len(rows), 1)
+
+
+def _average_projected_edge(rows: list) -> float:
+    edges = [
+        float(pick_context.projected_edge)
+        for _, pick_context in rows
+        if pick_context.projected_edge is not None
+    ]
+    return sum(edges) / len(edges) if edges else 0.0
+
+
+def _drift_warning_parts(delta: float, validation_accuracy: float,
+                         rolling_rate: float, pollution_ratio: float,
+                         polluted: int, total_training: int) -> list[str]:
+    parts = []
+    if abs(delta) > 0.04:
+        parts.append(
+            f"rolling_win_rate={rolling_rate:.3f}, "
+            f"val_accuracy={validation_accuracy:.3f}, delta={delta:+.3f}"
+        )
+    if pollution_ratio > 0.3:
+        parts.append(
+            f"training_pollution={pollution_ratio:.0%} "
+            f"({polluted}/{total_training} rows have zeroed matchup context)"
+        )
+    return parts
 
 
 def check_model_drift():
@@ -1077,27 +1135,10 @@ def check_model_drift():
             .filter(Bet.outcome.in_(['win', 'lose']))
             .all()
         )
-        polluted = 0
-        for _, pc in all_training:
-            try:
-                ctx = json.loads(pc.context_json) if pc.context_json else {}
-            except (ValueError, TypeError):
-                polluted += 1
-                continue
-            if _is_polluted_context(ctx):
-                polluted += 1
-        pollution_ratio = polluted / max(len(all_training), 1)
-
-        # Calibration: compare average predicted edge to actual win rate
-        avg_edge = 0.0
-        edge_count = 0
-        for _, ctx in resolved:
-            pe = ctx.projected_edge
-            if pe is not None:
-                avg_edge += float(pe)
-                edge_count += 1
-        if edge_count > 0:
-            avg_edge /= edge_count
+        polluted, pollution_ratio = _training_pollution(
+            all_training, _is_polluted_context,
+        )
+        avg_edge = _average_projected_edge(resolved)
 
         pq_model = ModelMetadata.query.filter_by(
             model_name='pick_quality_nba', is_active=True,
@@ -1114,18 +1155,11 @@ def check_model_drift():
             len(resolved), pollution_ratio * 100,
         )
 
-        if abs(delta) > 0.04 or pollution_ratio > 0.3:
-            parts = []
-            if abs(delta) > 0.04:
-                parts.append(
-                    f"rolling_win_rate={rolling_rate:.3f}, "
-                    f"val_accuracy={pq_model.val_accuracy:.3f}, delta={delta:+.3f}"
-                )
-            if pollution_ratio > 0.3:
-                parts.append(
-                    f"training_pollution={pollution_ratio:.0%} "
-                    f"({polluted}/{len(all_training)} rows have zeroed matchup context)"
-                )
+        parts = _drift_warning_parts(
+            delta, pq_model.val_accuracy, rolling_rate, pollution_ratio,
+            polluted, len(all_training),
+        )
+        if parts:
             warning_msg = "Model drift detected: " + "; ".join(parts)
             logger.warning(warning_msg)
             now = datetime.now(timezone.utc)

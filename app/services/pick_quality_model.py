@@ -103,6 +103,64 @@ def _is_polluted_context(ctx: dict) -> bool:
     return zeroed == len(matchup_keys)
 
 
+def _resolved_training_rows(user_id: int | None,
+                            include_bootstrap: bool) -> list:
+    query = (
+        db.session.query(Bet, PickContext)
+        .join(PickContext, Bet.id == PickContext.bet_id)
+        .filter(Bet.outcome.in_(['win', 'lose']))
+    )
+    if user_id is not None:
+        query = query.filter(Bet.user_id == int(user_id))
+    if not include_bootstrap:
+        query = query.filter(
+            db.or_(Bet.notes.is_(None),
+                   ~Bet.notes.like('AUTO_BOOTSTRAP_HIDDEN%')),
+        )
+    include_paper = str(
+        os.getenv('MODEL2_INCLUDE_PAPER_COHORTS', 'true'),
+    ).strip().lower() in ('1', 'true', 'yes', 'on')
+    if not include_paper:
+        query = query.filter(
+            db.or_(Bet.notes.is_(None),
+                   ~Bet.notes.like('AUTO_PAPER_COHORT:%')),
+        )
+    return query.all()
+
+
+def _pick_training_features(pick_context: PickContext) -> tuple[dict | None, str]:
+    try:
+        context = json.loads(
+            pick_context.context_json,
+        ) if pick_context.context_json else {}
+    except (ValueError, TypeError):
+        return None, 'invalid'
+    if _is_polluted_context(context):
+        return None, 'polluted'
+    features = {}
+    for key in PICK_FEATURES:
+        value = context.get(key, 0)
+        if isinstance(value, bool):
+            value = int(value)
+        try:
+            features[key] = float(value)
+        except (ValueError, TypeError):
+            features[key] = 0.0
+    features['player_trend'] = TREND_MAP.get(
+        context.get('player_last5_trend', ''), 0,
+    )
+    features['minutes_trend'] = MINUTES_MAP.get(
+        context.get('minutes_trend', ''), 0,
+    )
+    features['confidence_tier_num'] = TIER_MAP.get(
+        context.get('confidence_tier', ''), 0,
+    )
+    features['injury_returning'] = int(
+        context.get('injury_returning', False),
+    )
+    return features, 'ok'
+
+
 def _build_training_data(user_id: int | None = None, include_bootstrap: bool = False):
     """Build training data from resolved bets that have PickContext.
 
@@ -117,26 +175,7 @@ def _build_training_data(user_id: int | None = None, include_bootstrap: bool = F
 
     Returns (features_list, targets) or (None, None) if insufficient data.
     """
-    # Get all resolved bets with pick context
-    query = (
-        db.session.query(Bet, PickContext)
-        .join(PickContext, Bet.id == PickContext.bet_id)
-        .filter(Bet.outcome.in_(['win', 'lose']))
-    )
-    if user_id is not None:
-        query = query.filter(Bet.user_id == int(user_id))
-    if not include_bootstrap:
-        query = query.filter(
-            db.or_(Bet.notes.is_(None), ~Bet.notes.like('AUTO_BOOTSTRAP_HIDDEN%'))
-        )
-    include_paper = str(os.getenv('MODEL2_INCLUDE_PAPER_COHORTS', 'true')).strip().lower() in (
-        '1', 'true', 'yes', 'on',
-    )
-    if not include_paper:
-        query = query.filter(
-            db.or_(Bet.notes.is_(None), ~Bet.notes.like('AUTO_PAPER_COHORT:%'))
-        )
-    resolved = query.all()
+    resolved = _resolved_training_rows(user_id, include_bootstrap)
 
     if len(resolved) < MIN_RESOLVED_PICKS:
         logger.info(
@@ -151,35 +190,10 @@ def _build_training_data(user_id: int | None = None, include_bootstrap: bool = F
     skipped_polluted = 0
 
     for bet_obj, pick_ctx in resolved:
-        try:
-            ctx = json.loads(pick_ctx.context_json) if pick_ctx.context_json else {}
-        except (ValueError, TypeError):
+        features, status = _pick_training_features(pick_ctx)
+        skipped_polluted += int(status == 'polluted')
+        if features is None:
             continue
-
-        # Skip rows with polluted (all-zero) matchup context — these were
-        # generated without opponent/team info and would teach the model to
-        # ignore the most predictive features.
-        if _is_polluted_context(ctx):
-            skipped_polluted += 1
-            continue
-
-        features = {}
-        for key in PICK_FEATURES:
-            val = ctx.get(key, 0)
-            # Convert booleans to int
-            if isinstance(val, bool):
-                val = int(val)
-            try:
-                features[key] = float(val)
-            except (ValueError, TypeError):
-                features[key] = 0.0
-
-        # Encode categorical features
-        features['player_trend'] = TREND_MAP.get(ctx.get('player_last5_trend', ''), 0)
-        features['minutes_trend'] = MINUTES_MAP.get(ctx.get('minutes_trend', ''), 0)
-        features['confidence_tier_num'] = TIER_MAP.get(ctx.get('confidence_tier', ''), 0)
-        features['injury_returning'] = int(ctx.get('injury_returning', False))
-
         features_list.append(features)
         targets.append(1 if bet_obj.outcome == 'win' else 0)
         # Preserve match_date for time-aware splitting — None-safe.
@@ -210,6 +224,61 @@ class TemporalPickSplit:
     metadata: dict
 
 
+def _temporal_pick_indices(dates: list) -> tuple:
+    valid = [index for index, value in enumerate(dates) if value is not None]
+    if len(valid) < MIN_RESOLVED_PICKS:
+        raise ValueError(
+            f'Insufficient dated Model 2 rows: {len(valid)} '
+            f'(need {MIN_RESOLVED_PICKS})'
+        )
+    valid.sort(key=lambda index: dates[index])
+    unique_dates = sorted({dates[index] for index in valid})
+    if len(unique_dates) < 4:
+        raise ValueError('Model 2 needs at least four unique match dates')
+    train_date_count = max(
+        2, min(int(len(unique_dates) * 0.70), len(unique_dates) - 2),
+    )
+    calibration_end_count = max(
+        train_date_count + 1,
+        min(int(len(unique_dates) * 0.85), len(unique_dates) - 1),
+    )
+    train_cutoff = unique_dates[train_date_count - 1]
+    calibration_cutoff = unique_dates[calibration_end_count - 1]
+    train = [index for index in valid if dates[index] <= train_cutoff]
+    calibration = [
+        index for index in valid
+        if train_cutoff < dates[index] <= calibration_cutoff
+    ]
+    test = [index for index in valid if dates[index] > calibration_cutoff]
+    early_count = max(1, int(len(train) * 0.10))
+    return (valid, train[:-early_count], train[-early_count:], calibration,
+            test, train_cutoff, calibration_cutoff)
+
+
+def _validate_pick_partitions(targets: list, partitions: tuple) -> None:
+    fit, early, calibration, test = partitions
+    if len(calibration) < MIN_CALIBRATION_PICKS:
+        raise ValueError(
+            f'Insufficient Model 2 calibration rows: {len(calibration)} '
+            f'(need {MIN_CALIBRATION_PICKS})'
+        )
+    if len(test) < MIN_TEST_PICKS:
+        raise ValueError(
+            f'Insufficient Model 2 test rows: {len(test)} '
+            f'(need {MIN_TEST_PICKS})'
+        )
+    if not fit or not early:
+        raise ValueError('Insufficient Model 2 rows for fit and early stopping')
+    for name, indices in zip(
+        ('fit', 'early stopping', 'calibration', 'test'), partitions,
+    ):
+        classes = {int(targets[index]) for index in indices}
+        if classes != {0, 1}:
+            raise ValueError(
+                f'Model 2 {name} partition must contain wins and losses',
+            )
+
+
 def _prepare_training_data(features_list, targets, dates) -> TemporalPickSplit:
     """Build a mandatory date-boundary fit/early/calibration/test split."""
     import numpy as np
@@ -218,57 +287,13 @@ def _prepare_training_data(features_list, targets, dates) -> TemporalPickSplit:
         raise ValueError('Model 2 features, targets, and dates must be non-empty and aligned')
 
     feature_names = list(features_list[0].keys())
-    valid = [i for i, value in enumerate(dates) if value is not None]
-    excluded_missing_dates = len(dates) - len(valid)
-    if len(valid) < MIN_RESOLVED_PICKS:
-        raise ValueError(
-            f'Insufficient dated Model 2 rows: {len(valid)} (need {MIN_RESOLVED_PICKS})'
-        )
-
-    valid.sort(key=lambda i: dates[i])
-    unique_dates = sorted({dates[i] for i in valid})
-    if len(unique_dates) < 4:
-        raise ValueError('Model 2 needs at least four unique match dates')
-    train_date_count = max(2, min(int(len(unique_dates) * 0.70), len(unique_dates) - 2))
-    calibration_end_count = max(
-        train_date_count + 1,
-        min(int(len(unique_dates) * 0.85), len(unique_dates) - 1),
+    (valid, fit_indices, early_indices, calibration_indices, test_indices,
+     train_cutoff, calibration_cutoff) = _temporal_pick_indices(dates)
+    partitions = (
+        fit_indices, early_indices, calibration_indices, test_indices,
     )
-    train_cutoff = unique_dates[train_date_count - 1]
-    calibration_cutoff = unique_dates[calibration_end_count - 1]
-
-    train_indices = [i for i in valid if dates[i] <= train_cutoff]
-    calibration_indices = [
-        i for i in valid if train_cutoff < dates[i] <= calibration_cutoff
-    ]
-    test_indices = [i for i in valid if dates[i] > calibration_cutoff]
-    early_count = max(1, int(len(train_indices) * 0.10))
-    fit_indices = train_indices[:-early_count]
-    early_indices = train_indices[-early_count:]
-
-    if len(calibration_indices) < MIN_CALIBRATION_PICKS:
-        raise ValueError(
-            f'Insufficient Model 2 calibration rows: {len(calibration_indices)} '
-            f'(need {MIN_CALIBRATION_PICKS})'
-        )
-    if len(test_indices) < MIN_TEST_PICKS:
-        raise ValueError(
-            f'Insufficient Model 2 test rows: {len(test_indices)} (need {MIN_TEST_PICKS})'
-        )
-    if not fit_indices or not early_indices:
-        raise ValueError('Insufficient Model 2 rows for fit and early stopping')
-
-    def _classes(indices):
-        return {int(targets[i]) for i in indices}
-
-    for name, indices in (
-        ('fit', fit_indices),
-        ('early stopping', early_indices),
-        ('calibration', calibration_indices),
-        ('test', test_indices),
-    ):
-        if _classes(indices) != {0, 1}:
-            raise ValueError(f'Model 2 {name} partition must contain wins and losses')
+    _validate_pick_partitions(targets, partitions)
+    excluded_missing_dates = len(dates) - len(valid)
 
     X = np.array([[features_list[i][key] for key in feature_names] for i in valid])
     y = np.array([targets[i] for i in valid])
@@ -655,6 +680,41 @@ def get_feature_importance() -> list:
         return []
 
 
+def _active_pick_model_metadata(user_id: int | None):
+    metadata = None
+    if user_id is not None:
+        metadata = ModelMetadata.query.filter_by(
+            model_name=_model_name(user_id), is_active=True,
+        ).first()
+    if metadata is None:
+        metadata = ModelMetadata.query.filter_by(
+            model_name=_model_name(None), is_active=True,
+        ).first()
+    return metadata
+
+
+def _probe_artifact_path(meta: ModelMetadata,
+                         user_id: int | None) -> tuple[str | None, str | None]:
+    path = materialize_model_artifact(meta.file_path)
+    if path:
+        return path, 'configured_path'
+    path = _find_local_model_fallback(_model_name(user_id))
+    return (path, 'local_fallback') if path else (None, None)
+
+
+def _artifact_load_error(local_path: str, classifier_type) -> str | None:
+    try:
+        if local_path.endswith('.pkl'):
+            import joblib
+            joblib.load(local_path)
+        else:
+            model = classifier_type()
+            model.load_model(local_path)
+    except Exception as exc:
+        return f'load_error:{type(exc).__name__}'
+    return None
+
+
 def get_model_runtime_probe(user_id: int | None = None) -> dict:
     """Return runtime diagnostics for active Model 2 artifact availability.
 
@@ -680,16 +740,7 @@ def get_model_runtime_probe(user_id: int | None = None) -> dict:
         probe['reason'] = 'xgboost_missing'
         return probe
 
-    meta = None
-    if user_id is not None:
-        meta = ModelMetadata.query.filter_by(
-            model_name=_model_name(user_id), is_active=True,
-        ).first()
-    if meta is None:
-        meta = ModelMetadata.query.filter_by(
-            model_name=_model_name(None), is_active=True,
-        ).first()
-
+    meta = _active_pick_model_metadata(user_id)
     if not meta:
         probe['reason'] = 'no_active_model'
         return probe
@@ -698,35 +749,19 @@ def get_model_runtime_probe(user_id: int | None = None) -> dict:
     probe['model_version'] = meta.version
     probe['path_scheme'] = 's3' if str(meta.file_path or '').startswith('s3://') else 'local'
 
-    local_model_path = materialize_model_artifact(meta.file_path)
-    if local_model_path:
-        probe['artifact_source'] = 'configured_path'
-    else:
-        local_model_path = _find_local_model_fallback(_model_name(user_id))
-        if local_model_path:
-            probe['artifact_source'] = 'local_fallback'
-
+    local_model_path, probe['artifact_source'] = _probe_artifact_path(
+        meta, user_id,
+    )
     if not local_model_path:
         probe['reason'] = 'artifact_unavailable'
         return probe
 
     probe['artifact_basename'] = os.path.basename(local_model_path)
 
-    # Validate loadability without running predictions.
-    if local_model_path.endswith('.pkl'):
-        try:
-            import joblib
-            joblib.load(local_model_path)
-        except Exception as exc:
-            probe['reason'] = f'load_error:{type(exc).__name__}'
-            return probe
-    else:
-        try:
-            model = XGBClassifier()
-            model.load_model(local_model_path)
-        except Exception as exc:
-            probe['reason'] = f'load_error:{type(exc).__name__}'
-            return probe
+    load_error = _artifact_load_error(local_model_path, XGBClassifier)
+    if load_error:
+        probe['reason'] = load_error
+        return probe
 
     probe['model_loadable'] = True
     probe['reason'] = 'ok'

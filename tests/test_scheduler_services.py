@@ -190,6 +190,38 @@ class TestScheduler(BaseTestCase):
                     scheduler_module.retrain_models()
             retrain_mock.assert_called_once()
 
+    def test_bootstrap_pick_quality_creates_context_pair(self):
+        from app.services import scheduler as scheduler_module
+
+        with self.app.app_context():
+            db.session.add(PlayerGameLog(
+                player_id='bootstrap-1',
+                player_name='Bootstrap Player',
+                team_abbr='LAL',
+                game_date=date.today() - timedelta(days=2),
+                matchup='LAL vs. BOS',
+                home_away='home',
+                minutes=32,
+                pts=24,
+                reb=8,
+                ast=6,
+                fg3m=2,
+            ))
+            db.session.commit()
+
+        with patch('app.create_app', return_value=self.app):
+            result = scheduler_module.bootstrap_pick_quality_examples(
+                target_resolved=1, max_logs=10,
+            )
+
+        self.assertEqual(result['created'], 1)
+        self.assertEqual(result['created_context'], 1)
+        with self.app.app_context():
+            bet = Bet.query.filter(
+                Bet.notes.like('AUTO_BOOTSTRAP_HIDDEN%'),
+            ).one()
+            self.assertIsNotNone(PickContext.query.filter_by(bet_id=bet.id).first())
+
     def test_generate_daily_auto_picks_creates_separated_bets(self):
         from app.services import scheduler as scheduler_module
         with patch('app.create_app', return_value=self.app):

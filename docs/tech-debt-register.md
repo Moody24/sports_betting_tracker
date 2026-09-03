@@ -13,7 +13,7 @@ than remaining as an open checklist.
 - Full verification: 1,265 tests passing, 80% application coverage
 - Static/security gates: Ruff, Bandit, detect-secrets, Git-history credential
   scanning, and pip-audit passing
-- Ruff C901 inventory: 7 functions, down from 59 before this cleanup
+- Ruff C901 inventory: 0 functions, down from 59 before this cleanup
 - Working tree expectation: no generated files; personal untracked files are
   outside project scope
 
@@ -68,6 +68,8 @@ and architecture-contract tests are the reproducible measures for this repo.
 - Decomposed model-status reporting and multi-book prop parsing while
   preserving drift warnings, partial market data, consensus lines, and
   book-specific quotes.
+- Eliminated the remaining projection/pick-quality training and scheduler
+  complexity findings. The repository now has zero Ruff C901 findings.
 - Consolidated two conflicting inactive Railway runbooks.
 - Blocked accidental external HTTP in the shared test fixture.
 - Moved stale virtualenvs and generated test/browser artifacts to Trash,
@@ -77,10 +79,9 @@ and architecture-contract tests are the reproducible measures for this repo.
 
 | Priority | Item | Evidence and exit condition |
 |---|---|---|
-| P1 | Remaining high-complexity workflows | 7 C901 findings remain. Market-policy precedence and parlay selection are resolved; finish the projection/pick-quality training and scheduler workflows. Preserve behavior with focused tests per extraction. |
 | P2 before hosted deployment | Inactive Railway scripts and configuration | They are intentionally retained for restoration work and the surviving runbook is explicitly marked inactive. Revalidate or delete them when a hosting decision is made. |
 
 ## Next cleanup order
 
-1. Continue reducing the remaining C901 inventory in focused commits.
-2. Re-run the canonical guardrail and update this register's dated baseline.
+1. Re-run the canonical guardrail and update this register's dated baseline.
+2. Revisit inactive Railway material only after a hosting decision is made.

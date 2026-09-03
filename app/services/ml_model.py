@@ -305,6 +305,53 @@ def _sample_weights_by_recency(training_rows: list[tuple], max_boost: float = 0.
     return weights
 
 
+def _projection_cv_metrics(X, y, params: dict, weights, model_type,
+                           splitter_type, mae_metric, np_module) -> tuple:
+    maes = []
+    for train_indices, validation_indices in splitter_type(
+        n_splits=3,
+    ).split(X):
+        model = model_type(**params)
+        fit_kwargs = {
+            'eval_set': [(X[validation_indices], y[validation_indices])],
+            'verbose': False,
+        }
+        if weights is not None:
+            fit_kwargs['sample_weight'] = weights[train_indices]
+        model.fit(X[train_indices], y[train_indices], **fit_kwargs)
+        predictions = model.predict(X[validation_indices])
+        maes.append(mae_metric(y[validation_indices], predictions))
+    return float(np_module.mean(maes)), float(np_module.std(maes))
+
+
+def _projection_validation_indices(training_rows: list) -> tuple:
+    unique_dates = sorted({
+        row[0] for row in training_rows if row[0] is not None
+    })
+    train_indices = []
+    validation_indices = []
+    cutoff_date = None
+    if len(unique_dates) >= 2:
+        cutoff_index = int(len(unique_dates) * 0.8) - 1
+        cutoff_index = max(0, min(cutoff_index, len(unique_dates) - 2))
+        cutoff_date = unique_dates[cutoff_index]
+        train_indices = [
+            index for index, row in enumerate(training_rows)
+            if row[0] is not None and row[0] <= cutoff_date
+        ]
+        validation_indices = [
+            index for index, row in enumerate(training_rows)
+            if row[0] is None or row[0] > cutoff_date
+        ]
+    if train_indices and validation_indices:
+        return train_indices, validation_indices, 'date_cutoff', cutoff_date
+    split_index = int(len(training_rows) * 0.8)
+    split_index = min(max(split_index, 1), len(training_rows) - 1)
+    return (list(range(split_index)),
+            list(range(split_index, len(training_rows))),
+            'index_fallback', None)
+
+
 def train_model(stat_type: str) -> dict:
     """Train an XGBoost model for a specific stat type.
 
@@ -348,50 +395,13 @@ def train_model(stat_type: str) -> dict:
     weights = _sample_weights_by_recency(training_rows, max_boost=recency_boost)
     weights_np = np.array(weights) if weights else None
 
-    # TimeSeriesSplit CV to estimate MAE variance across time folds
-    tscv = TimeSeriesSplit(n_splits=3)
-    cv_maes = []
-    for cv_train_idx, cv_val_idx in tscv.split(X):
-        cv_model = XGBRegressor(**xgb_params)
-        cv_fit_kwargs = dict(
-            eval_set=[(X[cv_val_idx], y[cv_val_idx])],
-            verbose=False,
-        )
-        if weights_np is not None:
-            cv_fit_kwargs['sample_weight'] = weights_np[cv_train_idx]
-        cv_model.fit(
-            X[cv_train_idx], y[cv_train_idx],
-            **cv_fit_kwargs,
-        )
-        cv_preds = cv_model.predict(X[cv_val_idx])
-        cv_maes.append(mean_absolute_error(y[cv_val_idx], cv_preds))
-    cv_mean_mae = float(np.mean(cv_maes))
-    cv_std_mae = float(np.std(cv_maes))
-
-    # Final model: date-based walk-forward split
-    split_method = 'date_cutoff'
-    cutoff_date = None
-    unique_dates = sorted({row[0] for row in training_rows if row[0] is not None})
-
-    train_idx = []
-    val_idx = []
-    if len(unique_dates) >= 2:
-        cutoff_idx = int(len(unique_dates) * 0.8) - 1
-        cutoff_idx = max(0, min(cutoff_idx, len(unique_dates) - 2))
-        cutoff_date = unique_dates[cutoff_idx]
-        for idx, row in enumerate(training_rows):
-            row_date = row[0]
-            if row_date is not None and row_date <= cutoff_date:
-                train_idx.append(idx)
-            else:
-                val_idx.append(idx)
-
-    if not train_idx or len(val_idx) < 1:
-        split_method = 'index_fallback'
-        split_idx = int(len(X) * 0.8)
-        split_idx = min(max(split_idx, 1), len(X) - 1)
-        train_idx = list(range(split_idx))
-        val_idx = list(range(split_idx, len(X)))
+    cv_mean_mae, cv_std_mae = _projection_cv_metrics(
+        X, y, xgb_params, weights_np, XGBRegressor, TimeSeriesSplit,
+        mean_absolute_error, np,
+    )
+    train_idx, val_idx, split_method, cutoff_date = (
+        _projection_validation_indices(training_rows)
+    )
 
     if not train_idx or not val_idx:
         return {'error': 'Insufficient validation data', 'stat_type': stat_type}
