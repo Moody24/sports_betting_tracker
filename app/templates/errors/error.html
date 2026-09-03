@@ -1,0 +1,35 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ error_status }} · Edge Tracker{% endblock %}
+{% block page_title %}{{ error_title }}{% endblock %}
+{% block page_subtitle %}Request {{ error_request_id }}{% endblock %}
+
+{% block content %}
+<section class="error-sheet" aria-labelledby="error-heading">
+  <div class="sheet-head">
+    <h2 class="sheet-title" id="error-heading">{{ error_status }} · {{ error_title }}</h2>
+    <p class="sheet-dateline">Reference {{ error_request_id }}</p>
+  </div>
+  <div class="state-error">
+    <strong>{{ error_message }}</strong>
+    {% if error_retry_guidance %}<span>{{ error_retry_guidance }}</span>{% endif %}
+  </div>
+  <div class="control-bar" aria-label="Recovery actions">
+    {% if current_user.is_authenticated %}
+    <a class="act" href="{{ url_for('main.dashboard') }}">Dashboard</a>
+    <a class="act" href="{{ url_for('bet.place_bet') }}">Position log</a>
+    {% endif %}
+    <a class="act" href="{{ url_for('main.home') }}">Home</a>
+    <button class="act" type="button" data-history-back>Go back</button>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script nonce="{{ csp_nonce }}">
+  document.querySelector('[data-history-back]').addEventListener('click', function () {
+    if (window.history.length > 1) window.history.back();
+    else window.location.assign('{{ url_for("main.home") }}');
+  });
+</script>
+{% endblock %}

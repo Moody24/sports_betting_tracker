@@ -2881,6 +2881,19 @@ a:hover {
   min-width: 240px;
 }
 
+.error-sheet {
+  width: min(100%, 42rem);
+  margin: 8vh auto 0;
+}
+
+.error-sheet .state-error {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  text-align: left;
+}
+
 .sa-stat-filter-group {
   display: flex;
   flex-wrap: wrap;
@@ -4573,6 +4586,188 @@ a:hover {
 }
 
 .act-menu .act:hover { background: var(--bg-soft); }
+
+/* ── Dashboard Sheet composition ────────────────────────────────── */
+
+.dashboard-register,
+.dashboard-section,
+.dashboard-parlay,
+.today-section {
+  margin-bottom: 1.5rem;
+}
+
+.dashboard-register-row {
+  padding-block: 1rem;
+}
+
+.dashboard-register-row .row-figure.is-lead {
+  font-size: var(--type-lg);
+}
+
+.dashboard-settings {
+  margin: -0.75rem 0 1.5rem;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.dashboard-settings > .row-more {
+  padding: 0.75rem 1rem;
+}
+
+.dashboard-settings > .row-detail {
+  margin-bottom: 0;
+}
+
+.dashboard-quick-bet {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.25rem;
+}
+
+.dashboard-quick-bet .quick-stake-input {
+  width: 4.5rem;
+}
+
+.dashboard-parlay .control-bar {
+  padding-top: 0;
+  margin-bottom: 0.75rem;
+}
+
+.results-ribbon.pp {
+  width: 100%;
+  margin: -0.75rem 0 1.5rem;
+  padding: 0;
+  gap: 0;
+}
+
+.today-toolbar {
+  justify-content: flex-end;
+}
+
+.today-toolbar > :first-child {
+  margin-inline-end: auto;
+}
+
+.today-section.loading-shell {
+  min-height: 0;
+}
+
+.today-section .props-container[hidden] {
+  display: none;
+}
+
+.today-section .props-container {
+  margin: 0.5rem 0 0;
+}
+
+.today-section .prop-row {
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.today-section .prop-row:last-child {
+  border-bottom: 0;
+}
+
+.builder-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(17rem, 0.38fr);
+  gap: 1.5rem;
+  align-items: start;
+}
+
+.builder-board {
+  min-width: 0;
+}
+
+.builder-slip {
+  position: sticky;
+  top: 1rem;
+}
+
+.builder-stake-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 1rem;
+}
+
+.builder-stake-grid .form-control {
+  width: 100%;
+}
+
+.builder-slip-actions {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border-mid);
+}
+
+.builder-slip-actions .act:last-child {
+  color: var(--text-main);
+  border-color: var(--border-mid);
+}
+
+@media (max-width: 61.99rem) {
+  .builder-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .builder-slip {
+    position: static;
+  }
+}
+
+.stat-register,
+.stat-featured,
+.sa-filter-toolbar,
+.sa-matchup-card {
+  margin-bottom: 1.5rem;
+}
+
+.stat-analysis-results-shell {
+  min-height: 0;
+}
+
+.stat-featured .sa-featured-card,
+.sa-matchup-card .sa-player-row {
+  min-height: 0;
+  border-inline: 0;
+  text-align: left;
+}
+
+.stat-featured .sa-featured-card::before {
+  display: none;
+}
+
+.sa-matchup-card {
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.sa-matchup-card .sa-matchup-header {
+  display: flex;
+  padding: 0 0 0.75rem;
+  background: transparent;
+}
+
+.sa-filter-form {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-inline-start: auto;
+}
+
+@media (max-width: 47.99rem) {
+  .sa-filter-form {
+    width: 100%;
+    margin-inline-start: 0;
+  }
+}
+
+@media (max-width: 47.99rem) {
+  .dashboard-quick-bet {
+    justify-content: flex-start;
+  }
+}
 
 /* ── Focus ─────────────────────────────────────────────────────────
    Every interactive part of the grammar, in one place, so a new

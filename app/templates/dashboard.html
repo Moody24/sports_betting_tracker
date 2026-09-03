@@ -1,300 +1,192 @@
 {% extends "base.html" %}
-{% from "_macros.html" import outcome_badge, prop_badge, prop_label_short, edge_badge_bootstrap, side_text, projection_value with context %}
+{% from "_macros.html" import prop_label_short, side_text, projection_value with context %}
 
 {% block title %}Dashboard · Edge Tracker{% endblock %}
 {% block page_title %}Dashboard{% endblock %}
-{% block page_subtitle %}Performance snapshot of your latest betting activity.{% endblock %}
+{% block page_subtitle %}Performance, exposure, and tonight's strongest positions at a glance.{% endblock %}
+
+{% macro result_tag(outcome) -%}
+  {% set kind = {'win': 'win', 'lose': 'loss', 'push': 'push', 'pending': 'pending'}.get(outcome, 'push') %}
+  <span class="tag tag-{{ kind }}">{{ {'win': 'Won', 'lose': 'Lost', 'push': 'Push', 'pending': 'Pending'}.get(outcome, outcome|title) }}</span>
+{%- endmacro %}
 
 {% block content %}
-<div class="row g-3 mb-4" data-testid="dashboard-summary">
-  <div class="col-sm-6 col-xl-2 fade-up fade-up-1">
-    <div class="card-soft kpi-card kpi-card-neutral h-100">
-      <p class="kpi-label mb-1">Total Bets</p>
-      <p class="kpi-value mb-0">{{ stats.total_bets }}</p>
-      <div class="kpi-trend kpi-trend-neutral">{{ icon('dash') }} All time</div>
-    </div>
+{# The account register is a single ruled record. Secondary figures collapse
+   into the identity metadata on compact screens instead of becoming cards. #}
+<section class="dashboard-register" data-testid="dashboard-summary"
+         style="--cols: minmax(8rem, 1fr) repeat(5, minmax(4.75rem, auto))">
+  <div class="sheet-head">
+    <h2 class="sheet-title">Account register</h2>
+    <p class="sheet-dateline">All-time settled and pending action</p>
   </div>
-  <div class="col-sm-6 col-xl-2 fade-up fade-up-2">
-    <div class="card-soft kpi-card {{ 'kpi-card-pl-pos' if stats.net >= 0 else 'kpi-card-pl-neg' }} h-100">
-      <p class="kpi-label mb-1">Net P/L</p>
-      <p class="kpi-value mb-0 {{ 'text-success' if stats.net >= 0 else 'text-danger' }}">
-        {{ '+' if stats.net >= 0 else '' }}${{ '%.2f'|format(stats.net) }}
-      </p>
-      <div class="kpi-trend {{ 'kpi-trend-up' if stats.net >= 0 else 'kpi-trend-down' }}">
-        {{ icon('arrow-up' if stats.net >= 0 else 'arrow-down') }}
-        {{ 'Profitable' if stats.net >= 0 else 'Negative' }}
-      </div>
-    </div>
+  <div class="band">
+    <span class="band-cell">Total Bets</span>
+    <span class="band-cell is-num">Net P/L</span>
+    <span class="band-cell is-num is-optional">ROI</span>
+    <span class="band-cell is-num is-optional">Win rate</span>
+    <span class="band-cell is-num is-optional">Wagered</span>
+    <span class="band-cell is-num is-optional">Streak</span>
   </div>
-  <div class="col-sm-6 col-xl-2 fade-up fade-up-3">
-    <div class="card-soft kpi-card {{ 'kpi-card-roi-pos' if stats.roi >= 0 else 'kpi-card-roi-neg' }} h-100">
-      <p class="kpi-label mb-1">ROI</p>
-      <p class="kpi-value mb-0 {{ 'text-success' if stats.roi >= 0 else 'text-danger' }}">{{ '%.1f'|format(stats.roi) }}%</p>
-      <div class="kpi-trend {{ 'kpi-trend-up' if stats.roi >= 0 else 'kpi-trend-down' }}">
-        {{ icon('arrow-up' if stats.roi >= 0 else 'arrow-down') }}
-        Return on investment
-      </div>
-      {%- if resolved_bets | length >= 2 %}
-      {%- set pl_values = [] %}
-      {%- for b in resolved_bets %}
-        {%- set _ = pl_values.append(b.profit_loss()) %}
-      {%- endfor %}
-      {%- set min_pl = pl_values | min %}
-      {%- set max_pl = pl_values | max %}
-      {%- set pl_range = (max_pl - min_pl) if (max_pl - min_pl) > 0 else 1 %}
-      {%- set pts = [] %}
-      {%- for i in range(pl_values | length) %}
-        {%- set x = (i / ((pl_values | length) - 1) * 110) | round(1) %}
-        {%- set y = (28 - ((pl_values[i] - min_pl) / pl_range * 24)) | round(1) %}
-        {%- set _ = pts.append(x ~ "," ~ y) %}
-      {%- endfor %}
-      <svg class="kpi-sparkline" viewBox="0 0 110 32" aria-hidden="true" preserveAspectRatio="none">
-        <polyline points="{{ pts | join(' ') }}"/>
-      </svg>
-      {%- endif %}
+  <div class="row-line dashboard-register-row">
+    <div class="row-lead">
+      {{ stats.total_bets }} total bet{{ '' if stats.total_bets == 1 else 's' }}
+      <span class="row-sub">Recorded across the full position log</span>
+      <span class="row-meta is-compact-only">
+        ROI {{ '%.1f'|format(stats.roi) }}% · {{ '%.1f'|format(stats.win_pct) }}% wins ·
+        ${{ '%.2f'|format(stats.wagered) }} wagered ·
+        {{ stats.current_streak if stats.current_streak and stats.current_streak != 'No streak' else 'No active streak' }}
+      </span>
     </div>
+    <span class="row-figure is-lead {{ 'is-up' if stats.net >= 0 else 'is-down' }}">
+      {{ '+' if stats.net >= 0 else '' }}${{ '%.2f'|format(stats.net) }}
+    </span>
+    <span class="row-figure is-optional {{ 'is-up' if stats.roi >= 0 else 'is-down' }}">{{ '%.1f'|format(stats.roi) }}%</span>
+    <span class="row-figure is-optional">{{ '%.1f'|format(stats.win_pct) }}%</span>
+    <span class="row-figure is-optional">${{ '%.2f'|format(stats.wagered) }}</span>
+    <span class="row-figure is-optional">{{ stats.current_streak if stats.current_streak and stats.current_streak != 'No streak' else '—' }}</span>
   </div>
-  <div class="col-sm-6 col-xl-2 fade-up fade-up-4">
-    <div class="card-soft kpi-card kpi-card-wins h-100">
-      <p class="kpi-label mb-1">Win %</p>
-      <p class="kpi-value mb-0">{{ '%.1f'|format(stats.win_pct) }}%</p>
-      <div class="kpi-trend {{ 'kpi-trend-up' if stats.win_pct >= 50 else 'kpi-trend-down' }}">
-        {{ icon('check-circle' if stats.win_pct >= 50 else 'exclamation-triangle') }}
-        {{ 'Above 50%' if stats.win_pct >= 50 else 'Below 50%' }}
-      </div>
-    </div>
-  </div>
-  <div class="col-sm-6 col-xl-2 fade-up fade-up-5">
-    <div class="card-soft kpi-card kpi-card-neutral h-100">
-      <p class="kpi-label mb-1">Total Wagered</p>
-      <p class="kpi-value mb-0">${{ '%.2f'|format(stats.wagered) }}</p>
-      <div class="kpi-trend kpi-trend-neutral">{{ icon('wallet2') }} Total action</div>
-    </div>
-  </div>
-  <div class="col-sm-6 col-xl-2 fade-up fade-up-6">
-    <div class="card-soft kpi-card kpi-card-neutral h-100">
-      <p class="kpi-label mb-1">Current Streak</p>
-      <p class="kpi-value mb-0">{{ stats.current_streak if stats.current_streak and stats.current_streak != 'No streak' else '—' }}</p>
-      <div class="kpi-trend {{ 'kpi-trend-up' if stats.current_streak and stats.current_streak != 'No streak' else 'kpi-trend-neutral' }}">
-        {{ icon('lightning-charge') }} {{ 'Active' if stats.current_streak and stats.current_streak != 'No streak' else 'No active streak' }}
-      </div>
-    </div>
-  </div>
-</div>
+</section>
 
-{%- if resolved_bets %}
-<div class="results-ribbon mb-3 fade-up" aria-label="Last {{ resolved_bets | length }} results">
-  {%- for b in resolved_bets[-20:] %}
-    {%- if b.outcome == 'win' %}
-      {%- set dot_color = '#F5A623' %}
-    {%- elif b.outcome == 'lose' %}
-      {%- set dot_color = '#8B3A3A' %}
-    {%- else %}
-      {%- set dot_color = '#555' %}
-    {%- endif %}
-  <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
-    <circle cx="5" cy="5" r="4.5" fill="{{ dot_color }}"/>
-  </svg>
-  {%- endfor %}
+{% if resolved_bets %}
+<div class="results-ribbon pp" aria-label="Last {{ resolved_bets|length }} settled results, oldest to newest">
+  {% for bet in resolved_bets[-20:] %}
+  {% set tone = 'win' if bet.outcome == 'win' else 'loss' if bet.outcome == 'lose' else 'push' %}
+  <span class="pp-cell" style="--o: {{ 1 if bet.outcome == 'win' else -1 if bet.outcome == 'lose' else 0 }}; --pp-ink: var(--{{ tone }})"
+        title="{{ bet.outcome|title }} · {{ bet.match_date.strftime('%b %d') }}">
+    {{ 'W' if bet.outcome == 'win' else 'L' if bet.outcome == 'lose' else 'P' }}
+  </span>
+  {% endfor %}
 </div>
-{%- endif %}
+{% endif %}
 
-<details class="card-soft mb-4 fade-up fade-up-7">
-  <summary class="p-3 d-flex justify-content-between align-items-center dash-settings-summary">
-    <span class="small text-secondary">{{ icon('gear', classes='me-1') }}Bet Settings</span>
-    {% if current_user.unit_size %}
-      <span class="small text-secondary">1u = ${{ '%.2f'|format(current_user.unit_size) }}</span>
-    {% else %}
-      <span class="small text-secondary">Units not set</span>
-    {% endif %}
+<details class="dashboard-settings">
+  <summary class="row-more">
+    Bet settings · {% if current_user.unit_size %}1u = ${{ '%.2f'|format(current_user.unit_size) }}{% else %}units not set{% endif %}
   </summary>
-  <div class="px-3 pb-3">
-    <form method="POST" action="{{ url_for('main.dashboard_settings') }}" class="row g-2 align-items-end">
+  <div class="row-detail">
+    <form method="POST" action="{{ url_for('main.dashboard_settings') }}" class="control-bar">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <div class="col-sm-6 col-md-4">
-        <label class="form-label small">Unit Size ($)</label>
-        <input
-          type="number"
-          name="unit_size"
-          class="form-control form-control-sm"
-          min="0.01"
-          step="0.01"
-          placeholder="e.g. 25.00"
-          value="{{ current_user.unit_size if current_user.unit_size is not none else '' }}"
-        >
-        <div class="form-text text-secondary">Leave blank to disable units mode.</div>
-      </div>
-      <div class="col-sm-6 col-md-2 d-grid">
-        <button type="submit" class="btn btn-primary btn-sm">Save</button>
-      </div>
+      <label class="band-cell" for="unit-size">Unit size ($)
+        <input id="unit-size" type="number" name="unit_size" class="form-control form-control-sm"
+               min="0.01" step="0.01" placeholder="25.00"
+               value="{{ current_user.unit_size if current_user.unit_size is not none else '' }}">
+      </label>
+      <button type="submit" class="act">Save setting</button>
+      <span class="row-sub">Leave blank to disable units mode.</span>
     </form>
   </div>
 </details>
 
-{# ── Today's Top Plays ────────────────────────────────────── #}
 {% if top_plays %}
-<div class="card-soft p-3 mb-4">
-  <div class="section-title-row mb-3">
-    <div>
-      <h3 class="h6 mb-0">{{ icon('bullseye', classes='me-2 text-info') }}Today's Top Plays</h3>
-      <p class="text-secondary small mb-0 mt-1">ML-ranked player props with highest edge</p>
+<section class="dashboard-section" style="--cols: minmax(9rem, 1fr) 4rem 4.5rem 5rem auto">
+  <div class="sheet-head">
+    <h2 class="sheet-title">Today's top plays</h2>
+    <p class="sheet-dateline">{{ top_plays|length }} model-ranked · <a class="act" href="{{ url_for('bet.nba_analysis') }}">Full board</a></p>
+  </div>
+  <div class="band">
+    <span class="band-cell">Player / market</span>
+    <span class="band-cell is-num is-optional">Line</span>
+    <span class="band-cell is-num is-optional">Projection</span>
+    <span class="band-cell is-num">Edge</span>
+    <span class="band-cell"><span class="visually-hidden">Action</span></span>
+  </div>
+  {% for play in top_plays %}
+  <article class="row-line">
+    <div class="row-lead">
+      {{ play.player }}
+      <span class="row-sub">{{ prop_label_short(play.prop_type) }} · {{ side_text(play.recommended_side) }}</span>
+      <span class="row-meta is-compact-only">line {{ play.line }} · projection {{ projection_value(play.projection, play.line) }}</span>
     </div>
-    <a href="{{ url_for('bet.nba_analysis') }}" class="btn btn-sm btn-outline-info btn-toolbar-primary">View All</a>
-  </div>
-  <div class="table-wrap">
-    <table class="table table-dark table-sm table-hover align-middle mb-0">
-      <thead>
-        <tr>
-          <th>Player</th>
-          <th>Prop</th>
-          <th class="text-center">Line</th>
-          <th class="text-center">Proj</th>
-          <th class="text-center">Tier</th>
-          <th class="text-center">Side</th>
-          <th class="text-center">Add Bet</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for play in top_plays %}
-        <tr class="tier-card-{{ play.confidence_tier or 'slight' }}">
-          <td class="fw-semibold">{{ play.player }}</td>
-          <td>{{ prop_badge(play.prop_type) }}</td>
-          <td class="text-center tabular-num">{{ play.line }}</td>
-          <td class="text-center tabular-num">{{ projection_value(play.projection, play.line) }}</td>
-          <td class="text-center">{{ edge_badge_bootstrap(play.edge, play.confidence_tier) }}</td>
-          <td class="text-center">{{ side_text(play.recommended_side) }}</td>
-          <td class="text-center">
-            <form method="POST" action="{{ url_for('bet.quick_add_bet') }}" class="d-flex gap-1 justify-content-center align-items-center">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <input type="hidden" name="player" value="{{ play.player }}">
-              <input type="hidden" name="prop_type" value="{{ play.prop_type }}">
-              <input type="hidden" name="prop_line" value="{{ play.line }}">
-              <input type="hidden" name="bet_type" value="{{ play.recommended_side }}">
-              <input type="hidden" name="american_odds" value="{{ play.recommended_odds or -110 }}">
-              <input type="hidden" name="team_a" value="{{ play.away_team or '' }}">
-              <input type="hidden" name="team_b" value="{{ play.home_team or '' }}">
-              <input type="hidden" name="match_date" value="{{ play.match_date or '' }}">
-              <input type="hidden" name="game_id" value="{{ play.game_id or '' }}">
-              <input type="hidden" name="projection" value="{{ play.projection or 0 }}">
-              <input type="hidden" name="edge" value="{{ play.edge or 0 }}">
-              <input type="hidden" name="confidence_tier" value="{{ play.confidence_tier or 'slight' }}">
-              <label class="visually-hidden" for="quick-stake-{{ loop.index }}">Stake amount</label>
-              <input id="quick-stake-{{ loop.index }}" type="number" name="stake" placeholder="$25" aria-label="Stake amount" class="form-control form-control-sm tabular-num quick-stake-input" min="1" step="0.01" required>
-              <button type="submit" class="btn btn-sm btn-success px-2" title="Add as bet" aria-label="Add play as bet">{{ icon('plus-lg') }}</button>
-            </form>
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</div>
+    <span class="row-figure is-optional">{{ play.line }}</span>
+    <span class="row-figure is-optional">{{ projection_value(play.projection, play.line) }}</span>
+    <span class="row-figure is-lead">+{{ '%.1f'|format(play.edge * 100) }}%</span>
+    <span class="row-actions">
+      <form method="POST" action="{{ url_for('bet.quick_add_bet') }}" class="dashboard-quick-bet">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="player" value="{{ play.player }}">
+        <input type="hidden" name="prop_type" value="{{ play.prop_type }}">
+        <input type="hidden" name="prop_line" value="{{ play.line }}">
+        <input type="hidden" name="bet_type" value="{{ play.recommended_side }}">
+        <input type="hidden" name="american_odds" value="{{ play.recommended_odds or -110 }}">
+        <input type="hidden" name="team_a" value="{{ play.away_team or '' }}">
+        <input type="hidden" name="team_b" value="{{ play.home_team or '' }}">
+        <input type="hidden" name="match_date" value="{{ play.match_date or '' }}">
+        <input type="hidden" name="game_id" value="{{ play.game_id or '' }}">
+        <input type="hidden" name="projection" value="{{ play.projection or 0 }}">
+        <input type="hidden" name="edge" value="{{ play.edge or 0 }}">
+        <input type="hidden" name="confidence_tier" value="{{ play.confidence_tier or 'slight' }}">
+        <label class="visually-hidden" for="quick-stake-{{ loop.index }}">Stake amount</label>
+        <input id="quick-stake-{{ loop.index }}" type="number" name="stake" placeholder="$25"
+               class="form-control form-control-sm tabular-num quick-stake-input" min="1" step="0.01" required>
+        <button type="submit" class="act" aria-label="Add {{ play.player }} bet">Add bet</button>
+      </form>
+    </span>
+  </article>
+  {% endfor %}
+</section>
 {% endif %}
 
 {% if best_parlay %}
-<div class="card-soft p-3 mb-4">
-  <div class="section-title-row mb-2">
-    <h3 class="h6 mb-0">{{ icon('stars', classes='me-2 text-warning') }}Best Play Of The Day</h3>
-    <span class="badge text-bg-warning text-dark">High Confidence</span>
+<section class="slip dashboard-parlay">
+  <div class="slip-head">
+    <span>Best play of the day</span>
+    <span class="row-meta">{{ best_parlay.legs|length }} legs · {{ '%+d'|format(best_parlay.combined_odds) }}</span>
   </div>
-  <p class="small text-secondary mb-2">
-    Recommended {{ best_parlay.legs|length }}-leg parlay
-    <strong class="text-light">{{ '%+d'|format(best_parlay.combined_odds) }}</strong>
-    (target range +100 to +200).
-  </p>
-  <form method="POST" action="{{ url_for('bet.quick_add_parlay') }}" class="d-flex flex-wrap gap-2 align-items-center mb-3">
+  <form method="POST" action="{{ url_for('bet.quick_add_parlay') }}" class="control-bar">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <input type="hidden" name="legs" value='{{ best_parlay.legs | tojson }}'>
-    <div class="input-group input-group-sm best-parlay-stake-group">
-      <span class="input-group-text bg-dark border-secondary-subtle">$</span>
-      <input type="number" name="stake" class="form-control" placeholder="Stake" min="0.01" step="0.01">
-    </div>
+    <input type="hidden" name="legs" value='{{ best_parlay.legs|tojson }}'>
+    <label class="band-cell" for="parlay-stake">Stake
+      <input id="parlay-stake" type="number" name="stake" class="form-control form-control-sm" placeholder="$25" min="0.01" step="0.01">
+    </label>
     {% if current_user.unit_size %}
-    <span class="small text-secondary">or</span>
-    <div class="input-group input-group-sm best-parlay-units-group">
-      <input type="number" name="units" class="form-control" placeholder="Units" min="0.01" step="0.01">
-      <span class="input-group-text bg-dark border-secondary-subtle">u</span>
-    </div>
+    <label class="band-cell" for="parlay-units">Units
+      <input id="parlay-units" type="number" name="units" class="form-control form-control-sm" placeholder="1.0" min="0.01" step="0.01">
+    </label>
     {% endif %}
-    <button type="submit" class="btn btn-sm btn-warning text-dark fw-semibold">
-      {{ icon('plus-lg', classes='me-1') }}Place Parlay
-    </button>
+    <button type="submit" class="act">Place parlay</button>
   </form>
-  <div class="table-wrap">
-    <table class="table table-dark table-sm align-middle mb-0">
-      <caption class="visually-hidden">Best play parlay legs</caption>
-      <thead>
-        <tr>
-          <th>Player</th>
-          <th>Game</th>
-          <th>Prop</th>
-          <th class="text-center">Line</th>
-          <th class="text-center">Side</th>
-          <th class="text-center">Odds</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for leg in best_parlay.legs %}
-        <tr>
-          <td class="fw-semibold">{{ leg.player }}</td>
-          <td class="small text-secondary">
-            {% if leg.away_team and leg.home_team %}
-              {{ leg.away_team }} @ {{ leg.home_team }}
-            {% else %}
-              —
-            {% endif %}
-          </td>
-          <td>{{ prop_badge(leg.prop_type) }}</td>
-          <td class="text-center tabular-num">{{ leg.line }}</td>
-          <td class="text-center">{{ side_text(leg.side) }}</td>
-          <td class="text-center tabular-num">{{ '%+d'|format(leg.odds) }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+  <div class="slip-grid">
+    {% for leg in best_parlay.legs %}
+    <div class="slip-fact">
+      <span>{{ leg.player }} · {{ prop_label_short(leg.prop_type) }}</span>
+      <span>{{ side_text(leg.side) }} {{ leg.line }} · {{ '%+d'|format(leg.odds) }}</span>
+    </div>
+    {% endfor %}
   </div>
-</div>
+</section>
 {% endif %}
 
-<div class="card-soft p-3">
-  <div class="section-title-row mb-2">
-    <h3 class="h6 mb-0">Recent Bets</h3>
-    <a href="{{ url_for('bet.place_bet') }}" class="btn btn-sm btn-outline-light btn-toolbar-secondary">View All</a>
+<section class="dashboard-section" style="--cols: minmax(9rem, 1fr) 6rem 5rem 5rem">
+  <div class="sheet-head">
+    <h2 class="sheet-title">Recent bets</h2>
+    <p class="sheet-dateline"><a class="act" href="{{ url_for('bet.place_bet') }}">Full position log</a></p>
   </div>
-
-  <div class="table-wrap">
-    <table class="table table-dark table-hover align-middle mb-0">
-      <caption class="visually-hidden">Recent bets summary</caption>
-      <thead>
-        <tr>
-          <th>Match</th>
-          <th>Date</th>
-          <th>Type</th>
-          <th class="text-end">Stake</th>
-          <th>Status</th>
-          <th class="text-end">P/L</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for bet in recent_bets %}
-        <tr>
-          <td class="fw-semibold">{{ bet.team_a }} <span class="text-secondary">vs</span> {{ bet.team_b }}</td>
-          <td>{{ bet.match_date.strftime('%b %d, %Y') }}</td>
-          <td>
-            <span class="badge text-bg-dark">{{ bet.bet_type|capitalize }}</span>
-            {% if bet.over_under_line %}<span class="small text-secondary">{{ bet.over_under_line }}</span>{% endif %}
-          </td>
-          <td class="text-end tabular-num">${{ '%.2f'|format(bet.bet_amount) }}</td>
-          <td>{{ outcome_badge(bet.outcome) }}</td>
-          <td class="text-end {% if bet.outcome == 'win' %}text-success{% elif bet.outcome == 'lose' %}text-danger{% else %}text-secondary{% endif %}">${{ '%.2f'|format(bet.profit_loss()) }}</td>
-        </tr>
-        {% else %}
-        <tr>
-          <td colspan="6" class="text-center text-secondary py-4">No bets yet. <a href="{{ url_for('bet.new_bet') }}" class="link-light">Add your first bet</a> to start tracking.</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+  {% if recent_bets %}
+  <div class="band">
+    <span class="band-cell">Match / market</span>
+    <span class="band-cell is-num is-optional">Date</span>
+    <span class="band-cell is-num is-optional">Stake</span>
+    <span class="band-cell is-num">P / L</span>
   </div>
-</div>
+  {% for bet in recent_bets %}
+  <article class="row-line">
+    <div class="row-lead">
+      {{ bet.team_a }} vs {{ bet.team_b }}
+      <span class="row-sub">{{ bet.bet_type|replace('_', ' ')|title }}{% if bet.over_under_line %} · {{ bet.over_under_line }}{% endif %}</span>
+      <span class="row-meta">{{ result_tag(bet.outcome) }} <span class="is-compact-only">· {{ bet.match_date.strftime('%b %d') }} · ${{ '%.2f'|format(bet.bet_amount) }}</span></span>
+    </div>
+    <span class="row-figure is-optional">{{ bet.match_date.strftime('%b %d') }}</span>
+    <span class="row-figure is-optional">${{ '%.2f'|format(bet.bet_amount) }}</span>
+    <span class="row-figure is-lead {{ 'is-up' if bet.outcome == 'win' else 'is-down' if bet.outcome == 'lose' else '' }}">
+      {% if bet.outcome == 'pending' %}—{% else %}{{ '+' if bet.outcome == 'win' else '' }}${{ '%.2f'|format(bet.profit_loss()) }}{% endif %}
+    </span>
+  </article>
+  {% endfor %}
+  {% else %}
+  <div class="state-empty">
+    <strong>No bets yet.</strong>
+    <a class="act" href="{{ url_for('bet.new_bet') }}">Add your first bet</a> to start the register.
+  </div>
+  {% endif %}
+</section>
 {% endblock %}

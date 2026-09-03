@@ -2,7 +2,7 @@
 
 {% block title %}Bet Builder · Edge Tracker{% endblock %}
 {% block page_title %}Bet Builder{% endblock %}
-{% block page_subtitle %}Record a game line, player prop, or parlay.{% endblock %}
+{% block page_subtitle %}Build one position from game markets and player props, then submit it once.{% endblock %}
 
 {% block content %}
 {% set flow_active = 'builder' %}
@@ -10,127 +10,78 @@
 {% include 'bets/_workflow_nav.html' %}
 
 <datalist id="game-datalist"></datalist>
+<noscript><div class="notice" style="--notice-ink: var(--amber)">The live builder requires JavaScript.</div></noscript>
 
-<noscript><div class="alert alert-warning">Bet Builder parlay and screenshot modes require JavaScript enabled.</div></noscript>
-<div class="bb-shell">
+<div class="builder-layout" id="ub-root" data-testid="bet-builder">
+  <section class="builder-board">
+    <div class="sheet-head">
+      <h2 class="sheet-title">Market board</h2>
+      <p class="sheet-dateline" id="ub-last-updated">Not refreshed</p>
+    </div>
 
-  {# ─── Main column ──────────────────────────────────────────────── #}
-  <div class="bb-main">
+    <div class="control-bar">
+      <label class="band-cell" for="ub-game-picker">Game
+        <select id="ub-game-picker" class="form-select form-select-sm" aria-label="Select game for unified slip">
+          <option value="">Select a game…</option>
+        </select>
+      </label>
+      <button type="button" id="ub-refresh-btn" class="act">Refresh odds</button>
+      <span id="ub-game-meta" class="row-meta">Choose a game to unlock its markets.</span>
+    </div>
 
-    <div class="card-soft mb-3" id="ub-root" data-testid="bet-builder">
-      <div class="bb-form-section">
-        <div class="bb-form-section-label">{{ icon('layout-wtf') }} Unified Bet Slip <span class="badge text-bg-info ms-1">Primary</span></div>
-        <div class="small text-secondary mb-2">
-          One flow: choose game, tap markets/props, submit once. 1 pick = single, 2+ picks = parlay.
-        </div>
-        <div class="ub-grid">
-          <div>
-            <label class="form-label small mb-1">Game</label>
-            <div class="ub-game-select-wrap">
-              {{ icon('controller', classes='ub-game-select-icon') }}
-              <select id="ub-game-picker" class="form-select ub-game-select" aria-label="Select game for unified slip">
-                <option value="">Select a game...</option>
-              </select>
-            </div>
-            <div id="ub-game-meta" class="form-text">Pick a game to unlock moneyline, total, and props.</div>
-            <div class="d-flex align-items-center gap-2 mt-1">
-              <button type="button" id="ub-refresh-btn" class="btn btn-outline-secondary btn-sm">
-                {{ icon('arrow-clockwise', classes='me-1') }}Refresh Odds
-              </button>
-              <span id="ub-last-updated" class="small text-secondary">Not refreshed yet.</span>
-            </div>
+    <div class="control-bar ub-market-row" aria-label="Game markets">
+      <button type="button" id="ub-home-ml-btn" class="chip" disabled>Home ML</button>
+      <button type="button" id="ub-away-ml-btn" class="chip" disabled>Away ML</button>
+      <button type="button" id="ub-over-btn" class="chip" disabled>Over</button>
+      <button type="button" id="ub-under-btn" class="chip" disabled>Under</button>
+    </div>
 
-            <div class="ub-market-row mt-3">
-              <button type="button" id="ub-home-ml-btn" class="btn btn-sm btn-outline-secondary" disabled>Home ML</button>
-              <button type="button" id="ub-away-ml-btn" class="btn btn-sm btn-outline-secondary" disabled>Away ML</button>
-              <button type="button" id="ub-over-btn" class="btn btn-sm btn-outline-success" disabled>Over</button>
-              <button type="button" id="ub-under-btn" class="btn btn-sm btn-outline-danger" disabled>Under</button>
-            </div>
+    <div class="control-bar" role="group" aria-label="Prop filters">
+      <button type="button" id="ub-filter-all" class="chip is-active">All</button>
+      <button type="button" id="ub-filter-pts" class="chip">PTS</button>
+      <button type="button" id="ub-filter-reb" class="chip">REB</button>
+      <button type="button" id="ub-filter-ast" class="chip">AST</button>
+      <button type="button" id="ub-filter-3pm" class="chip">3PM</button>
+      <span id="ub-props-status" class="row-meta" role="status" aria-live="polite" aria-atomic="true">Props load after a game is selected.</span>
+    </div>
+    <div id="ub-props-list" class="bb-prop-list"></div>
+  </section>
 
-            <div class="d-flex align-items-center gap-2 mt-3">
-              <div class="btn-group btn-group-sm" role="group" aria-label="Prop filters">
-                <button type="button" id="ub-filter-all" class="btn btn-outline-secondary active">All</button>
-                <button type="button" id="ub-filter-pts" class="btn btn-outline-secondary">PTS</button>
-                <button type="button" id="ub-filter-reb" class="btn btn-outline-secondary">REB</button>
-                <button type="button" id="ub-filter-ast" class="btn btn-outline-secondary">AST</button>
-                <button type="button" id="ub-filter-3pm" class="btn btn-outline-secondary">3PM</button>
-              </div>
-            </div>
-            <div id="ub-props-status" class="form-text" role="status" aria-live="polite" aria-atomic="true">Pick a game. Props auto-load for that matchup.</div>
-            <div id="ub-props-list" class="bb-prop-list mt-2"></div>
-          </div>
-
-          <div>
-            <div class="d-flex align-items-center justify-content-between">
-              <div class="bb-form-section-label mb-0">{{ icon('receipt') }} Slip</div>
-              <span id="ub-mode-badge" class="badge text-bg-secondary">No picks</span>
-            </div>
-            <div id="ub-slip-list" class="bb-legs-list">
-              <div class="bb-legs-empty">
-                {{ icon('plus-circle', classes='bb-legs-empty-icon') }}
-                <p class="mb-0 small mt-2 bb-legs-empty-text">No selections yet.</p>
-              </div>
-            </div>
-            <div id="ub-feedback" class="alert d-none py-2 small mt-2" role="alert" aria-live="assertive" aria-atomic="true"></div>
-            <div class="row g-2 mt-2">
-              <div class="col-6">
-                <label class="form-label small mb-1">Stake</label>
-                <input type="number" id="ub-stake" class="form-control form-control-sm" min="1" step="0.01" placeholder="25.00">
-              </div>
-              <div class="col-6">
-                <label class="form-label small mb-1">Units</label>
-                <input type="number" id="ub-units" class="form-control form-control-sm" min="0.1" step="0.1" placeholder="1.0">
-              </div>
-              <div class="col-12 d-grid">
-                <button type="button" id="ub-submit-btn" class="btn btn-primary btn-sm">
-                  {{ icon('check-lg', classes='me-1') }}Submit Slip
-                </button>
-              </div>
-              <div class="col-12 d-grid">
-                <button type="button" id="ub-clear-slip-btn" class="btn btn-outline-secondary btn-sm">
-                  Clear Slip
-                </button>
-              </div>
-              <div class="col-12">
-                <div id="ub-payout-preview" class="small text-info">Projected payout appears here once stake and odds are set.</div>
-              </div>
-              <div class="col-12">
-                <div id="ub-rr-section" class="ub-rr-section d-none">
-                  <button type="button" id="ub-rr-toggle" class="ub-rr-toggle">
-                    {{ icon('shuffle', classes='me-1') }}Round Robin
-                  </button>
-                  <div id="ub-rr-config" class="ub-rr-config d-none">
-                    <label class="form-label small mb-1 mt-2" for="ub-rr-size">Combination size</label>
-                    <select id="ub-rr-size" class="form-select form-select-sm">
-                    </select>
-                    <div id="ub-rr-summary" class="ub-rr-summary"></div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+  <aside class="slip builder-slip" aria-label="Current bet slip">
+    <div class="slip-head">
+      <span>Current position</span>
+      <span id="ub-mode-badge" class="tag tag-pending">No picks</span>
+    </div>
+    <div id="ub-slip-list" class="bb-legs-list">
+      <div class="state-empty bb-legs-empty">
+        <strong>No selections yet.</strong>
+        Choose a price from the market board.
       </div>
     </div>
-  </div>{# end bb-main #}
-
-  {# ─── Ticket summary sidebar ───────────────────────────────────── #}
-  <aside class="bb-aside">
-    <div class="bb-ticket" id="ticket-summary">
-      <div class="bb-ticket-head">
-        {{ icon('receipt', classes='me-2 bb-icon-accent') }}
-        <span class="bb-ticket-head-title" id="ticket-mode-label">Ticket</span>
+    <div id="ub-feedback" class="notice d-none" role="alert" aria-live="assertive" aria-atomic="true"></div>
+    <div class="slip-grid builder-stake-grid">
+      <label class="slip-fact" for="ub-stake"><span>Stake</span>
+        <input type="number" id="ub-stake" class="form-control form-control-sm" min="1" step="0.01" placeholder="25.00">
+      </label>
+      <label class="slip-fact" for="ub-units"><span>Units</span>
+        <input type="number" id="ub-units" class="form-control form-control-sm" min="0.1" step="0.1" placeholder="1.0">
+      </label>
+    </div>
+    <p id="ub-payout-preview" class="row-meta">Payout appears once stake and odds are set.</p>
+    <div id="ub-rr-section" class="ub-rr-section d-none">
+      <button type="button" id="ub-rr-toggle" class="row-more">Round robin</button>
+      <div id="ub-rr-config" class="row-detail d-none">
+        <label class="band-cell" for="ub-rr-size">Combination size</label>
+        <select id="ub-rr-size" class="form-select form-select-sm"></select>
+        <div id="ub-rr-summary" class="row-meta"></div>
       </div>
-      <div id="ticket-body" class="bb-ticket-body">
-        <div class="bb-ticket-empty">
-          {{ icon('plus-circle-dotted', classes='bb-ticket-empty-icon') }}
-          <p class="bb-ticket-empty-text mt-2 mb-0">Fill in the form to preview your ticket</p>
-        </div>
-      </div>
+    </div>
+    <div class="row-actions builder-slip-actions">
+      <button type="button" id="ub-clear-slip-btn" class="act">Clear slip</button>
+      <button type="button" id="ub-submit-btn" class="act">Submit position</button>
     </div>
   </aside>
-
-</div>{# end bb-shell #}
+</div>
 {% endblock %}
 
 {% block scripts %}

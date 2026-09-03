@@ -10,36 +10,18 @@
 {% set flow_builder_tab = 'prop' %}
 {% include 'bets/_workflow_nav.html' %}
 
-{# ── Display maps from centralized config (context processor) ─── #}
-{# PROP_LABELS_SHORT is available via the context processor. #}
-
-{# ── KPI Row ─────────────────────────────────────────────────── #}
-<div class="row g-3 mb-4 fade-up fade-up-1">
-  <div class="col-6 col-xl-3">
-    <div class="card-soft kpi-card h-100">
-      <p class="kpi-label mb-1">Total Props</p>
-      <p class="kpi-value mb-0">{{ total }}</p>
-    </div>
+<section class="slip stat-register">
+  <div class="slip-head">
+    <span>Today's prop register</span>
+    <span class="row-meta">Model projections against posted lines</span>
   </div>
-  <div class="col-6 col-xl-3">
-    <div class="card-soft kpi-card h-100 kpi-card-wins">
-      <p class="kpi-label mb-1">Strong ★</p>
-      <p class="kpi-value mb-0 text-success">{{ strong_ct }}</p>
-    </div>
+  <div class="slip-grid">
+    <div class="slip-fact"><span>Total props</span><span>{{ total }}</span></div>
+    <div class="slip-fact"><span>Strong</span><span class="is-up">{{ strong_ct }}</span></div>
+    <div class="slip-fact"><span>Value</span><span>{{ value_ct }}</span></div>
+    <div class="slip-fact"><span>Avoid</span><span class="is-down">{{ avoid_ct }}</span></div>
   </div>
-  <div class="col-6 col-xl-3">
-    <div class="card-soft kpi-card h-100 kpi-card-value">
-      <p class="kpi-label mb-1">Value 💰</p>
-      <p class="kpi-value mb-0 text-amber">{{ value_ct }}</p>
-    </div>
-  </div>
-  <div class="col-6 col-xl-3">
-    <div class="card-soft kpi-card h-100 kpi-card-pl-neg">
-      <p class="kpi-label mb-1">Avoid ✗</p>
-      <p class="kpi-value mb-0 text-danger">{{ avoid_ct }}</p>
-    </div>
-  </div>
-</div>
+</section>
 
 {# ── Featured Strong Picks ────────────────────────────────────── #}
 {% set strong_picks = [] %}
@@ -52,45 +34,39 @@
 {% endfor %}
 
 {% if strong_picks %}
-<div class="mb-4 fade-up fade-up-2">
-  <p class="kpi-label mb-2">Top Picks Today</p>
-  <div class="sa-featured-row">
-    {% for s in strong_picks %}
-    {% set pos = (s.breakdown or {}).get('player_position', '') %}
-    <div class="featured-play-card sa-featured-card sa-clickable"
-         role="button"
-         tabindex="0"
-         aria-label="Open breakdown for {{ s.player }} {{ PROP_LABELS_SHORT.get(s.prop_type, s.prop_type) }}"
-         data-prop='{{ s | tojson }}'>
-      <div class="d-flex justify-content-between align-items-start mb-1">
-        <span class="tier-strong">STRONG ★</span>
-        <span class="featured-play-meta">{{ PROP_LABELS_SHORT.get(s.prop_type, s.prop_type) }}</span>
-      </div>
-      <p class="featured-play-player mb-0">{{ s.player }}</p>
-      <p class="featured-play-meta mb-2">{% if pos %}Est. {{ pos|upper }} · {% endif %}{{ s.player_team_abbr or '' }}</p>
-      <div class="featured-play-numbers">
-        <div>
-          <div class="featured-play-meta">Line</div>
-          <div class="fw-bold">{{ s.line }}</div>
-        </div>
-        <div>
-          <div class="featured-play-meta">Proj</div>
-          <div class="fw-bold text-success">{{ '%.1f' | format(s.projection or 0) }}</div>
-        </div>
-        <div>
-          <div class="featured-play-meta">Edge</div>
-          <div class="featured-play-edge">+{{ '%.0f' | format((s.edge or 0) * 100) }}%</div>
-        </div>
-      </div>
-    </div>
-    {% endfor %}
+<section class="stat-featured" style="--cols: minmax(9rem, 1fr) 4rem 4rem 5rem">
+  <div class="sheet-head">
+    <h2 class="sheet-title">Top picks today</h2>
+    <p class="sheet-dateline">Open a row for the full case</p>
   </div>
-</div>
+  <div class="band">
+    <span class="band-cell">Player / market</span>
+    <span class="band-cell is-num is-optional">Line</span>
+    <span class="band-cell is-num is-optional">Proj</span>
+    <span class="band-cell is-num">Edge</span>
+  </div>
+  {% for s in strong_picks %}
+  {% set pos = (s.breakdown or {}).get('player_position', '') %}
+  <button class="row-line sa-featured-card sa-clickable" type="button"
+          role="button"
+          tabindex="0"
+          aria-label="Open breakdown for {{ s.player }} {{ PROP_LABELS_SHORT.get(s.prop_type, s.prop_type) }}"
+          data-prop='{{ s|tojson }}'>
+    <span class="row-lead">
+      {{ s.player }}
+      <span class="row-sub">{{ PROP_LABELS_SHORT.get(s.prop_type, s.prop_type) }} · {% if pos %}est. {{ pos|upper }} · {% endif %}{{ s.player_team_abbr or '' }}</span>
+      <span class="row-meta is-compact-only">line {{ s.line }} · projection {{ '%.1f'|format(s.projection or 0) }}</span>
+    </span>
+    <span class="row-figure is-optional">{{ s.line }}</span>
+    <span class="row-figure is-optional">{{ '%.1f'|format(s.projection or 0) }}</span>
+    <span class="row-figure is-lead">+{{ '%.0f'|format((s.edge or 0) * 100) }}%</span>
+  </button>
+  {% endfor %}
+</section>
 {% endif %}
 
 {# ── Filters ─────────────────────────────────────────────────── #}
-<div class="card-soft p-3 mb-4 fade-up fade-up-3">
-  <div class="d-flex flex-wrap gap-2 align-items-center sa-filter-toolbar">
+<div class="control-bar sa-filter-toolbar">
     {% set stat_options = [
       ('all', 'All'), ('player_points', 'PTS'), ('player_rebounds', 'REB'),
       ('player_assists', 'AST'), ('player_threes', '3PM'),
@@ -99,51 +75,39 @@
     <nav class="sa-stat-filter-group" aria-label="Filter by statistic">
       {% for val, label in stat_options %}
       <a href="{{ url_for('bet.nba_stat_analysis', stat=val, q=search_q) }}"
-         class="btn btn-sm {% if stat_filter == val %}btn-primary{% else %}btn-outline-secondary{% endif %}"
+         class="chip{% if stat_filter == val %} is-active{% endif %}"
          {% if stat_filter == val %}aria-current="page"{% endif %}>
         {{ label }}
       </a>
       {% endfor %}
     </nav>
-    <form class="ms-auto d-flex gap-2 sa-filter-form" method="get" action="{{ url_for('bet.nba_stat_analysis') }}">
+    <form class="sa-filter-form" method="get" action="{{ url_for('bet.nba_stat_analysis') }}">
       <input type="hidden" name="stat" value="{{ stat_filter }}">
-      <input class="form-control form-control-sm sa-search-input" type="text"
-             name="q" value="{{ search_q }}" placeholder="Search player…">
-      <button class="btn btn-sm btn-outline-secondary" type="submit" aria-label="Search players">
-        {{ icon('search') }}
-      </button>
+      <label class="band-cell" for="stat-player-search">Player
+        <input id="stat-player-search" class="form-control form-control-sm sa-search-input" type="search"
+               name="q" value="{{ search_q }}" placeholder="Search…">
+      </label>
+      <button class="act" type="submit">Search</button>
       {% if search_q %}
-      <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('bet.nba_stat_analysis', stat=stat_filter) }}">Clear</a>
+      <a class="chip-clear" href="{{ url_for('bet.nba_stat_analysis', stat=stat_filter) }}">Clear</a>
       {% endif %}
     </form>
-    <div class="d-flex align-items-center gap-2">
-      <span id="stat-analysis-last-updated" class="small text-secondary">Last updated at --:--</span>
-      <button class="btn btn-sm btn-outline-info btn-toolbar-primary" type="button" id="stat-analysis-refresh">
-        {{ icon('arrow-repeat', classes='me-1') }}Refresh
-      </button>
-    </div>
-  </div>
+    <span id="stat-analysis-last-updated" class="row-meta">Updated --:--</span>
+    <button class="act" type="button" id="stat-analysis-refresh">Refresh</button>
 </div>
 
 {# ── Matchup Cards ────────────────────────────────────────────── #}
 <div id="stat-analysis-results-shell" class="stat-analysis-results-shell" data-testid="stat-results">
-<div id="stat-analysis-loading" class="card-soft p-3 mb-4" hidden>
-  <div class="placeholder-glow">
-    <p class="placeholder col-12 mb-2"></p>
-    <p class="placeholder col-12 mb-2"></p>
-    <p class="placeholder col-10 mb-0"></p>
-  </div>
-</div>
-<div id="stat-analysis-error" class="ux-state-error card-soft p-3 mb-4 text-danger text-center" hidden>
-  <p class="mb-2">{{ icon('exclamation-triangle', classes='me-1') }}Unable to refresh stat analysis.</p>
-  <button class="btn btn-sm btn-outline-danger" type="button" id="stat-analysis-refresh-retry">Retry</button>
+<div id="stat-analysis-loading" class="state-loading" hidden>Refreshing stat analysis…</div>
+<div id="stat-analysis-error" class="state-error" hidden>
+  Unable to refresh stat analysis.
+  <button class="act" type="button" id="stat-analysis-refresh-retry">Retry</button>
 </div>
 <div id="stat-analysis-results" class="refresh-content">
 {% if not matchups %}
-<div class="ux-empty-state card-soft p-4 text-center text-secondary mb-4 fade-up fade-up-4">
-  {{ icon('bar-chart-line', classes='fs-1 d-block mb-2 ux-empty-icon') }}
-  <p class="mb-0">No props available for today.</p>
-  <p class="small mt-1 mb-0">Try refreshing closer to tip-off when books post more lines.</p>
+<div class="state-empty">
+  <strong>No props available for today.</strong>
+  Refresh closer to tip-off when books have posted more lines.
 </div>
 {% endif %}
 
@@ -162,75 +126,41 @@
   {% if s.game_ctx and s.game_ctx.get('blowout_risk') %}{% set any_blowout.val = true %}{% endif %}
 {% endfor %}
 
-<div class="sa-matchup-card mb-4 fade-up fade-up-4">
-
-  {# Matchup header: VS layout #}
-  <div class="sa-matchup-header">
-    <div class="sa-team-block sa-team-away">
-      <span class="sa-team-abbr">{{ away_abbr }}</span>
-      <span class="sa-team-label">Away</span>
-    </div>
-    <div class="sa-matchup-meta text-center">
-      <div class="sa-vs">VS</div>
-      {% if ou %}<div class="sa-game-line">O/U {{ ou }}</div>{% endif %}
-      {% if ml_h and ml_a %}<div class="sa-game-line">{{ ml_a }} / {{ ml_h }}</div>{% endif %}
-      {% if any_blowout.val %}<span class="badge text-bg-warning mt-1">⚠ Blowout Risk</span>{% endif %}
-    </div>
-    <div class="sa-team-block sa-team-home">
-      <span class="sa-team-abbr">{{ home_abbr }}</span>
-      <span class="sa-team-label">Home</span>
-    </div>
+<section class="sa-matchup-card" style="--cols: minmax(9rem, 1fr) 4rem 4rem 5rem auto">
+  <div class="sheet-head sa-matchup-header">
+    <h2 class="sheet-title">{{ away_abbr }} @ {{ home_abbr }}</h2>
+    <p class="sheet-dateline">
+      {% if ou %}O/U {{ ou }}{% endif %}
+      {% if ml_h and ml_a %} · ML {{ ml_a }} / {{ ml_h }}{% endif %}
+      {% if any_blowout.val %} · Blowout risk{% endif %}
+    </p>
   </div>
-
-  {# Two-column player grid #}
-  <div class="row g-0">
-    {# Away column #}
-    <div class="col-12 col-lg-6 sa-team-col sa-team-col-away border-lg-end">
-      {% if not m.away %}
-      <div class="px-3 py-2 small text-secondary fst-italic">No props</div>
-      {% else %}
-      {% set ns = namespace(last_pos='') %}
-      {% for s in m.away %}
-      {% set pos = (s.breakdown or {}).get('player_position', '') %}
-      {% if pos and pos != ns.last_pos %}
-      {% set ns.last_pos = pos %}
-      <div class="sa-pos-header">Est. {{ pos|upper }}</div>
-      {% endif %}
-      <button type="button" class="sa-player-row sa-ind-{{ s.indicator }}" data-prop='{{ s | tojson }}'>
-        <div class="sa-player-info">
-          <span class="sa-player-name">{{ s.player }}</span>
-          <span class="sa-prop-desc">{{ PROP_LABELS_SHORT.get(s.prop_type, s.prop_type) }} {{ s.line }}</span>
-        </div>
-        {{ indicator_badge(s.indicator) }}
-      </button>
-      {% endfor %}
-      {% endif %}
-    </div>
-
-    {# Home column #}
-    <div class="col-12 col-lg-6 sa-team-col sa-team-col-home">
-      {% if not m.home %}
-      <div class="px-3 py-2 small text-secondary fst-italic">No props</div>
-      {% else %}
-      {% set ns = namespace(last_pos='') %}
-      {% for s in m.home %}
-      {% set pos = (s.breakdown or {}).get('player_position', '') %}
-      {% if pos and pos != ns.last_pos %}
-      {% set ns.last_pos = pos %}
-      <div class="sa-pos-header">Est. {{ pos|upper }}</div>
-      {% endif %}
-      <button type="button" class="sa-player-row sa-ind-{{ s.indicator }}" data-prop='{{ s | tojson }}'>
-        <div class="sa-player-info">
-          <span class="sa-player-name">{{ s.player }}</span>
-          <span class="sa-prop-desc">{{ PROP_LABELS_SHORT.get(s.prop_type, s.prop_type) }} {{ s.line }}</span>
-        </div>
-        {{ indicator_badge(s.indicator) }}
-      </button>
-      {% endfor %}
-      {% endif %}
-    </div>
+  <div class="band">
+    <span class="band-cell">Player / market</span>
+    <span class="band-cell is-num is-optional">Line</span>
+    <span class="band-cell is-num is-optional">Proj</span>
+    <span class="band-cell is-num">Edge</span>
+    <span class="band-cell"><span class="visually-hidden">Signal</span></span>
   </div>
-</div>
+  {% for side_label, side_props in [('Away', m.away), ('Home', m.home)] %}
+    {% for s in side_props %}
+    {% set pos = (s.breakdown or {}).get('player_position', '') %}
+    <button type="button" class="row-line sa-player-row sa-ind-{{ s.indicator }}" data-prop='{{ s|tojson }}'>
+      <span class="row-lead">
+        {{ s.player }}
+        <span class="row-sub">{{ side_label }} · {{ PROP_LABELS_SHORT.get(s.prop_type, s.prop_type) }}{% if pos %} · est. {{ pos|upper }}{% endif %}</span>
+        <span class="row-meta is-compact-only">line {{ s.line }} · projection {{ '%.1f'|format(s.projection or 0) }}</span>
+      </span>
+      <span class="row-figure is-optional">{{ s.line }}</span>
+      <span class="row-figure is-optional">{{ '%.1f'|format(s.projection or 0) }}</span>
+      <span class="row-figure is-lead">{{ '+' if (s.edge or 0) >= 0 else '' }}{{ '%.0f'|format((s.edge or 0) * 100) }}%</span>
+      <span class="row-actions">{{ indicator_badge(s.indicator) }}</span>
+    </button>
+    {% else %}
+    <div class="row-line"><span class="row-lead">{{ side_label }} team<span class="row-sub">No posted props</span></span><span class="row-figure is-lead">—</span></div>
+    {% endfor %}
+  {% endfor %}
+</section>
 {% endfor %}
 </div>
 </div>

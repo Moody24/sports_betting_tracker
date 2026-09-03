@@ -59,7 +59,7 @@
 
   function setFeedback(msg, type) {
     if (!feedback) return;
-    feedback.className = 'alert alert-' + type + ' py-2 small';
+    feedback.className = 'notice' + (type === 'danger' ? ' text-danger' : '');
     feedback.textContent = msg;
     feedback.classList.remove('d-none');
   }
@@ -173,6 +173,7 @@
     ].forEach(function (pair) {
       if (!pair[0]) return;
       pair[0].classList.toggle('active', pair[1] === propFilter);
+      pair[0].classList.toggle('is-active', pair[1] === propFilter);
     });
     renderProps();
   }
@@ -180,16 +181,16 @@
   function updateModeBadge() {
     if (!modeBadge) return;
     if (!slip.length) {
-      modeBadge.className = 'badge text-bg-secondary';
+      modeBadge.className = 'tag tag-pending';
       modeBadge.textContent = 'No picks';
       return;
     }
     if (slip.length === 1) {
-      modeBadge.className = 'badge text-bg-info';
+      modeBadge.className = 'tag tag-live';
       modeBadge.textContent = 'Single';
       return;
     }
-    modeBadge.className = 'badge text-bg-success';
+    modeBadge.className = 'tag tag-win';
     modeBadge.textContent = 'Parlay · ' + slip.length + ' legs';
   }
 

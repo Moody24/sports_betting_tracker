@@ -40,21 +40,17 @@ test.describe('Responsive layout contract', () => {
     }
   });
 
-  test('dashboard cards remain usable and primary navigation remains reachable', async ({ page }) => {
+  test('dashboard ledger remains usable and primary navigation remains reachable', async ({ page }) => {
     await registerAndLogin(page);
 
     for (const width of widths) {
       await page.setViewportSize({ width, height: 900 });
       await page.goto('/dashboard');
 
-      // Deliberately still pinned to `.kpi-card`: unlike the readiness
-      // selectors above, this is a real assertion about card shape, not
-      // plumbing. Phase 3 replaces the KPI card row with a ledger band, at
-      // which point this assertion stops being meaningful and the migrator
-      // must replace it rather than repoint it.
-      const firstCard = page.locator('.kpi-card').first();
-      await expect(firstCard).toBeVisible();
-      expect(await firstCard.evaluate((element) => element.getBoundingClientRect().width)).toBeGreaterThan(120);
+      const ledger = page.locator('[data-testid="dashboard-summary"]');
+      await expect(ledger.locator('.band')).toBeVisible();
+      await expect(ledger.locator('.row-line')).toHaveCount(1);
+      await expect(ledger.locator('.row-figure.is-lead')).toBeVisible();
 
       // The masthead replaced the sidebar drawer, so navigation is the same
       // component at every width — no toggle, no overlay, no focus trap.

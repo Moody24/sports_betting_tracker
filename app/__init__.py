@@ -7,7 +7,7 @@ import sys
 from time import perf_counter
 from datetime import datetime, timedelta, timezone
 
-from flask import Flask, g, get_template_attribute, render_template, request
+from flask import Flask, g, get_template_attribute, request
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_login import LoginManager, current_user
@@ -250,6 +250,7 @@ def _register_security_hooks(app: Flask) -> None:
             response.headers['X-Response-Time-ms'] = f'{duration_ms:.1f}'
             response.headers['Server-Timing'] = f'app;dur={duration_ms:.1f}'
         response.headers['X-Content-Type-Options'] = 'nosniff'
+        response.headers['X-Request-ID'] = g.request_id
         response.headers['X-Frame-Options'] = 'SAMEORIGIN'
         response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
         response.headers['Content-Security-Policy'] = (
@@ -270,6 +271,7 @@ def _register_security_hooks(app: Flask) -> None:
     @app.before_request
     def mark_request_start():
         g._request_started_at = perf_counter()
+        g.request_id = secrets.token_urlsafe(12)
 
 
 def _register_http_routes(app: Flask) -> None:
@@ -292,14 +294,8 @@ def _register_http_routes(app: Flask) -> None:
     app.register_blueprint(bet)
     app.register_blueprint(main)
 
-    @app.errorhandler(404)
-    def not_found_error(_error):
-        return render_template('errors/404.html'), 404
-
-    @app.errorhandler(500)
-    def internal_error(_error):
-        db.session.rollback()
-        return render_template('errors/500.html'), 500
+    from app.http_errors import register_error_handlers
+    register_error_handlers(app, db)
 
 
 def _run_startup_tasks(app: Flask) -> None:

@@ -2,528 +2,234 @@
 
 {% block title %}NBA Today · Edge Tracker{% endblock %}
 {% block page_title %}NBA Today{% endblock %}
-{% block page_subtitle %}Live dashboard — active games auto-archive when final with odds &amp; props locked at snapshot time.{% endblock %}
+{% block page_subtitle %}Live scores, market context, and captured closing records for the current ET slate.{% endblock %}
 
 {% block content %}
 {% set flow_active = 'today' %}
 {% set flow_builder_tab = 'prop' %}
 {% include 'bets/_workflow_nav.html' %}
 
-<div class="today-toolbar">
-  <p class="today-toolbar-stats">
-    {{ games|length }} active game{{ 's' if games|length != 1 }} &middot;
-    {{ completed_snaps|length }} completed
-  </p>
-  <div class="today-toolbar-actions section-action-row">
-    <span id="today-last-updated" class="small text-secondary">Last updated at --:--</span>
-    <button type="button" class="btn btn-sm btn-outline-info btn-toolbar-primary" id="refresh-active-games">
-      {{ icon('arrow-repeat', classes='me-1') }}Refresh Live Games
-    </button>
-    <form action="{{ url_for('bet.nba_update_results') }}" method="POST" class="d-inline">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <button type="submit" class="btn btn-sm btn-outline-light btn-toolbar-secondary">
-        {{ icon('arrow-repeat', classes='me-1') }}Update Results
-      </button>
-    </form>
-  </div>
+<div class="control-bar today-toolbar">
+  <span class="row-meta">{{ games|length }} active · {{ completed_snaps|length }} completed · {{ upcoming_games|length }} tomorrow</span>
+  <span id="today-last-updated" class="row-meta">Updated --:--</span>
+  <button type="button" class="act" id="refresh-active-games">Refresh live</button>
+  <form action="{{ url_for('bet.nba_update_results') }}" method="POST">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="act">Grade results</button>
+  </form>
 </div>
 
-{# ══════════════════════════════════════════════════════════════
-   ACTIVE GAMES
-══════════════════════════════════════════════════════════════ #}
 {% if not games and not completed_snaps %}
-<div class="ux-empty-state card-soft p-4 text-center text-secondary mb-4">
-  {{ icon('calendar-x', classes='today-empty-icon ux-empty-icon') }}
-  <p class="mt-2 mb-0">No NBA games scheduled today.</p>
-  <p class="small mt-1 mb-0">Check back later or use Refresh Live Games.</p>
+<div class="state-empty">
+  <strong>No NBA games scheduled today.</strong>
+  Check back later or refresh the live slate.
 </div>
 {% endif %}
 
-<div id="active-games-section" class="loading-shell" data-testid="today-active-games">
-{% if games %}
-<h2 class="h5 mb-3">
-  {{ icon('broadcast', classes='me-2 text-success') }}Active Games
-  <span class="badge text-bg-success ms-2 today-count-badge">{{ games|length }}</span>
-</h2>
-<div class="row g-3 mb-5 align-items-start refresh-content" id="active-games-content">
-  {% for game in games %}
-  <div class="col-md-6 col-xl-4">
-    <div class="card-soft p-3 h-100 d-flex flex-column{% if game.status == 'STATUS_IN_PROGRESS' %} game-card-live{% endif %}">
+<section id="active-games-section" class="loading-shell today-section"
+         data-testid="today-active-games"
+         style="--cols: minmax(11rem, 1fr) 6rem 5rem auto">
+  <div class="sheet-head">
+    <h2 class="sheet-title">Active games</h2>
+    <p class="sheet-dateline">{{ games|length }} on the ET slate · market lines update on refresh</p>
+  </div>
 
-      {# Status badge + O/U line #}
-      <div class="d-flex justify-content-between align-items-center mb-2">
-        {% if game.status == 'STATUS_IN_PROGRESS' %}
-          <span class="badge text-bg-success d-flex align-items-center gap-1"><span class="live-pulse"></span>Live &middot; Q{{ game.period }} {{ game.clock }}</span>
-        {% else %}
-          <span class="badge text-bg-info">{{ game.status_detail }}</span>
-        {% endif %}
-        {% if game.over_under_line %}
-          <span class="small text-secondary">O/U <strong class="text-light">{{ game.over_under_line }}</strong></span>
-        {% else %}
-          <span class="small text-secondary">O/U &mdash;</span>
-        {% endif %}
-      </div>
-
-      {# Matchup #}
-      <div class="d-flex align-items-center justify-content-between mb-2">
-        <div class="text-center today-team-col">
-          {% if game.away.logo %}
-          <img src="{{ game.away.logo }}" alt="{{ game.away.abbr }}" class="nba-team-logo-lg mb-1" loading="lazy" decoding="async">
-          {% endif %}
-          <div class="small fw-semibold text-truncate">{{ game.away.name }}</div>
-          <div class="score-main">{{ game.away.score }}</div>
-          {% if game.moneyline_away %}
-            <div class="small mt-1 today-muted-meta">
-              ML <span class="{{ 'text-success' if game.moneyline_away > 0 else 'text-danger' }}">
-                {{ '%+d'|format(game.moneyline_away) }}
-              </span>
-            </div>
-          {% endif %}
-        </div>
-        <div class="text-secondary fw-bold px-1">@</div>
-        <div class="text-center today-team-col">
-          {% if game.home.logo %}
-          <img src="{{ game.home.logo }}" alt="{{ game.home.abbr }}" class="nba-team-logo-lg mb-1" loading="lazy" decoding="async">
-          {% endif %}
-          <div class="small fw-semibold text-truncate">{{ game.home.name }}</div>
-          <div class="score-main">{{ game.home.score }}</div>
-          {% if game.moneyline_home %}
-            <div class="small mt-1 today-muted-meta">
-              ML <span class="{{ 'text-success' if game.moneyline_home > 0 else 'text-danger' }}">
-                {{ '%+d'|format(game.moneyline_home) }}
-              </span>
-            </div>
-          {% endif %}
-        </div>
-      </div>
-
-      {# Total tracker #}
-      {% if game.status == 'STATUS_IN_PROGRESS' %}
-      <div class="small text-center mb-2">
-        <span class="text-secondary">Combined:</span>
-        <strong class="text-light">{{ game.total_score }}</strong>
-        {% if game.over_under_line %}
-          {% set diff = game.total_score - game.over_under_line %}
-          {% if diff > 0 %}
-            <span class="text-success">(+{{ '%.1f'|format(diff) }} over)</span>
-          {% elif diff < 0 %}
-            <span class="text-danger">({{ '%.1f'|format(diff) }} under)</span>
+  {% if games %}
+  <div class="band">
+    <span class="band-cell">Matchup / state</span>
+    <span class="band-cell is-num">Score</span>
+    <span class="band-cell is-num is-optional">Total</span>
+    <span class="band-cell"><span class="visually-hidden">Actions</span></span>
+  </div>
+  <div class="refresh-content" id="active-games-content">
+    {% for game in games %}
+    <article class="row-line{% if game.status == 'STATUS_IN_PROGRESS' %} game-card-live{% endif %}">
+      <div class="row-lead">
+        {{ game.away.name }} @ {{ game.home.name }}
+        <span class="row-sub">
+          {% if game.status == 'STATUS_IN_PROGRESS' %}
+          <span class="tag tag-live">Live · Q{{ game.period }} {{ game.clock }}</span>
           {% else %}
-            <span class="text-warning">(push)</span>
+          <span class="tag tag-pending">{{ game.status_detail }}</span>
           {% endif %}
+          {% if game.moneyline_away or game.moneyline_home %}
+          · ML {{ game.away.abbr }} {{ '%+d'|format(game.moneyline_away) if game.moneyline_away else '—' }} /
+          {{ game.home.abbr }} {{ '%+d'|format(game.moneyline_home) if game.moneyline_home else '—' }}
+          {% endif %}
+        </span>
+        <span class="row-meta">
+          {% if tracked.get(game.espn_id) %}
+            {% set tracked_bet = tracked[game.espn_id] %}
+            Tracking {{ tracked_bet.bet_type|title }}{% if tracked_bet.over_under_line %} {{ tracked_bet.over_under_line }}{% endif %}
+            · ${{ '%.2f'|format(tracked_bet.bet_amount) }}
+          {% else %}
+            Untracked
+          {% endif %}
+          <span class="is-compact-only"> · O/U {{ game.over_under_line or '—' }}</span>
+        </span>
+        {% set rec = market_recs.get(game.espn_id, {}) if market_recs else {} %}
+        {% if rec %}
+        <span class="row-meta today-model-rec">
+          Model Recommendations ·
+          {% if rec.get('moneyline') %}
+            {% set ml_rec = rec.get('moneyline') %}
+            Moneyline {{ 'home' if ml_rec.side == 'home' else 'away' }} · {{ ml_rec.action|upper }} · edge {{ '%.1f'|format((ml_rec.edge or 0) * 100) }}%
+          {% endif %}
+          {% if rec.get('total') %}
+            {% set total_rec = rec.get('total') %}
+            {% if rec.get('moneyline') %} · {% endif %}Total {{ total_rec.side|title }} · {{ total_rec.action|upper }} · {{ '%.0f'|format((total_rec.confidence or 0) * 100) }}%
+          {% endif %}
+        </span>
         {% endif %}
       </div>
-      {% endif %}
-
-      {# Tracked bet indicator #}
-      {% if tracked.get(game.espn_id) %}
-        {% set tb = tracked[game.espn_id] %}
-        <div class="small text-center py-1 px-2 rounded mb-2 today-tracked-pill">
-          {{ icon('eye') }}
-          Tracking <strong>{{ tb.bet_type|capitalize }}</strong>
-          {% if tb.over_under_line %} {{ tb.over_under_line }}{% endif %}
-          &middot; ${{ '%.2f'|format(tb.bet_amount) }}
-        </div>
-      {% endif %}
-
-      {# Quick-add O/U buttons #}
-      {% if game.over_under_line and not tracked.get(game.espn_id) %}
-      <div class="d-flex gap-2 mb-2">
-        <a href="{{ url_for('bet.new_bet',
-            team_a=game.away.name,
-            team_b=game.home.name,
-            match_date=game.start_time[:10],
-            bet_type='over',
-            over_under_line=game.over_under_line,
-            game_id=game.espn_id) }}#single"
-           class="btn btn-sm btn-outline-success flex-fill">
-          {{ icon('arrow-up', classes='me-1') }}Over {{ game.over_under_line }}
-        </a>
-        <a href="{{ url_for('bet.new_bet',
-            team_a=game.away.name,
-            team_b=game.home.name,
-            match_date=game.start_time[:10],
-            bet_type='under',
-            over_under_line=game.over_under_line,
-            game_id=game.espn_id) }}#single"
-           class="btn btn-sm btn-outline-danger flex-fill">
-          {{ icon('arrow-down', classes='me-1') }}Under {{ game.over_under_line }}
-        </a>
-      </div>
-      {% elif not game.over_under_line %}
-      <div class="mb-2">
-        <a href="{{ url_for('bet.new_bet',
-            team_a=game.away.name,
-            team_b=game.home.name,
-            match_date=game.start_time[:10],
-            game_id=game.espn_id) }}#single"
-           class="btn btn-sm btn-outline-light w-100">
-          {{ icon('plus-lg', classes='me-1') }}Place Bet
-        </a>
-      </div>
-      {% endif %}
-
-      {% set rec = market_recs.get(game.espn_id, {}) if market_recs else {} %}
-      {% if rec %}
-      <div class="today-model-rec small mb-2 p-2 rounded border border-secondary-subtle">
-        <div class="fw-semibold text-info mb-1">{{ icon('robot', classes='me-1') }}Model Recommendations</div>
-        {% if rec.get('moneyline') %}
-          {% set ml_rec = rec.get('moneyline') %}
-          <div class="d-flex justify-content-between align-items-center">
-            <span class="text-secondary">Moneyline</span>
-            <span>
-              <strong class="{{ 'text-success' if ml_rec.action == 'bet' else 'text-secondary' }}">
-                {{ 'Home' if ml_rec.side == 'home' else 'Away' }}
-              </strong>
-              <span class="text-secondary">({{ ml_rec.action|upper }}, edge {{ '%.1f'|format((ml_rec.edge or 0) * 100) }}%)</span>
-            </span>
-          </div>
-          {% if ml_rec.action_reason == 'market_disabled' %}
-          <div class="text-warning-emphasis small">
-            {{ icon('shield-exclamation', classes='me-1') }}Temporarily disabled by governance guardrails
-          </div>
-          {% endif %}
+      <span class="row-figure is-lead">{{ game.away.score }}–{{ game.home.score }}</span>
+      <span class="row-figure is-optional">
+        {% if game.status == 'STATUS_IN_PROGRESS' %}{{ game.total_score }} / {% endif %}{{ game.over_under_line or '—' }}
+      </span>
+      <span class="row-actions">
+        {% if game.over_under_line and not tracked.get(game.espn_id) %}
+        <a class="act" href="{{ url_for('bet.new_bet', team_a=game.away.name, team_b=game.home.name, match_date=game.start_time[:10], bet_type='over', over_under_line=game.over_under_line, game_id=game.espn_id) }}#single">Over</a>
+        <a class="act" href="{{ url_for('bet.new_bet', team_a=game.away.name, team_b=game.home.name, match_date=game.start_time[:10], bet_type='under', over_under_line=game.over_under_line, game_id=game.espn_id) }}#single">Under</a>
+        {% elif not game.over_under_line %}
+        <a class="act" href="{{ url_for('bet.new_bet', team_a=game.away.name, team_b=game.home.name, match_date=game.start_time[:10], game_id=game.espn_id) }}#single">Add bet</a>
         {% endif %}
-        {% if rec.get('total') %}
-          {% set t_rec = rec.get('total') %}
-          <div class="d-flex justify-content-between align-items-center">
-            <span class="text-secondary">Total</span>
-            <span>
-              <strong class="{{ 'text-success' if t_rec.action == 'bet' else 'text-secondary' }}">
-                {{ t_rec.side|capitalize }}
-              </strong>
-              <span class="text-secondary">({{ t_rec.action|upper }}, conf {{ '%.0f'|format((t_rec.confidence or 0) * 100) }}%)</span>
-            </span>
-          </div>
-          {% if t_rec.action_reason == 'market_disabled' %}
-          <div class="text-warning-emphasis small">
-            {{ icon('shield-exclamation', classes='me-1') }}Temporarily disabled by governance guardrails
-          </div>
-          {% endif %}
-        {% endif %}
-      </div>
-      {% endif %}
-
-      {# Player Props toggle #}
-      <div class="mt-auto">
-        <button class="btn btn-sm btn-outline-info w-100 props-toggle" type="button" aria-expanded="false"
+        <button class="act props-toggle" type="button" aria-expanded="false"
                 aria-controls="props-{{ game.espn_id }}"
                 data-espn-id="{{ game.espn_id }}"
                 data-away="{{ game.away.name }}"
                 data-home="{{ game.home.name }}"
-                data-date="{{ game.start_time[:10] }}">
-          {{ icon('person-lines-fill', classes='me-1') }}Player Props
-        </button>
-        <div class="props-container mt-2" id="props-{{ game.espn_id }}" hidden>
-          <div class="text-center py-3">
-            <div class="spinner-border spinner-border-sm text-info" role="status"></div>
-            <span class="small text-secondary ms-2">Loading props...</span>
-          </div>
-        </div>
+                data-date="{{ game.start_time[:10] }}">Props</button>
+      </span>
+      <div class="props-container row-full row-detail" id="props-{{ game.espn_id }}" hidden>
+        <div class="state-loading" role="status">Loading props…</div>
       </div>
-    </div>
+    </article>
+    {% endfor %}
   </div>
-  {% endfor %}
-</div>
-{% endif %}
+  {% endif %}
 
-<div class="row g-3 mb-5 align-items-start" id="active-games-loading" hidden>
-  {% for _ in range(3) %}
-  <div class="col-md-6 col-xl-4">
-    <div class="card-soft p-3 h-100 d-flex flex-column skeleton-card placeholder-glow">
-      <div class="d-flex justify-content-between mb-3">
-        <span class="placeholder col-4"></span>
-        <span class="placeholder col-3"></span>
-      </div>
-      <div class="skeleton-block today-skeleton-lg"></div>
-      <div class="skeleton-block today-skeleton-md"></div>
-      <div class="skeleton-block mt-auto today-skeleton-sm"></div>
-    </div>
+  <div id="active-games-loading" class="state-loading" hidden>Refreshing active games…</div>
+  <div id="active-games-error" class="state-error" hidden>
+    Unable to refresh live games.
+    <button class="act" type="button" id="retry-active-games">Retry</button>
   </div>
-  {% endfor %}
-</div>
+</section>
 
-<div id="active-games-error" class="ux-state-error card-soft p-3 text-center text-danger mb-4" hidden>
-  <div class="mb-2">{{ icon('exclamation-triangle', classes='me-1') }}Unable to refresh live games.</div>
-  <button class="btn btn-sm btn-outline-danger" type="button" id="retry-active-games">Retry</button>
-</div>
-</div>
-
-{# ══════════════════════════════════════════════════════════════
-   COMPLETED GAMES (archived snapshots)
-══════════════════════════════════════════════════════════════ #}
 {% if completed_snaps %}
-<h2 class="h5 mb-3 text-secondary">
-  {{ icon('archive', classes='me-2') }}Completed Games
-  <span class="badge text-bg-dark ms-2 today-count-badge">{{ completed_snaps|length }}</span>
-  <span class="small fw-normal ms-2 today-muted-note">
-    &mdash; odds &amp; props locked at snapshot time
-  </span>
-</h2>
-<div class="row g-3 mb-5 align-items-start">
+<section class="today-section" style="--cols: minmax(11rem, 1fr) 6rem 5rem auto">
+  <div class="sheet-head">
+    <h2 class="sheet-title">Completed games</h2>
+    <p class="sheet-dateline">{{ completed_snaps|length }} final · odds and props locked at snapshot time</p>
+  </div>
+  <div class="band">
+    <span class="band-cell">Matchup / capture</span>
+    <span class="band-cell is-num">Final</span>
+    <span class="band-cell is-num is-optional">Total / line</span>
+    <span class="band-cell"><span class="visually-hidden">Details</span></span>
+  </div>
   {% for snap in completed_snaps %}
-  <div class="col-md-6 col-xl-4">
-    <div class="card-soft p-3 h-100 d-flex flex-column today-completed-card">
-
-      {# Header #}
-      <div class="d-flex justify-content-between align-items-center mb-2">
-        <span class="badge text-bg-secondary">Final</span>
-        <span class="small text-secondary" title="Snapshot time: {{ snap.snapshot_time.strftime('%H:%M UTC') }}">
-          {{ icon('camera', classes='me-1') }}
-          Snapped {{ snap.snapshot_time.strftime('%H:%M') }} UTC
-        </span>
-      </div>
-
-      {# Matchup + final score #}
-      <div class="d-flex align-items-center justify-content-between mb-2">
-        <div class="text-center today-team-col">
-          {% if snap.away_logo %}
-          <img src="{{ snap.away_logo }}" alt="" width="36" height="36" class="nba-team-logo mb-1" loading="lazy" decoding="async">
-          {% endif %}
-          <div class="small fw-semibold">{{ snap.away_team }}</div>
-          <div class="h5 mb-0">{{ snap.away_score or 0 }}</div>
-        </div>
-        <div class="text-secondary fw-bold">@</div>
-        <div class="text-center today-team-col">
-          {% if snap.home_logo %}
-          <img src="{{ snap.home_logo }}" alt="" width="36" height="36" class="nba-team-logo mb-1" loading="lazy" decoding="async">
-          {% endif %}
-          <div class="small fw-semibold">{{ snap.home_team }}</div>
-          <div class="h5 mb-0">{{ snap.home_score or 0 }}</div>
-        </div>
-      </div>
-
-      {# Final total vs snapshot O/U #}
-      <div class="small text-center mb-2">
-        <span class="text-secondary">Final total: </span>
-        <strong class="text-light">{{ snap.total_score }}</strong>
-        {% if snap.over_under_line %}
-          {% set diff = snap.total_score - snap.over_under_line %}
-          &nbsp;
-          {% if diff > 0 %}
-            <span class="text-success">(Over +{{ '%.1f'|format(diff) }})</span>
-          {% elif diff < 0 %}
-            <span class="text-danger">(Under {{ '%.1f'|format(diff) }})</span>
-          {% else %}
-            <span class="text-warning">(Push)</span>
-          {% endif %}
-        {% endif %}
-      </div>
-
-      {# Snapshot odds row #}
-      <div class="d-flex justify-content-center gap-3 mb-2 small">
-        <div class="text-center">
-          <div class="text-secondary today-mini-label">O/U LINE</div>
-          <div class="text-light fw-semibold">
-            {{ snap.over_under_line if snap.over_under_line else '—' }}
-          </div>
-        </div>
-        {% if snap.moneyline_away %}
-        <div class="text-center">
-          <div class="text-secondary today-mini-label">{{ snap.away_team | truncate(10, True, '') }} ML</div>
-          <div class="{{ 'text-success' if snap.moneyline_away > 0 else 'text-danger' }} fw-semibold">
-            {{ '%+d'|format(snap.moneyline_away) }}
-          </div>
-        </div>
-        {% endif %}
-        {% if snap.moneyline_home %}
-        <div class="text-center">
-          <div class="text-secondary today-mini-label">{{ snap.home_team | truncate(10, True, '') }} ML</div>
-          <div class="{{ 'text-success' if snap.moneyline_home > 0 else 'text-danger' }} fw-semibold">
-            {{ '%+d'|format(snap.moneyline_home) }}
-          </div>
-        </div>
-        {% endif %}
-      </div>
-
-      {# Snapshot props (collapsible) #}
-      {% set snap_props = snap.props %}
-      {% if snap_props %}
-      <div class="mt-auto">
-        <button class="btn btn-sm btn-outline-secondary w-100 collapsed"
-                type="button"
-                data-ui-toggle="collapse"
-                data-ui-target="#snap-props-{{ snap.id }}"
-                aria-expanded="false"
-                aria-controls="snap-props-{{ snap.id }}">
-          {{ icon('lock', classes='me-1') }}Snapshot Props
-          {{ icon('chevron-down', classes='ms-1 today-mini-chevron') }}
-        </button>
-        <div class="collapse mt-2" id="snap-props-{{ snap.id }}">
-          <div class="snap-props-scroll">
-          {% for market_key, market_list in snap_props.items() %}
-            {% set market_label = {
-              'player_points': 'Points',
-              'player_rebounds': 'Rebounds',
-              'player_assists': 'Assists',
-              'player_points_rebounds_assists': 'Points + Rebounds + Assists',
-              'player_threes': '3-Pointers',
-              'player_blocks': 'Blocks',
-              'player_steals': 'Steals',
-            }.get(market_key, market_key | replace('player_', '') | replace('_', ' ') | title) %}
-            <div class="prop-market-label small text-secondary mt-2">{{ market_label }}</div>
-            {% for prop in market_list[:5] %}
-            <div class="prop-row">
-              <div class="prop-player">{{ prop.player }}</div>
-              <div class="prop-line">{{ prop.line }}</div>
-              <div class="prop-actions">
-                <span class="badge text-bg-success me-1">O {{ '%+d'|format(prop.over_odds) if prop.over_odds else '?' }}</span>
-                <span class="badge text-bg-danger">U {{ '%+d'|format(prop.under_odds) if prop.under_odds else '?' }}</span>
-              </div>
-            </div>
-            {% endfor %}
-            {% if market_list|length > 5 %}
-            <div class="small text-secondary mt-1">+{{ market_list|length - 5 }} more…</div>
-            {% endif %}
-          {% endfor %}
-          </div>
-        </div>
-      </div>
-      {% else %}
-      <div class="mt-auto small text-secondary text-center">
-        {{ icon('info-circle', classes='me-1') }}No props were snapshotted for this game.
-      </div>
+  <article class="row-line today-completed-card">
+    <div class="row-lead">
+      {{ snap.away_team }} @ {{ snap.home_team }}
+      <span class="row-sub"><span class="tag tag-push">Final</span> · snapped {{ snap.snapshot_time.strftime('%H:%M') }} UTC</span>
+      <span class="row-meta">
+        ML {{ snap.away_team|truncate(10, True, '') }} {{ '%+d'|format(snap.moneyline_away) if snap.moneyline_away else '—' }} /
+        {{ snap.home_team|truncate(10, True, '') }} {{ '%+d'|format(snap.moneyline_home) if snap.moneyline_home else '—' }}
+        <span class="is-compact-only"> · total {{ snap.total_score }} / {{ snap.over_under_line or '—' }}</span>
+      </span>
+    </div>
+    <span class="row-figure is-lead">{{ snap.away_score or 0 }}–{{ snap.home_score or 0 }}</span>
+    <span class="row-figure is-optional">{{ snap.total_score }} / {{ snap.over_under_line or '—' }}</span>
+    <span class="row-actions">
+      {% if snap.props %}
+      <button class="act collapsed" type="button" data-ui-toggle="collapse"
+              data-ui-target="#snap-props-{{ snap.id }}" aria-expanded="false"
+              aria-controls="snap-props-{{ snap.id }}">Snapshot props</button>
       {% endif %}
-
+    </span>
+    {% if snap.props %}
+    <div class="collapse row-full row-detail snap-props-scroll" id="snap-props-{{ snap.id }}">
+      {% for market_key, market_list in snap.props.items() %}
+      <div class="row-meta">{{ market_key|replace('player_', '')|replace('_', ' ')|title }}</div>
+      {% for prop in market_list[:5] %}
+      <div class="prop-row">
+        <div class="prop-player">{{ prop.player }}</div>
+        <div class="prop-line">{{ prop.line }}</div>
+        <div class="prop-actions">O {{ '%+d'|format(prop.over_odds) if prop.over_odds else '—' }} · U {{ '%+d'|format(prop.under_odds) if prop.under_odds else '—' }}</div>
+      </div>
+      {% endfor %}
+      {% if market_list|length > 5 %}<div class="row-sub">+{{ market_list|length - 5 }} more</div>{% endif %}
+      {% endfor %}
     </div>
-  </div>
+    {% else %}
+    <span class="row-sub row-full">No props were captured for this game.</span>
+    {% endif %}
+  </article>
   {% endfor %}
-</div>
+</section>
 {% endif %}
 
-{# ══════════════════════════════════════════════════════════════
-   UPCOMING GAMES (tomorrow)
-══════════════════════════════════════════════════════════════ #}
 {% if upcoming_games %}
-<h2 class="h5 mb-3 text-secondary">
-  {{ icon('calendar-event', classes='me-2') }}Coming Up Tomorrow
-  <span class="badge text-bg-dark ms-2 today-count-badge">{{ upcoming_games|length }} game{{ 's' if upcoming_games|length != 1 }}</span>
-</h2>
-<div class="row g-3 align-items-start">
-  {% for game in upcoming_games %}
-  <div class="col-md-6 col-xl-4">
-    <div class="card-soft p-3 h-100 d-flex flex-column today-upcoming-card">
-      <div class="d-flex justify-content-between align-items-center mb-2">
-        <span class="badge text-bg-dark">Tomorrow</span>
-        {% if game.over_under_line %}
-          <span class="small text-secondary">O/U <strong class="text-light">{{ game.over_under_line }}</strong></span>
-        {% else %}
-          <span class="small text-secondary">O/U &mdash;</span>
-        {% endif %}
-      </div>
-
-      <div class="d-flex align-items-center justify-content-between mb-3">
-        <div class="text-center today-team-col-wide">
-          <div class="small fw-semibold">{{ game.away.name }}</div>
-        </div>
-        <div class="text-secondary fw-bold small">@</div>
-        <div class="text-center today-team-col-wide">
-          <div class="small fw-semibold">{{ game.home.name }}</div>
-        </div>
-      </div>
-
-      <div class="d-flex gap-2 mt-auto">
-        {% if game.over_under_line %}
-        <a href="{{ url_for('bet.new_bet',
-            team_a=game.away.name,
-            team_b=game.home.name,
-            match_date=game.match_date,
-            bet_type='over',
-            over_under_line=game.over_under_line,
-            game_id=game.espn_id) }}#single"
-           class="btn btn-sm btn-outline-success flex-fill">
-          {{ icon('arrow-up', classes='me-1') }}Over {{ game.over_under_line }}
-        </a>
-        <a href="{{ url_for('bet.new_bet',
-            team_a=game.away.name,
-            team_b=game.home.name,
-            match_date=game.match_date,
-            bet_type='under',
-            over_under_line=game.over_under_line,
-            game_id=game.espn_id) }}#single"
-           class="btn btn-sm btn-outline-danger flex-fill">
-          {{ icon('arrow-down', classes='me-1') }}Under {{ game.over_under_line }}
-        </a>
-        {% else %}
-        <a href="{{ url_for('bet.new_bet',
-            team_a=game.away.name,
-            team_b=game.home.name,
-            match_date=game.match_date,
-            game_id=game.espn_id) }}#single"
-           class="btn btn-sm btn-outline-light w-100">
-          {{ icon('plus-lg', classes='me-1') }}Place Bet
-        </a>
-        {% endif %}
-      </div>
-    </div>
+<section class="today-section" style="--cols: minmax(11rem, 1fr) 6rem auto">
+  <div class="sheet-head">
+    <h2 class="sheet-title">Tomorrow</h2>
+    <p class="sheet-dateline">{{ upcoming_games|length }} scheduled game{{ '' if upcoming_games|length == 1 else 's' }}</p>
   </div>
+  <div class="band">
+    <span class="band-cell">Matchup</span>
+    <span class="band-cell is-num">O/U</span>
+    <span class="band-cell"><span class="visually-hidden">Actions</span></span>
+  </div>
+  {% for game in upcoming_games %}
+  <article class="row-line today-upcoming-card">
+    <div class="row-lead">
+      {{ game.away.name }} @ {{ game.home.name }}
+      <span class="row-sub"><span class="tag tag-pending">Tomorrow</span></span>
+    </div>
+    <span class="row-figure is-lead">{{ game.over_under_line or '—' }}</span>
+    <span class="row-actions">
+      {% if game.over_under_line %}
+      <a class="act" href="{{ url_for('bet.new_bet', team_a=game.away.name, team_b=game.home.name, match_date=game.match_date, bet_type='over', over_under_line=game.over_under_line, game_id=game.espn_id) }}#single">Over</a>
+      <a class="act" href="{{ url_for('bet.new_bet', team_a=game.away.name, team_b=game.home.name, match_date=game.match_date, bet_type='under', over_under_line=game.over_under_line, game_id=game.espn_id) }}#single">Under</a>
+      {% else %}
+      <a class="act" href="{{ url_for('bet.new_bet', team_a=game.away.name, team_b=game.home.name, match_date=game.match_date, game_id=game.espn_id) }}#single">Add bet</a>
+      {% endif %}
+    </span>
+  </article>
   {% endfor %}
-</div>
+</section>
 {% endif %}
 
-{# ══════════════════════════════════════════════════════════════
-   Bet Slip (floating panel)
-══════════════════════════════════════════════════════════════ #}
-<div id="bet-slip" class="bet-slip d-none">
-  <div class="bet-slip-header d-flex justify-content-between align-items-center">
-    <h6 class="mb-0">{{ icon('receipt', classes='me-1') }}Bet Slip <span id="slip-count" class="badge text-bg-info ms-1">0</span></h6>
-    <button class="btn btn-sm btn-outline-secondary border-0" id="slip-toggle-btn" aria-label="Collapse bet slip" aria-expanded="true">
-      {{ icon('chevron-down', classes='slip-toggle-icon') }}
-    </button>
+{# Overlay layer: does not count as the one raised surface in document flow. #}
+<aside id="bet-slip" class="bet-slip d-none" aria-label="Bet slip">
+  <div class="bet-slip-header">
+    <strong>Bet slip · <span id="slip-count">0</span></strong>
+    <button class="act" id="slip-toggle-btn" aria-label="Collapse bet slip" aria-expanded="true">Collapse</button>
   </div>
   <div class="bet-slip-body" id="slip-body">
     <div id="slip-legs"></div>
-    <div id="slip-empty" class="text-center text-secondary small py-3">
-      {{ icon('hand-index-thumb', classes='today-slip-empty-icon') }}
-      <p class="mb-0 mt-1">Click props above to add them here</p>
-    </div>
-
+    <div id="slip-empty" class="state-empty">Choose a player prop to begin.</div>
     <div id="slip-controls" class="d-none">
-      <hr class="border-secondary my-2">
-
-      {# Parlay toggle #}
-      <div class="d-flex align-items-center gap-2 mb-2">
-        <div class="form-check form-switch">
-          <input class="form-check-input" type="checkbox" id="parlay-toggle">
-          <label class="form-check-label small" for="parlay-toggle">Parlay</label>
-        </div>
-        <div id="parlay-odds-display" class="small text-info ms-auto d-none"></div>
-      </div>
-
-      {# Bonus bet multiplier #}
-      <div class="mb-2">
-        <label class="form-label small mb-1 text-secondary">
-          {{ icon('lightning-charge', classes='me-1') }}Bonus Multiplier
-          <span id="slip-bonus-label" class="text-warning ms-1"></span>
+      <div class="control-bar">
+        <label class="form-check form-switch" for="parlay-toggle">
+          <input class="form-check-input" type="checkbox" id="parlay-toggle"> Parlay
         </label>
-        <div class="input-group input-group-sm">
-          <span class="input-group-text bg-dark border-secondary-subtle">×</span>
-          <input type="number" class="form-control" id="slip-bonus-multiplier"
-                 placeholder="1.00" value="1.00" min="1" step="0.05">
-        </div>
-        <div id="slip-bonus-payout" class="small text-warning mt-1 d-none"></div>
+        <span id="parlay-odds-display" class="row-meta d-none"></span>
       </div>
-
-      {# Stake #}
-      <div class="input-group input-group-sm mb-2">
-        <span class="input-group-text bg-dark border-secondary-subtle">$</span>
-        <input type="number" class="form-control" id="slip-stake" placeholder="25.00" min="1" step="0.01">
-      </div>
-
-      {# Estimated payout #}
-      <div id="slip-payout-info" class="small text-secondary mb-2 d-none"></div>
-
-      <div class="d-flex gap-2">
-        <button class="btn btn-sm btn-outline-danger flex-fill" id="slip-clear">
-          {{ icon('trash3', classes='me-1') }}Clear
-        </button>
-        <button class="btn btn-sm btn-primary flex-fill" id="slip-submit">
-          {{ icon('check-lg', classes='me-1') }}Place Bet
-        </button>
+      <label class="band-cell" for="slip-bonus-multiplier">Bonus multiplier</label>
+      <input type="number" class="form-control form-control-sm" id="slip-bonus-multiplier" value="1.00" min="1" step="0.05">
+      <span id="slip-bonus-label" class="row-meta"></span>
+      <div id="slip-bonus-payout" class="row-meta d-none"></div>
+      <label class="band-cell" for="slip-stake">Stake</label>
+      <input type="number" class="form-control form-control-sm" id="slip-stake" placeholder="25.00" min="1" step="0.01">
+      <div id="slip-payout-info" class="row-meta d-none"></div>
+      <div class="row-actions">
+        <button class="act" id="slip-clear">Clear</button>
+        <button class="act" id="slip-submit">Place bet</button>
       </div>
     </div>
   </div>
-</div>
+</aside>
 {% endblock %}
 
 {% block scripts %}
@@ -541,9 +247,7 @@ document.addEventListener('DOMContentLoaded', function () {
   var updatedEl = document.getElementById('today-last-updated');
 
   function stampUpdated() {
-    if (updatedEl) {
-      updatedEl.textContent = 'Last updated at ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    }
+    if (updatedEl) updatedEl.textContent = 'Updated ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   }
 
   function setLoading(isLoading) {
@@ -551,9 +255,7 @@ document.addEventListener('DOMContentLoaded', function () {
     if (contentEl) contentEl.classList.toggle('is-loading', isLoading);
     if (refreshBtn) {
       refreshBtn.disabled = isLoading;
-      refreshBtn.innerHTML = isLoading
-        ? '<span class="spinner-border spinner-border-sm me-1"></span>Refreshing...'
-        : `{{ icon('arrow-repeat', classes='me-1') }}Refresh Live Games`;
+      refreshBtn.textContent = isLoading ? 'Refreshing…' : 'Refresh live';
     }
     if (!isLoading && errorEl) errorEl.hidden = true;
   }
@@ -562,13 +264,13 @@ document.addEventListener('DOMContentLoaded', function () {
     if (typeof trackUxEvent === 'function') trackUxEvent('nba_today_refresh_started');
     setLoading(true);
     fetch(window.location.pathname, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
-      .then(function (res) {
-        if (!res.ok) throw new Error('refresh failed');
-        return res.text();
+      .then(function (response) {
+        if (!response.ok) throw new Error('refresh failed');
+        return response.text();
       })
       .then(function (html) {
-        var doc = new DOMParser().parseFromString(html, 'text/html');
-        var nextContent = doc.getElementById('active-games-content');
+        var documentCopy = new DOMParser().parseFromString(html, 'text/html');
+        var nextContent = documentCopy.getElementById('active-games-content');
         if (!nextContent || !contentEl) throw new Error('missing refreshed content');
         contentEl.innerHTML = nextContent.innerHTML;
         if (window.__initBetSlipUI) window.__initBetSlipUI();
@@ -579,16 +281,11 @@ document.addEventListener('DOMContentLoaded', function () {
         if (errorEl) errorEl.hidden = false;
         if (typeof trackUxEvent === 'function') trackUxEvent('nba_today_refresh_error');
       })
-      .finally(function () {
-        setLoading(false);
-      });
+      .finally(function () { setLoading(false); });
   }
 
   if (refreshBtn) refreshBtn.addEventListener('click', refreshActiveGames);
-  if (retryBtn) retryBtn.addEventListener('click', function () {
-    if (typeof trackUxEvent === 'function') trackUxEvent('nba_today_refresh_retry');
-    refreshActiveGames();
-  });
+  if (retryBtn) retryBtn.addEventListener('click', refreshActiveGames);
   stampUpdated();
 });
 </script>
