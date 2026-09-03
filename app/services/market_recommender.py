@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import date as date_type, datetime, timezone
+from datetime import date as date_type, datetime, timedelta, timezone
 
 from app import db
 from app.models import GameSnapshot, ModelMetadata
@@ -826,6 +826,193 @@ def tune_market_thresholds(days: int = 180, bins: int = 5, min_bets: int = 40, a
     return result
 
 
+def _walkforward_folds(snaps, train_days: int, test_days: int, step_days: int):
+    start_date = snaps[0].game_date
+    end_date = snaps[-1].game_date
+    folds = []
+    cur_test_start = start_date + timedelta(days=train_days)
+    while cur_test_start <= end_date:
+        train_start = cur_test_start - timedelta(days=train_days)
+        test_end = cur_test_start + timedelta(days=test_days - 1)
+        train = [
+            snap for snap in snaps
+            if snap.game_date and train_start <= snap.game_date < cur_test_start
+        ]
+        test = [
+            snap for snap in snaps
+            if snap.game_date and cur_test_start <= snap.game_date <= test_end
+        ]
+        if train and test:
+            folds.append((train_start, cur_test_start, test_end, train, test))
+        cur_test_start += timedelta(days=step_days)
+    return folds
+
+
+def _walkforward_rows(snaps) -> dict[str, list[dict]]:
+    rows = {'moneyline': [], 'total_ou': []}
+    for snap in snaps:
+        if snap.home_score != snap.away_score:
+            rows['moneyline'].append({
+                'x': _features_for_snapshot(snap),
+                'y': 1 if (snap.home_score or 0) > (snap.away_score or 0) else 0,
+                'moneyline_home': int(snap.moneyline_home),
+                'moneyline_away': int(snap.moneyline_away),
+            })
+        total_score = (snap.home_score or 0) + (snap.away_score or 0)
+        line = float(snap.over_under_line or 0.0)
+        if total_score != line:
+            rows['total_ou'].append({
+                'x': _features_for_snapshot(snap),
+                'y': 1 if total_score > line else 0,
+            })
+    return rows
+
+
+def _fit_walkforward_probs(
+    train_rows: list[dict],
+    test_rows: list[dict],
+) -> tuple[list[float], list[int]]:
+    from sklearn.isotonic import IsotonicRegression
+    from sklearn.linear_model import LogisticRegression
+
+    if len(train_rows) < 20 or len({row['y'] for row in train_rows}) < 2:
+        return [], []
+    x_train = [row['x'] for row in train_rows]
+    y_train = [row['y'] for row in train_rows]
+    x_test = [row['x'] for row in test_rows]
+    y_test = [row['y'] for row in test_rows]
+    model = LogisticRegression(max_iter=400, class_weight='balanced')
+    model.fit(x_train, y_train)
+    test_probs = list(model.predict_proba(x_test)[:, 1])
+    if len(test_rows) >= 20 and len(set(y_test)) >= 2:
+        calibrator = IsotonicRegression(out_of_bounds='clip')
+        calibrator.fit(list(model.predict_proba(x_train)[:, 1]), y_train)
+        test_probs = [
+            max(0.0, min(1.0, float(calibrator.predict([prob])[0])))
+            for prob in test_probs
+        ]
+    return test_probs, y_test
+
+
+def _moneyline_pick_vectors(probs, rows):
+    edges = []
+    confidences = []
+    pick_correct = []
+    odds = []
+    for prob, row in zip(probs, rows):
+        home_prob = prob
+        away_prob = 1.0 - home_prob
+        home_edge = home_prob - implied_prob(int(row['moneyline_home']))
+        away_edge = away_prob - implied_prob(int(row['moneyline_away']))
+        side = 'home' if home_edge >= away_edge else 'away'
+        edges.append(home_edge if side == 'home' else away_edge)
+        confidences.append(max(home_prob, away_prob))
+        odds.append(
+            int(row['moneyline_home'])
+            if side == 'home'
+            else int(row['moneyline_away'])
+        )
+        home_won = int(row['y'])
+        pick_correct.append(int(
+            (side == 'home' and home_won == 1)
+            or (side == 'away' and home_won == 0)
+        ))
+    return edges, confidences, pick_correct, odds
+
+
+def _total_pick_vectors(probs, rows):
+    edges = []
+    confidences = []
+    pick_correct = []
+    for prob, row in zip(probs, rows):
+        side = 'over' if prob >= 0.5 else 'under'
+        edges.append(abs(prob - 0.5))
+        confidences.append(max(prob, 1 - prob))
+        over_hit = int(row['y'])
+        pick_correct.append(int(
+            (side == 'over' and over_hit == 1)
+            or (side == 'under' and over_hit == 0)
+        ))
+    return edges, confidences, pick_correct, [-110] * len(probs)
+
+
+def _walkforward_fold_metric(
+    market: str,
+    train_rows: list[dict],
+    test_rows: list[dict],
+    policy: dict,
+    fold_dates,
+    bins: int,
+) -> dict | None:
+    from sklearn.metrics import accuracy_score, brier_score_loss, log_loss
+
+    probs, y_true = _fit_walkforward_probs(train_rows, test_rows)
+    if not probs:
+        return None
+    vectors = (
+        _moneyline_pick_vectors(probs, test_rows)
+        if market == 'moneyline'
+        else _total_pick_vectors(probs, test_rows)
+    )
+    edges, confidences, pick_correct, odds = vectors
+    market_policy = policy[market]
+    bet_idx = [
+        idx for idx, (edge, confidence) in enumerate(zip(edges, confidences))
+        if _decide_market_action(
+            edge=float(edge),
+            confidence=float(confidence),
+            min_edge=float(market_policy['min_edge']),
+            min_confidence=float(market_policy['min_confidence']),
+        )[0] == 'bet'
+    ]
+    units_profit = sum(
+        _profit_per_unit(int(odds[idx]), bool(pick_correct[idx]))
+        for idx in bet_idx
+    )
+    train_start, test_start, test_end = fold_dates
+    y_pred = [1 if prob >= 0.5 else 0 for prob in probs]
+    return {
+        'train_start': train_start.isoformat(),
+        'test_start': test_start.isoformat(),
+        'test_end': test_end.isoformat(),
+        'rows': len(y_true),
+        'accuracy': round(float(accuracy_score(y_true, y_pred)), 4),
+        'brier': round(float(brier_score_loss(y_true, probs)), 4),
+        'logloss': round(float(log_loss(y_true, probs)), 4),
+        'recommended_bets': len(bet_idx),
+        'roi_per_bet': (
+            round(float(units_profit / len(bet_idx)), 4) if bet_idx else None
+        ),
+        'avg_edge': (
+            round(float(sum(edges) / len(edges)), 4) if edges else None
+        ),
+        'bins': _calibration_bins(list(zip(probs, y_true)), bins=bins),
+    }
+
+
+def _aggregate_walkforward_metrics(rows: list[dict]) -> dict:
+    if not rows:
+        return {'error': 'no_fold_metrics'}
+    metric_keys = ('accuracy', 'brier', 'logloss')
+    averages = {
+        f'avg_{key}': round(
+            sum(float(row[key]) for row in rows) / len(rows),
+            4,
+        )
+        for key in metric_keys
+    }
+    roi_values = [
+        float(row['roi_per_bet'])
+        for row in rows
+        if row.get('roi_per_bet') is not None
+    ]
+    averages['avg_roi_per_bet'] = (
+        round(sum(roi_values) / len(roi_values), 4) if roi_values else None
+    )
+    averages['folds'] = len(rows)
+    return averages
+
+
 def walkforward_market_report(
     days: int = 180,
     train_days: int = 60,
@@ -834,11 +1021,6 @@ def walkforward_market_report(
     bins: int = 5,
 ) -> dict:
     """Walk-forward evaluation for market models using rolling date windows."""
-    from datetime import timedelta
-    from sklearn.linear_model import LogisticRegression
-    from sklearn.metrics import accuracy_score, brier_score_loss, log_loss
-    from sklearn.isotonic import IsotonicRegression
-
     snaps = sorted(_load_recent_final_snapshots(days=days), key=lambda s: s.game_date or date_type.min)
     if len(snaps) < 40:
         return {'error': 'insufficient_rows', 'rows_scanned': len(snaps)}
@@ -852,139 +1034,28 @@ def walkforward_market_report(
     if not start_date or not end_date:
         return {'error': 'invalid_dates', 'rows_scanned': len(snaps)}
 
-    folds = []
-    cur_test_start = start_date + timedelta(days=train_days)
-    while cur_test_start <= end_date:
-        train_start = cur_test_start - timedelta(days=train_days)
-        test_end = cur_test_start + timedelta(days=test_days - 1)
-        train = [s for s in snaps if s.game_date and train_start <= s.game_date < cur_test_start]
-        test = [s for s in snaps if s.game_date and cur_test_start <= s.game_date <= test_end]
-        if train and test:
-            folds.append((train_start, cur_test_start, test_end, train, test))
-        cur_test_start = cur_test_start + timedelta(days=step_days)
+    folds = _walkforward_folds(snaps, train_days, test_days, step_days)
 
     if not folds:
         return {'error': 'no_folds', 'rows_scanned': len(snaps)}
 
     market_fold_metrics = {'moneyline': [], 'total_ou': []}
 
-    def _fit_predict(train_rows: list[dict], test_rows: list[dict]) -> tuple[list[float], list[int]]:
-        if len(train_rows) < 20 or len({r['y'] for r in train_rows}) < 2:
-            return [], []
-        X_train = [r['x'] for r in train_rows]
-        y_train = [r['y'] for r in train_rows]
-        X_test = [r['x'] for r in test_rows]
-        y_test = [r['y'] for r in test_rows]
-        model = LogisticRegression(max_iter=400, class_weight='balanced')
-        model.fit(X_train, y_train)
-        p_test = list(model.predict_proba(X_test)[:, 1])
-        if len(test_rows) >= 20 and len(set(y_test)) >= 2:
-            iso = IsotonicRegression(out_of_bounds='clip')
-            train_probs = list(model.predict_proba(X_train)[:, 1])
-            iso.fit(train_probs, y_train)
-            p_test = [max(0.0, min(1.0, float(iso.predict([p])[0]))) for p in p_test]
-        return p_test, y_test
-
     for train_start, test_start, test_end, train_snaps, test_snaps in folds:
-        train_rows = {'moneyline': [], 'total_ou': []}
-        test_rows = {'moneyline': [], 'total_ou': []}
-        for s in train_snaps:
-            if s.home_score != s.away_score:
-                train_rows['moneyline'].append({
-                    'x': _features_for_snapshot(s),
-                    'y': 1 if (s.home_score or 0) > (s.away_score or 0) else 0,
-                    'moneyline_home': int(s.moneyline_home),
-                    'moneyline_away': int(s.moneyline_away),
-                })
-            total_score = (s.home_score or 0) + (s.away_score or 0)
-            line = float(s.over_under_line or 0.0)
-            if total_score != line:
-                train_rows['total_ou'].append({
-                    'x': _features_for_snapshot(s),
-                    'y': 1 if total_score > line else 0,
-                })
-        for s in test_snaps:
-            if s.home_score != s.away_score:
-                test_rows['moneyline'].append({
-                    'x': _features_for_snapshot(s),
-                    'y': 1 if (s.home_score or 0) > (s.away_score or 0) else 0,
-                    'moneyline_home': int(s.moneyline_home),
-                    'moneyline_away': int(s.moneyline_away),
-                })
-            total_score = (s.home_score or 0) + (s.away_score or 0)
-            line = float(s.over_under_line or 0.0)
-            if total_score != line:
-                test_rows['total_ou'].append({
-                    'x': _features_for_snapshot(s),
-                    'y': 1 if total_score > line else 0,
-                })
+        train_rows = _walkforward_rows(train_snaps)
+        test_rows = _walkforward_rows(test_snaps)
 
         for market in ('moneyline', 'total_ou'):
-            probs, y_true = _fit_predict(train_rows[market], test_rows[market])
-            if not probs:
-                continue
-            y_pred = [1 if p >= 0.5 else 0 for p in probs]
-            edges = []
-            confidences = []
-            pick_correct = []
-            odds = []
-            if market == 'moneyline':
-                for p, row in zip(probs, test_rows[market]):
-                    p_home = p
-                    p_away = 1.0 - p_home
-                    edge_home = p_home - implied_prob(int(row['moneyline_home']))
-                    edge_away = p_away - implied_prob(int(row['moneyline_away']))
-                    side = 'home' if edge_home >= edge_away else 'away'
-                    edge = edge_home if side == 'home' else edge_away
-                    confidences.append(max(p_home, p_away))
-                    edges.append(edge)
-                    odds.append(int(row['moneyline_home']) if side == 'home' else int(row['moneyline_away']))
-                    home_won = int(row['y'])
-                    pick_correct.append(1 if ((side == 'home' and home_won == 1) or (side == 'away' and home_won == 0)) else 0)
-                p_policy = policy['moneyline']
-            else:
-                for p, row in zip(probs, test_rows[market]):
-                    side = 'over' if p >= 0.5 else 'under'
-                    edges.append(abs(p - 0.5))
-                    confidences.append(max(p, 1 - p))
-                    odds.append(-110)
-                    over_hit = int(row['y'])
-                    pick_correct.append(1 if ((side == 'over' and over_hit == 1) or (side == 'under' and over_hit == 0)) else 0)
-                p_policy = policy['total_ou']
-
-            bet_idx = [
-                i for i, (e, c) in enumerate(zip(edges, confidences))
-                if _decide_market_action(
-                    edge=float(e),
-                    confidence=float(c),
-                    min_edge=float(p_policy['min_edge']),
-                    min_confidence=float(p_policy['min_confidence']),
-                )[0] == 'bet'
-            ]
-            units_profit = sum(_profit_per_unit(int(odds[i]), bool(pick_correct[i])) for i in bet_idx)
-            market_fold_metrics[market].append({
-                'train_start': train_start.isoformat(),
-                'test_start': test_start.isoformat(),
-                'test_end': test_end.isoformat(),
-                'rows': len(y_true),
-                'accuracy': round(float(accuracy_score(y_true, y_pred)), 4),
-                'brier': round(float(brier_score_loss(y_true, probs)), 4),
-                'logloss': round(float(log_loss(y_true, probs)), 4),
-                'recommended_bets': len(bet_idx),
-                'roi_per_bet': round(float(units_profit / len(bet_idx)), 4) if bet_idx else None,
-                'avg_edge': round(float(sum(edges) / len(edges)), 4) if edges else None,
-                'bins': _calibration_bins(list(zip(probs, y_true)), bins=bins),
-            })
-
-    def _aggregate(rows: list[dict]) -> dict:
-        if not rows:
-            return {'error': 'no_fold_metrics'}
-        metric_keys = ('accuracy', 'brier', 'logloss')
-        avg = {f'avg_{k}': round(sum(float(r[k]) for r in rows) / len(rows), 4) for k in metric_keys}
-        roi_values = [float(r['roi_per_bet']) for r in rows if r.get('roi_per_bet') is not None]
-        avg['avg_roi_per_bet'] = round(sum(roi_values) / len(roi_values), 4) if roi_values else None
-        avg['folds'] = len(rows)
-        return avg
+            metric = _walkforward_fold_metric(
+                market,
+                train_rows[market],
+                test_rows[market],
+                policy,
+                (train_start, test_start, test_end),
+                bins,
+            )
+            if metric:
+                market_fold_metrics[market].append(metric)
 
     return {
         'window_days': int(days),
@@ -995,11 +1066,11 @@ def walkforward_market_report(
         'policy_used': policy,
         'markets': {
             'moneyline': {
-                'summary': _aggregate(market_fold_metrics['moneyline']),
+                'summary': _aggregate_walkforward_metrics(market_fold_metrics['moneyline']),
                 'folds': market_fold_metrics['moneyline'],
             },
             'total_ou': {
-                'summary': _aggregate(market_fold_metrics['total_ou']),
+                'summary': _aggregate_walkforward_metrics(market_fold_metrics['total_ou']),
                 'folds': market_fold_metrics['total_ou'],
             },
         },

@@ -3,7 +3,6 @@
 import logging
 import re
 from collections import defaultdict
-from datetime import date as date_type
 
 from flask import request, jsonify, render_template
 from flask_login import login_required
@@ -21,6 +20,7 @@ from app.services.projection_engine import ProjectionEngine
 from app.services.stats_service import find_player_id, get_cached_logs, get_player_stats_summary
 from app.services.analysis_context import POSITION_ORDER, build_stat_context
 from app.utils.odds import american_from_decimal
+from app.utils.time_helpers import et_today
 
 logger = logging.getLogger(__name__)
 
@@ -316,126 +316,154 @@ def _stat_matchup_counts(matchups: list[dict]) -> dict[str, int]:
     }
 
 
-# ── Routes ────────────────────────────────────────────────────────────────
-
-@login_required
-@limiter.limit("6 per minute")
-def nba_all_props():
-    """Return a flat list of all player props across today's games."""
-    today = date_type.today()
-
+def _live_props_for_games(games: list[dict]) -> tuple[list[dict], set[str]]:
     raw_props = []
-    player_names: set[str] = set()
-
-    def _append_props_for_games(games_batch: list[dict]) -> None:
-        for game in games_batch:
-            event_id = game.get('odds_event_id', '')
-            if not event_id:
-                continue
-            props = fetch_player_props_for_event(event_id)
-            if not isinstance(props, dict):
-                continue
-            away = game.get('away', {}) or {}
-            home = game.get('home', {}) or {}
-            team_a_abbr = (away.get('abbr') or '').upper()
-            team_b_abbr = (home.get('abbr') or '').upper()
-            for market_key, market_props in props.items():
-                for prop in market_props:
-                    player_name = prop.get('player')
-                    if not player_name:
-                        continue
-                    player_names.add(player_name)
-                    raw_props.append({
-                        'player': player_name,
-                        'market': market_key,
-                        'line': prop.get('line'),
-                        'over_odds': prop.get('over_odds'),
-                        'under_odds': prop.get('under_odds'),
-                        'books': prop.get('books', {}),
-                        'best_over_book': prop.get('best_over_book', ''),
-                        'best_under_book': prop.get('best_under_book', ''),
-                        'game_id': game.get('espn_id', ''),
-                        'team_a': away.get('name', ''),
-                        'team_b': home.get('name', ''),
-                        'team_a_abbr': team_a_abbr,
-                        'team_b_abbr': team_b_abbr,
-                        'match_date': (game.get('start_time', '') or game.get('match_date', ''))[:10],
-                    })
-
-    _append_props_for_games(get_todays_games())
-
-    if not raw_props:
-        _append_props_for_games(fetch_upcoming_games())
-
-    if not raw_props:
-        try:
-            game_rows = GameSnapshot.query.filter_by(game_date=today).all()
-            game_map = {g.game_id: g for g in game_rows}
-
-            latest_by_key: dict = {}
-            snap_rows = (
-                OddsSnapshot.query
-                .filter_by(game_date=today)
-                .order_by(OddsSnapshot.snapped_at.desc())
-                .all()
-            )
-            for snap in snap_rows:
-                key = (snap.game_id, snap.player_name, snap.market)
-                slot = latest_by_key.setdefault(key, {'books': {}})
-                if snap.bookmaker and snap.bookmaker not in slot['books']:
-                    slot['books'][snap.bookmaker] = {
-                        'line': snap.line,
-                        'over_odds': snap.over_odds,
-                        'under_odds': snap.under_odds,
-                    }
-
-            for (game_id, player_name, market), slot in latest_by_key.items():
-                books = slot.get('books', {})
-                if not books:
+    player_names = set()
+    for game in games:
+        event_id = game.get('odds_event_id', '')
+        if not event_id:
+            continue
+        props = fetch_player_props_for_event(event_id)
+        if not isinstance(props, dict):
+            continue
+        away = game.get('away', {}) or {}
+        home = game.get('home', {}) or {}
+        for market_key, market_props in props.items():
+            for prop in market_props:
+                player_name = prop.get('player')
+                if not player_name:
                     continue
-                preferred_book = 'fanduel' if 'fanduel' in books else next(iter(books.keys()))
-                preferred = books.get(preferred_book) or {}
-                over_choice = max(
-                    ((bk, data.get('over_odds')) for bk, data in books.items() if data.get('over_odds') is not None),
-                    key=lambda x: x[1],
-                    default=('', None),
-                )
-                under_choice = max(
-                    ((bk, data.get('under_odds')) for bk, data in books.items() if data.get('under_odds') is not None),
-                    key=lambda x: x[1],
-                    default=('', None),
-                )
-                game_row = game_map.get(game_id)
+                player_names.add(player_name)
                 raw_props.append({
                     'player': player_name,
-                    'market': market,
-                    'line': preferred.get('line'),
-                    'over_odds': preferred.get('over_odds'),
-                    'under_odds': preferred.get('under_odds'),
-                    'books': books,
-                    'best_over_book': over_choice[0] or '',
-                    'best_under_book': under_choice[0] or '',
-                    'game_id': game_id or '',
-                    'team_a': (game_row.away_team if game_row else '') or '',
-                    'team_b': (game_row.home_team if game_row else '') or '',
-                    'team_a_abbr': '',
-                    'team_b_abbr': '',
-                    'match_date': today.isoformat(),
+                    'market': market_key,
+                    'line': prop.get('line'),
+                    'over_odds': prop.get('over_odds'),
+                    'under_odds': prop.get('under_odds'),
+                    'books': prop.get('books', {}),
+                    'best_over_book': prop.get('best_over_book', ''),
+                    'best_under_book': prop.get('best_under_book', ''),
+                    'game_id': game.get('espn_id', ''),
+                    'team_a': away.get('name', ''),
+                    'team_b': home.get('name', ''),
+                    'team_a_abbr': (away.get('abbr') or '').upper(),
+                    'team_b_abbr': (home.get('abbr') or '').upper(),
+                    'match_date': (
+                        game.get('start_time', '') or game.get('match_date', '')
+                    )[:10],
                 })
-                player_names.add(player_name)
-        except Exception as exc:
-            logger.warning("nba_all_props snapshot fallback failed: %s", exc)
+    return raw_props, player_names
 
-    movement_map: dict = {}
+
+def _best_book_choice(books: dict, odds_key: str) -> tuple[str, int | None]:
+    return max(
+        (
+            (book, data.get(odds_key))
+            for book, data in books.items()
+            if data.get(odds_key) is not None
+        ),
+        key=lambda choice: choice[1],
+        default=('', None),
+    )
+
+
+def _snapshot_props_for_date(today) -> tuple[list[dict], set[str]]:
     try:
-        snapshots = OddsSnapshot.query.filter_by(game_date=today).order_by(OddsSnapshot.snapped_at).all()
-        for snap in snapshots:
-            key = (snap.game_id, snap.player_name, snap.market)
-            if key not in movement_map:
-                movement_map[key] = snap.line
-    except Exception as exc:
-        logger.warning("Failed to load OddsSnapshot movement data: %s", exc)
+        game_rows = GameSnapshot.query.filter_by(game_date=today).all()
+        game_map = {game.game_id: game for game in game_rows}
+        latest_by_key = {}
+        snapshots = (
+            OddsSnapshot.query
+            .filter_by(game_date=today)
+            .order_by(OddsSnapshot.snapped_at.desc())
+            .all()
+        )
+        for snapshot in snapshots:
+            key = (snapshot.game_id, snapshot.player_name, snapshot.market)
+            slot = latest_by_key.setdefault(key, {'books': {}})
+            if snapshot.bookmaker and snapshot.bookmaker not in slot['books']:
+                slot['books'][snapshot.bookmaker] = {
+                    'line': snapshot.line,
+                    'over_odds': snapshot.over_odds,
+                    'under_odds': snapshot.under_odds,
+                }
 
+        raw_props = []
+        player_names = set()
+        for (game_id, player_name, market), slot in latest_by_key.items():
+            books = slot.get('books', {})
+            if not books:
+                continue
+            preferred_book = (
+                'fanduel' if 'fanduel' in books else next(iter(books))
+            )
+            preferred = books.get(preferred_book) or {}
+            over_choice = _best_book_choice(books, 'over_odds')
+            under_choice = _best_book_choice(books, 'under_odds')
+            game_row = game_map.get(game_id)
+            raw_props.append({
+                'player': player_name,
+                'market': market,
+                'line': preferred.get('line'),
+                'over_odds': preferred.get('over_odds'),
+                'under_odds': preferred.get('under_odds'),
+                'books': books,
+                'best_over_book': over_choice[0] or '',
+                'best_under_book': under_choice[0] or '',
+                'game_id': game_id or '',
+                'team_a': (game_row.away_team if game_row else '') or '',
+                'team_b': (game_row.home_team if game_row else '') or '',
+                'team_a_abbr': '',
+                'team_b_abbr': '',
+                'match_date': today.isoformat(),
+            })
+            player_names.add(player_name)
+        return raw_props, player_names
+    except Exception as exc:
+        logger.warning('nba_all_props snapshot fallback failed: %s', exc)
+        return [], set()
+
+
+def _first_snapshot_lines(today) -> dict:
+    try:
+        snapshots = (
+            OddsSnapshot.query
+            .filter_by(game_date=today)
+            .order_by(OddsSnapshot.snapped_at)
+            .all()
+        )
+        movement_map = {}
+        for snapshot in snapshots:
+            key = (snapshot.game_id, snapshot.player_name, snapshot.market)
+            movement_map.setdefault(key, snapshot.line)
+        return movement_map
+    except Exception as exc:
+        logger.warning('Failed to load OddsSnapshot movement data: %s', exc)
+        return {}
+
+
+def _prop_movement(prop: dict, first_lines: dict) -> dict:
+    key = (prop['game_id'], prop['player'], prop['market'])
+    first_line = first_lines.get(key)
+    if first_line is None or first_line == prop['line']:
+        return {
+            'line_delta': 0,
+            'direction': 'flat',
+            'first_line': prop['line'],
+        }
+    delta = round(prop['line'] - first_line, 2)
+    return {
+        'line_delta': delta,
+        'direction': 'up' if delta > 0 else 'down',
+        'first_line': first_line,
+    }
+
+
+def _enrich_all_props(
+    raw_props: list[dict],
+    player_names: set[str],
+    first_lines: dict,
+) -> list[dict]:
     player_team_map = _resolve_player_team_abbrs(player_names)
     all_props = []
     for prop in raw_props:
@@ -446,26 +474,33 @@ def nba_all_props():
             player_team_name = prop.get('team_b', '')
         else:
             player_team_name = ''
-
         enriched = dict(prop)
-        enriched['player_team_abbr'] = player_team_abbr
-        enriched['player_team'] = player_team_name
-
-        mv_key = (prop['game_id'], prop['player'], prop['market'])
-        first_line = movement_map.get(mv_key)
-        if first_line is not None and first_line != prop['line']:
-            delta = round(prop['line'] - first_line, 2)
-            enriched['movement'] = {
-                'line_delta': delta,
-                'direction': 'up' if delta > 0 else 'down',
-                'first_line': first_line,
-            }
-        else:
-            enriched['movement'] = {'line_delta': 0, 'direction': 'flat', 'first_line': prop['line']}
-
+        enriched.update(
+            player_team_abbr=player_team_abbr,
+            player_team=player_team_name,
+            movement=_prop_movement(prop, first_lines),
+        )
         all_props.append(enriched)
+    return all_props
 
-    return jsonify(all_props)
+
+# ── Routes ────────────────────────────────────────────────────────────────
+
+@login_required
+@limiter.limit("6 per minute")
+def nba_all_props():
+    """Return a flat list of all player props across today's games."""
+    today = et_today()
+    raw_props, player_names = _live_props_for_games(get_todays_games())
+    if not raw_props:
+        raw_props, player_names = _live_props_for_games(fetch_upcoming_games())
+    if not raw_props:
+        raw_props, player_names = _snapshot_props_for_date(today)
+    return jsonify(_enrich_all_props(
+        raw_props,
+        player_names,
+        _first_snapshot_lines(today),
+    ))
 
 
 @login_required

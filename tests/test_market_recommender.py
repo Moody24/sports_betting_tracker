@@ -220,6 +220,55 @@ class TestMarketRecommender(BaseTestCase):
         self.assertEqual(recs["g1"]["moneyline"]["action"], "pass")
         self.assertEqual(recs["g1"]["moneyline"]["action_reason"], "market_disabled")
 
+    def test_walkforward_report_preserves_fold_metrics(self):
+        from app.services.market_recommender import walkforward_market_report
+
+        self._seed_snapshots(120)
+        with self.app.app_context():
+            report = walkforward_market_report(
+                days=365,
+                train_days=60,
+                test_days=14,
+                step_days=14,
+                bins=5,
+            )
+
+        self.assertEqual(report['rows_scanned'], 120)
+        self.assertEqual(report['policy_used'], {
+            'moneyline': {'min_edge': 0.03, 'min_confidence': 0.55},
+            'total_ou': {'min_edge': 0.06, 'min_confidence': 0.56},
+        })
+        self.assertEqual(report['markets']['moneyline']['summary'], {
+            'avg_accuracy': 0.6429,
+            'avg_brier': 0.25,
+            'avg_logloss': 0.6931,
+            'avg_roi_per_bet': None,
+            'folds': 5,
+        })
+        self.assertEqual(report['markets']['total_ou']['summary'], {
+            'avg_accuracy': 0.5,
+            'avg_brier': 0.2488,
+            'avg_logloss': 0.6907,
+            'avg_roi_per_bet': -0.0455,
+            'folds': 5,
+        })
+
+    def test_walkforward_report_rejects_insufficient_rows(self):
+        from app.services.market_recommender import walkforward_market_report
+
+        self._seed_snapshots(39)
+        with self.app.app_context():
+            report = walkforward_market_report(days=365)
+        self.assertEqual(report, {'error': 'insufficient_rows', 'rows_scanned': 39})
+
+    def test_walkforward_report_rejects_window_without_folds(self):
+        from app.services.market_recommender import walkforward_market_report
+
+        self._seed_snapshots(40)
+        with self.app.app_context():
+            report = walkforward_market_report(days=365, train_days=100)
+        self.assertEqual(report, {'error': 'no_folds', 'rows_scanned': 40})
+
 
 class TestMarketRecommenderPureFunctions(BaseTestCase):
     """Unit tests for pure/utility functions in market_recommender."""
