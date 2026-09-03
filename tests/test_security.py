@@ -5,7 +5,7 @@ from datetime import timedelta
 from unittest.mock import patch
 
 from app import create_app, db
-from app.models import Bet
+from app.models import Bet, PickContext
 
 from tests.helpers import BaseTestCase, make_bet, make_user
 
@@ -152,8 +152,92 @@ class TestSecurity(BaseTestCase):
             data={"username": "attacker", "password": "password123"},
             follow_redirects=True,
         )
-        resp = self.client.post(f"/delete_bet/{bet_id}", follow_redirects=True)
-        self.assertIn(b"permission to delete", resp.data)
+        resp = self.client.post(f"/delete_bet/{bet_id}", follow_redirects=False)
+        self.assertEqual(resp.status_code, 404)
         with self.app.app_context():
             still_there = db.session.get(Bet, bet_id)
             self.assertIsNotNone(still_there)
+
+
+class TestObjectOwnership(BaseTestCase):
+    """Every exposed Bet mutation uses the same non-disclosing ownership policy."""
+
+    def setUp(self):
+        super().setUp()
+        with self.app.app_context():
+            owner = make_user('idor_owner', 'idor-owner@example.com')
+            attacker = make_user('idor_attacker', 'idor-attacker@example.com')
+            db.session.add_all([owner, attacker])
+            db.session.flush()
+
+            straight = make_bet(
+                owner.id,
+                team_a='Owner Secret Team',
+                notes='owner-private-notes',
+            )
+            parlay_id = Bet.generate_parlay_id()
+            parlay = make_bet(
+                owner.id,
+                team_a='Owner Parlay Team',
+                player_name='Owner Private Player',
+                prop_type='player_points',
+                prop_line=20.5,
+                bet_type='over',
+                is_parlay=True,
+                parlay_id=parlay_id,
+                parlay_leg_count=1,
+            )
+            db.session.add_all([straight, parlay])
+            db.session.flush()
+            db.session.add(PickContext(
+                bet_id=straight.id,
+                context_json='{"private_marker":"owner-private-context"}',
+            ))
+            db.session.commit()
+            self.owner_bet_id = straight.id
+            self.owner_parlay_id = parlay.id
+
+        self.client.post(
+            '/auth/login',
+            data={'username': 'idor_attacker', 'password': 'password123'},
+            follow_redirects=True,
+        )
+
+    def test_lists_and_exports_exclude_other_user_bets_parlays_and_context(self):
+        for response in (self.client.get('/bets'), self.client.get('/bets/export')):
+            self.assertEqual(response.status_code, 200)
+            self.assertNotIn(b'Owner Secret Team', response.data)
+            self.assertNotIn(b'Owner Parlay Team', response.data)
+            self.assertNotIn(b'Owner Private Player', response.data)
+            self.assertNotIn(b'owner-private-notes', response.data)
+            self.assertNotIn(b'owner-private-context', response.data)
+
+    def test_editing_another_users_bet_is_indistinguishable_from_missing(self):
+        response = self.client.post(
+            f'/bets/{self.owner_bet_id}/edit',
+            json={'notes': 'attacker overwrite'},
+        )
+        missing = self.client.post('/bets/999999/edit', json={'notes': 'overwrite'})
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(missing.status_code, 404)
+        with self.app.app_context():
+            self.assertEqual(db.session.get(Bet, self.owner_bet_id).notes, 'owner-private-notes')
+
+    def test_grading_another_users_bet_is_indistinguishable_from_missing(self):
+        response = self.client.post(
+            f'/bets/{self.owner_bet_id}/grade',
+            data={'outcome': 'win'},
+        )
+        missing = self.client.post('/bets/999999/grade', data={'outcome': 'win'})
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(missing.status_code, 404)
+        with self.app.app_context():
+            self.assertEqual(db.session.get(Bet, self.owner_bet_id).outcome, 'pending')
+
+    def test_deleting_another_users_parlay_is_indistinguishable_from_missing(self):
+        response = self.client.post(f'/delete_bet/{self.owner_parlay_id}')
+        missing = self.client.post('/delete_bet/999999')
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(missing.status_code, 404)
+        with self.app.app_context():
+            self.assertIsNotNone(db.session.get(Bet, self.owner_parlay_id))

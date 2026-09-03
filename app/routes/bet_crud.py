@@ -6,7 +6,7 @@ import logging
 import time
 from datetime import datetime, date as date_type
 
-from flask import render_template, redirect, url_for, flash, request, jsonify, Response, abort
+from flask import render_template, redirect, url_for, flash, request, jsonify, Response
 from flask_login import login_required, current_user
 from sqlalchemy import case as sa_case
 from sqlalchemy.orm import joinedload, selectinload
@@ -374,11 +374,10 @@ def new_bet():
 @login_required
 def edit_bet(bet_id):
     """Edit an existing bet post-placement."""
-    found_bet = db.session.get(Bet, bet_id)
-    if found_bet is None:
-        abort(404)
-    if found_bet.user_id != current_user.id:
-        return jsonify({'error': 'Permission denied'}), 403
+    found_bet = Bet.query.filter_by(
+        id=bet_id,
+        user_id=current_user.id,
+    ).first_or_404()
 
     data = request.get_json(silent=True) or {}
     if not data:
@@ -405,13 +404,10 @@ def edit_bet(bet_id):
 
 @login_required
 def delete_bet(bet_id):
-    found_bet = db.session.get(Bet, bet_id)
-    if found_bet is None:
-        abort(404)
-
-    if found_bet.user_id != current_user.id:
-        flash("You don't have permission to delete this bet.", 'danger')
-        return redirect(url_for('bet.place_bet'))
+    found_bet = Bet.query.filter_by(
+        id=bet_id,
+        user_id=current_user.id,
+    ).first_or_404()
 
     db.session.delete(found_bet)
     db.session.commit()

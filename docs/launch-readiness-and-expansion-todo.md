@@ -106,7 +106,7 @@ migration cost.
 - [ ] **P0: move production rate limits to a shared store.** `memory://` produces
   per-worker counters. Configure Redis through `RATELIMIT_STORAGE_URI`, test fail
   behavior, and monitor 429 rates.
-- [ ] **P0: test object ownership/IDOR systematically.** User B must receive the
+- [x] **P0: test object ownership/IDOR systematically.** User B must receive the
   chosen non-disclosing response when reading, editing, grading, deleting, or
   exporting User A's bets/parlays/context. Prefer querying by both object ID and
   `user_id` instead of fetching first and checking ownership afterward.
@@ -135,7 +135,7 @@ migration cost.
 
 ### Acceptance evidence
 
-- [ ] Two-user browser and request-level security suite passes.
+- [x] Two-user browser and request-level security suite passes.
 - [x] Production-cookie assertions pass with no sensitive payload discovered.
 - [x] Logout clears every documented user-specific browser key.
 - [ ] Redis-backed rate limiting works across two Gunicorn workers.

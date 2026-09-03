@@ -1,7 +1,7 @@
 # Edge Tracker System Contract
 
 Status: **canonical architecture SSOT**  
-Contract version: **1.2**
+Contract version: **1.3**
 Last verified: **2026-09-03**
 
 Verified inventory at this version: **16 SQLAlchemy models**, **22 registered
@@ -446,7 +446,10 @@ only with their JavaScript consumers and tests in the same change.
 6. **Idempotent jobs.** Scheduler work MUST tolerate retries. Use database
    uniqueness/source keys and check persisted state before external writes.
 7. **User isolation.** All user-owned reads and writes require `current_user.id`
-   or an explicit trusted user ID; browser-supplied ownership is ignored.
+   or an explicit trusted user ID; browser-supplied ownership is ignored. Routes
+   that accept an object ID MUST scope the database query by both object ID and
+   user ID, and MUST return the same 404 response for missing and foreign-owned
+   objects.
 8. **Frontend state is disposable.** The server validates all browser payloads.
    `sessionStorage`, DOM state, and JS globals are never authoritative.
 9. **Artifact activation is explicit.** Evaluation verdicts do not auto-activate

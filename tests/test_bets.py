@@ -274,8 +274,8 @@ class TestBetRoutes(BaseTestCase):
             data={"username": "user2", "password": "password123"},
             follow_redirects=True,
         )
-        resp = self.client.post(f"/delete_bet/{bet_id}", follow_redirects=True)
-        self.assertIn(b"permission to delete", resp.data)
+        resp = self.client.post(f"/delete_bet/{bet_id}", follow_redirects=False)
+        self.assertEqual(resp.status_code, 404)
 
     def test_delete_nonexistent_bet_returns_404(self):
         self.register_and_login()
