@@ -66,89 +66,94 @@ PUBLIC_ENDPOINTS = frozenset({
 })
 
 
-def create_app(testing=False):
-    app = Flask(__name__)
-    secret_key = os.getenv('SECRET_KEY')
-    if not secret_key:
-        if testing:
-            secret_key = 'test-only-insecure-key'
-        else:
-            raise RuntimeError(
-                "SECRET_KEY environment variable is not set. "
-                "Set it before starting the application."
-            )
-    app.config['SECRET_KEY'] = secret_key
-    db_url = os.getenv('DATABASE_URL', 'sqlite:///app.db')
-    # Railway Postgres URLs may start with postgres:// — SQLAlchemy 2.x requires postgresql://
-    if db_url.startswith('postgres://'):
-        db_url = db_url.replace('postgres://', 'postgresql://', 1)
-    # In testing mode, use a named shared-cache in-memory SQLite database.
-    # Using ?cache=shared with a file URI means all connections (including
-    # new ones after engine.dispose()) share the same in-memory database,
-    # providing test isolation without StaticPool. StaticPool was previously
-    # used here but is incompatible with services that call db.engine.dispose()
-    # (e.g. ml_model.train_model), which permanently destroys StaticPool's
-    # single underlying connection, leaving subsequent queries with an empty DB.
+def _database_url(testing: bool) -> str:
     if testing:
-        db_url = 'sqlite:///file:edge_tracker_testdb?mode=memory&cache=shared&uri=true'
-    app.config['SQLALCHEMY_DATABASE_URI'] = db_url
-    app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-    app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024  # 10 MB
-    engine_options = dict(app.config.get('SQLALCHEMY_ENGINE_OPTIONS', {}))
-    base_pool_opts: dict = {
+        return 'sqlite:///file:edge_tracker_testdb?mode=memory&cache=shared&uri=true'
+    url = os.getenv('DATABASE_URL', 'sqlite:///app.db')
+    return url.replace('postgres://', 'postgresql://', 1) if url.startswith(
+        'postgres://'
+    ) else url
+
+
+def _database_engine_options(app: Flask, database_url: str) -> dict:
+    options = dict(app.config.get('SQLALCHEMY_ENGINE_OPTIONS', {}))
+    base_pool_options = {
         'pool_pre_ping': True,
         'pool_recycle': 300,
         'pool_timeout': 30,
     }
-    # pool_size / max_overflow only apply to QueuePool (PostgreSQL).
-    # SQLite (file-based or in-memory URI) does not support these options.
-    if not db_url.startswith('sqlite'):
-        base_pool_opts['pool_size'] = int(os.getenv('DB_POOL_SIZE', '2'))
-        base_pool_opts['max_overflow'] = int(os.getenv('DB_MAX_OVERFLOW', '3'))
-        engine_options.update(base_pool_opts)
-    elif db_url.startswith('sqlite:///file:') and 'cache=shared' in db_url:
-        # Shared-cache in-memory SQLite: allow cross-thread access.
-        engine_options.update({'connect_args': {'check_same_thread': False}})
+    if not database_url.startswith('sqlite'):
+        base_pool_options['pool_size'] = int(os.getenv('DB_POOL_SIZE', '2'))
+        base_pool_options['max_overflow'] = int(os.getenv('DB_MAX_OVERFLOW', '3'))
+        options.update(base_pool_options)
+    elif database_url.startswith('sqlite:///file:') and 'cache=shared' in database_url:
+        options.update({'connect_args': {'check_same_thread': False}})
     else:
-        # File-based SQLite: use default pool settings without pool_size.
-        engine_options.update(base_pool_opts)
-    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = engine_options
-    app.config['WTF_CSRF_ENABLED'] = True
-    app.config['RATELIMIT_ENABLED'] = os.getenv('RATELIMIT_ENABLED', 'true').lower() == 'true'
-    app.config['RATELIMIT_STORAGE_URI'] = os.getenv('RATELIMIT_STORAGE_URI', 'memory://')
-    app.config['SESSION_COOKIE_HTTPONLY'] = True
-    app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
-    # In production behind HTTPS (Railway), cookies must be Secure.
-    is_probably_prod = bool(os.getenv('RAILWAY_ENVIRONMENT')) or os.getenv('FLASK_ENV') == 'production'
-    secure_default = 'true' if is_probably_prod else 'false'
+        options.update(base_pool_options)
+    return options
+
+
+def _configure_app(app: Flask, testing: bool) -> None:
+    secret_key = os.getenv('SECRET_KEY')
+    if not secret_key and testing:
+        secret_key = 'test-only-insecure-key'
+    if not secret_key:
+        raise RuntimeError(
+            'SECRET_KEY environment variable is not set. '
+            'Set it before starting the application.'
+        )
+    database_url = _database_url(testing)
+    app.config.update(
+        SECRET_KEY=secret_key,
+        SQLALCHEMY_DATABASE_URI=database_url,
+        SQLALCHEMY_TRACK_MODIFICATIONS=False,
+        SQLALCHEMY_ENGINE_OPTIONS=_database_engine_options(app, database_url),
+        MAX_CONTENT_LENGTH=10 * 1024 * 1024,
+        WTF_CSRF_ENABLED=True,
+        RATELIMIT_ENABLED=(
+            os.getenv('RATELIMIT_ENABLED', 'true').lower() == 'true'
+        ),
+        RATELIMIT_STORAGE_URI=os.getenv('RATELIMIT_STORAGE_URI', 'memory://'),
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE='Lax',
+    )
+    is_production = (
+        bool(os.getenv('RAILWAY_ENVIRONMENT'))
+        or os.getenv('FLASK_ENV') == 'production'
+    )
+    secure_default = 'true' if is_production else 'false'
     app.config['SESSION_COOKIE_SECURE'] = (
         os.getenv('SESSION_COOKIE_SECURE', secure_default).lower() == 'true'
     )
-
     if testing:
         app.config['TESTING'] = True
         app.config['RATELIMIT_ENABLED'] = False
 
+
+def _initialize_extensions(app: Flask) -> None:
     db.init_app(app)
     migrate.init_app(app, db)
     login_manager.init_app(app)
     csrf.init_app(app)
     limiter.init_app(app)
 
-    web_concurrency = int(os.environ.get("WEB_CONCURRENCY", 1))
-    storage_uri = app.config.get("RATELIMIT_STORAGE_URI", "memory://")
-    if web_concurrency > 1 and storage_uri.startswith("memory://"):
+
+def _warn_unshared_rate_limit(app: Flask) -> None:
+    web_concurrency = int(os.environ.get('WEB_CONCURRENCY', 1))
+    storage_uri = app.config.get('RATELIMIT_STORAGE_URI', 'memory://')
+    if web_concurrency > 1 and storage_uri.startswith('memory://'):
         app.logger.warning(
             "RATELIMIT_STORAGE_URI is 'memory://' with WEB_CONCURRENCY=%d — "
-            "rate limits are per-worker and NOT shared across processes.",
+            'rate limits are per-worker and NOT shared across processes.',
             web_concurrency,
         )
 
+
+def _register_login_loader() -> None:
+    from app.models import User
+
     login_manager.login_view = 'auth.login'
     login_manager.login_message_category = 'info'
-
-    from app.forms import LogoutForm
-    from app.models import User
 
     @login_manager.user_loader
     def load_user(user_id):
@@ -158,27 +163,28 @@ def create_app(testing=False):
             db.session.rollback()
             return None
 
+
+def _csp_nonce() -> str:
+    if not getattr(g, '_csp_nonce', None):
+        g._csp_nonce = secrets.token_urlsafe(16)
+    return g._csp_nonce
+
+
+def _register_template_context(app: Flask) -> None:
     from app.config_display import get_template_display_config
-    _display_config = get_template_display_config()
+    from app.forms import LogoutForm
 
-    def _csp_nonce() -> str:
-        if not getattr(g, '_csp_nonce', None):
-            g._csp_nonce = secrets.token_urlsafe(16)
-        return g._csp_nonce
+    display_config = get_template_display_config()
 
-    # ``icon()`` is used by twelve templates, only one of which imports it.
-    # The rest resolved it because ``base.html``'s top-level import leaked into
-    # their block context — so any reordering of base.html silently degraded
-    # every icon in the app to an HTML comment, which renders as nothing and
-    # passes every Python test. Bind it as a global so it no longer depends on
-    # a Jinja scoping accident.
     @app.template_global('icon')
-    def _icon(name, size=16, classes=''):
-        return get_template_attribute('_macros.html', 'icon')(name, size, classes)
+    def icon(name, size=16, classes=''):
+        return get_template_attribute('_macros.html', 'icon')(
+            name, size, classes
+        )
 
     @app.context_processor
     def inject_user():
-        if request.endpoint in ('health', 'ready', 'healthcheck', None):
+        if request.endpoint in ('health', 'ready', 'healthcheck'):
             return {}
         return {
             'current_user': current_user,
@@ -186,9 +192,11 @@ def create_app(testing=False):
             'logout_form': LogoutForm(),
             'csp_nonce': _csp_nonce(),
             'page_is_public': request.endpoint in PUBLIC_ENDPOINTS,
-            **_display_config,
+            **display_config,
         }
 
+
+def _register_security_hooks(app: Flask) -> None:
     @app.after_request
     def add_security_headers(response):
         started = getattr(g, '_request_started_at', None)
@@ -199,15 +207,6 @@ def create_app(testing=False):
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['X-Frame-Options'] = 'SAMEORIGIN'
         response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
-        # Per-request nonce lets Jinja2 inline <script nonce="{{ csp_nonce }}">
-        # blocks execute without weakening script-src with 'unsafe-inline'.
-        #
-        # The jsDelivr, Google Fonts, and gstatic allowances are gone: the app
-        # self-hosts its CSS, JS, and WOFF2 and makes zero external requests, so
-        # those origins only widened the attack surface. style-src keeps
-        # 'unsafe-inline' because data-driven CSS custom properties are set via
-        # style attributes (see test_template_inline_styles.py, which restricts
-        # them to custom properties only).
         response.headers['Content-Security-Policy'] = (
             "default-src 'self'; "
             f"script-src 'self' 'nonce-{_csp_nonce()}'; "
@@ -218,65 +217,74 @@ def create_app(testing=False):
             "frame-ancestors 'none';"
         )
         if not app.debug:
-            response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+            response.headers['Strict-Transport-Security'] = (
+                'max-age=31536000; includeSubDomains'
+            )
         return response
 
     @app.before_request
     def mark_request_start():
         g._request_started_at = perf_counter()
 
-    # ── Liveness check (fast, always 200) ────────────────────────────
+
+def _register_http_routes(app: Flask) -> None:
+    from app.routes.auth import auth
+    from app.routes.bet import bet
+    from app.routes.main import main
+
     @app.route('/health')
     def health():
         return {'status': 'healthy'}, 200
 
     @app.route('/favicon.ico')
     def favicon():
+        favicon_path = os.path.join(app.static_folder, 'favicon.ico')
         return app.send_static_file('favicon.ico') if os.path.exists(
-            os.path.join(app.static_folder, 'favicon.ico')
+            favicon_path
         ) else ('', 204)
-
-    from app.routes.auth import auth
-    from app.routes.bet import bet
-    from app.routes.main import main
 
     app.register_blueprint(auth, url_prefix='/auth')
     app.register_blueprint(bet)
     app.register_blueprint(main)
 
     @app.errorhandler(404)
-    def not_found_error(e):
+    def not_found_error(_error):
         return render_template('errors/404.html'), 404
 
     @app.errorhandler(500)
-    def internal_error(e):
+    def internal_error(_error):
         db.session.rollback()
         return render_template('errors/500.html'), 500
 
-    # ── Register CLI commands ───────────────────────────────────
-    from app.cli import register_cli
-    register_cli(app)
 
-    # ── Auto-upgrade migrations (Docker entrypoint) ──────────────
+def _run_startup_tasks(app: Flask) -> None:
     auto_upgrade = os.getenv('AUTO_DB_UPGRADE', 'false').lower() == 'true'
-
     if not app.config.get('TESTING') and auto_upgrade:
         with app.app_context():
             _upgrade()
-
-    # ── Start background scheduler (production only) ─────────────
-    non_server_invocation = _is_non_server_invocation()
     running_cli = (
         os.getenv('FLASK_RUN_FROM_CLI', 'false').lower() == 'true'
         or os.getenv('RUNNING_CLI', '0') == '1'
-        or non_server_invocation
+        or _is_non_server_invocation()
     )
-    if (
-        not app.config.get('TESTING')
-        and not running_cli
-        and os.getenv('SCHEDULER_ENABLED', 'false').lower() == 'true'
-    ):
+    scheduler_enabled = (
+        os.getenv('SCHEDULER_ENABLED', 'false').lower() == 'true'
+    )
+    if not app.config.get('TESTING') and not running_cli and scheduler_enabled:
         from app.services.scheduler import init_scheduler
         init_scheduler(app)
 
+
+def create_app(testing=False):
+    app = Flask(__name__)
+    _configure_app(app, testing)
+    _initialize_extensions(app)
+    _warn_unshared_rate_limit(app)
+    _register_login_loader()
+    _register_template_context(app)
+    _register_security_hooks(app)
+    _register_http_routes(app)
+    from app.cli import register_cli
+    register_cli(app)
+    _run_startup_tasks(app)
     return app
