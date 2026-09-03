@@ -33,6 +33,22 @@ class TestEvaluationRuns(BaseTestCase):
 
 
 class TestPropOddsImporter(BaseTestCase):
+    @staticmethod
+    def _valid_row(**overrides):
+        row = {
+            'source_event_id': 'event-1',
+            'event_start_time': '2026-11-01T19:30:00Z',
+            'snapped_at': '2026-11-01T18:30:00Z',
+            'player_name': 'Player A',
+            'market': 'player_points',
+            'bookmaker': 'fanduel',
+            'line': '25.5',
+            'over_odds': '-110',
+            'under_odds': '-110',
+        }
+        row.update(overrides)
+        return row
+
     def test_import_is_idempotent_and_normalizes_naive_et(self):
         from app.cli.prop_odds_import import import_player_prop_odds
 
@@ -83,6 +99,43 @@ class TestPropOddsImporter(BaseTestCase):
             result = import_player_prop_odds(path, 'json', 'fixture')
             self.assertEqual(result['rejected'], 1)
             self.assertEqual(OddsSnapshot.query.count(), 0)
+
+    def test_snapshot_kind_windows_are_enforced(self):
+        from app.cli.prop_odds_import import _validated_snapshot_times
+
+        decision = self._valid_row(snapshot_kind='decision')
+        _, _, kind = _validated_snapshot_times(decision)
+        self.assertEqual(kind, 'decision')
+
+        too_early = self._valid_row(
+            snapshot_kind='decision',
+            snapped_at='2026-11-01T18:00:00Z',
+        )
+        with self.assertRaisesRegex(ValueError, 'decision snapshot'):
+            _validated_snapshot_times(too_early)
+
+        valid_close = self._valid_row(
+            snapshot_kind='close',
+            snapped_at='2026-11-01T19:20:00Z',
+        )
+        _, _, kind = _validated_snapshot_times(valid_close)
+        self.assertEqual(kind, 'close')
+
+    def test_duplicate_key_skips_player_resolution(self):
+        from app.cli.prop_odds_import import _build_imported_snapshot
+
+        row = self._valid_row(source_snapshot_key='fixture:known')
+        with patch('app.cli.prop_odds_import.resolve_espn_id') as resolver:
+            snapshot, key, resolved = _build_imported_snapshot(
+                row,
+                'fixture',
+                {'fixture:known'},
+            )
+
+        self.assertIsNone(snapshot)
+        self.assertEqual(key, 'fixture:known')
+        self.assertFalse(resolved)
+        resolver.assert_not_called()
 
 
 class TestProfitabilityMetrics(BaseTestCase):

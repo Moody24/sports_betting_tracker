@@ -59,6 +59,98 @@ def _snapshot_key(source: str, row: dict, snapped_at: datetime) -> str:
     return f'{source}:{hashlib.sha256(payload.encode()).hexdigest()}'
 
 
+def _validated_market(row: dict) -> tuple[str, float, int | None, int | None]:
+    market = str(row['market']).strip()
+    if market not in SUPPORTED_PROP_MARKETS:
+        raise ValueError(f'unsupported market: {market}')
+    line = float(row['line'])
+    if line < 0 or line > 200:
+        raise ValueError(f'invalid prop line: {line}')
+    over_odds = _parse_odds(row.get('over_odds'))
+    under_odds = _parse_odds(row.get('under_odds'))
+    if over_odds is None and under_odds is None:
+        raise ValueError('at least one side must have odds')
+    return market, line, over_odds, under_odds
+
+
+def _validated_snapshot_times(row: dict) -> tuple[datetime, datetime, str]:
+    event_start = _parse_datetime(row['event_start_time'])
+    snapped_at = _parse_datetime(row['snapped_at'])
+    if snapped_at >= event_start:
+        raise ValueError('snapshot is at or after event start')
+    kind = str(row.get('snapshot_kind') or 'imported').strip().lower()
+    if kind not in {'scheduled', 'decision', 'close', 'imported'}:
+        raise ValueError(f'invalid snapshot kind: {kind}')
+    minutes_to_tip = (event_start - snapped_at).total_seconds() / 60.0
+    if kind == 'decision' and not 55 <= minutes_to_tip <= 65:
+        raise ValueError('decision snapshot must be between T-65 and T-55')
+    if kind == 'close' and not 5 <= minutes_to_tip <= 15:
+        raise ValueError('close snapshot must be between T-15 and T-5')
+    return event_start, snapped_at, kind
+
+
+def _validated_snapshot_key(
+    row: dict,
+    source: str,
+    snapped_at: datetime,
+) -> str:
+    key = str(row.get('source_snapshot_key') or '').strip()
+    if not key:
+        key = _snapshot_key(source, row, snapped_at)
+    if len(key) > 160:
+        raise ValueError('source_snapshot_key exceeds 160 characters')
+    return key
+
+
+def _validated_player_identity(row: dict) -> tuple[str, str, str | None]:
+    player_name = str(row['player_name']).strip()
+    if not player_name:
+        raise ValueError('player_name is empty')
+    bookmaker = str(row['bookmaker']).strip().lower()
+    if not bookmaker or len(bookmaker) > 30:
+        raise ValueError('bookmaker must contain 1-30 characters')
+    player_id = (
+        str(row.get('player_id') or '').strip()
+        or resolve_espn_id(player_name)
+    )
+    return player_name, bookmaker, player_id
+
+
+def _build_imported_snapshot(row: dict, source: str, existing_keys: set[str]):
+    missing = REQUIRED_FIELDS - set(row)
+    if missing:
+        raise ValueError(f"missing fields: {', '.join(sorted(missing))}")
+    market, line, over_odds, under_odds = _validated_market(row)
+    event_start, snapped_at, kind = _validated_snapshot_times(row)
+    key = _validated_snapshot_key(
+        row,
+        source,
+        snapped_at,
+    )
+    if key in existing_keys:
+        return None, key, False
+    player_name, bookmaker, player_id = _validated_player_identity(row)
+    snapshot = OddsSnapshot(
+        game_id=str(row.get('game_id') or '').strip() or None,
+        source_event_id=str(row['source_event_id']).strip(),
+        game_date=event_start.astimezone(ET).date(),
+        event_start_time=event_start,
+        player_id=player_id,
+        player_name=player_name,
+        player_key=normalize_name(player_name),
+        market=market,
+        bookmaker=bookmaker,
+        line=line,
+        over_odds=over_odds,
+        under_odds=under_odds,
+        source=source,
+        snapshot_kind=kind,
+        source_snapshot_key=key,
+        snapped_at=snapped_at,
+    )
+    return snapshot, key, bool(player_id)
+
+
 def import_player_prop_odds(file_path: str, file_format: str, source: str) -> dict:
     source = str(source or '').strip().lower()
     if not source or len(source) > 30:
@@ -73,68 +165,19 @@ def import_player_prop_odds(file_path: str, file_format: str, source: str) -> di
     pending = []
     for number, row in enumerate(rows, start=2 if file_format == 'csv' else 1):
         try:
-            missing = REQUIRED_FIELDS - set(row)
-            if missing:
-                raise ValueError(f"missing fields: {', '.join(sorted(missing))}")
-            market = str(row['market']).strip()
-            if market not in SUPPORTED_PROP_MARKETS:
-                raise ValueError(f'unsupported market: {market}')
-            event_start = _parse_datetime(row['event_start_time'])
-            snapped_at = _parse_datetime(row['snapped_at'])
-            if snapped_at >= event_start:
-                raise ValueError('snapshot is at or after event start')
-            line = float(row['line'])
-            if line < 0 or line > 200:
-                raise ValueError(f'invalid prop line: {line}')
-            over_odds = _parse_odds(row.get('over_odds'))
-            under_odds = _parse_odds(row.get('under_odds'))
-            if over_odds is None and under_odds is None:
-                raise ValueError('at least one side must have odds')
-            kind = str(row.get('snapshot_kind') or 'imported').strip().lower()
-            if kind not in {'scheduled', 'decision', 'close', 'imported'}:
-                raise ValueError(f'invalid snapshot kind: {kind}')
-            minutes_to_tip = (event_start - snapped_at).total_seconds() / 60.0
-            if kind == 'decision' and not 55 <= minutes_to_tip <= 65:
-                raise ValueError('decision snapshot must be between T-65 and T-55')
-            if kind == 'close' and not 5 <= minutes_to_tip <= 15:
-                raise ValueError('close snapshot must be between T-15 and T-5')
-            key = str(row.get('source_snapshot_key') or '').strip()
-            if not key:
-                key = _snapshot_key(source, row, snapped_at)
-            if len(key) > 160:
-                raise ValueError('source_snapshot_key exceeds 160 characters')
-            if key in existing_keys:
+            snapshot, key, player_resolved = _build_imported_snapshot(
+                row,
+                source,
+                existing_keys,
+            )
+            if snapshot is None:
                 skipped += 1
                 continue
-            player_name = str(row['player_name']).strip()
-            if not player_name:
-                raise ValueError('player_name is empty')
-            bookmaker = str(row['bookmaker']).strip().lower()
-            if not bookmaker or len(bookmaker) > 30:
-                raise ValueError('bookmaker must contain 1-30 characters')
-            player_id = str(row.get('player_id') or '').strip() or resolve_espn_id(player_name)
-            if player_id:
+            if player_resolved:
                 resolved += 1
             else:
                 unresolved += 1
-            pending.append(OddsSnapshot(
-                game_id=str(row.get('game_id') or '').strip() or None,
-                source_event_id=str(row['source_event_id']).strip(),
-                game_date=event_start.astimezone(ET).date(),
-                event_start_time=event_start,
-                player_id=player_id,
-                player_name=player_name,
-                player_key=normalize_name(player_name),
-                market=market,
-                bookmaker=bookmaker,
-                line=line,
-                over_odds=over_odds,
-                under_odds=under_odds,
-                source=source,
-                snapshot_kind=kind,
-                source_snapshot_key=key,
-                snapped_at=snapped_at,
-            ))
+            pending.append(snapshot)
             existing_keys.add(key)
             inserted += 1
         except (TypeError, ValueError) as exc:
