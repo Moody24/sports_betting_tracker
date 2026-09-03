@@ -163,7 +163,7 @@ test.describe('Visual Regression', () => {
     await page.locator('#confirm_password').fill('doesNotMatch');
     await page.locator('form [type="submit"]').click();
 
-    await expect(page.locator('.invalid-feedback').first()).toBeVisible();
+    await expect(page.locator('.field-errors').first()).toBeVisible();
     await expect(page).toHaveScreenshot('register-validation-errors.png', {
       fullPage: true,
       animations: 'disabled',

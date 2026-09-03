@@ -1,8 +1,11 @@
 """Contract tests for safe HTML and ApiErrorV1 responses."""
 
+from unittest.mock import patch
+
 from flask import abort
 from werkzeug.exceptions import TooManyRequests
 
+from app import db
 from tests.helpers import BaseTestCase
 
 
@@ -54,6 +57,13 @@ class TestHttpErrors(BaseTestCase):
         response = self.client.get('/_test/limited')
         self.assertEqual(response.status_code, 429)
         self.assertEqual(response.headers['Retry-After'], '17')
+
+    def test_server_error_rolls_back_the_database_session(self):
+        path = self._route_for_status(500)
+        with patch.object(db.session, 'rollback') as rollback:
+            response = self.client.get(path)
+        self.assertEqual(response.status_code, 500)
+        rollback.assert_called_once_with()
 
     def test_authenticated_error_offers_private_recovery(self):
         self.register_and_login()

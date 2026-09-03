@@ -22,9 +22,12 @@ class TestClassAuditManifest(unittest.TestCase):
 
     def test_manifest_shape(self):
         stored = json.loads(MANIFEST.read_text())
-        for key in ('grid', 'components', 'utilities', 'icons'):
+        for key in ('grid', 'components', 'utilities', 'icons', 'unmatched'):
             self.assertIn(key, stored)
-            self.assertTrue(stored[key], f'{key} list empty')
+            self.assertIsInstance(stored[key], list)
+        self.assertTrue(stored['components'])
+        self.assertTrue(stored['utilities'])
+        self.assertTrue(stored['icons'])
 
 
 if __name__ == '__main__':

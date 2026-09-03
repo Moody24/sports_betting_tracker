@@ -12,6 +12,37 @@ const pages = [
 ];
 
 test.describe('Responsive layout contract', () => {
+  test('public and error pages fit compact and desktop viewports', async ({ page }) => {
+    const publicPaths = [
+      '/',
+      '/methodology',
+      '/responsible-gambling',
+      '/privacy',
+      '/terms',
+      '/data-sources',
+      '/about',
+      '/missing-responsive-fixture',
+    ];
+
+    for (const width of [1200, 412, 320]) {
+      await page.setViewportSize({ width, height: 900 });
+      for (const path of publicPaths) {
+        await page.goto(path);
+        await expect(page.locator('main')).toBeVisible();
+        const overflow = await page.evaluate(() => ({
+          documentWidth: document.documentElement.scrollWidth,
+          viewportWidth: document.documentElement.clientWidth,
+          bodyWidth: document.body.scrollWidth,
+        }));
+        expect(overflow, `${path} overflows horizontally at ${width}px`).toEqual({
+          documentWidth: width,
+          viewportWidth: width,
+          bodyWidth: width,
+        });
+      }
+    }
+  });
+
   test('core pages fit every supported viewport without document overflow', async ({ page }) => {
     await registerAndLogin(page);
 

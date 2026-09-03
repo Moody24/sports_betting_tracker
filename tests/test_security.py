@@ -49,6 +49,7 @@ class TestSecurity(BaseTestCase):
             {
                 'SECRET_KEY': 'production-test-secret',
                 'FLASK_ENV': 'production',
+                'PUBLIC_BASE_URL': 'https://edge.example',
                 'SESSION_IDLE_MINUTES': '30',
                 'SESSION_ABSOLUTE_HOURS': '12',
                 'REMEMBER_COOKIE_DAYS': '14',
@@ -75,6 +76,7 @@ class TestSecurity(BaseTestCase):
             {
                 'SECRET_KEY': 'production-test-secret',
                 'FLASK_ENV': 'production',
+                'PUBLIC_BASE_URL': 'https://edge.example',
             },
             clear=False,
         ):
