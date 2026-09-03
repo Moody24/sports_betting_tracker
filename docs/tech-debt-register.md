@@ -13,7 +13,7 @@ than remaining as an open checklist.
 - Full verification: 1,265 tests passing, 80% application coverage
 - Static/security gates: Ruff, Bandit, detect-secrets, Git-history credential
   scanning, and pip-audit passing
-- Ruff C901 inventory: 44 functions, down from 59 before this cleanup
+- Ruff C901 inventory: 43 functions, down from 59 before this cleanup
 - Working tree expectation: no generated files; personal untracked files are
   outside project scope
 
@@ -41,6 +41,8 @@ and architecture-contract tests are the reproducible measures for this repo.
 - Decomposed the two most complex workflows: market-model walk-forward
   evaluation and the all-player-props API. The latter now uses the required ET
   calendar date instead of the host machine's local date.
+- Decomposed historical player-log backfill orchestration while preserving
+  retries, resume checks, batched writes, dry runs, and optional retraining.
 - Consolidated two conflicting inactive Railway runbooks.
 - Blocked accidental external HTTP in the shared test fixture.
 - Moved stale virtualenvs and generated test/browser artifacts to Trash,
@@ -50,7 +52,7 @@ and architecture-contract tests are the reproducible measures for this repo.
 
 | Priority | Item | Evidence and exit condition |
 |---|---|---|
-| P1 | Remaining high-complexity workflows | 44 C901 findings remain. Continue with `stats_commands.cli_backfill_player_logs` (22), then the 20-complexity pick-context, prop-import, and NBA ingestion/fetch workflows. Preserve behavior with focused tests per extraction. |
+| P1 | Remaining high-complexity workflows | 43 C901 findings remain. Continue with the 20-complexity pick-context, prop-import, and NBA ingestion/fetch workflows. Preserve behavior with focused tests per extraction. |
 | P2 | Oversized service test module | `tests/test_services.py` is 7,613 lines across 55 test classes. Split by service only in a dedicated mechanical commit; do not mix that move with production changes. |
 | P2 | Historical local model artifacts | `app/ml_models/` contains 190 ignored artifacts (about 76 MB). Active database metadata still references July artifacts, so retain them until `flask retrain --force` succeeds and the active paths are re-audited. |
 | P2 before hosted deployment | Inactive Railway scripts and configuration | They are intentionally retained for restoration work and the surviving runbook is explicitly marked inactive. Revalidate or delete them when a hosting decision is made. |

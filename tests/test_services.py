@@ -6053,6 +6053,87 @@ class TestStatsCommandsBackfill(BaseTestCase):
         # Cache should NOT be called in dry_run mode
         mock_cache.assert_not_called()
 
+    def test_backfill_player_selection_honors_explicit_ids(self):
+        from app.cli.stats_commands import _select_backfill_players
+
+        nba_players = MagicMock()
+        nba_players.get_players.return_value = [
+            {'id': 23, 'full_name': 'Known Player'},
+        ]
+
+        selected = _select_backfill_players(
+            nba_players,
+            '23, 99',
+            'active',
+            None,
+        )
+
+        self.assertEqual(selected, [
+            {'id': '23', 'full_name': 'Known Player'},
+            {'id': '99', 'full_name': 'Player 99'},
+        ])
+        nba_players.get_active_players.assert_not_called()
+
+    @patch('app.cli.stats_commands.time.sleep')
+    @patch('app.cli.stats_commands._has_backfill_season_data', return_value=False)
+    def test_backfill_player_logs_retries_then_writes(
+        self,
+        _mock_existing,
+        mock_sleep,
+    ):
+        from app.cli.stats_commands import _run_player_log_backfill
+
+        logs = [{'GAME_DATE': '2025-01-15', 'PTS': 20}]
+        fetch_logs = MagicMock(side_effect=[RuntimeError('busy'), logs])
+        cache_logs = MagicMock(return_value={
+            'inserted': 1,
+            'updated': 0,
+            'total': 1,
+        })
+        with self.app.app_context():
+            totals, failures = _run_player_log_backfill(
+                [{'id': 23, 'full_name': 'Known Player'}],
+                ['2024-25'],
+                resume=True,
+                dry_run=False,
+                sleep_seconds=0,
+                fetch_logs=fetch_logs,
+                cache_logs=cache_logs,
+            )
+
+        self.assertEqual(totals['rows_fetched'], 1)
+        self.assertEqual(totals['rows_inserted'], 1)
+        self.assertEqual(totals['fetch_failures'], 0)
+        self.assertEqual(failures, [])
+        self.assertEqual(fetch_logs.call_count, 2)
+        mock_sleep.assert_called_once_with(2)
+        cache_logs.assert_called_once_with(
+            '23',
+            logs,
+            ttl_days=3650,
+            commit=False,
+        )
+
+    @patch('app.cli.stats_commands._has_backfill_season_data', return_value=True)
+    def test_backfill_player_logs_resume_skips_fetch(self, _mock_existing):
+        from app.cli.stats_commands import _run_player_log_backfill
+
+        fetch_logs = MagicMock()
+        with self.app.app_context():
+            totals, failures = _run_player_log_backfill(
+                [{'id': 23, 'full_name': 'Known Player'}],
+                ['2024-25'],
+                resume=True,
+                dry_run=True,
+                sleep_seconds=0,
+                fetch_logs=fetch_logs,
+                cache_logs=MagicMock(),
+            )
+
+        self.assertEqual(totals['players_skipped_resume'], 1)
+        self.assertEqual(failures, [])
+        fetch_logs.assert_not_called()
+
     @patch('app.services.nba_service.backfill_game_snapshots')
     def test_backfill_game_snapshots_valid_dates(self, mock_backfill):
         """cli_backfill_game_snapshots calls backfill_game_snapshots with correct date range."""

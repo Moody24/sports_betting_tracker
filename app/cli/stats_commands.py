@@ -24,6 +24,8 @@ from app.cli import (
 
 logger = logging.getLogger(__name__)
 
+_BACKFILL_RETRY_BACKOFFS = (0, 2, 5, 10)
+
 
 @click.command('refresh-stats')
 def cli_refresh_stats():
@@ -47,6 +49,204 @@ def cli_refresh_injuries():
     click.echo('Refreshing injury reports...')
     refresh_injury_reports()
     click.echo('Done.')
+
+
+def _select_backfill_players(nba_players, player_ids, players_scope, max_players):
+    explicit_player_ids = _parse_player_ids(player_ids)
+    if explicit_player_ids:
+        all_candidates = nba_players.get_players()
+        by_id = {str(player.get('id')): player for player in all_candidates}
+        selected = [
+            {
+                'id': player_id,
+                'full_name': by_id.get(player_id, {}).get(
+                    'full_name',
+                    f'Player {player_id}',
+                ),
+            }
+            for player_id in explicit_player_ids
+        ]
+    elif players_scope == 'all':
+        selected = nba_players.get_players()
+    else:
+        selected = nba_players.get_active_players()
+    return selected[:max_players] if max_players else selected
+
+
+def _has_backfill_season_data(player_id: str, season: str) -> bool:
+    season_year = _season_start_year(season)
+    return bool(
+        PlayerGameLog.query
+        .filter_by(player_id=player_id)
+        .filter(PlayerGameLog.game_date >= datetime(season_year, 10, 1).date())
+        .filter(PlayerGameLog.game_date < datetime(season_year + 1, 10, 1).date())
+        .first()
+    )
+
+
+def _fetch_backfill_logs(fetch_logs, player_id, player_name, season):
+    logs = []
+    last_exc = None
+    for attempt, backoff in enumerate(_BACKFILL_RETRY_BACKOFFS, start=1):
+        try:
+            if backoff:
+                time.sleep(backoff)
+            logs = fetch_logs(
+                player_id,
+                season=season,
+                last_n=None,
+                raise_on_error=True,
+            )
+            break
+        except Exception as exc:
+            last_exc = exc
+            click.echo(
+                f'Backfill retry: player {player_name}/{player_id}, '
+                f'season {season}, attempt {attempt} failed: {exc}'
+            )
+    return logs, last_exc
+
+
+def _record_backfill_failure(totals, failure_details, detail):
+    totals['fetch_failures'] += 1
+    failure_details.append(detail)
+    click.echo(f'Backfill error: {detail}')
+    if totals['fetch_failures'] >= MAX_FETCH_FAILURES:
+        click.echo(
+            'Backfill warning: maximum failures reached; '
+            'continuing with remaining players.'
+        )
+
+
+def _process_backfill_season(
+    *,
+    player_id,
+    player_name,
+    season,
+    resume,
+    dry_run,
+    sleep_seconds,
+    pending_rows,
+    totals,
+    failure_details,
+    fetch_logs,
+    cache_logs,
+):
+    if resume and _has_backfill_season_data(player_id, season):
+        totals['players_skipped_resume'] += 1
+        click.echo(
+            f'Backfill: player {player_name}/{player_id}, season {season}, '
+            'skipped (resume found data)'
+        )
+        return pending_rows
+
+    logs, last_exc = _fetch_backfill_logs(
+        fetch_logs,
+        player_id,
+        player_name,
+        season,
+    )
+    if last_exc and not logs:
+        detail = f'{player_name}/{player_id} {season}: {last_exc}'
+        _record_backfill_failure(totals, failure_details, detail)
+        return pending_rows
+
+    fetched_count = len(logs)
+    totals['rows_fetched'] += fetched_count
+    inserted = 0
+    updated = 0
+    if not dry_run and logs:
+        result = cache_logs(player_id, logs, ttl_days=3650, commit=False)
+        inserted = result['inserted']
+        updated = result['updated']
+        totals['rows_inserted'] += inserted
+        totals['rows_updated'] += updated
+        totals['rows_written'] += result['total']
+        pending_rows += result['total']
+        if pending_rows >= BACKFILL_COMMIT_BATCH:
+            db.session.commit()
+            pending_rows = 0
+
+    click.echo(
+        f'Backfill: player {player_name}/{player_id}, season {season}, '
+        f'fetched {fetched_count} rows, inserted {inserted}, updated {updated}'
+    )
+    if sleep_seconds > 0:
+        time.sleep(sleep_seconds)
+    return pending_rows
+
+
+def _run_player_log_backfill(
+    selected_players,
+    seasons,
+    *,
+    resume,
+    dry_run,
+    sleep_seconds,
+    fetch_logs,
+    cache_logs,
+):
+    totals = {
+        'players_processed': 0,
+        'players_skipped_resume': 0,
+        'rows_fetched': 0,
+        'rows_inserted': 0,
+        'rows_updated': 0,
+        'rows_written': 0,
+        'fetch_failures': 0,
+    }
+    failure_details = []
+    pending_rows = 0
+    for player in selected_players:
+        player_id = str(player.get('id'))
+        player_name = player.get('full_name', player_id)
+        totals['players_processed'] += 1
+        for season in seasons:
+            pending_rows = _process_backfill_season(
+                player_id=player_id,
+                player_name=player_name,
+                season=season,
+                resume=resume,
+                dry_run=dry_run,
+                sleep_seconds=sleep_seconds,
+                pending_rows=pending_rows,
+                totals=totals,
+                failure_details=failure_details,
+                fetch_logs=fetch_logs,
+                cache_logs=cache_logs,
+            )
+    if not dry_run:
+        db.session.commit()
+    return totals, failure_details
+
+
+def _backfill_summary(totals) -> str:
+    return (
+        'Backfill summary: '
+        f"players_processed={totals['players_processed']}, "
+        f"players_skipped_resume={totals['players_skipped_resume']}, "
+        f"rows_fetched={totals['rows_fetched']}, "
+        f"rows_inserted={totals['rows_inserted']}, "
+        f"rows_updated={totals['rows_updated']}, "
+        f"fetch_failures={totals['fetch_failures']}"
+    )
+
+
+def _finish_backfill_job(job_id, totals, summary, failure_details, trained):
+    job = db.session.get(JobLog, job_id)
+    if not job:
+        return
+    job.finished_at = datetime.now(timezone.utc)
+    job.status = (
+        'success' if totals['fetch_failures'] == 0 else 'completed_with_errors'
+    )
+    message = summary
+    if failure_details:
+        message = f"{summary}; sample_errors={'; '.join(failure_details[:5])}"
+    if trained:
+        message = f'{message}; train_after=true'
+    job.message = message
+    db.session.commit()
 
 
 @click.command('backfill_player_logs')
@@ -86,123 +286,22 @@ def cli_backfill_player_logs(
     )
     db.session.add(job)
     db.session.commit()
-
-    explicit_player_ids = _parse_player_ids(player_ids)
-    if explicit_player_ids:
-        all_candidates = nba_players.get_players()
-        by_id = {str(p.get('id')): p for p in all_candidates}
-        selected_players = [
-            {'id': pid, 'full_name': by_id.get(pid, {}).get('full_name', f'Player {pid}')}
-            for pid in explicit_player_ids
-        ]
-    elif players_scope == 'all':
-        selected_players = nba_players.get_players()
-    else:
-        selected_players = nba_players.get_active_players()
-
-    if max_players:
-        selected_players = selected_players[:max_players]
-
-    totals = {
-        'players_processed': 0,
-        'players_skipped_resume': 0,
-        'rows_fetched': 0,
-        'rows_inserted': 0,
-        'rows_updated': 0,
-        'rows_written': 0,
-        'fetch_failures': 0,
-    }
-    failure_details = []
-    pending_rows = 0
-
-    for player in selected_players:
-        player_id = str(player.get('id'))
-        player_name = player.get('full_name', player_id)
-        totals['players_processed'] += 1
-
-        for season in seasons:
-            season_year = _season_start_year(season)
-            if resume:
-                existing = (
-                    PlayerGameLog.query
-                    .filter_by(player_id=player_id)
-                    .filter(PlayerGameLog.game_date >= datetime(season_year, 10, 1).date())
-                    .filter(PlayerGameLog.game_date < datetime(season_year + 1, 10, 1).date())
-                    .first()
-                )
-                if existing:
-                    totals['players_skipped_resume'] += 1
-                    click.echo(
-                        f'Backfill: player {player_name}/{player_id}, season {season}, skipped (resume found data)'
-                    )
-                    continue
-
-            logs = []
-            last_exc = None
-            for attempt, backoff in enumerate((0, 2, 5, 10), start=1):
-                try:
-                    if backoff:
-                        time.sleep(backoff)
-                    logs = fetch_player_game_logs(
-                        player_id,
-                        season=season,
-                        last_n=None,
-                        raise_on_error=True,
-                    )
-                    break
-                except Exception as exc:
-                    last_exc = exc
-                    click.echo(
-                        f'Backfill retry: player {player_name}/{player_id}, season {season}, '
-                        f'attempt {attempt} failed: {exc}'
-                    )
-
-            if last_exc and not logs:
-                totals['fetch_failures'] += 1
-                detail = f'{player_name}/{player_id} {season}: {last_exc}'
-                failure_details.append(detail)
-                click.echo(f'Backfill error: {detail}')
-                if totals['fetch_failures'] >= MAX_FETCH_FAILURES:
-                    click.echo('Backfill warning: maximum failures reached; continuing with remaining players.')
-                continue
-
-            fetched_count = len(logs)
-            totals['rows_fetched'] += fetched_count
-
-            inserted = 0
-            updated = 0
-            if not dry_run and logs:
-                result = cache_player_logs(player_id, logs, ttl_days=3650, commit=False)
-                inserted = result['inserted']
-                updated = result['updated']
-                totals['rows_inserted'] += inserted
-                totals['rows_updated'] += updated
-                totals['rows_written'] += result['total']
-                pending_rows += result['total']
-                if pending_rows >= BACKFILL_COMMIT_BATCH:
-                    db.session.commit()
-                    pending_rows = 0
-
-            click.echo(
-                f'Backfill: player {player_name}/{player_id}, season {season}, '
-                f'fetched {fetched_count} rows, inserted {inserted}, updated {updated}'
-            )
-
-            if sleep_seconds > 0:
-                time.sleep(sleep_seconds)
-
-    if not dry_run:
-        db.session.commit()
-
-    summary = (
-        'Backfill summary: '
-        f"players_processed={totals['players_processed']}, "
-        f"players_skipped_resume={totals['players_skipped_resume']}, "
-        f"rows_fetched={totals['rows_fetched']}, "
-        f"rows_inserted={totals['rows_inserted']}, "
-        f"rows_updated={totals['rows_updated']}, "
-        f"fetch_failures={totals['fetch_failures']}"
+    selected_players = _select_backfill_players(
+        nba_players,
+        player_ids,
+        players_scope,
+        max_players,
     )
+    totals, failure_details = _run_player_log_backfill(
+        selected_players,
+        seasons,
+        resume=resume,
+        dry_run=dry_run,
+        sleep_seconds=sleep_seconds,
+        fetch_logs=fetch_player_game_logs,
+        cache_logs=cache_player_logs,
+    )
+    summary = _backfill_summary(totals)
     click.echo(summary)
 
     train_results = None
@@ -211,17 +310,13 @@ def cli_backfill_player_logs(
         train_results = retrain_all_models()
         click.echo(f'Retrain results: {train_results}')
 
-    job = db.session.get(JobLog, job.id)
-    if job:
-        job.finished_at = datetime.now(timezone.utc)
-        job.status = 'success' if totals['fetch_failures'] == 0 else 'completed_with_errors'
-        message = summary
-        if failure_details:
-            message = f"{summary}; sample_errors={'; '.join(failure_details[:5])}"
-        if train_results is not None:
-            message = f'{message}; train_after=true'
-        job.message = message
-        db.session.commit()
+    _finish_backfill_job(
+        job.id,
+        totals,
+        summary,
+        failure_details,
+        train_results is not None,
+    )
 
 
 @click.command('prune_player_logs')
