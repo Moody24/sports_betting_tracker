@@ -2,6 +2,9 @@
 
 import unittest
 from datetime import datetime, timezone
+from unittest.mock import patch
+
+import requests
 
 from app import create_app, db
 from app.models import Bet, User
@@ -28,6 +31,14 @@ def make_bet(user_id, **kwargs):
 
 class BaseTestCase(unittest.TestCase):
     def setUp(self):
+        self._http_guard = patch(
+            "app.services.espn_client.requests.get",
+            side_effect=requests.RequestException(
+                "External HTTP is disabled in BaseTestCase"
+            ),
+        )
+        self._http_guard.start()
+        self.addCleanup(self._http_guard.stop)
         self.app = create_app(testing=True)
         self.app.config["WTF_CSRF_ENABLED"] = False
         self.client = self.app.test_client()
