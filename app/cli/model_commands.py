@@ -631,6 +631,13 @@ def cli_model_status():
     click.echo('\n=== Projection engine mode ===')
     click.echo(f'USE_ML_PROJECTIONS={ml_enabled}')
 
+    _echo_model_metadata_status()
+    _echo_pick_quality_win_rate()
+    _echo_last_drift_status()
+    _echo_recent_job_status()
+
+
+def _echo_model_metadata_status() -> None:
     click.echo('\n=== ModelMetadata (latest active first) ===')
     models = (
         ModelMetadata.query
@@ -647,44 +654,50 @@ def cli_model_status():
             f"trained={model.training_date.isoformat() if model.training_date else 'n/a'}"
         )
 
-    # 30-day rolling win-rate vs model training accuracy
+
+def _echo_win_rate_segment(label: str, segment) -> None:
+    if segment is None:
+        click.echo(f'  {label}: no data')
+        return
+    count, wins, rate = segment
+    click.echo(f'  {label}: {rate:.1%} ({wins}/{count})')
+
+
+def _echo_pick_quality_win_rate() -> None:
     click.echo('\n=== 30-day Rolling Win Rate (pick quality) ===')
     win_rate_result = _resolved_win_rate(30)
-    if win_rate_result:
-        def _fmt(label, seg):
-            if seg is None:
-                click.echo(f'  {label}: no data')
-            else:
-                count, wins, rate = seg
-                click.echo(f'  {label}: {rate:.1%} ({wins}/{count})')
-
-        _fmt('Manual bets', win_rate_result['manual'])
-        _fmt('Auto picks (real)', win_rate_result['auto'])
-        real = win_rate_result['real']
-        if real:
-            count, wins_30d, rolling_win_rate = real
-            click.echo(f'  Rolling win rate: {rolling_win_rate:.3f} ({wins_30d}/{count})')
-        _fmt('Bootstrap synthetic', win_rate_result['bootstrap'])
-
-        pq_model = ModelMetadata.query.filter_by(
-            model_name='pick_quality_nba', is_active=True,
-        ).first()
-        if real and pq_model and pq_model.val_accuracy:
-            delta = rolling_win_rate - pq_model.val_accuracy
-            click.echo(
-                f'  vs model val_accuracy ({pq_model.val_accuracy:.3f}): '
-                f'delta={delta:+.3f}'
-            )
-            if abs(delta) > 0.05:
-                click.echo('  WARN: >5% drift detected — consider retraining.')
-        elif not real:
-            click.echo('  No real (non-bootstrap) resolved bets in last 30 days.')
-        else:
-            click.echo('  No active pick_quality model metadata for comparison.')
-    else:
+    if not win_rate_result:
         click.echo('No resolved bets with context in last 30 days.')
+        return
+    _echo_win_rate_segment('Manual bets', win_rate_result['manual'])
+    _echo_win_rate_segment('Auto picks (real)', win_rate_result['auto'])
+    real = win_rate_result['real']
+    if real:
+        count, wins_30d, rolling_win_rate = real
+        click.echo(
+            f'  Rolling win rate: {rolling_win_rate:.3f} '
+            f'({wins_30d}/{count})'
+        )
+    _echo_win_rate_segment('Bootstrap synthetic', win_rate_result['bootstrap'])
+    pq_model = ModelMetadata.query.filter_by(
+        model_name='pick_quality_nba',
+        is_active=True,
+    ).first()
+    if real and pq_model and pq_model.val_accuracy:
+        delta = rolling_win_rate - pq_model.val_accuracy
+        click.echo(
+            f'  vs model val_accuracy ({pq_model.val_accuracy:.3f}): '
+            f'delta={delta:+.3f}'
+        )
+        if abs(delta) > 0.05:
+            click.echo('  WARN: >5% drift detected — consider retraining.')
+    elif not real:
+        click.echo('  No real (non-bootstrap) resolved bets in last 30 days.')
+    else:
+        click.echo('  No active pick_quality model metadata for comparison.')
 
-    # Last automated drift check result
+
+def _echo_last_drift_status() -> None:
     click.echo('\n=== Last Automated Drift Check ===')
     last_drift = (
         JobLog.query
@@ -700,6 +713,8 @@ def cli_model_status():
     else:
         click.echo('  No drift check job log found.')
 
+
+def _echo_recent_job_status() -> None:
     click.echo('\n=== Recent JobLog entries ===')
     jobs = JobLog.query.order_by(JobLog.started_at.desc()).limit(20).all()
     if not jobs:

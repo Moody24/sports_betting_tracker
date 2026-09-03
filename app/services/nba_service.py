@@ -1024,6 +1024,110 @@ def _best_odds(books_dict: dict, side: str, required_line: float | None = None) 
     return best_odds_val, best_book
 
 
+def _prop_outcomes_by_player(outcomes: list[dict]) -> dict:
+    player_lines = {}
+    for outcome in outcomes:
+        player = outcome.get('description', '')
+        if not player:
+            continue
+        side = outcome.get('name', '').lower()
+        player_lines.setdefault(player, {})[side] = {
+            'odds': outcome.get('price', 0),
+            'point': outcome.get('point'),
+        }
+    return player_lines
+
+
+def _collect_prop_market_quotes(
+    per_book: dict,
+    book_name: str,
+    market: dict,
+) -> None:
+    market_key = market.get('key', '')
+    if market_key not in SUPPORTED_PROP_MARKETS:
+        return
+    player_lines = _prop_outcomes_by_player(market.get('outcomes', []))
+    for player, sides in player_lines.items():
+        over = sides.get('over', {})
+        under = sides.get('under', {})
+        line = over.get('point') or under.get('point')
+        if line is None:
+            continue
+        per_book.setdefault((market_key, player), {})[book_name] = {
+            'line': float(line),
+            'over_odds': (
+                int(over.get('odds', 0))
+                if over.get('odds') is not None
+                else None
+            ),
+            'under_odds': (
+                int(under.get('odds', 0))
+                if under.get('odds') is not None
+                else None
+            ),
+        }
+
+
+def _collect_prop_quotes(data: dict) -> dict:
+    per_book = {}
+    for bookmaker in data.get('bookmakers', []):
+        book_name = (bookmaker.get('key') or _TARGET_BOOKMAKERS[0]).lower()
+        for market in bookmaker.get('markets', []):
+            _collect_prop_market_quotes(per_book, book_name, market)
+    return per_book
+
+
+def _consensus_prop(player: str, book_data: dict) -> dict | None:
+    books = {
+        name: quote
+        for name, quote in book_data.items()
+        if name in _TARGET_BOOKMAKERS
+    }
+    if not books:
+        return None
+    line_counts = {}
+    for quote in books.values():
+        line = float(quote['line'])
+        line_counts[line] = line_counts.get(line, 0) + 1
+    first_book_line = next(
+        (
+            float(books[name]['line'])
+            for name in _TARGET_BOOKMAKERS
+            if name in books
+        ),
+        min(line_counts),
+    )
+    line = max(
+        line_counts,
+        key=lambda candidate: (
+            line_counts[candidate],
+            candidate == first_book_line,
+        ),
+    )
+    best_over_odds, best_over_book = _best_odds(books, 'over', line)
+    best_under_odds, best_under_book = _best_odds(books, 'under', line)
+    return {
+        'player': player,
+        'line': float(line),
+        'over_odds': best_over_odds if best_over_odds is not None else 0,
+        'under_odds': best_under_odds if best_under_odds is not None else 0,
+        'books': books,
+        'best_over_book': best_over_book,
+        'best_under_book': best_under_book,
+    }
+
+
+def _build_consensus_props(per_book: dict) -> dict:
+    props = {}
+    for (market_key, player), book_data in per_book.items():
+        prop = _consensus_prop(player, book_data)
+        if prop is not None:
+            props.setdefault(market_key, []).append(prop)
+    for market_props in props.values():
+        market_props.sort(key=lambda prop: prop['player'])
+    return props
+
+
 def fetch_player_props_for_event(odds_event_id: str, critical: bool = False) -> dict:
     """Fetch player prop lines for a specific Odds API event.
 
@@ -1054,84 +1158,7 @@ def fetch_player_props_for_event(odds_event_id: str, critical: bool = False) -> 
         logger.error("Odds API (player props) fetch failed for event %s: %s", odds_event_id, _sanitize_api_error(exc))
         return {}
 
-    # Collect per-bookmaker data: {(market, player) -> {book -> {over_odds, under_odds, line}}}
-    per_book: dict = {}
-
-    for bookmaker in data.get("bookmakers", []):
-        # A few legacy/test payloads omit the key; preserve the market using
-        # the primary configured book rather than discarding every quote.
-        book_name = (bookmaker.get("key") or _TARGET_BOOKMAKERS[0]).lower()
-        for market in bookmaker.get("markets", []):
-            market_key = market.get("key", "")
-            if market_key not in SUPPORTED_PROP_MARKETS:
-                continue
-
-            outcomes = market.get("outcomes", [])
-            player_lines: dict = {}
-            for outcome in outcomes:
-                player = outcome.get("description", "")
-                if not player:
-                    continue
-                if player not in player_lines:
-                    player_lines[player] = {}
-                side = outcome.get("name", "").lower()
-                player_lines[player][side] = {
-                    "odds": outcome.get("price", 0),
-                    "point": outcome.get("point"),
-                }
-
-            for player, sides in player_lines.items():
-                over = sides.get("over", {})
-                under = sides.get("under", {})
-                line = over.get("point") or under.get("point")
-                if line is None:
-                    continue
-
-                combo_key = (market_key, player)
-                per_book.setdefault(combo_key, {})
-                per_book[combo_key][book_name] = {
-                    "line": float(line),
-                    "over_odds": int(over.get("odds", 0)) if over.get("odds") is not None else None,
-                    "under_odds": int(under.get("odds", 0)) if under.get("odds") is not None else None,
-                }
-
-    # Build output
-    props: dict = {}
-    for (market_key, player), book_data in per_book.items():
-        books = {k: v for k, v in book_data.items() if k in _TARGET_BOOKMAKERS}
-        if not books:
-            continue
-        line_counts: dict[float, int] = {}
-        for quote in books.values():
-            quote_line = float(quote['line'])
-            line_counts[quote_line] = line_counts.get(quote_line, 0) + 1
-        # Stable consensus: most books, then the first target book's line.
-        first_book_line = next(
-            (float(books[name]['line']) for name in _TARGET_BOOKMAKERS if name in books),
-            min(line_counts),
-        )
-        line = max(line_counts, key=lambda candidate: (
-            line_counts[candidate], candidate == first_book_line,
-        ))
-
-        best_over_odds, best_over_book = _best_odds(books, "over", line)
-        best_under_odds, best_under_book = _best_odds(books, "under", line)
-
-        props.setdefault(market_key, []).append({
-            "player": player,
-            "line": float(line),
-            "over_odds": best_over_odds if best_over_odds is not None else 0,
-            "under_odds": best_under_odds if best_under_odds is not None else 0,
-            "books": books,
-            "best_over_book": best_over_book,
-            "best_under_book": best_under_book,
-        })
-
-    # Sort each market by player name
-    for market_key in props:
-        props[market_key].sort(key=lambda p: p["player"])
-
-    return props
+    return _build_consensus_props(_collect_prop_quotes(data))
 
 
 def _prop_snapshot_event_start(game: dict) -> datetime | None:
