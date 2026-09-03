@@ -17,6 +17,13 @@ echo "== Guardrail: lint =="
 
 echo "== Guardrail: security scan =="
 "$PY_BIN" -m bandit -q -r app -x tests -ll
+git ls-files -z | xargs -0 "$PY_BIN" -m detect_secrets.main hook \
+  --disable-plugin KeywordDetector \
+  --disable-plugin BasicAuthDetector \
+  --disable-plugin HexHighEntropyString \
+  --disable-plugin Base64HighEntropyString
+"$PY_BIN" scripts/check_secret_history.py
+"$PY_BIN" -m pip_audit -r requirements.txt
 
 echo "== Guardrail: test suite + coverage =="
 "$PY_BIN" -m coverage run -m unittest discover -s tests -v

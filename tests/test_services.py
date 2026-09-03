@@ -3211,7 +3211,7 @@ class TestCLI(BaseTestCase):
     """Tests for Flask CLI commands in app/cli.py."""
 
     def _runner(self):
-        return self.app.test_cli_runner(mix_stderr=False)
+        return self.app.test_cli_runner()
 
     @patch('app.services.scheduler.refresh_player_stats')
     def test_refresh_stats(self, mock_fn):
@@ -3990,7 +3990,7 @@ class TestCLIDriftReport(BaseTestCase):
     """Tests for flask drift_report CLI command."""
 
     def _runner(self):
-        return self.app.test_cli_runner(mix_stderr=False)
+        return self.app.test_cli_runner()
 
     def test_drift_report_no_data(self):
         """drift_report outputs message when no resolved bets exist."""

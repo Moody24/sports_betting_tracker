@@ -32,13 +32,25 @@ jobs:
           cache-dependency-path: requirements-dev.txt
 
       - name: Install lint/security tools
-        run: pip install ruff==0.15.5 bandit==1.9.4
+        run: pip install ruff==0.15.5 bandit==1.9.4 detect-secrets==1.5.0 pip-audit==2.10.1
 
       - name: Lint (ruff)
         run: ruff check .
 
       - name: Security scan (bandit)
         run: bandit -q -r app -x tests -ll
+
+      - name: Secret scan (tracked files and Git history)
+        run: |
+          git ls-files -z | xargs -0 detect-secrets-hook \
+            --disable-plugin KeywordDetector \
+            --disable-plugin BasicAuthDetector \
+            --disable-plugin HexHighEntropyString \
+            --disable-plugin Base64HighEntropyString
+          python scripts/check_secret_history.py
+
+      - name: Dependency vulnerability audit
+        run: pip-audit -r requirements.txt
 
   test:
     name: Test suite & coverage
@@ -67,4 +79,4 @@ jobs:
           SECRET_KEY: ci-test-secret-key-not-for-production
 
       - name: Coverage report
-        run: python -m coverage report --include="app/*" --show-missing --fail-under=75
+        run: python -m coverage report --include="app/*" --show-missing --fail-under=80

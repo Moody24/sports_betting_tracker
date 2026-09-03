@@ -33,7 +33,7 @@ published.
 | Shared architecture | A dependency map, shared schemas, state rules, and module ownership registry exist in `docs/architecture/system-contract.md` | Reconcile with Claude's work, commit it, add architecture tests to CI, and keep it synchronized with executable contracts |
 | Login security | Passwords are hashed with Werkzeug; CSRF, login/register rate limits, POST logout, hardened production session/remember cookies, bounded session lifetimes, a 12–256 character password policy, CSP, HSTS, frame blocking, and generic login failures exist | Account recovery/verification, auth audit logging, breached-password coverage, shared rate-limit storage, and broader security review |
 | Browser persistence | The versioned parlay queue is the only active app-managed browser key; its contents/lifecycle are inventoried and current/legacy keys clear on logout | Keep the inventory and logout browser regression synchronized with any new browser state |
-| Environment/secrets | `.env` is ignored; `.env.example` exists; `SECRET_KEY` is required | Expand the example to cover every operator-facing variable, add secret scanning and an env-contract test, and store production values only in Railway variables |
+| Environment/secrets | `.env` is ignored; `.env.example` inventories runtime variables with safe defaults; `SECRET_KEY` is required; CI enforces the environment contract, dependency audit, and tracked/history secret scans | Store production values only in Railway variables and establish the operational rotation schedule when hosting is restored |
 | Database/deployment | SQLAlchemy accepts SQLite or `DATABASE_URL`; `postgres://` is normalized; psycopg is installed; Alembic, Docker, Gunicorn, `/health`, and `/ready` exist | Test the complete migration chain on PostgreSQL, build a data-copy validator, use Railway pre-deploy migrations, establish backup/rollback, and separate web/scheduler ownership |
 | MLB/NFL | Sport stat catalogs exist for NBA, MLB, and NFL; `HistoricalGameLog` and scenario tables include `sport`; a `SportService` interface exists | Only NBA has a registered service. Bet/snapshot/context schemas, providers, features, models, calibration, grading, routes, schedules, and tests remain sport-specific or absent |
 | Error pages | Custom 404 and 500 templates exist | Add negotiated 400/401/403/405/429/502/503/505 handling, request IDs, monitoring, accessibility, and visual fixtures |
@@ -130,7 +130,7 @@ migration cost.
   external font/CDN origins after Claude's design work settles and eliminate
   `'unsafe-inline'` for styles through nonces/hashes or owned static CSS where
   feasible.
-- [ ] **P1: automate security gates.** Add dependency vulnerability review,
+- [x] **P1: automate security gates.** Add dependency vulnerability review,
   secret scanning, SAST, CSRF/auth/IDOR tests, and a production-header test to CI.
 
 ### Acceptance evidence
@@ -157,12 +157,12 @@ browser-injected configuration, logs, test fixtures, or the brain vault.
 
 - [x] `.env` and `.env.backup` are ignored by Git.
 - [x] A tracked `.env.example` exists.
-- [ ] **P0: expand `.env.example` from the executable inventory.** Categorize
+- [x] **P0: expand `.env.example` from the executable inventory.** Categorize
   variables as required, optional, provider-specific, tuning, or Railway-injected.
-- [ ] **P0: add an env-contract test.** Every operator-facing `os.getenv()` name
+- [x] **P0: add an env-contract test.** Every operator-facing `os.getenv()` name
   must be declared in `.env.example` or explicitly allowlisted as internal or
   platform-injected. The test should fail on undocumented new variables.
-- [ ] **P0: add secret scanning before commit and in CI.** Scan tracked content and
+- [x] **P0: add secret scanning before commit and in CI.** Scan tracked content and
   Git history using a maintained tool; verified false positives should use narrow
   suppressions with comments.
 - [ ] **P0: put production values in Railway service variables.** Use reference
@@ -268,12 +268,9 @@ EMAIL_FROM_ADDRESS=
 operator secrets. `RUNNING_CLI` is internal process state and should not be
 presented as an operator setting.
 
-The current tracked example says `sqlite:///instance/app.db`. Flask-SQLAlchemy
-resolves relative SQLite URLs under the Flask instance directory, so reconcile
-that value with the actual local database path and add a startup test; the known
-local convention is `sqlite:///app.db`. Also review implicit production defaults:
-`AUTO_PAPER_ENABLED` and `MARKET_GOV_APPLY` currently default true in code, so
-deployment should set them explicitly rather than inherit surprising behavior.
+The tracked example now uses the verified local convention, `sqlite:///app.db`,
+and a contract test protects that value. Risky automation is also explicitly
+disabled in the example: `AUTO_PAPER_ENABLED=false` and `MARKET_GOV_APPLY=false`.
 
 ## 5. P0 — SQLite to Railway PostgreSQL transition map
 

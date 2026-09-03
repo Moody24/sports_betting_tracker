@@ -10,8 +10,9 @@ than remaining as an open checklist.
 
 - Canonical guardrail: `scripts/predeploy_guardrails.sh`
 - Test runner: `unittest`
-- Full verification: 1,246 tests passing, 80% application coverage
-- Static gates: Ruff and Bandit passing
+- Full verification: 1,265 tests passing, 80% application coverage
+- Static/security gates: Ruff, Bandit, detect-secrets, Git-history credential
+  scanning, and pip-audit passing
 - Ruff C901 inventory: 46 functions, down from 59 before this cleanup
 - Working tree expectation: no generated files; personal untracked files are
   outside project scope
@@ -33,6 +34,8 @@ and architecture-contract tests are the reproducible measures for this repo.
 - Fixed pick-quality local fallback lookup when a global model is selected.
 - Removed the duplicate pytest invocation from pre-deploy checks.
 - Split development-only coverage tooling from production dependencies.
+- Eliminated all 35 known runtime dependency findings and made dependency,
+  environment, and credential scans blocking local/CI gates.
 - Consolidated two conflicting inactive Railway runbooks.
 - Blocked accidental external HTTP in the shared test fixture.
 - Moved stale virtualenvs and generated test/browser artifacts to Trash,
