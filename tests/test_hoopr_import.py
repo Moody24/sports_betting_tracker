@@ -131,7 +131,7 @@ def _player_box_df():
 class TestSeasonYearMapping(BaseTestCase):
 
     def test_app_season_string_maps_to_hoopr_end_year(self):
-        from app.cli.hoopr_import import _season_to_hoopr_year
+        from app.services.hoopr_import_service import _season_to_hoopr_year
         self.assertEqual(_season_to_hoopr_year('2025-26'), 2026)
         self.assertEqual(_season_to_hoopr_year('2024-25'), 2025)
 
@@ -139,7 +139,7 @@ class TestSeasonYearMapping(BaseTestCase):
 class TestParsePlusMinus(BaseTestCase):
 
     def test_signed_strings_none_and_numeric(self):
-        from app.cli.hoopr_import import _parse_plus_minus
+        from app.services.hoopr_import_service import _parse_plus_minus
         self.assertEqual(_parse_plus_minus('+12'), 12.0)
         self.assertEqual(_parse_plus_minus('-4'), -4.0)
         self.assertEqual(_parse_plus_minus('0'), 0.0)
@@ -151,7 +151,7 @@ class TestParsePlusMinus(BaseTestCase):
 class TestRowsFromPlayerBox(BaseTestCase):
 
     def _rows(self, **kwargs):
-        from app.cli.hoopr_import import _rows_from_player_box
+        from app.services.hoopr_import_service import _rows_from_player_box
         defaults = dict(season='2025-26', season_type_code=2)
         defaults.update(kwargs)
         rows, _ = _rows_from_player_box(_player_box_df(), **defaults)
@@ -162,7 +162,7 @@ class TestRowsFromPlayerBox(BaseTestCase):
         df.loc[df.team_abbreviation == 'BOS', 'team_abbreviation'] = 'GS'
         df.loc[df.opponent_team_abbreviation == 'BOS',
                'opponent_team_abbreviation'] = 'GS'
-        from app.cli.hoopr_import import _rows_from_player_box
+        from app.services.hoopr_import_service import _rows_from_player_box
         rows, _ = _rows_from_player_box(
             df, season='2025-26', season_type_code=2)
         self.assertEqual(len(rows), 4)
@@ -173,7 +173,7 @@ class TestRowsFromPlayerBox(BaseTestCase):
     def test_all_star_exhibition_rows_dropped_and_reported(self):
         rows = self._rows()
         self.assertNotIn('401777777', {r['game_id'] for r in rows})
-        from app.cli.hoopr_import import _rows_from_player_box
+        from app.services.hoopr_import_service import _rows_from_player_box
         _, dropped = _rows_from_player_box(
             _player_box_df(), season='2025-26', season_type_code=2)
         self.assertEqual(dropped, {'STARS': 1, 'WORLD': 1})
@@ -237,7 +237,7 @@ class TestRowsFromPlayerBox(BaseTestCase):
         extra['game_id'] = 401700002
         extra['game_date'] = date(2025, 10, 23)
         df = pd.concat([df, extra.to_frame().T], ignore_index=True)
-        from app.cli.hoopr_import import _rows_from_player_box
+        from app.services.hoopr_import_service import _rows_from_player_box
         rows, _ = _rows_from_player_box(
             df, season='2025-26', season_type_code=2, max_games=1)
         self.assertEqual({r['game_id'] for r in rows}, {'401700001'})
@@ -250,7 +250,7 @@ class TestImportCommand(BaseTestCase):
         runner = self.app.test_cli_runner()
         return runner.invoke(args=['import-hoopr-logs'] + args)
 
-    @patch('app.cli.hoopr_import._load_player_box_df')
+    @patch('app.services.hoopr_import_service._load_player_box_df')
     def test_import_inserts_and_logs_success(self, mock_load):
         from app.models import HistoricalGameLog, JobLog
         mock_load.return_value = _player_box_df()
@@ -264,7 +264,7 @@ class TestImportCommand(BaseTestCase):
             job = JobLog.query.filter_by(job_name='import-hoopr-logs').one()
             self.assertEqual(job.status, 'success')
 
-    @patch('app.cli.hoopr_import._load_player_box_df')
+    @patch('app.services.hoopr_import_service._load_player_box_df')
     def test_import_is_idempotent(self, mock_load):
         from app.models import HistoricalGameLog
         mock_load.return_value = _player_box_df()
@@ -278,7 +278,7 @@ class TestImportCommand(BaseTestCase):
         result = self._run(['--sport', 'mlb', '--seasons', '1'])
         self.assertNotEqual(result.exit_code, 0)
 
-    @patch('app.cli.hoopr_import._load_player_box_df')
+    @patch('app.services.hoopr_import_service._load_player_box_df')
     def test_load_failure_marks_job_failed_not_stuck_running(self, mock_load):
         from app.models import JobLog
         mock_load.side_effect = RuntimeError('github unreachable')
@@ -290,7 +290,7 @@ class TestImportCommand(BaseTestCase):
             self.assertIn('github unreachable', job.message)
             self.assertIsNotNone(job.finished_at)
 
-    @patch('app.cli.hoopr_import._load_player_box_df')
+    @patch('app.services.hoopr_import_service._load_player_box_df')
     def test_warns_when_season_mixes_nba_id_namespace(self, mock_load):
         from app import db
         from app.models import HistoricalGameLog
@@ -309,9 +309,9 @@ class TestImportCommand(BaseTestCase):
 
 class TestImportCallable(BaseTestCase):
 
-    @patch('app.cli.hoopr_import._load_player_box_df')
+    @patch('app.services.hoopr_import_service._load_player_box_df')
     def test_import_hoopr_seasons_returns_counts(self, mock_load):
-        from app.cli.hoopr_import import import_hoopr_seasons
+        from app.services.hoopr_import_service import import_hoopr_seasons
         mock_load.return_value = _player_box_df()
         with self.app.app_context():
             result = import_hoopr_seasons(seasons=1)
@@ -322,7 +322,7 @@ class TestImportCallable(BaseTestCase):
 class TestScoreEnrichment(BaseTestCase):
 
     def test_rows_carry_team_and_opp_scores(self):
-        from app.cli.hoopr_import import _rows_from_player_box
+        from app.services.hoopr_import_service import _rows_from_player_box
         rows, _ = _rows_from_player_box(
             _player_box_df(), season='2025-26', season_type_code=2)
         lebron = next(r for r in rows if r['player_id'] == '1966')
@@ -332,10 +332,10 @@ class TestScoreEnrichment(BaseTestCase):
         self.assertEqual(tatum['stats']['team_score'], 110.0)
         self.assertEqual(tatum['stats']['opp_score'], 120.0)
 
-    @patch('app.cli.hoopr_import._load_player_box_df')
+    @patch('app.services.hoopr_import_service._load_player_box_df')
     def test_update_stats_merges_missing_keys_only(self, mock_load):
         from app import db
-        from app.cli.hoopr_import import import_hoopr_seasons
+        from app.services.hoopr_import_service import import_hoopr_seasons
         from app.models import HistoricalGameLog
         mock_load.return_value = _player_box_df()
         with self.app.app_context():
@@ -354,7 +354,7 @@ class TestScoreEnrichment(BaseTestCase):
             self.assertEqual(row.stats['team_score'], 120.0)   # merged in
             self.assertEqual(row.stats['pts'], 99.0)           # untouched
 
-    @patch('app.cli.hoopr_import._load_player_box_df')
+    @patch('app.services.hoopr_import_service._load_player_box_df')
     def test_update_stats_cli_flag(self, mock_load):
         mock_load.return_value = _player_box_df()
         runner = self.app.test_cli_runner()

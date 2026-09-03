@@ -1,16 +1,16 @@
 """CLI commands for the permanent HistoricalGameLog store."""
 
 import logging
-import math
 import time
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 
 import click
 
 from app import db
 from app.models import HistoricalGameLog, JobLog
 from app.services.ml_feature_builder import extract_opp_abbr
-from app.utils.time_helpers import ET
+from app.utils.data_coercion import normalize_player_id, safe_float, safe_str
+from app.utils.seasons import recent_nba_seasons
 
 logger = logging.getLogger(__name__)
 
@@ -20,69 +20,6 @@ _NBA_STAT_COLUMNS = {
     'TOV': 'tov', 'FGM': 'fgm', 'FGA': 'fga', 'FG3M': 'fg3m', 'FG3A': 'fg3a',
     'FTM': 'ftm', 'FTA': 'fta', 'MIN': 'minutes', 'PLUS_MINUS': 'plus_minus',
 }
-
-
-def _recent_seasons(n: int, today: date | None = None) -> list[str]:
-    """Most recent ``n`` NBA season strings, newest first.
-
-    NBA seasons start in October: before October, the 'current' season is
-    the one that started last calendar year.
-    """
-    today = today or datetime.now(ET).date()
-    start_year = today.year if today.month >= 10 else today.year - 1
-    return [
-        f"{y}-{str(y + 1)[-2:]}"
-        for y in range(start_year, start_year - n, -1)
-    ]
-
-
-def _safe_float(value, default: float = 0.0) -> float:
-    """Coerce ``value`` to float, falling back to ``default``.
-
-    Handles the pandas/nba_api sentinels for missing data: ``None`` and
-    NaN (``float`` truthy, so a plain ``or`` fallback lets it through).
-    """
-    if value is None:
-        return default
-    try:
-        as_float = float(value)
-    except (TypeError, ValueError):
-        return default
-    return default if math.isnan(as_float) else as_float
-
-
-def _safe_str(value) -> str:
-    """Coerce ``value`` to str, treating None/NaN as ''.
-
-    ``str(float('nan'))`` produces the literal string ``'nan'``, which
-    would otherwise leak into nullable text columns via ``or None``.
-    """
-    if value is None:
-        return ''
-    if isinstance(value, float) and math.isnan(value):
-        return ''
-    return str(value)
-
-
-def _norm_player_id(value) -> str:
-    """Normalize a player-id value to a canonical string.
-
-    ``pandas`` upcasts an otherwise-integer column to ``float`` the moment
-    it contains a NaN, so the same NBA player id can arrive as ``2544``
-    (int) from one endpoint/frame and ``2544.0`` (float) from another.
-    Collapsing both to the same string keeps the backfill write path and
-    the enrich match path in agreement — otherwise enrich silently fails
-    to match rows it should, and a stuck game can never be enriched.
-    """
-    if value is None:
-        return ''
-    if isinstance(value, float):
-        if math.isnan(value):
-            return ''
-        if value.is_integer():
-            return str(int(value))
-        return str(value)
-    return str(value)
 
 
 def _fetch_league_log_df(season: str, season_type: str):
@@ -101,22 +38,22 @@ def _rows_from_league_log(df, season: str) -> list[dict]:
     """Map a LeagueGameLog dataframe to HistoricalGameLog constructor kwargs."""
     rows = []
     for rec in df.to_dict('records'):
-        matchup = _safe_str(rec.get('MATCHUP'))
+        matchup = safe_str(rec.get('MATCHUP'))
         stats = {}
         for col, key in _NBA_STAT_COLUMNS.items():
-            stats[key] = _safe_float(rec.get(col))
+            stats[key] = safe_float(rec.get(col))
         rows.append(dict(
             sport='nba',
-            player_id=_norm_player_id(rec.get('PLAYER_ID')),
-            player_name=_safe_str(rec.get('PLAYER_NAME')),
-            team_abbr=_safe_str(rec.get('TEAM_ABBREVIATION')) or None,
+            player_id=normalize_player_id(rec.get('PLAYER_ID')),
+            player_name=safe_str(rec.get('PLAYER_NAME')),
+            team_abbr=safe_str(rec.get('TEAM_ABBREVIATION')) or None,
             opp_abbr=extract_opp_abbr(matchup) or None,
-            game_id=_safe_str(rec.get('GAME_ID')),
+            game_id=safe_str(rec.get('GAME_ID')),
             game_date=datetime.strptime(
-                _safe_str(rec.get('GAME_DATE')), '%Y-%m-%d').date(),
+                safe_str(rec.get('GAME_DATE')), '%Y-%m-%d').date(),
             season=season,
             home_away='HOME' if ' vs. ' in matchup else 'AWAY',
-            win_loss=_safe_str(rec.get('WL')) or None,
+            win_loss=safe_str(rec.get('WL')) or None,
             starter=None,          # filled by `flask enrich-logs`
             stats=stats,
         ))
@@ -145,7 +82,7 @@ def cli_backfill_logs(sport, seasons, season_type, sleep_seconds):
     errors: list[str] = []
 
     try:
-        for season in _recent_seasons(seasons):
+        for season in recent_nba_seasons(seasons):
             try:
                 df = _fetch_league_log_df(season, season_type)
             except Exception as exc:  # nba_api raises assorted exception types
@@ -236,7 +173,7 @@ def cli_enrich_logs(sport, limit, sleep_seconds):
             logger.warning("enrich-logs: game %s fetch failed: %s", gid, exc)
             continue
         by_player = {
-            _norm_player_id(rec.get('PLAYER_ID')): rec
+            normalize_player_id(rec.get('PLAYER_ID')): rec
             for rec in df.to_dict('records')
         }
         rows = HistoricalGameLog.query.filter_by(
@@ -251,9 +188,9 @@ def cli_enrich_logs(sport, limit, sleep_seconds):
                 if row.starter is None:
                     row.starter = False
                 continue
-            row.starter = bool(_safe_str(rec.get('START_POSITION')).strip())
+            row.starter = bool(safe_str(rec.get('START_POSITION')).strip())
             new_stats = dict(row.stats or {})
-            new_stats['usage_pct'] = _safe_float(rec.get('USG_PCT'))
+            new_stats['usage_pct'] = safe_float(rec.get('USG_PCT'))
             row.stats = new_stats   # reassign — JSON columns don't track mutation
             updated += 1
         db.session.commit()

@@ -5432,9 +5432,9 @@ class TestNBALiveHelpers(BaseTestCase):
 
     def test_build_stat_context_no_game(self):
         """_build_stat_context returns minimal ctx when game not found."""
-        from app.routes.nba_live import _build_stat_context
+        from app.services.analysis_context import build_stat_context
         with self.app.app_context():
-            ctx = _build_stat_context({'game_id': 'missing'}, [], def_snap_map={})
+            ctx = build_stat_context({'game_id': 'missing'}, [], def_snap_map={})
         self.assertIn('opp_abbr', ctx)
         self.assertIsNone(ctx.get('opp_def_rating'))
 

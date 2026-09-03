@@ -16,12 +16,9 @@ from app.services.projection_engine import ProjectionEngine
 from app.services.value_detector import ValueDetector
 from app.services.feature_engine import build_pick_context_features
 from app.services.stats_service import find_player_id
-from app.routes.bet_crud import _create_pick_context_for_bet
+from app.services.bet_context_service import create_pick_context_for_bet
 
 logger = logging.getLogger(__name__)
-
-_POSITION_ORDER = {'PG': 0, 'SG': 1, 'SF': 2, 'PF': 3, 'C': 4}
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -355,7 +352,7 @@ def manual_parlay():
     db.session.flush()
     detector = ValueDetector(ProjectionEngine())
     for bet_obj in created_bets:
-        _create_pick_context_for_bet(
+        create_pick_context_for_bet(
             bet_obj=bet_obj,
             detector=detector,
             selected_odds=bet_obj.american_odds,

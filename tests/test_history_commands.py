@@ -33,17 +33,17 @@ def _league_log_df():
 class TestSeasonHelpers(BaseTestCase):
 
     def test_recent_seasons_mid_offseason(self):
-        from app.cli.history_commands import _recent_seasons
+        from app.utils.seasons import recent_nba_seasons
         # July 2026 → most recent completed/active season is 2025-26
         self.assertEqual(
-            _recent_seasons(3, today=date(2026, 7, 7)),
+            recent_nba_seasons(3, today=date(2026, 7, 7)),
             ['2025-26', '2024-25', '2023-24'],
         )
 
     def test_recent_seasons_after_october_rolls_forward(self):
-        from app.cli.history_commands import _recent_seasons
+        from app.utils.seasons import recent_nba_seasons
         self.assertEqual(
-            _recent_seasons(2, today=date(2026, 11, 1)),
+            recent_nba_seasons(2, today=date(2026, 11, 1)),
             ['2026-27', '2025-26'],
         )
 

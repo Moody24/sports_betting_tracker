@@ -11,9 +11,9 @@ from flask_login import login_required, current_user
 import requests
 
 from app import db
-from app.config_display import PROP_ESPN_COLUMN, PROP_TO_OPP_ALLOWED
+from app.config_display import PROP_ESPN_COLUMN
 from app.enums import BetSource, BetType, Outcome
-from app.models import Bet, GameSnapshot, TeamDefenseSnapshot
+from app.models import Bet, GameSnapshot
 from app.utils import safe_float
 from app.services.nba_service import (
     get_todays_games,
@@ -29,7 +29,7 @@ from app.services.market_recommender import recommend_market_sides
 from app.services.projection_engine import ProjectionEngine
 from app.services.value_detector import ValueDetector
 from app.services.postmortem_service import create_or_update_postmortem
-from app.routes.bet_crud import _create_pick_context_for_bet
+from app.services.bet_context_service import create_pick_context_for_bet
 
 logger = logging.getLogger(__name__)
 
@@ -52,50 +52,6 @@ _SNAPSHOT_WRITE_TTL = 60
 
 def _normalize_name(value: str) -> str:
     return re.sub(r'[^a-z0-9]+', ' ', (value or '').lower()).strip()
-
-
-def _build_stat_context(score: dict, games_today, def_snap_map: dict | None = None) -> dict:
-    """Build defensive + game context for a prop score."""
-    ctx = {}
-    if isinstance(games_today, dict):
-        game = games_today.get(score.get('game_id'), {})
-    else:
-        game = next((g for g in games_today if g.get('espn_id') == score.get('game_id')), {})
-
-    ctx['over_under_line'] = game.get('over_under_line')
-    ctx['moneyline_home'] = game.get('moneyline_home')
-    ctx['moneyline_away'] = game.get('moneyline_away')
-    ml_h = game.get('moneyline_home') or 0
-    ml_a = game.get('moneyline_away') or 0
-    ctx['blowout_risk'] = abs(ml_h) >= 400 or abs(ml_a) >= 400
-
-    player_team = score.get('player_team_abbr') or ''
-    home_abbr = (game.get('home') or {}).get('abbr', '')
-    away_abbr = (game.get('away') or {}).get('abbr', '')
-    opp_abbr = away_abbr if player_team == home_abbr else home_abbr
-    ctx['opp_abbr'] = opp_abbr
-
-    if def_snap_map is not None:
-        def_snap = def_snap_map.get(opp_abbr) if opp_abbr else None
-    else:
-        def_snap = (TeamDefenseSnapshot.query.filter_by(team_abbr=opp_abbr)
-                    .order_by(TeamDefenseSnapshot.fetched_at.desc()).first()) if opp_abbr else None
-
-    if def_snap:
-        ctx['opp_def_rating'] = def_snap.def_rating
-        ctx['opp_pace'] = def_snap.pace
-        opp_field = PROP_TO_OPP_ALLOWED.get(score.get('prop_type', ''))
-        ctx['opp_stat_allowed'] = getattr(def_snap, opp_field, None) if opp_field else None
-        position = (score.get('breakdown') or {}).get('player_position', '')
-        pos_map = {'PG': def_snap.opp_pts_allowed_pg, 'SG': def_snap.opp_pts_allowed_sg,
-                   'SF': def_snap.opp_pts_allowed_sf, 'PF': def_snap.opp_pts_allowed_pf,
-                   'C': def_snap.opp_pts_allowed_c}
-        ctx['opp_pos_allowed'] = pos_map.get(position)
-        ctx['player_position'] = position
-    else:
-        ctx.update(opp_def_rating=None, opp_pace=None, opp_stat_allowed=None,
-                   opp_pos_allowed=None, player_position='')
-    return ctx
 
 
 def _extract_prop_boxscore(summary_data: dict) -> dict:
@@ -641,7 +597,7 @@ def nba_place_bets():
     db.session.flush()
     detector = ValueDetector(ProjectionEngine())
     for bet_obj in created:
-        _create_pick_context_for_bet(
+        create_pick_context_for_bet(
             bet_obj=bet_obj,
             detector=detector,
             selected_odds=bet_obj.american_odds,

@@ -41,6 +41,5 @@ class TestEspnMapping(BaseTestCase):
         self.assertEqual(season_for_date(date(2027, 3, 5)), '2026-27')
         self.assertEqual(season_for_date(date(2026, 7, 10)), '2025-26')
 
-    def test_hoopr_import_still_exposes_behavior(self):
-        # the CLI module must keep working after the extraction
-        from app.cli.hoopr_import import _rows_from_player_box  # noqa: F401
+    def test_hoopr_import_service_exposes_mapping_behavior(self):
+        from app.services.hoopr_import_service import _rows_from_player_box  # noqa: F401

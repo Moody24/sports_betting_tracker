@@ -19,8 +19,7 @@ from app.services.nba_service import (
 )
 from app.services.projection_engine import ProjectionEngine
 from app.services.stats_service import find_player_id, get_cached_logs, get_player_stats_summary
-from app.routes.nba_live import _build_stat_context
-from app.routes.bet_import import _POSITION_ORDER
+from app.services.analysis_context import POSITION_ORDER, build_stat_context
 from app.utils.odds import american_from_decimal
 
 logger = logging.getLogger(__name__)
@@ -460,7 +459,7 @@ def nba_stat_analysis():
         line = float(s.get('line') or 0)
         col_name = _STAT_COL.get(s.get('prop_type', ''))
         s['hit_rates'] = _hit_rates_from_logs(logs_by_player.get(s.get('player', ''), []), col_name, line)
-        s['game_ctx'] = _build_stat_context(s, game_lookup, def_snap_map)
+        s['game_ctx'] = build_stat_context(s, game_lookup, def_snap_map)
         tier = s.get('confidence_tier', 'no_edge')
         wp = s.get('win_probability') or 0.5
         if tier == 'strong':
@@ -491,7 +490,7 @@ def nba_stat_analysis():
     for gdata in game_map.values():
         for bucket in ('home', 'away'):
             gdata[bucket].sort(
-                key=lambda s: _POSITION_ORDER.get(
+                key=lambda s: POSITION_ORDER.get(
                     (s.get('breakdown') or {}).get('player_position', ''), 99))
 
     matchups = [v for v in game_map.values() if v['home'] or v['away']]

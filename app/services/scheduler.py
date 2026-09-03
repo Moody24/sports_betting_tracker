@@ -1258,7 +1258,7 @@ def _run_coordinator_tick():
 
 
 def _run_hoopr_reconcile():
-    from app.cli.hoopr_import import import_hoopr_seasons
+    from app.services.hoopr_import_service import import_hoopr_seasons
     app = _get_app()
     with app.app_context():
         result = import_hoopr_seasons(seasons=1)

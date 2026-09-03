@@ -8,7 +8,7 @@ from tests.helpers import BaseTestCase
 from app import db
 from app.models import PlayerGameLog
 from app.routes.nba_analysis import _compute_hit_rates
-from app.routes.nba_live import _build_stat_context
+from app.services.analysis_context import build_stat_context
 
 
 class TestComputeHitRates(BaseTestCase):
@@ -65,7 +65,7 @@ class TestBuildStatContext(BaseTestCase):
             score = {'game_id': 'g1', 'player_team_abbr': 'LAL', 'prop_type': 'player_points', 'breakdown': {}}
             games_today = [{'espn_id': 'g1', 'moneyline_home': -450, 'moneyline_away': 370,
                             'over_under_line': 215.5, 'home': {'abbr': 'BOS'}, 'away': {'abbr': 'LAL'}}]
-            ctx = _build_stat_context(score, games_today)
+            ctx = build_stat_context(score, games_today)
             self.assertTrue(ctx['blowout_risk'])
 
     def test_no_blowout_risk(self):
@@ -74,14 +74,14 @@ class TestBuildStatContext(BaseTestCase):
             score = {'game_id': 'g2', 'player_team_abbr': 'LAL', 'prop_type': 'player_points', 'breakdown': {}}
             games_today = [{'espn_id': 'g2', 'moneyline_home': -150, 'moneyline_away': 130,
                             'over_under_line': 220.0, 'home': {'abbr': 'BOS'}, 'away': {'abbr': 'LAL'}}]
-            ctx = _build_stat_context(score, games_today)
+            ctx = build_stat_context(score, games_today)
             self.assertFalse(ctx['blowout_risk'])
 
     def test_missing_game_returns_safe_dict(self):
         """Score references unknown game_id → safe ctx with None values."""
         with self.app.app_context():
             score = {'game_id': 'missing', 'player_team_abbr': 'LAL', 'prop_type': 'player_points', 'breakdown': {}}
-            ctx = _build_stat_context(score, [])
+            ctx = build_stat_context(score, [])
             self.assertIsNone(ctx['opp_def_rating'])
             self.assertIsNone(ctx['opp_stat_allowed'])
 

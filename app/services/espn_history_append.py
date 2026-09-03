@@ -12,12 +12,12 @@ from datetime import datetime
 import requests
 
 from app import db
-from app.cli.history_commands import _norm_player_id, _safe_float, _safe_str
 from app.models import HistoricalGameLog
 from app.services.espn_mapping import (
     NBA_TEAMS, normalize_abbr, season_for_date, usage_pct,
 )
 from app.utils.time_helpers import ET
+from app.utils.data_coercion import normalize_player_id, safe_float, safe_str
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,10 @@ ESPN_SUMMARY_URL = (
     'https://site.api.espn.com/apis/site/v2/sports/basketball/nba/summary')
 
 # summary stat label → (stats-payload key, parser)
-_SPLIT = lambda made_att, part: _safe_float(made_att.split('-')[part])  # noqa: E731
+def _made_attempted_part(value: str, part: int) -> float:
+    """Return one side of an ESPN made-attempted value such as ``5-12``."""
+    pieces = value.split('-')
+    return safe_float(pieces[part]) if len(pieces) > part else 0.0
 
 
 def history_rows_exist(espn_game_id: str) -> bool:
@@ -47,14 +50,14 @@ def _player_records(payload: dict) -> list[dict]:
     records = []
     for team_block in payload.get('boxscore', {}).get('players', []):
         abbr = normalize_abbr(
-            _safe_str(team_block.get('team', {}).get('abbreviation')))
+            safe_str(team_block.get('team', {}).get('abbreviation')))
         stats_block = (team_block.get('statistics') or [{}])[0]
         labels = stats_block.get('labels') or []
         idx = {label: i for i, label in enumerate(labels)}
 
         def col(stats, label, default=0.0):
             i = idx.get(label)
-            return _safe_float(stats[i]) if i is not None and i < len(stats) \
+            return safe_float(stats[i]) if i is not None and i < len(stats) \
                 else default
 
         for ath in stats_block.get('athletes', []):
@@ -66,8 +69,8 @@ def _player_records(payload: dict) -> list[dict]:
             ft = stats[idx['FT']] if 'FT' in idx else '0-0'
             pm_raw = stats[idx['+/-']] if '+/-' in idx else '0'
             records.append({
-                'player_id': _norm_player_id(ath.get('athlete', {}).get('id')),
-                'player_name': _safe_str(
+                'player_id': normalize_player_id(ath.get('athlete', {}).get('id')),
+                'player_name': safe_str(
                     ath.get('athlete', {}).get('displayName')),
                 'team_abbr': abbr,
                 'starter': bool(ath.get('starter')),
@@ -75,10 +78,13 @@ def _player_records(payload: dict) -> list[dict]:
                 'pts': col(stats, 'PTS'), 'reb': col(stats, 'REB'),
                 'ast': col(stats, 'AST'), 'stl': col(stats, 'STL'),
                 'blk': col(stats, 'BLK'), 'tov': col(stats, 'TO'),
-                'fgm': _SPLIT(fg, 0), 'fga': _SPLIT(fg, 1),
-                'fg3m': _SPLIT(fg3, 0), 'fg3a': _SPLIT(fg3, 1),
-                'ftm': _SPLIT(ft, 0), 'fta': _SPLIT(ft, 1),
-                'plus_minus': _safe_float(
+                'fgm': _made_attempted_part(fg, 0),
+                'fga': _made_attempted_part(fg, 1),
+                'fg3m': _made_attempted_part(fg3, 0),
+                'fg3a': _made_attempted_part(fg3, 1),
+                'ftm': _made_attempted_part(ft, 0),
+                'fta': _made_attempted_part(ft, 1),
+                'plus_minus': safe_float(
                     str(pm_raw).replace('+', '') or None),
             })
     return records
@@ -89,8 +95,8 @@ def append_final_game(game: dict) -> int:
     espn_id = str(game.get('espn_id') or '')
     if not espn_id:
         return 0
-    home_abbr = normalize_abbr(_safe_str(game.get('home', {}).get('abbr')))
-    away_abbr = normalize_abbr(_safe_str(game.get('away', {}).get('abbr')))
+    home_abbr = normalize_abbr(safe_str(game.get('home', {}).get('abbr')))
+    away_abbr = normalize_abbr(safe_str(game.get('away', {}).get('abbr')))
     if home_abbr not in NBA_TEAMS or away_abbr not in NBA_TEAMS:
         logger.info("history-append: %s skipped (non-NBA teams %s/%s)",
                     espn_id, home_abbr, away_abbr)
