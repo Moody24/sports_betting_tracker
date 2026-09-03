@@ -4297,7 +4297,7 @@ class Phase1Dot1FeatureBuilderTest(BaseTestCase):
     - compute_opp_history
     - FEATURE_KEYS completeness
     - build_ml_features_from_history with Phase 1 params
-    - _build_defense_lookup and _build_game_total_lookup (ml_model helpers)
+    - build_defense_lookup and _build_game_total_lookup (ml_model helpers)
     """
 
     # ------------------------------------------------------------------
@@ -4525,11 +4525,11 @@ class Phase1Dot1FeatureBuilderTest(BaseTestCase):
         self.assertEqual(feat['opp_hist_games'], 0.0)
 
     # ------------------------------------------------------------------
-    # _build_defense_lookup (ml_model helper)
+    # build_defense_lookup (ml_model helper)
     # ------------------------------------------------------------------
 
     def test_build_defense_lookup_basic(self):
-        from app.services.ml_model import _build_defense_lookup
+        from app.services.ml_model import build_defense_lookup
         with self.app.app_context():
             snap = TeamDefenseSnapshot(
                 team_id='BOS1', team_name='Boston Celtics',
@@ -4540,7 +4540,7 @@ class Phase1Dot1FeatureBuilderTest(BaseTestCase):
             )
             db.session.add(snap)
             db.session.commit()
-            lookup = _build_defense_lookup()
+            lookup = build_defense_lookup()
 
         self.assertIn('BOS', lookup)
         self.assertAlmostEqual(lookup['BOS']['def_rating'], 108.0)
@@ -4548,7 +4548,7 @@ class Phase1Dot1FeatureBuilderTest(BaseTestCase):
 
     def test_build_defense_lookup_most_recent_wins(self):
         """Only the most-recent snapshot per team is kept."""
-        from app.services.ml_model import _build_defense_lookup
+        from app.services.ml_model import build_defense_lookup
         with self.app.app_context():
             for rating, snap_date in [(110.0, date(2026, 1, 1)), (108.0, date(2026, 1, 20))]:
                 db.session.add(TeamDefenseSnapshot(
@@ -4558,7 +4558,7 @@ class Phase1Dot1FeatureBuilderTest(BaseTestCase):
                     opp_pts_pg=110.0,
                 ))
             db.session.commit()
-            lookup = _build_defense_lookup()
+            lookup = build_defense_lookup()
 
         self.assertAlmostEqual(lookup['MIA']['def_rating'], 108.0)
 
@@ -4987,11 +4987,11 @@ class Phase1FeatureBuilderTest(BaseTestCase):
     # ── ml_model training pipeline ───────────────────────────────────────────
 
     def test_build_defense_lookup_returns_dict(self):
-        from app.services.ml_model import _build_defense_lookup
+        from app.services.ml_model import build_defense_lookup
         with self.app.app_context():
             _seed_defense(team_name='Boston Celtics', team_abbr='BOS',
                           opp_pts=108.0, pace=98.5, def_rating=106.5)
-            result = _build_defense_lookup()
+            result = build_defense_lookup()
         self.assertIsInstance(result, dict)
         self.assertIn('BOS', result)
         self.assertAlmostEqual(result['BOS']['def_rating'], 106.5)
@@ -4999,9 +4999,9 @@ class Phase1FeatureBuilderTest(BaseTestCase):
         self.assertAlmostEqual(result['BOS']['opp_pts_pg'], 108.0)
 
     def test_build_defense_lookup_empty_db(self):
-        from app.services.ml_model import _build_defense_lookup
+        from app.services.ml_model import build_defense_lookup
         with self.app.app_context():
-            result = _build_defense_lookup()
+            result = build_defense_lookup()
         self.assertIsInstance(result, dict)
 
     def test_build_game_total_lookup_returns_dict(self):

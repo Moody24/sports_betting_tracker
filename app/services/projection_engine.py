@@ -130,41 +130,15 @@ class ProjectionEngine:
 
         components = COMBO_PROP_COMPONENTS.get(prop_type)
         if components:
-            component_results = {
-                component: self.project_stat(
-                    player_name,
-                    component,
-                    opponent_name,
-                    team_name,
-                    is_home,
-                    game_date=game_date,
-                )
-                for component in components
-            }
-            total_projection = sum(r.get('projection', 0) or 0 for r in component_results.values())
-            total_projection += COMBO_PROP_BIAS_CORRECTION.get(prop_type, 0)
-            total_variance = sum((r.get('std_dev', 0) or 0) ** 2 for r in component_results.values())
-            combo_context = []
-            for component in components:
-                for note in component_results[component].get('context_notes', []):
-                    if note not in combo_context:
-                        combo_context.append(note)
-
-            result = {
-                'projection': round(total_projection, 1),
-                'confidence': min(
-                    (r.get('confidence', 'low') for r in component_results.values()),
-                    key=lambda c: {'low': 0, 'medium': 1, 'high': 2}.get(c, 0),
-                ),
-                'context_notes': combo_context,
-                'std_dev': round(math.sqrt(total_variance), 2),
-                'z_score': round(sum(r.get('z_score', 0) or 0 for r in component_results.values()) / len(components), 2),
-                'games_played': min(r.get('games_played', 0) or 0 for r in component_results.values()),
-                'projection_source': 'derived_combo',
-                'breakdown': {
-                    'components': {k: deepcopy(v) for k, v in component_results.items()},
-                },
-            }
+            result = self._project_combo(
+                player_name=player_name,
+                prop_type=prop_type,
+                components=components,
+                opponent_name=opponent_name,
+                team_name=team_name,
+                is_home=is_home,
+                game_date=game_date,
+            )
             self._projection_cache[cache_key] = result
             return deepcopy(result)
 
@@ -172,178 +146,60 @@ class ProjectionEngine:
         if not stat_key:
             return self._empty_projection()
 
-        # Look up player and baseline stats once per player.
-        player_cache_key = str(player_name).strip().lower()
-        player_state = self._player_state_cache.get(player_cache_key)
+        player_state = self._get_player_state(player_name)
         if player_state is None:
-            player_id = find_player_id(player_name)
-            if not player_id:
-                return self._empty_projection()
-
-            logs = get_cached_logs(player_id, last_n=82)
-            if not logs:
-                return self._empty_projection()
-
-            summary = get_player_stats_summary(player_id, logs)
-            player_state = (player_id, logs, summary)
-            self._player_state_cache[player_cache_key] = player_state
+            return self._empty_projection()
 
         _, logs, summary = player_state
-        games_played = summary['games_played']
+        baseline = self._build_baseline(summary, stat_key, prop_type, opponent_name)
+        games_played = baseline['games_played']
+        season_avg = baseline['season_avg']
+        std_dev = baseline['std_dev']
+        matchup_mult = baseline['matchup_mult']
+        position_matchup_mult = baseline['position_matchup_mult']
+        player_position = baseline['player_position']
+        pace_mult = baseline['pace_mult']
+        base_projection = baseline['base_projection']
 
-        last_5_avg = summary['last_10'].get(stat_key, 0) if games_played < 5 else summary['last_5'].get(stat_key, 0)
-        last_10_avg = summary['season'].get(stat_key, 0) if games_played < 10 else summary['last_10'].get(stat_key, 0)
-        season_avg = summary['season'].get(stat_key, 0)
-        std_dev = summary['std_dev'].get(stat_key, 0)
-
-        # Matchup adjustment
-        matchup_mult = get_matchup_adjustment(opponent_name, prop_type) if opponent_name else 1.0
-        player_position = infer_player_position(summary)
-        position_matchup_mult = (
-            get_position_matchup_adjustment(opponent_name, player_position)
-            if opponent_name and prop_type == 'player_points'
-            else 1.0
+        modifier, context_notes, unavailable = self._context_modifier(
+            player_name, team_name, is_home
         )
-        pace_mult = get_pace_factor(opponent_name) if opponent_name else 1.0
-        matchup_adjusted = season_avg * matchup_mult * position_matchup_mult * pace_mult
+        if unavailable is not None:
+            return unavailable
 
-        # Weighted base projection
-        base_projection = (
-            self.W_LAST_5 * last_5_avg +
-            self.W_LAST_10 * last_10_avg +
-            self.W_SEASON * season_avg +
-            self.W_MATCHUP * matchup_adjusted
+        minutes_modifier, minutes_note = self._minutes_modifier(
+            summary, games_played
         )
+        modifier *= minutes_modifier
+        if minutes_note:
+            context_notes.append(minutes_note)
 
-        # Context modifiers
-        context_notes = []
-        modifier = 1.0
-
-        # Game context — get_game_context() now uses a process-level cache keyed
-        # by (team_name, today_date) so ESPN scoreboard fetches only happen once
-        # per unique date, regardless of how many players/props trigger this path.
-        if team_name:
-            ctx_key = (str(player_name).strip().lower(), str(team_name).strip().lower())
-            ctx = self._context_cache.get(ctx_key)
-            if ctx is None:
-                _t = _time.perf_counter()
-                ctx = get_game_context(player_name, team_name)
-                _elapsed = _time.perf_counter() - _t
-                if _elapsed > 0.05:  # only log slow calls (>50ms means cache miss)
-                    logger.debug("PERF get_game_context player=%s team=%s elapsed=%.3fs",
-                                 player_name, team_name, _elapsed)
-                self._context_cache[ctx_key] = ctx
-
-            injury_status = ctx.get('injury_status', 'healthy')
-
-            # Hard block: out or doubtful players should not receive projections.
-            # value_detector filters these via is_player_available(), but direct
-            # calls to project_stat() (e.g. player modal) also need this guard.
-            if injury_status in ('out', 'doubtful'):
-                result = self._empty_projection()
-                result['context_notes'] = [f'player listed as {injury_status} — no projection']
-                result['confidence'] = 'low'
-                return result
-
-            if ctx.get('back_to_back'):
-                modifier *= self.B2B_FACTOR
-                context_notes.append('back-to-back (-8%)')
-
-            if injury_status == 'day-to-day':
-                modifier *= self.INJURY_RETURN_FACTOR
-                context_notes.append('day-to-day (-10%)')
-            elif injury_status in ('questionable', 'probable'):
-                context_notes.append(f'injury: {injury_status}')
-        else:
-            ctx = {}
-
-        # Home/away
-        if is_home:
-            modifier *= self.HOME_BOOST
-            context_notes.append('home court (+3%)')
-        else:
-            modifier *= self.AWAY_PENALTY
-            context_notes.append('away game (-3%)')
-
-        # Minutes trend
-        min_summary = summary['last_5'].get('minutes', 0) if games_played >= 5 else 0
-        min_season = summary['season'].get('minutes', 0)
-        if min_season > 0 and min_summary > 0:
-            min_ratio = min_summary / min_season
-            if min_ratio < 0.85:
-                modifier *= 0.90
-                context_notes.append('minutes decreasing')
-            elif min_ratio > 1.15:
-                modifier *= 1.05
-                context_notes.append('minutes increasing')
-
-        # Hot/cold streak detection
         z_score = self._compute_z_score(logs, stat_key, last_n=3)
-        if z_score > self.HOT_STREAK_THRESHOLD:
-            context_notes.append('hot streak')
-        elif z_score < self.COLD_STREAK_THRESHOLD:
-            context_notes.append('cold streak')
-            cold_reasons = self._explain_cold_streak(logs, stat_key)
-            context_notes.extend(cold_reasons)
+        self._append_streak_notes(context_notes, logs, stat_key, z_score)
+        self._append_matchup_notes(
+            context_notes,
+            opponent_name,
+            prop_type,
+            player_position,
+            matchup_mult,
+            position_matchup_mult,
+            pace_mult,
+        )
 
-        # Matchup context note
-        if opponent_name and matchup_mult > 1.05:
-            context_notes.append(f'favorable matchup vs {opponent_name}')
-        elif opponent_name and matchup_mult < 0.95:
-            context_notes.append(f'tough matchup vs {opponent_name}')
-        if prop_type == 'player_points' and opponent_name:
-            if position_matchup_mult > 1.05:
-                context_notes.append(f'favorable vs {player_position.upper()} defenders')
-            elif position_matchup_mult < 0.95:
-                context_notes.append(f'tough vs {player_position.upper()} defenders')
-
-        if opponent_name and pace_mult > 1.03:
-            context_notes.append('pace boost')
-        elif opponent_name and pace_mult < 0.97:
-            context_notes.append('slow pace')
-
-        final_projection = round(base_projection * modifier, 1)
-
-        # Confidence based on sample size and variance
+        final_projection, projection_source = self._select_projection(
+            heuristic_projection=round(base_projection * modifier, 1),
+            player_name=player_name,
+            prop_type=prop_type,
+            games_played=games_played,
+            logs=logs,
+            stat_key=stat_key,
+            is_home=is_home,
+            team_name=team_name,
+            opponent_name=opponent_name,
+            game_total_line=game_total_line,
+            game_date=game_date,
+        )
         confidence = self._compute_confidence(games_played, std_dev, season_avg)
-
-        projection_source = 'heuristic'
-        if self._use_ml_projections() and games_played >= 10 and prop_type in PROP_STAT_KEY:
-            # Build a matchup string from team/opponent names to enable opp history.
-            # Format mirrors PlayerGameLog.matchup: "TEAM vs. OPP" (home) or "TEAM @ OPP".
-            from app.services.ml_model import _build_defense_lookup as _get_def_lookup
-            _defense_lookup = self._context_cache.get('__defense_lookup__')
-            if _defense_lookup is None:
-                try:
-                    _defense_lookup = _get_def_lookup()
-                except Exception:
-                    _defense_lookup = {}
-                self._context_cache['__defense_lookup__'] = _defense_lookup
-
-            _current_matchup = ''
-            if team_name and opponent_name:
-                _sep = ' vs. ' if is_home else ' @ '
-                _current_matchup = f"{team_name}{_sep}{opponent_name}"
-
-            ml_features = self._build_ml_features(
-                logs, stat_key, is_home,
-                current_matchup=_current_matchup,
-                game_total_line=game_total_line,
-                defense_lookup=_defense_lookup,
-                game_date=game_date,
-            )
-            if ml_features:
-                try:
-                    from app.services.ml_model import predict_stat
-                    ml_prediction = predict_stat(prop_type, ml_features)
-                    if ml_prediction > 0:
-                        final_projection = ml_prediction
-                        projection_source = 'ml'
-                except Exception as exc:
-                    logger.warning(
-                        "ML projection failed for %s (%s); using heuristic fallback: %s",
-                        player_name, prop_type, exc,
-                    )
 
         # Apply single-stat systematic bias correction (postmortem-derived).
         bias = SINGLE_STAT_BIAS_CORRECTION.get(prop_type, 0)
@@ -359,10 +215,10 @@ class ProjectionEngine:
             'games_played': games_played,
             'projection_source': projection_source,
             'breakdown': {
-                'last_5_avg': round(last_5_avg, 1),
-                'last_10_avg': round(last_10_avg, 1),
+                'last_5_avg': round(baseline['last_5_avg'], 1),
+                'last_10_avg': round(baseline['last_10_avg'], 1),
                 'season_avg': round(season_avg, 1),
-                'matchup_adj': round(matchup_adjusted, 1),
+                'matchup_adj': round(baseline['matchup_adjusted'], 1),
                 'matchup_mult': round(matchup_mult, 3),
                 'position_matchup_mult': round(position_matchup_mult, 3),
                 'player_position': player_position,
@@ -373,6 +229,302 @@ class ProjectionEngine:
         }
         self._projection_cache[cache_key] = result
         return deepcopy(result)
+
+    def _project_combo(
+        self,
+        *,
+        player_name: str,
+        prop_type: str,
+        components: tuple[str, ...],
+        opponent_name: str,
+        team_name: str,
+        is_home: bool,
+        game_date: Optional[_date],
+    ) -> dict:
+        component_results = {
+            component: self.project_stat(
+                player_name,
+                component,
+                opponent_name,
+                team_name,
+                is_home,
+                game_date=game_date,
+            )
+            for component in components
+        }
+        total_projection = sum(
+            result.get('projection', 0) or 0
+            for result in component_results.values()
+        ) + COMBO_PROP_BIAS_CORRECTION.get(prop_type, 0)
+        total_variance = sum(
+            (result.get('std_dev', 0) or 0) ** 2
+            for result in component_results.values()
+        )
+        context_notes = []
+        for component in components:
+            for note in component_results[component].get('context_notes', []):
+                if note not in context_notes:
+                    context_notes.append(note)
+        return {
+            'projection': round(total_projection, 1),
+            'confidence': min(
+                (result.get('confidence', 'low')
+                 for result in component_results.values()),
+                key=lambda confidence: {
+                    'low': 0,
+                    'medium': 1,
+                    'high': 2,
+                }.get(confidence, 0),
+            ),
+            'context_notes': context_notes,
+            'std_dev': round(math.sqrt(total_variance), 2),
+            'z_score': round(
+                sum(result.get('z_score', 0) or 0
+                    for result in component_results.values()) / len(components),
+                2,
+            ),
+            'games_played': min(
+                result.get('games_played', 0) or 0
+                for result in component_results.values()
+            ),
+            'projection_source': 'derived_combo',
+            'breakdown': {
+                'components': {
+                    key: deepcopy(value)
+                    for key, value in component_results.items()
+                },
+            },
+        }
+
+    def _get_player_state(self, player_name: str):
+        """Return cached ``(player_id, logs, summary)`` or None without data."""
+        cache_key = str(player_name).strip().lower()
+        cached = self._player_state_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        player_id = find_player_id(player_name)
+        if not player_id:
+            return None
+        logs = get_cached_logs(player_id, last_n=82)
+        if not logs:
+            return None
+        state = (player_id, logs, get_player_stats_summary(player_id, logs))
+        self._player_state_cache[cache_key] = state
+        return state
+
+    def _build_baseline(
+        self,
+        summary: dict,
+        stat_key: str,
+        prop_type: str,
+        opponent_name: str,
+    ) -> dict:
+        games_played = summary['games_played']
+        last_5_avg = (
+            summary['last_10'].get(stat_key, 0)
+            if games_played < 5 else summary['last_5'].get(stat_key, 0)
+        )
+        last_10_avg = (
+            summary['season'].get(stat_key, 0)
+            if games_played < 10 else summary['last_10'].get(stat_key, 0)
+        )
+        season_avg = summary['season'].get(stat_key, 0)
+        matchup_mult = (
+            get_matchup_adjustment(opponent_name, prop_type)
+            if opponent_name else 1.0
+        )
+        player_position = infer_player_position(summary)
+        position_matchup_mult = (
+            get_position_matchup_adjustment(opponent_name, player_position)
+            if opponent_name and prop_type == 'player_points' else 1.0
+        )
+        pace_mult = get_pace_factor(opponent_name) if opponent_name else 1.0
+        matchup_adjusted = (
+            season_avg * matchup_mult * position_matchup_mult * pace_mult
+        )
+        base_projection = (
+            self.W_LAST_5 * last_5_avg
+            + self.W_LAST_10 * last_10_avg
+            + self.W_SEASON * season_avg
+            + self.W_MATCHUP * matchup_adjusted
+        )
+        return {
+            'games_played': games_played,
+            'last_5_avg': last_5_avg,
+            'last_10_avg': last_10_avg,
+            'season_avg': season_avg,
+            'std_dev': summary['std_dev'].get(stat_key, 0),
+            'matchup_mult': matchup_mult,
+            'position_matchup_mult': position_matchup_mult,
+            'player_position': player_position,
+            'pace_mult': pace_mult,
+            'matchup_adjusted': matchup_adjusted,
+            'base_projection': base_projection,
+        }
+
+    def _context_modifier(
+        self,
+        player_name: str,
+        team_name: str,
+        is_home: bool,
+    ) -> tuple[float, list[str], dict | None]:
+        modifier = 1.0
+        notes = []
+        context = self._cached_game_context(player_name, team_name) if team_name else {}
+        injury_status = context.get('injury_status', 'healthy')
+        if injury_status in ('out', 'doubtful'):
+            unavailable = self._empty_projection()
+            unavailable['context_notes'] = [
+                f'player listed as {injury_status} — no projection'
+            ]
+            return modifier, notes, unavailable
+        if context.get('back_to_back'):
+            modifier *= self.B2B_FACTOR
+            notes.append('back-to-back (-8%)')
+        if injury_status == 'day-to-day':
+            modifier *= self.INJURY_RETURN_FACTOR
+            notes.append('day-to-day (-10%)')
+        elif injury_status in ('questionable', 'probable'):
+            notes.append(f'injury: {injury_status}')
+        if is_home:
+            modifier *= self.HOME_BOOST
+            notes.append('home court (+3%)')
+        else:
+            modifier *= self.AWAY_PENALTY
+            notes.append('away game (-3%)')
+        return modifier, notes, None
+
+    def _cached_game_context(self, player_name: str, team_name: str) -> dict:
+        cache_key = (
+            str(player_name).strip().lower(),
+            str(team_name).strip().lower(),
+        )
+        cached = self._context_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        started_at = _time.perf_counter()
+        context = get_game_context(player_name, team_name)
+        elapsed = _time.perf_counter() - started_at
+        if elapsed > 0.05:
+            logger.debug(
+                'PERF get_game_context player=%s team=%s elapsed=%.3fs',
+                player_name,
+                team_name,
+                elapsed,
+            )
+        self._context_cache[cache_key] = context
+        return context
+
+    @staticmethod
+    def _minutes_modifier(summary: dict, games_played: int) -> tuple[float, str]:
+        recent_minutes = (
+            summary['last_5'].get('minutes', 0) if games_played >= 5 else 0
+        )
+        season_minutes = summary['season'].get('minutes', 0)
+        if season_minutes <= 0 or recent_minutes <= 0:
+            return 1.0, ''
+        ratio = recent_minutes / season_minutes
+        if ratio < 0.85:
+            return 0.90, 'minutes decreasing'
+        if ratio > 1.15:
+            return 1.05, 'minutes increasing'
+        return 1.0, ''
+
+    def _append_streak_notes(
+        self,
+        notes: list[str],
+        logs: list,
+        stat_key: str,
+        z_score: float,
+    ) -> None:
+        if z_score > self.HOT_STREAK_THRESHOLD:
+            notes.append('hot streak')
+        elif z_score < self.COLD_STREAK_THRESHOLD:
+            notes.append('cold streak')
+            notes.extend(self._explain_cold_streak(logs, stat_key))
+
+    @staticmethod
+    def _append_matchup_notes(
+        notes: list[str],
+        opponent_name: str,
+        prop_type: str,
+        player_position: str,
+        matchup_mult: float,
+        position_matchup_mult: float,
+        pace_mult: float,
+    ) -> None:
+        if opponent_name and matchup_mult > 1.05:
+            notes.append(f'favorable matchup vs {opponent_name}')
+        elif opponent_name and matchup_mult < 0.95:
+            notes.append(f'tough matchup vs {opponent_name}')
+        if prop_type == 'player_points' and opponent_name:
+            if position_matchup_mult > 1.05:
+                notes.append(f'favorable vs {player_position.upper()} defenders')
+            elif position_matchup_mult < 0.95:
+                notes.append(f'tough vs {player_position.upper()} defenders')
+        if opponent_name and pace_mult > 1.03:
+            notes.append('pace boost')
+        elif opponent_name and pace_mult < 0.97:
+            notes.append('slow pace')
+
+    def _select_projection(
+        self,
+        *,
+        heuristic_projection: float,
+        player_name: str,
+        prop_type: str,
+        games_played: int,
+        logs: list,
+        stat_key: str,
+        is_home: bool,
+        team_name: str,
+        opponent_name: str,
+        game_total_line: float,
+        game_date: Optional[_date],
+    ) -> tuple[float, str]:
+        if not self._use_ml_projections() or games_played < 10:
+            return heuristic_projection, 'heuristic'
+        defense_lookup = self._get_defense_lookup()
+        separator = ' vs. ' if is_home else ' @ '
+        current_matchup = (
+            f'{team_name}{separator}{opponent_name}'
+            if team_name and opponent_name else ''
+        )
+        features = self._build_ml_features(
+            logs,
+            stat_key,
+            is_home,
+            current_matchup=current_matchup,
+            game_total_line=game_total_line,
+            defense_lookup=defense_lookup,
+            game_date=game_date,
+        )
+        if not features:
+            return heuristic_projection, 'heuristic'
+        try:
+            from app.services.ml_model import predict_stat
+            prediction = predict_stat(prop_type, features)
+        except Exception as exc:
+            logger.warning(
+                'ML projection failed for %s (%s); using heuristic fallback: %s',
+                player_name,
+                prop_type,
+                exc,
+            )
+            return heuristic_projection, 'heuristic'
+        return (prediction, 'ml') if prediction > 0 else (heuristic_projection, 'heuristic')
+
+    def _get_defense_lookup(self) -> dict:
+        cached = self._context_cache.get('__defense_lookup__')
+        if cached is not None:
+            return cached
+        try:
+            from app.services.ml_model import build_defense_lookup
+            lookup = build_defense_lookup()
+        except Exception:
+            lookup = {}
+        self._context_cache['__defense_lookup__'] = lookup
+        return lookup
 
     def _compute_z_score(self, logs: list, stat_key: str, last_n: int = 3) -> float:
         """Calculate z-score of recent games vs season average."""

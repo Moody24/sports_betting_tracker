@@ -27,7 +27,7 @@ from app.services.ml_feature_builder import build_ml_features_from_history, buil
 from app.services.ml_model import (
     MIN_TRAIN_SAMPLES,
     MODEL_DIR,
-    _build_defense_lookup,
+    build_defense_lookup,
     _build_game_total_lookup,
     _check_training_data_quality,
     _ensure_model_dir,
@@ -215,7 +215,7 @@ def _build_dist_training_rows(stat_type: str) -> list:
         player_logs.setdefault(log.player_id, []).append(log)
 
     team_totals, team_counts = build_team_game_aggregates(all_logs)
-    defense_lookup = _build_defense_lookup()
+    defense_lookup = build_defense_lookup()
     game_total_lookup = (
         load_historical_game_total_lookup()
         if using_historical_source

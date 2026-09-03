@@ -50,7 +50,7 @@ def _ensure_model_dir():
     os.makedirs(MODEL_DIR, exist_ok=True)
 
 
-def _build_defense_lookup() -> dict:
+def build_defense_lookup() -> dict:
     """Pre-fetch all team defense snapshots into a lookup dict keyed by ABBR.
 
     Uses the most recent snapshot per team so training rows reference current
@@ -228,7 +228,7 @@ def _build_training_rows(stat_type: str, min_train_samples: int | None = None):
     team_totals, team_counts = build_team_game_aggregates(all_logs)
 
     # Phase 1: pre-fetch context lookups once (not per row)
-    defense_lookup = _build_defense_lookup()
+    defense_lookup = build_defense_lookup()
     game_total_lookup = (
         load_historical_game_total_lookup()
         if using_historical_source

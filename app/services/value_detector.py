@@ -492,7 +492,7 @@ class ValueDetector:
         unavailable (caller falls back to the synthetic Gaussian).
         """
         from app.services.distributional_model import DIST_STAT_KEY_MAP, wrap_pra_logs
-        from app.services.ml_model import _build_defense_lookup
+        from app.services.ml_model import build_defense_lookup
 
         player_cache_key = str(player_name).strip().lower()
         state = self.engine._player_state_cache.get(player_cache_key)
@@ -516,7 +516,7 @@ class ValueDetector:
         defense_lookup = self.engine._context_cache.get(defense_cache_key)
         if defense_lookup is None:
             try:
-                defense_lookup = _build_defense_lookup()
+                defense_lookup = build_defense_lookup()
             except Exception:
                 defense_lookup = {}
             self.engine._context_cache[defense_cache_key] = defense_lookup
