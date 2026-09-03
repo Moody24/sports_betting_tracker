@@ -898,6 +898,58 @@ def fetch_upcoming_games() -> list[dict]:
     return games
 
 
+def _upcoming_odds_window(tomorrow) -> tuple[str, str]:
+    day_after = tomorrow + timedelta(days=1)
+    start_et = datetime.combine(tomorrow, datetime.min.time(), tzinfo=APP_TIMEZONE)
+    end_et = datetime.combine(day_after, datetime.min.time(), tzinfo=APP_TIMEZONE)
+    start_utc = start_et.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    end_utc = end_et.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    return start_utc, end_utc
+
+
+def _upcoming_total_line(game: dict) -> float | None:
+    for bookmaker in game.get('bookmakers', []):
+        for market in bookmaker.get('markets', []):
+            if market.get('key') != 'totals':
+                continue
+            line = _total_line(market)
+            if line is not None:
+                return line
+    return None
+
+
+def _upcoming_match_date(commence: str, tomorrow) -> str:
+    if not commence:
+        return tomorrow.isoformat()
+    try:
+        return datetime.fromisoformat(
+            commence.replace('Z', '+00:00'),
+        ).date().isoformat()
+    except ValueError:
+        return tomorrow.isoformat()
+
+
+def _normalize_upcoming_odds_game(game: dict, tomorrow) -> dict:
+    home = game.get('home_team', '')
+    away = game.get('away_team', '')
+    commence = game.get('commence_time', '')
+    event_id = game.get('id', '')
+    return {
+        'espn_id': event_id,
+        'home': {'name': home, 'score': 0, 'logo': '', 'abbr': ''},
+        'away': {'name': away, 'score': 0, 'logo': '', 'abbr': ''},
+        'start_time': commence,
+        'match_date': _upcoming_match_date(commence, tomorrow),
+        'status': 'STATUS_SCHEDULED',
+        'status_detail': 'Tomorrow',
+        'clock': '',
+        'period': 0,
+        'total_score': 0,
+        'over_under_line': _upcoming_total_line(game),
+        'odds_event_id': event_id,
+    }
+
+
 def _fetch_upcoming_games_odds(tomorrow) -> list[dict]:
     """Fetch tomorrow's games with O/U lines from The Odds API."""
     api_key = _get_odds_api_key()
@@ -905,11 +957,7 @@ def _fetch_upcoming_games_odds(tomorrow) -> list[dict]:
         logger.warning("ODDS_API_KEY not set – skipping Odds API for upcoming games")
         return []
 
-    day_after = tomorrow + timedelta(days=1)
-    start_et = datetime.combine(tomorrow, datetime.min.time(), tzinfo=APP_TIMEZONE)
-    end_et = datetime.combine(day_after, datetime.min.time(), tzinfo=APP_TIMEZONE)
-    start_utc = start_et.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
-    end_utc = end_et.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    start_utc, end_utc = _upcoming_odds_window(tomorrow)
 
     try:
         resp = ODDS_BUDGET.budgeted_get(
@@ -929,51 +977,7 @@ def _fetch_upcoming_games_odds(tomorrow) -> list[dict]:
     except (requests.RequestException, ValueError) as exc:
         logger.error("Odds API (upcoming games) fetch failed: %s", _sanitize_api_error(exc))
         return []
-
-    games = []
-    for game in data:
-        home = game.get("home_team", "")
-        away = game.get("away_team", "")
-        commence = game.get("commence_time", "")
-
-        line = None
-        for bookmaker in game.get("bookmakers", []):
-            for market in bookmaker.get("markets", []):
-                if market.get("key") == "totals":
-                    for outcome in market.get("outcomes", []):
-                        if outcome.get("name") == "Over" and outcome.get("point"):
-                            line = float(outcome["point"])
-                            break
-                if line is not None:
-                    break
-            if line is not None:
-                break
-
-        match_date = tomorrow.isoformat()
-        if commence:
-            try:
-                match_date = datetime.fromisoformat(
-                    commence.replace("Z", "+00:00")
-                ).date().isoformat()
-            except ValueError:
-                pass
-
-        games.append({
-            "espn_id": game.get("id", ""),
-            "home": {"name": home, "score": 0, "logo": "", "abbr": ""},
-            "away": {"name": away, "score": 0, "logo": "", "abbr": ""},
-            "start_time": commence,
-            "match_date": match_date,
-            "status": "STATUS_SCHEDULED",
-            "status_detail": "Tomorrow",
-            "clock": "",
-            "period": 0,
-            "total_score": 0,
-            "over_under_line": line,
-            "odds_event_id": game.get("id", ""),
-        })
-
-    return games
+    return [_normalize_upcoming_odds_game(game, tomorrow) for game in data]
 
 
 def _fetch_upcoming_games_espn(tomorrow) -> list[dict]:
@@ -1675,6 +1679,42 @@ def derive_game_status_from_summary(summary_data: dict) -> dict:
     }
 
 
+def _best_boxscore_match(boxscore: dict, player_name: str) -> tuple:
+    target = _normalize_player_name(player_name)
+    best_name = None
+    best_stats = None
+    best_score = 0.0
+    for candidate_name, stats in boxscore.items():
+        candidate = _normalize_player_name(candidate_name)
+        if not candidate:
+            continue
+        score = SequenceMatcher(None, target, candidate).ratio()
+        if target == candidate:
+            score = 1.0
+        elif (len(target) >= 8 and len(candidate) >= 8
+              and (target in candidate or candidate in target)):
+            score = max(score, 0.92)
+        if score > best_score:
+            best_score = score
+            best_name = candidate_name
+            best_stats = stats
+    return best_name, best_stats, best_score
+
+
+def _prop_progress_values(current_stat: float, line: float, bet_type: str,
+                          elapsed_ratio: float) -> tuple:
+    projected = (current_stat if elapsed_ratio <= 0
+                 else current_stat / max(elapsed_ratio, 0.01))
+    progress_pct = 0.0
+    if line > 0:
+        progress_pct = max(0.0, min(200.0, (current_stat / line) * 100.0))
+    on_track = None
+    if line > 0 and bet_type in (BetType.OVER.value, BetType.UNDER.value):
+        on_track = (projected >= line if bet_type == BetType.OVER.value
+                    else projected <= line)
+    return projected, progress_pct, on_track
+
+
 def resolve_card_progress(
     espn_id: str, player_name: str, prop_type: str, line: float,
     bet_type: str, summary_data: dict,
@@ -1689,27 +1729,9 @@ def resolve_card_progress(
     if not boxscore:
         return {'ok': False, 'status': 'game_not_started', 'error': 'No boxscore data available yet'}
 
-    target = _normalize_player_name(player_name)
-    best_name = None
-    best_stats = None
-    best_score = 0.0
-    for candidate_name, stats in boxscore.items():
-        candidate_norm = _normalize_player_name(candidate_name)
-        if not candidate_norm:
-            continue
-        score = SequenceMatcher(None, target, candidate_norm).ratio()
-        if target == candidate_norm:
-            score = 1.0
-        elif (
-            len(target) >= 8 and len(candidate_norm) >= 8
-            and (target in candidate_norm or candidate_norm in target)
-        ):
-            score = max(score, 0.92)
-        if score > best_score:
-            best_score = score
-            best_name = candidate_name
-            best_stats = stats
-
+    best_name, best_stats, best_score = _best_boxscore_match(
+        boxscore, player_name,
+    )
     if best_name is None or best_score < 0.85:
         return {'ok': False, 'error': f'Player not found in boxscore for {player_name}'}
 
@@ -1720,15 +1742,10 @@ def resolve_card_progress(
     status_meta = derive_game_status_from_summary(summary_data)
     current_stat = safe_float(stat_val, 0.0)
     elapsed_ratio = status_meta['elapsed_ratio']
-    projected_final = current_stat if elapsed_ratio <= 0 else current_stat / max(elapsed_ratio, 0.01)
-    progress_pct = 0.0
     delta_to_line = current_stat - line
-    if line > 0:
-        progress_pct = max(0.0, min(200.0, (current_stat / line) * 100.0))
-
-    on_track = None
-    if line > 0 and bet_type in (BetType.OVER.value, BetType.UNDER.value):
-        on_track = projected_final >= line if bet_type == BetType.OVER.value else projected_final <= line
+    projected_final, progress_pct, on_track = _prop_progress_values(
+        current_stat, line, bet_type, elapsed_ratio,
+    )
 
     return {
         'ok': True,

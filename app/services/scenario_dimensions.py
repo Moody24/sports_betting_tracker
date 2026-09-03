@@ -180,15 +180,78 @@ def build_context_pack(df: pd.DataFrame,
     }
 
 
+def _add_teammate_context(df: pd.DataFrame) -> None:
+    df['_wusage'] = df.get('usage_pct', 0.0) * df['minutes']
+    top_players = (df.groupby(['season', 'team_abbr', 'player_id'])['_wusage']
+                     .sum().reset_index()
+                     .sort_values(['season', 'team_abbr', '_wusage'],
+                                  ascending=[True, True, False]))
+    top_players['rank'] = top_players.groupby(
+        ['season', 'team_abbr'],
+    ).cumcount()
+    key_by_team = (top_players[top_players['rank'] < 3]
+                   .groupby(['season', 'team_abbr'])['player_id']
+                   .apply(list).to_dict())
+    present = df.groupby(
+        ['game_id', 'team_abbr'],
+    )['player_id'].apply(set)
+
+    def teammate_bucket(row):
+        keys = key_by_team.get((row['season'], row['team_abbr']), [])
+        mates = [player for player in keys if player != row['player_id']][:2]
+        if not mates:
+            return float('nan')
+        available = present.get((row['game_id'], row['team_abbr']), set())
+        return 'full' if all(mate in available for mate in mates) else 'shorthanded'
+
+    df['ctx_teammate_context'] = df.apply(teammate_bucket, axis=1)
+    df.drop(columns=['_wusage'], inplace=True)
+
+
+def _merge_odds_context(df: pd.DataFrame,
+                        odds_df: pd.DataFrame | None) -> pd.DataFrame:
+    if odds_df is None or odds_df.empty:
+        df['ctx_fav_dog'] = float('nan')
+        df['ctx_total_bucket'] = float('nan')
+        return df
+    odds = odds_df.copy()
+    odds['game_date'] = pd.to_datetime(odds['game_date'])
+    odds['season_key'] = odds['game_date'].map(
+        lambda value: (f"{value.year}-{str(value.year + 1)[-2:]}"
+                       if value.month >= 10
+                       else f"{value.year - 1}-{str(value.year)[-2:]}")
+    )
+    odds['ctx_total_bucket'] = odds.groupby('season_key')['total'].transform(
+        lambda values: _safe_qcut(values, ('low', 'mid', 'high')),
+    )
+    frames = []
+    for side in ('home_abbr', 'away_abbr'):
+        subset = odds[
+            ['game_date', side, 'spread', 'favored', 'ctx_total_bucket']
+        ].rename(columns={side: 'team_abbr'})
+        subset['is_home_side'] = side == 'home_abbr'
+        frames.append(subset)
+    odds_long = pd.concat(frames, ignore_index=True)
+    odds_long['ctx_fav_dog'] = odds_long.apply(
+        lambda row: fav_dog_label(
+            row['spread'],
+            (row['favored'] == 'home') == row['is_home_side'],
+        ),
+        axis=1,
+    )
+    return df.merge(
+        odds_long[['game_date', 'team_abbr', 'ctx_fav_dog',
+                   'ctx_total_bucket']],
+        on=['game_date', 'team_abbr'],
+        how='left',
+    )
+
+
 def build_context(df: pd.DataFrame,
                   odds_df: pd.DataFrame | None = None) -> pd.DataFrame:
     df = df.copy()
     if 'pra' not in df.columns:
         df['pra'] = df['pts'] + df['reb'] + df['ast']
-    # Pre-backfill store: HistoricalGameLog.stats payload may not yet carry
-    # team_score/opp_score (backfill runs post-merge). Treat as unknown
-    # rather than raising -- rows fall out via the existing NaN-bucket
-    # conventions below (game_script, opp_def_tier).
     for score_col in ('team_score', 'opp_score'):
         if score_col not in df.columns:
             df[score_col] = float('nan')
@@ -256,58 +319,5 @@ def build_context(df: pd.DataFrame,
                      'def_tier': 'ctx_opp_def_tier'}),
         on=['game_id', 'opp_abbr'], how='left')
 
-    # --- teammate_context: top-2 teammates by minutes-weighted usage
-    df['_wusage'] = df.get('usage_pct', 0.0) * df['minutes']
-    top2 = (df.groupby(['season', 'team_abbr', 'player_id'])['_wusage']
-              .sum().reset_index()
-              .sort_values(['season', 'team_abbr', '_wusage'],
-                           ascending=[True, True, False]))
-    top2['rank'] = top2.groupby(['season', 'team_abbr']).cumcount()
-    key_players = top2[top2['rank'] < 3]        # top-3 pool; teammates = top-2 excl self
-    key_by_team = key_players.groupby(['season', 'team_abbr'])[
-        'player_id'].apply(list).to_dict()
-    present = df.groupby(['game_id', 'team_abbr'])['player_id'].apply(set)
-    def _teammate_bucket(row):
-        keys = key_by_team.get((row['season'], row['team_abbr']), [])
-        mates = [p for p in keys if p != row['player_id']][:2]
-        if not mates:
-            return float('nan')
-        there = present.get((row['game_id'], row['team_abbr']), set())
-        return 'full' if all(m in there for m in mates) else 'shorthanded'
-    df['ctx_teammate_context'] = df.apply(_teammate_bucket, axis=1)
-    df = df.drop(columns=['_wusage'])
-
-    # --- odds dims
-    if odds_df is None or odds_df.empty:
-        df['ctx_fav_dog'] = float('nan')
-        df['ctx_total_bucket'] = float('nan')
-        return df
-    o = odds_df.copy()
-    o['game_date'] = pd.to_datetime(o['game_date'])
-    o['season_key'] = o['game_date'].map(
-        lambda d: f"{d.year}-{str(d.year + 1)[-2:]}" if d.month >= 10
-        else f"{d.year - 1}-{str(d.year)[-2:]}")
-    o['ctx_total_bucket'] = o.groupby('season_key')['total'].transform(
-        lambda s: _safe_qcut(s, ('low', 'mid', 'high')))
-    # join twice: once as home team, once as away
-    merged_home = None
-    merged_away = None
-    for side, _other in (('home_abbr', 'away_abbr'), ('away_abbr', 'home_abbr')):
-        sub = o[['game_date', side, 'spread', 'favored',
-                 'ctx_total_bucket']].rename(columns={side: 'team_abbr'})
-        sub['is_home_side'] = side == 'home_abbr'
-        if side == 'home_abbr':
-            merged_home = sub
-        else:
-            merged_away = sub
-    odds_long = pd.concat([merged_home, merged_away], ignore_index=True)
-    def _fav_bucket(row):
-        return fav_dog_label(
-            row['spread'],
-            (row['favored'] == 'home') == row['is_home_side'])
-    odds_long['ctx_fav_dog'] = odds_long.apply(_fav_bucket, axis=1)
-    df = df.merge(
-        odds_long[['game_date', 'team_abbr', 'ctx_fav_dog',
-                   'ctx_total_bucket']],
-        on=['game_date', 'team_abbr'], how='left')
-    return df
+    _add_teammate_context(df)
+    return _merge_odds_context(df, odds_df)
