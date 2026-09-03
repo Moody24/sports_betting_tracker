@@ -33,6 +33,89 @@ logger = logging.getLogger(__name__)
 # this process session so we don't call ESPN + commit on every /bets GET.
 _BACKFILL_ATTEMPTED: dict[int, float] = {}
 _BACKFILL_TTL = 300  # 5 min retry window
+_ALLOWED_EDIT_OUTCOMES = {
+    Outcome.WIN.value,
+    Outcome.LOSE.value,
+    Outcome.PENDING.value,
+    Outcome.PUSH.value,
+}
+
+
+class BetEditError(ValueError):
+    """Raised when an editable bet field has an invalid value."""
+
+
+def _edit_bet_amount(bet: Bet, value) -> str:
+    try:
+        amount = float(value)
+    except (TypeError, ValueError) as exc:
+        raise BetEditError('bet_amount must be a number') from exc
+    if amount <= 0:
+        raise BetEditError('bet_amount must be positive')
+    bet.bet_amount = amount
+    return 'stake'
+
+
+def _edit_american_odds(bet: Bet, value) -> str:
+    if value is None:
+        bet.american_odds = None
+        return 'odds'
+    try:
+        odds = int(value)
+    except (TypeError, ValueError) as exc:
+        raise BetEditError('american_odds must be an integer') from exc
+    if odds == 0:
+        raise BetEditError('american_odds cannot be 0')
+    bet.american_odds = odds
+    return 'odds'
+
+
+def _edit_notes(bet: Bet, value) -> str:
+    bet.notes = str(value)[:2000] if value is not None else None
+    return 'notes'
+
+
+def _edit_outcome(bet: Bet, value) -> str:
+    if value not in _ALLOWED_EDIT_OUTCOMES:
+        allowed = ", ".join(sorted(_ALLOWED_EDIT_OUTCOMES))
+        raise BetEditError(f'outcome must be one of: {allowed}')
+    bet.outcome = value
+    return 'outcome'
+
+
+def _edit_optional_float(bet: Bet, attribute: str, label: str, value) -> str:
+    if value is None:
+        setattr(bet, attribute, None)
+        return label
+    try:
+        setattr(bet, attribute, float(value))
+    except (TypeError, ValueError) as exc:
+        raise BetEditError(f'{attribute} must be a number') from exc
+    return label
+
+
+def _edit_over_under_line(bet: Bet, value) -> str:
+    return _edit_optional_float(bet, 'over_under_line', 'line', value)
+
+
+def _edit_prop_line(bet: Bet, value) -> str:
+    return _edit_optional_float(bet, 'prop_line', 'prop line', value)
+
+
+def _edit_picked_team(bet: Bet, value) -> str:
+    bet.picked_team = str(value)[:80] if value else None
+    return 'picked team'
+
+
+_BET_EDITORS = {
+    'bet_amount': _edit_bet_amount,
+    'american_odds': _edit_american_odds,
+    'notes': _edit_notes,
+    'outcome': _edit_outcome,
+    'over_under_line': _edit_over_under_line,
+    'prop_line': _edit_prop_line,
+    'picked_team': _edit_picked_team,
+}
 
 
 def _escape_like(value: str) -> str:
@@ -301,73 +384,17 @@ def edit_bet(bet_id):
     if not data:
         return jsonify({'error': 'No data provided'}), 400
 
-    EDITABLE_FIELDS = {
-        'bet_amount', 'american_odds', 'notes',
-        'outcome', 'over_under_line', 'prop_line', 'picked_team',
-    }
-    unknown = set(data.keys()) - EDITABLE_FIELDS
+    unknown = set(data) - set(_BET_EDITORS)
     if unknown:
         return jsonify({'error': f'Cannot edit field(s): {", ".join(sorted(unknown))}'}), 400
 
     changes = []
-
-    if 'bet_amount' in data:
-        try:
-            val = float(data['bet_amount'])
-            if val <= 0:
-                return jsonify({'error': 'bet_amount must be positive'}), 400
-        except (TypeError, ValueError):
-            return jsonify({'error': 'bet_amount must be a number'}), 400
-        found_bet.bet_amount = val
-        changes.append('stake')
-
-    if 'american_odds' in data:
-        if data['american_odds'] is None:
-            found_bet.american_odds = None
-        else:
-            try:
-                val = int(data['american_odds'])
-                if val == 0:
-                    return jsonify({'error': 'american_odds cannot be 0'}), 400
-            except (TypeError, ValueError):
-                return jsonify({'error': 'american_odds must be an integer'}), 400
-            found_bet.american_odds = val
-        changes.append('odds')
-
-    if 'notes' in data:
-        found_bet.notes = str(data['notes'])[:2000] if data['notes'] is not None else None
-        changes.append('notes')
-
-    if 'outcome' in data:
-        allowed_outcomes = {Outcome.WIN.value, Outcome.LOSE.value, Outcome.PENDING.value, Outcome.PUSH.value}
-        if data['outcome'] not in allowed_outcomes:
-            return jsonify({'error': f'outcome must be one of: {", ".join(sorted(allowed_outcomes))}'}), 400
-        found_bet.outcome = data['outcome']
-        changes.append('outcome')
-
-    if 'over_under_line' in data:
-        if data['over_under_line'] is None:
-            found_bet.over_under_line = None
-        else:
-            try:
-                found_bet.over_under_line = float(data['over_under_line'])
-            except (TypeError, ValueError):
-                return jsonify({'error': 'over_under_line must be a number'}), 400
-        changes.append('line')
-
-    if 'prop_line' in data:
-        if data['prop_line'] is None:
-            found_bet.prop_line = None
-        else:
-            try:
-                found_bet.prop_line = float(data['prop_line'])
-            except (TypeError, ValueError):
-                return jsonify({'error': 'prop_line must be a number'}), 400
-        changes.append('prop line')
-
-    if 'picked_team' in data:
-        found_bet.picked_team = str(data['picked_team'])[:80] if data['picked_team'] else None
-        changes.append('picked team')
+    try:
+        for field, editor in _BET_EDITORS.items():
+            if field in data:
+                changes.append(editor(found_bet, data[field]))
+    except BetEditError as exc:
+        return jsonify({'error': str(exc)}), 400
 
     if not changes:
         return jsonify({'success': True, 'message': 'No changes made'}), 200

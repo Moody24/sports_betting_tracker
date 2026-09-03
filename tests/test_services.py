@@ -6854,6 +6854,24 @@ class TestNBAAnalysisRoutes(BaseTestCase):
             resp = self.client.get('/nba/stat-analysis')
         self.assertEqual(resp.status_code, 200)
 
+    def test_stat_analysis_enrichment_does_not_mutate_cached_scores(self):
+        """Presentation fields must not leak into the shared score cache."""
+        from app.routes.nba_analysis import _enrich_stat_scores
+
+        cached_score = {
+            'player': 'LeBron James',
+            'prop_type': 'player_points',
+            'line': 25.5,
+            'confidence_tier': 'strong',
+            'win_probability': 0.65,
+            'game_id': 'game-1',
+        }
+        with self.app.app_context():
+            enriched = _enrich_stat_scores([cached_score], {})
+
+        self.assertNotIn('indicator', cached_score)
+        self.assertEqual(enriched[0]['indicator'], 'strong')
+
     def test_nba_analysis_redirects_when_not_logged_in(self):
         """GET /nba/analysis redirects unauthenticated users."""
         resp = self.client.get('/nba/analysis')

@@ -172,6 +172,150 @@ def _resolve_player_team_abbrs(player_names: set[str]) -> dict[str, str]:
     return resolved
 
 
+def _recent_logs_by_player(scores: list[dict], limit: int = 20) -> dict[str, list]:
+    player_names = {score.get('player') for score in scores if score.get('player')}
+    logs_by_player: dict[str, list] = defaultdict(list)
+    if not player_names:
+        return logs_by_player
+    logs = (
+        PlayerGameLog.query
+        .filter(PlayerGameLog.player_name.in_(list(player_names)))
+        .order_by(PlayerGameLog.game_date.desc())
+        .all()
+    )
+    for log in logs:
+        if len(logs_by_player[log.player_name]) < limit:
+            logs_by_player[log.player_name].append(log)
+    return logs_by_player
+
+
+def _latest_team_abbrs(logs_by_player: dict[str, list]) -> dict[str, str]:
+    team_abbrs = {}
+    for player_name, logs in logs_by_player.items():
+        latest_with_team = next((log for log in logs if log.team_abbr), None)
+        if latest_with_team:
+            team_abbrs[player_name] = latest_with_team.team_abbr.upper()
+    return team_abbrs
+
+
+def _opponent_abbrs(scores: list[dict], game_lookup: dict) -> set[str]:
+    opponents = set()
+    for score in scores:
+        game = game_lookup.get(score.get('game_id'), {})
+        player_team = (score.get('player_team_abbr') or '').upper()
+        home_abbr = ((game.get('home') or {}).get('abbr') or '').upper()
+        away_abbr = ((game.get('away') or {}).get('abbr') or '').upper()
+        opponent = away_abbr if player_team == home_abbr else home_abbr
+        if opponent:
+            opponents.add(opponent)
+    return opponents
+
+
+def _latest_defense_snapshots(opponent_abbrs: set[str]) -> dict:
+    if not opponent_abbrs:
+        return {}
+    rows = (
+        TeamDefenseSnapshot.query
+        .filter(TeamDefenseSnapshot.team_abbr.in_(list(opponent_abbrs)))
+        .order_by(TeamDefenseSnapshot.fetched_at.desc())
+        .all()
+    )
+    snapshots = {}
+    for row in rows:
+        snapshots.setdefault(row.team_abbr, row)
+    return snapshots
+
+
+def _stat_indicator(score: dict) -> str:
+    indicator = {
+        'strong': 'strong',
+        'moderate': 'value',
+        'slight': 'slight',
+    }.get(score.get('confidence_tier'), 'avoid')
+    if (score.get('win_probability') or 0.5) < 0.40:
+        return 'avoid'
+    return indicator
+
+
+def _enrich_stat_scores(scores: list[dict], game_lookup: dict) -> list[dict]:
+    enriched_scores = [dict(score) for score in scores]
+    logs_by_player = _recent_logs_by_player(enriched_scores)
+    team_abbrs = _latest_team_abbrs(logs_by_player)
+    for score in enriched_scores:
+        if not score.get('player_team_abbr'):
+            score['player_team_abbr'] = team_abbrs.get(score.get('player', ''), '')
+    defense_snapshots = _latest_defense_snapshots(
+        _opponent_abbrs(enriched_scores, game_lookup)
+    )
+    for score in enriched_scores:
+        try:
+            line = float(score.get('line') or 0)
+        except (TypeError, ValueError):
+            line = 0.0
+        stat_column = _STAT_COL.get(score.get('prop_type', ''))
+        score['hit_rates'] = _hit_rates_from_logs(
+            logs_by_player.get(score.get('player', ''), []), stat_column, line
+        )
+        score['game_ctx'] = build_stat_context(
+            score, game_lookup, defense_snapshots
+        )
+        score['indicator'] = _stat_indicator(score)
+    return enriched_scores
+
+
+def _group_stat_scores(scores: list[dict], games: list[dict]) -> list[dict]:
+    grouped = {
+        game.get('espn_id'): {'meta': game, 'home': [], 'away': []}
+        for game in games
+    }
+    for score in scores:
+        game = grouped.get(score.get('game_id'))
+        if game is None:
+            continue
+        player_team = (score.get('player_team_abbr') or '').upper()
+        home_abbr = ((game['meta'].get('home') or {}).get('abbr') or '').upper()
+        game['home' if player_team == home_abbr else 'away'].append(score)
+    for game in grouped.values():
+        for bucket in ('home', 'away'):
+            game[bucket].sort(
+                key=lambda score: POSITION_ORDER.get(
+                    (score.get('breakdown') or {}).get('player_position', ''), 99
+                )
+            )
+    return [game for game in grouped.values() if game['home'] or game['away']]
+
+
+def _filter_stat_matchups(
+    matchups: list[dict], stat_filter: str, search_query: str
+) -> None:
+    if stat_filter == 'all' and not search_query:
+        return
+    for matchup in matchups:
+        for bucket in ('home', 'away'):
+            matchup[bucket] = [
+                score for score in matchup[bucket]
+                if (stat_filter == 'all' or score.get('prop_type') == stat_filter)
+                and (
+                    not search_query
+                    or search_query in (score.get('player') or '').lower()
+                )
+            ]
+
+
+def _stat_matchup_counts(matchups: list[dict]) -> dict[str, int]:
+    scores = [
+        score
+        for matchup in matchups
+        for score in matchup['home'] + matchup['away']
+    ]
+    return {
+        'total': len(scores),
+        'strong_ct': sum(score.get('indicator') == 'strong' for score in scores),
+        'value_ct': sum(score.get('indicator') == 'value' for score in scores),
+        'avoid_ct': sum(score.get('indicator') == 'avoid' for score in scores),
+    }
+
+
 # ── Routes ────────────────────────────────────────────────────────────────
 
 @login_required
@@ -409,109 +553,17 @@ def nba_stat_analysis():
         scores = []
 
     games_today = _get_todays_games()
-
-    game_lookup = {g.get('espn_id'): g for g in games_today}
-
-    all_player_names = {s.get('player', '') for s in scores if s.get('player')}
-    _all_logs = (
-        PlayerGameLog.query
-        .filter(PlayerGameLog.player_name.in_(list(all_player_names)))
-        .order_by(PlayerGameLog.game_date.desc())
-        .all()
-    )
-    logs_by_player: dict[str, list] = defaultdict(list)
-    for _log in _all_logs:
-        if len(logs_by_player[_log.player_name]) < 20:
-            logs_by_player[_log.player_name].append(_log)
-
-    player_team_abbr_map: dict[str, str] = {}
-    for _pname, _plogs in logs_by_player.items():
-        for _plog in _plogs:
-            if _plog.team_abbr:
-                player_team_abbr_map[_pname] = _plog.team_abbr.upper()
-                break
-
-    for s in scores:
-        if not s.get('player_team_abbr'):
-            s['player_team_abbr'] = player_team_abbr_map.get(s.get('player', ''), '')
-
-    _opp_abbrs: set[str] = set()
-    for s in scores:
-        _game = game_lookup.get(s.get('game_id'), {})
-        _pt = (s.get('player_team_abbr') or '').upper()
-        _home = (_game.get('home') or {}).get('abbr', '').upper()
-        _away = (_game.get('away') or {}).get('abbr', '').upper()
-        _opp = _away if _pt == _home else _home
-        if _opp:
-            _opp_abbrs.add(_opp)
-    _def_rows = (
-        TeamDefenseSnapshot.query
-        .filter(TeamDefenseSnapshot.team_abbr.in_(list(_opp_abbrs)))
-        .order_by(TeamDefenseSnapshot.fetched_at.desc())
-        .all()
-    )
-    def_snap_map: dict[str, TeamDefenseSnapshot] = {}
-    for _snap in _def_rows:
-        if _snap.team_abbr not in def_snap_map:
-            def_snap_map[_snap.team_abbr] = _snap
-
-    for s in scores:
-        line = float(s.get('line') or 0)
-        col_name = _STAT_COL.get(s.get('prop_type', ''))
-        s['hit_rates'] = _hit_rates_from_logs(logs_by_player.get(s.get('player', ''), []), col_name, line)
-        s['game_ctx'] = build_stat_context(s, game_lookup, def_snap_map)
-        tier = s.get('confidence_tier', 'no_edge')
-        wp = s.get('win_probability') or 0.5
-        if tier == 'strong':
-            s['indicator'] = 'strong'
-        elif tier == 'moderate':
-            s['indicator'] = 'value'
-        elif tier == 'slight':
-            s['indicator'] = 'slight'
-        else:
-            s['indicator'] = 'avoid'
-        if wp < 0.40 and s['indicator'] != 'avoid':
-            s['indicator'] = 'avoid'
-
-    game_map = {}
-    for g in games_today:
-        gid = g.get('espn_id')
-        game_map[gid] = {'meta': g, 'home': [], 'away': []}
-
-    for s in scores:
-        gid = s.get('game_id')
-        if gid not in game_map:
-            continue
-        pt = (s.get('player_team_abbr') or '').upper()
-        home_abbr = (game_map[gid]['meta'].get('home') or {}).get('abbr', '').upper()
-        bucket = 'home' if pt == home_abbr else 'away'
-        game_map[gid][bucket].append(s)
-
-    for gdata in game_map.values():
-        for bucket in ('home', 'away'):
-            gdata[bucket].sort(
-                key=lambda s: POSITION_ORDER.get(
-                    (s.get('breakdown') or {}).get('player_position', ''), 99))
-
-    matchups = [v for v in game_map.values() if v['home'] or v['away']]
+    game_lookup = {game.get('espn_id'): game for game in games_today}
+    scores = _enrich_stat_scores(scores, game_lookup)
+    matchups = _group_stat_scores(scores, games_today)
 
     stat_filter = request.args.get('stat', 'all')
     search_q = request.args.get('q', '').strip().lower()
-    if stat_filter != 'all' or search_q:
-        for m in matchups:
-            for bucket in ('home', 'away'):
-                m[bucket] = [s for s in m[bucket]
-                             if (stat_filter == 'all' or s.get('prop_type') == stat_filter)
-                             and (not search_q or search_q in (s.get('player') or '').lower())]
-
-    total = sum(len(m['home']) + len(m['away']) for m in matchups)
-    strong_ct = sum(1 for m in matchups for s in m['home'] + m['away'] if s.get('indicator') == 'strong')
-    value_ct = sum(1 for m in matchups for s in m['home'] + m['away'] if s.get('indicator') == 'value')
-    avoid_ct = sum(1 for m in matchups for s in m['home'] + m['away'] if s.get('indicator') == 'avoid')
+    _filter_stat_matchups(matchups, stat_filter, search_q)
+    counts = _stat_matchup_counts(matchups)
 
     return render_template('bets/nba_stat_analysis.html',
                            matchups=matchups,
                            stat_filter=stat_filter,
                            search_q=search_q,
-                           total=total, strong_ct=strong_ct,
-                           value_ct=value_ct, avoid_ct=avoid_ct)
+                           **counts)
