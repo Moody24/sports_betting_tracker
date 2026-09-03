@@ -457,6 +457,10 @@ class GameSnapshot(db.Model):
     )
     is_final = db.Column(db.Boolean, nullable=False, default=False)
 
+    __table_args__ = (
+        Index('ix_game_snapshot_espn_id_game_date', 'espn_id', 'game_date'),
+    )
+
     def __repr__(self) -> str:
         return f"<GameSnapshot {self.espn_id} {self.game_date}>"
 
@@ -511,6 +515,7 @@ class PlayerGameLog(db.Model):
 
     __table_args__ = (
         UniqueConstraint('player_id', 'game_date', name='uq_player_game_date'),
+        Index('ix_player_game_log_player_name', 'player_name'),
         Index('ix_player_game_log_player_date', 'player_name', 'game_date'),
         Index('ix_player_game_log_cache_expires', 'cache_expires'),
     )
@@ -657,6 +662,7 @@ class TeamDefenseSnapshot(db.Model):
 
     __table_args__ = (
         UniqueConstraint('team_id', 'snapshot_date', name='uq_team_defense_date'),
+        Index('ix_team_defense_snapshot_team_name', 'team_name'),
     )
 
     def __repr__(self) -> str:
@@ -728,6 +734,10 @@ class ModelMetadata(db.Model):
         db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
     )
 
+    __table_args__ = (
+        Index('ix_model_metadata_model_name_is_active', 'model_name', 'is_active'),
+    )
+
     def __repr__(self) -> str:
         return f"<ModelMetadata {self.model_name} v{self.version}>"
 
@@ -744,6 +754,7 @@ class JobLog(db.Model):
 
     __table_args__ = (
         Index('ix_job_log_job_name', 'job_name'),
+        Index('ix_job_log_started_at', 'started_at'),
     )
 
     def __repr__(self) -> str:
@@ -846,8 +857,6 @@ class BetPostmortem(db.Model):
         db.Integer,
         db.ForeignKey('bet.id', ondelete='CASCADE'),
         nullable=False,
-        unique=True,   # one postmortem per settled leg
-        index=True,
     )
 
     # ── Bet metadata (denormalised for fast reporting) ────────────────
@@ -879,7 +888,7 @@ class BetPostmortem(db.Model):
     blowout_flag = db.Column(db.Boolean, nullable=False, default=False)
 
     # ── Reason codes (PostmortemReason enum values) ───────────────────
-    primary_reason_code = db.Column(db.String(40), nullable=True, index=True)
+    primary_reason_code = db.Column(db.String(40), nullable=True)
     secondary_reason_code = db.Column(db.String(40), nullable=True)
     tertiary_reason_code = db.Column(db.String(40), nullable=True)
     reason_confidence = db.Column(db.Float, nullable=True)  # 0.0–1.0
@@ -893,6 +902,20 @@ class BetPostmortem(db.Model):
     )
     updated_at = db.Column(
         db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            'bet_id',
+            name='bet_postmortem_bet_id_key',
+        ),
+        Index('ix_bet_postmortem_bet_id', 'bet_id'),
+        Index('ix_bet_postmortem_primary_reason', 'primary_reason_code'),
+        Index(
+            'ix_bet_postmortem_created_at_stat_type',
+            'created_at',
+            'stat_type',
+        ),
     )
 
     bet = db.relationship(

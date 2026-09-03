@@ -6,7 +6,7 @@ A Flask web application for recording bets, tracking outcomes, projecting player
 
 The repository-owned NBA scope is complete: the application, Sheet UI, security
 contracts, migration tooling, test coverage, and technical-debt cleanup have been
-implemented and verified. The current release baseline passes 1,323 unittests at
+implemented and verified. The current release baseline passes 1,326 unittests at
 85% application coverage and 58 Playwright browser tests.
 
 Hosted deployment is intentionally inactive. A production launch still requires

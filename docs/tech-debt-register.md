@@ -10,7 +10,7 @@ than remaining as an open checklist.
 
 - Canonical guardrail: `scripts/predeploy_guardrails.sh`
 - Test runner: `unittest`
-- Full verification: 1,323 tests passing, 85% application coverage
+- Full verification: 1,326 tests passing, 85% application coverage
 - Static/security gates: Ruff, Bandit, detect-secrets, Git-history credential
   scanning, and pip-audit passing
 - Ruff C901 inventory: 0 functions, down from 59 before this cleanup
@@ -38,6 +38,8 @@ and architecture-contract tests are the reproducible measures for this repo.
   environment, and credential scans blocking local/CI gates.
 - Established a one-worker hosted baseline, fail-closed production limiter
   topology, and blocking Railway pre-deploy migrations.
+- Reconciled migration-owned indexes, uniqueness, and timestamp nullability with
+  SQLAlchemy metadata so fresh SQLite and PostgreSQL chains pass `flask db check`.
 - Decomposed the two most complex workflows: market-model walk-forward
   evaluation and the all-player-props API. The latter now uses the required ET
   calendar date instead of the host machine's local date.
