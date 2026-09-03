@@ -842,6 +842,161 @@ def cli_prod_readiness():
 
 # ── Pick-context backfill commands ─────────────────────────────────────────────
 
+
+def _normalize_context_team(value: str) -> str:
+    return ''.join(character for character in (value or '').lower() if character.isalnum())
+
+
+def _infer_pick_context_teams(
+    bet_obj,
+    player_team_abbr: str,
+    allow_weak_context: bool,
+) -> tuple[str, str, bool, str]:
+    team_a = (bet_obj.team_a or '').strip()
+    team_b = (bet_obj.team_b or '').strip()
+    picked_team = (bet_obj.picked_team or '').strip()
+    if team_a and team_b and picked_team in {team_a, team_b}:
+        if picked_team == team_a:
+            return team_a, team_b, True, 'picked_team'
+        return team_b, team_a, False, 'picked_team'
+    if player_team_abbr:
+        if _normalize_context_team(team_a) == _normalize_context_team(player_team_abbr):
+            return team_a, team_b, True, 'team_abbr_match'
+        if _normalize_context_team(team_b) == _normalize_context_team(player_team_abbr):
+            return team_b, team_a, False, 'team_abbr_match'
+    if allow_weak_context and team_a and team_b:
+        return team_a, team_b, True, 'weak_fallback'
+    return '', '', True, 'unresolved'
+
+
+def _pick_context_edge(bet_obj, score: dict):
+    projected_edge = score.get('edge', 0.0)
+    if bet_obj.bet_type == 'over':
+        return score.get('edge_over', projected_edge)
+    if bet_obj.bet_type == 'under':
+        return score.get('edge_under', projected_edge)
+    return projected_edge
+
+
+def _player_team_from_latest_logs(player_id, get_cached_logs) -> str:
+    latest_logs = get_cached_logs(str(player_id), last_n=1)
+    if not latest_logs:
+        return ''
+    return (getattr(latest_logs[0], 'team_abbr', '') or '').strip().upper()
+
+
+def _build_missing_pick_context(
+    bet_obj,
+    *,
+    detector,
+    allow_weak_context,
+    find_player_id,
+    get_cached_logs,
+    build_features,
+):
+    import json
+
+    if PickContext.query.filter_by(bet_id=bet_obj.id).first():
+        return None, 'duplicate', None
+    player_id = find_player_id((bet_obj.player_name or '').strip())
+    if not player_id:
+        return None, 'no_player', None
+    player_team_abbr = _player_team_from_latest_logs(player_id, get_cached_logs)
+    team_name, opponent_name, is_home, mode = _infer_pick_context_teams(
+        bet_obj,
+        player_team_abbr,
+        allow_weak_context,
+    )
+    if not team_name or not opponent_name:
+        return None, 'unresolved_context', mode
+
+    market_odds = int(bet_obj.american_odds or -110)
+    score = detector.score_prop(
+        player_name=bet_obj.player_name or '',
+        prop_type=bet_obj.prop_type or '',
+        line=float(bet_obj.prop_line or 0.0),
+        over_odds=market_odds,
+        under_odds=market_odds,
+        opponent_name=opponent_name,
+        team_name=team_name,
+        is_home=is_home,
+        game_id=bet_obj.external_game_id or '',
+    )
+    projected_edge = _pick_context_edge(bet_obj, score)
+    context = build_features(
+        player_name=bet_obj.player_name or '',
+        player_id=str(player_id),
+        prop_type=bet_obj.prop_type or '',
+        prop_line=float(bet_obj.prop_line or 0.0),
+        american_odds=market_odds,
+        projected_stat=float(score.get('projection', 0.0) or 0.0),
+        projected_edge=float(projected_edge or 0.0),
+        confidence_tier=score.get('confidence_tier', 'no_edge'),
+        opponent_name=opponent_name,
+        team_name=team_name,
+        is_home=is_home,
+    )
+    return PickContext(
+        bet_id=bet_obj.id,
+        context_json=json.dumps(context),
+        projected_stat=score.get('projection'),
+        projected_edge=projected_edge,
+        confidence_tier=score.get('confidence_tier'),
+    ), 'created', mode
+
+
+def _backfill_pick_context_rows(
+    missing,
+    *,
+    dry_run,
+    detector,
+    allow_weak_context,
+    find_player_id,
+    get_cached_logs,
+    build_features,
+):
+    counts = {
+        'created': 0,
+        'no_player': 0,
+        'unresolved_context': 0,
+        'duplicate': 0,
+    }
+    mode_counts = {}
+    for bet_obj in missing:
+        context, outcome, mode = _build_missing_pick_context(
+            bet_obj,
+            detector=detector,
+            allow_weak_context=allow_weak_context,
+            find_player_id=find_player_id,
+            get_cached_logs=get_cached_logs,
+            build_features=build_features,
+        )
+        counts[outcome] += 1
+        if mode:
+            mode_counts[mode] = mode_counts.get(mode, 0) + 1
+        if context is not None and not dry_run:
+            db.session.add(context)
+    if not dry_run and counts['created']:
+        db.session.commit()
+    return counts, mode_counts
+
+
+def _missing_pick_context_bets(limit: int):
+    return (
+        Bet.query
+        .outerjoin(PickContext, PickContext.bet_id == Bet.id)
+        .filter(
+            Bet.player_name.isnot(None),
+            Bet.prop_type.isnot(None),
+            Bet.prop_line.isnot(None),
+        )
+        .filter(PickContext.id.is_(None))
+        .order_by(Bet.created_at.asc())
+        .limit(int(limit))
+        .all()
+    )
+
+
 @click.command('backfill-pick-context')
 @click.option('--limit', default=500, show_default=True,
               help='Maximum missing prop bets to inspect.')
@@ -851,130 +1006,32 @@ def cli_prod_readiness():
               help='Allow fallback team/opponent inference when player team is unknown.')
 def cli_backfill_pick_context(limit, dry_run, allow_weak_context):
     """Backfill missing PickContext rows for historical prop bets."""
-    import json as _json
     from app.services.feature_engine import build_pick_context_features
     from app.services.stats_service import find_player_id, get_cached_logs
     from app.services.value_detector import ValueDetector
 
     detector = ValueDetector()
 
-    def _norm(s: str) -> str:
-        return ''.join(ch for ch in (s or '').lower() if ch.isalnum())
-
-    def _infer_context(bet_obj, player_team_abbr: str) -> tuple[str, str, bool, str]:
-        team_a = (bet_obj.team_a or '').strip()
-        team_b = (bet_obj.team_b or '').strip()
-        picked_team = (bet_obj.picked_team or '').strip()
-
-        if team_a and team_b and picked_team in {team_a, team_b}:
-            if picked_team == team_a:
-                return team_a, team_b, True, 'picked_team'
-            return team_b, team_a, False, 'picked_team'
-
-        # If team names are stored as abbreviations, match from player logs.
-        if player_team_abbr:
-            if _norm(team_a) == _norm(player_team_abbr):
-                return team_a, team_b, True, 'team_abbr_match'
-            if _norm(team_b) == _norm(player_team_abbr):
-                return team_b, team_a, False, 'team_abbr_match'
-
-        # Conservative fallback: preserve signal if both teams are present.
-        if allow_weak_context and team_a and team_b:
-            return team_a, team_b, True, 'weak_fallback'
-        return '', '', True, 'unresolved'
-
     with current_app.app_context():
-        missing = (
-            Bet.query
-            .outerjoin(PickContext, PickContext.bet_id == Bet.id)
-            .filter(Bet.player_name.isnot(None), Bet.prop_type.isnot(None), Bet.prop_line.isnot(None))
-            .filter(PickContext.id.is_(None))
-            .order_by(Bet.created_at.asc())
-            .limit(int(limit))
-            .all()
-        )
-
+        missing = _missing_pick_context_bets(limit)
         click.echo(f'Missing PickContext candidates: {len(missing)}')
         if not missing:
             return
-
-        created = 0
-        skipped_no_player = 0
-        skipped_unresolved_context = 0
-        skipped_duplicate = 0
-        mode_counts = {}
-
-        for bet_obj in missing:
-            if PickContext.query.filter_by(bet_id=bet_obj.id).first():
-                skipped_duplicate += 1
-                continue
-
-            player_id = find_player_id((bet_obj.player_name or '').strip())
-            if not player_id:
-                skipped_no_player += 1
-                continue
-
-            latest_logs = get_cached_logs(str(player_id), last_n=1)
-            player_team_abbr = ''
-            if latest_logs:
-                player_team_abbr = (getattr(latest_logs[0], 'team_abbr', '') or '').strip().upper()
-
-            team_name, opponent_name, is_home, mode = _infer_context(bet_obj, player_team_abbr)
-            mode_counts[mode] = mode_counts.get(mode, 0) + 1
-            if not team_name or not opponent_name:
-                skipped_unresolved_context += 1
-                continue
-
-            market_odds = int(bet_obj.american_odds or -110)
-            score = detector.score_prop(
-                player_name=bet_obj.player_name or '',
-                prop_type=bet_obj.prop_type or '',
-                line=float(bet_obj.prop_line or 0.0),
-                over_odds=market_odds,
-                under_odds=market_odds,
-                opponent_name=opponent_name,
-                team_name=team_name,
-                is_home=is_home,
-                game_id=bet_obj.external_game_id or '',
-            )
-
-            projected_edge = score.get('edge', 0.0)
-            if bet_obj.bet_type == 'over':
-                projected_edge = score.get('edge_over', projected_edge)
-            elif bet_obj.bet_type == 'under':
-                projected_edge = score.get('edge_under', projected_edge)
-
-            context = build_pick_context_features(
-                player_name=bet_obj.player_name or '',
-                player_id=str(player_id),
-                prop_type=bet_obj.prop_type or '',
-                prop_line=float(bet_obj.prop_line or 0.0),
-                american_odds=market_odds,
-                projected_stat=float(score.get('projection', 0.0) or 0.0),
-                projected_edge=float(projected_edge or 0.0),
-                confidence_tier=score.get('confidence_tier', 'no_edge'),
-                opponent_name=opponent_name,
-                team_name=team_name,
-                is_home=is_home,
-            )
-
-            if not dry_run:
-                db.session.add(PickContext(
-                    bet_id=bet_obj.id,
-                    context_json=_json.dumps(context),
-                    projected_stat=score.get('projection'),
-                    projected_edge=projected_edge,
-                    confidence_tier=score.get('confidence_tier'),
-                ))
-            created += 1
-
-        if not dry_run and created:
-            db.session.commit()
-
-        click.echo(f'Created PickContext rows: {created}')
-        click.echo(f'Skipped (no player id): {skipped_no_player}')
-        click.echo(f'Skipped (unresolved context): {skipped_unresolved_context}')
-        click.echo(f'Skipped (duplicate race): {skipped_duplicate}')
+        counts, mode_counts = _backfill_pick_context_rows(
+            missing,
+            dry_run=dry_run,
+            detector=detector,
+            allow_weak_context=allow_weak_context,
+            find_player_id=find_player_id,
+            get_cached_logs=get_cached_logs,
+            build_features=build_pick_context_features,
+        )
+        click.echo(f"Created PickContext rows: {counts['created']}")
+        click.echo(f"Skipped (no player id): {counts['no_player']}")
+        click.echo(
+            f"Skipped (unresolved context): {counts['unresolved_context']}"
+        )
+        click.echo(f"Skipped (duplicate race): {counts['duplicate']}")
         click.echo(f'Inference modes: {mode_counts}')
         if dry_run:
             click.echo('Dry-run only; no writes committed.')

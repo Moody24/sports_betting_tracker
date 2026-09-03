@@ -6238,6 +6238,84 @@ class TestModelCommandsBackfillPickContext(BaseTestCase):
         self.assertEqual(result.exit_code, 0)
         self.assertIn('Skipped (no player id): 1', result.output)
 
+    def test_pick_context_team_inference_modes(self):
+        from app.cli.model_commands import _infer_pick_context_teams
+
+        picked = SimpleNamespace(
+            team_a='Lakers',
+            team_b='Celtics',
+            picked_team='Celtics',
+        )
+        self.assertEqual(
+            _infer_pick_context_teams(picked, '', False),
+            ('Celtics', 'Lakers', False, 'picked_team'),
+        )
+
+        abbreviation = SimpleNamespace(
+            team_a='LAL',
+            team_b='BOS',
+            picked_team='',
+        )
+        self.assertEqual(
+            _infer_pick_context_teams(abbreviation, 'LAL', False),
+            ('LAL', 'BOS', True, 'team_abbr_match'),
+        )
+        self.assertEqual(
+            _infer_pick_context_teams(abbreviation, '', True),
+            ('LAL', 'BOS', True, 'weak_fallback'),
+        )
+
+    @patch('app.services.feature_engine.build_pick_context_features')
+    @patch('app.services.stats_service.get_cached_logs', return_value=[])
+    @patch('app.services.stats_service.find_player_id', return_value='123')
+    @patch('app.services.value_detector.ValueDetector')
+    def test_backfill_pick_context_creates_row(
+        self,
+        detector_class,
+        _find_player,
+        _get_logs,
+        build_features,
+    ):
+        from app.models import User, Bet
+        from app.cli.model_commands import cli_backfill_pick_context
+
+        detector_class.return_value.score_prop.return_value = {
+            'projection': 27.0,
+            'edge': 0.05,
+            'edge_over': 0.12,
+            'confidence_tier': 'strong',
+        }
+        build_features.return_value = {'feature': 1.0}
+        with self.app.app_context():
+            user = User(username='create_ctx_user', email='createctx@test.com')
+            user.set_password('pw')
+            db.session.add(user)
+            db.session.flush()
+            db.session.add(Bet(
+                user_id=user.id,
+                team_a='Lakers',
+                team_b='Celtics',
+                picked_team='Lakers',
+                bet_amount=10.0,
+                bet_type='over',
+                american_odds=-115,
+                match_date=datetime.now(timezone.utc),
+                player_name='Player A',
+                prop_type='player_points',
+                prop_line=25.5,
+            ))
+            db.session.commit()
+
+            result = self._invoke(cli_backfill_pick_context)
+            stored = PickContext.query.one()
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn('Created PickContext rows: 1', result.output)
+        self.assertEqual(stored.projected_stat, 27.0)
+        self.assertEqual(stored.projected_edge, 0.12)
+        self.assertEqual(stored.confidence_tier, 'strong')
+        self.assertEqual(json.loads(stored.context_json), {'feature': 1.0})
+
     def test_normalize_pick_context_flags_empty_db(self):
         """cli_normalize_pick_context_flags exits 0 when no PickContext rows exist."""
         from app.cli.model_commands import cli_normalize_pick_context_flags
