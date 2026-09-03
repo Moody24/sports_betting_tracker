@@ -16,6 +16,12 @@ from app.enums import BetType, Outcome
 from app.forms import BetForm
 from app.models import Bet, compute_bets_net_pl
 from app.services.bet_context_service import create_pick_context_for_bet
+from app.services.bet_placement_service import (
+    BetPlacementError,
+    normalize_single_bet_lines,
+    parse_bonus_multiplier,
+    parse_optional_units,
+)
 from app.services.nba_service import backfill_game_ids
 from app.services.projection_engine import ProjectionEngine
 from app.services.value_detector import ValueDetector
@@ -82,6 +88,40 @@ def _filtered_bets_query(user_id: int, args):
 
 
 # ── Routes ────────────────────────────────────────────────────────────────
+
+
+def _prefill_new_bet_form(form, args) -> None:
+    """Apply optional builder query parameters to the single-bet form."""
+    if args.get('team_a'):
+        form.team_a.data = args['team_a']
+    if args.get('team_b'):
+        form.team_b.data = args['team_b']
+    if args.get('match_date'):
+        try:
+            form.match_date.data = datetime.strptime(
+                args['match_date'], '%Y-%m-%d'
+            ).date()
+        except ValueError:
+            pass
+    if args.get('bet_type'):
+        form.bet_type.data = args['bet_type']
+    if args.get('over_under_line'):
+        try:
+            form.over_under_line.data = float(args['over_under_line'])
+        except (TypeError, ValueError):
+            pass
+    if args.get('game_id'):
+        form.external_game_id.data = args['game_id']
+
+
+def _new_bet_error(form, current_tab: str, message: str):
+    flash(message, 'danger')
+    return render_template(
+        'bets/form.html',
+        form=form,
+        bet=None,
+        current_tab=current_tab,
+    ), 400
 
 @login_required
 def place_bet():
@@ -187,89 +227,30 @@ def new_bet():
         current_tab = 'single'
 
     if request.method == 'GET':
-        if request.args.get('team_a'):
-            form.team_a.data = request.args['team_a']
-        if request.args.get('team_b'):
-            form.team_b.data = request.args['team_b']
-        if request.args.get('match_date'):
-            try:
-                form.match_date.data = datetime.strptime(request.args['match_date'], '%Y-%m-%d').date()
-            except ValueError:
-                pass
-        if request.args.get('bet_type'):
-            form.bet_type.data = request.args['bet_type']
-        if request.args.get('over_under_line'):
-            try:
-                form.over_under_line.data = float(request.args['over_under_line'])
-            except (ValueError, TypeError):
-                pass
-        if request.args.get('game_id'):
-            form.external_game_id.data = request.args['game_id']
+        _prefill_new_bet_form(form, request.args)
 
     if form.validate_on_submit():
         player_name = request.form.get('player_name') or None
         prop_type = request.form.get('prop_type') or None
-        prop_line_val = None
-        if request.form.get('prop_line'):
-            try:
-                prop_line_val = float(request.form['prop_line'])
-            except (ValueError, TypeError):
-                pass
-
+        prop_line_val = request.form.get('prop_line', type=float)
         over_under_line_val = form.over_under_line.data
         if over_under_line_val is None and request.form.get('over_under_line'):
-            try:
-                over_under_line_val = float(request.form['over_under_line'])
-            except (ValueError, TypeError):
-                pass
+            over_under_line_val = request.form.get('over_under_line', type=float)
 
         picked_team = form.picked_team.data or None
-
-        bonus_mult = 1.0
-        try:
-            bm = float(request.form.get('bonus_multiplier', '1.0') or '1.0')
-            if bm >= 1.0:
-                bonus_mult = bm
-        except (ValueError, TypeError):
-            pass
-
-        american_odds_val = None
-        if request.form.get('american_odds'):
-            try:
-                american_odds_val = int(request.form.get('american_odds'))
-            except (ValueError, TypeError):
-                american_odds_val = None
-
-        units_val = None
-        if request.form.get('units'):
-            try:
-                parsed_units = float(request.form.get('units'))
-                if parsed_units > 0:
-                    units_val = parsed_units
-            except (ValueError, TypeError):
-                units_val = None
-
-        normalized_prop_line = prop_line_val
-        normalized_over_under_line = over_under_line_val
-
+        bonus_mult = parse_bonus_multiplier(request.form.get('bonus_multiplier'))
+        american_odds_val = request.form.get('american_odds', type=int)
+        units_val = parse_optional_units(request.form.get('units'))
         is_total_side = form.bet_type.data in (BetType.OVER.value, BetType.UNDER.value)
-        if is_total_side and not prop_type:
-            if normalized_over_under_line is None and normalized_prop_line is not None:
-                normalized_over_under_line = normalized_prop_line
-                normalized_prop_line = None
-            else:
-                normalized_prop_line = None
-
-            if normalized_over_under_line is None:
-                flash('A line is required for totals (Over/Under).', 'danger')
-                return render_template('bets/form.html', form=form, bet=None, current_tab=current_tab), 400
-
-        if is_total_side and prop_type:
-            normalized_prop_line = prop_line_val
-            normalized_over_under_line = None
-            if normalized_prop_line is None:
-                flash('A prop line is required for player props.', 'danger')
-                return render_template('bets/form.html', form=form, bet=None, current_tab=current_tab), 400
+        try:
+            normalized_prop_line, normalized_over_under_line = normalize_single_bet_lines(
+                form.bet_type.data,
+                prop_type,
+                prop_line_val,
+                over_under_line_val,
+            )
+        except BetPlacementError as exc:
+            return _new_bet_error(form, current_tab, str(exc))
 
         bet_obj = Bet(
             user_id=current_user.id,

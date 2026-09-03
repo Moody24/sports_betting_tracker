@@ -10,13 +10,17 @@ from flask import request, jsonify, url_for, flash, redirect
 from flask_login import login_required, current_user
 
 from app import db
-from app.enums import BetSource, BetType, Outcome
+from app.enums import BetSource, Outcome
 from app.models import Bet, PickContext
-from app.services.projection_engine import ProjectionEngine
-from app.services.value_detector import ValueDetector
 from app.services.feature_engine import build_pick_context_features
 from app.services.stats_service import find_player_id
-from app.services.bet_context_service import create_pick_context_for_bet
+from app.services.bet_placement_service import (
+    BetPlacementError,
+    build_manual_parlay_bets,
+    parse_optional_units,
+    parse_stake,
+    persist_new_bets,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -256,115 +260,19 @@ def manual_parlay():
         return jsonify({"success": False, "message": "Add at least one leg"}), 400
 
     try:
-        stake = float(data.get("stake") or 0)
-    except (TypeError, ValueError):
-        return jsonify({"success": False, "message": "Stake must be a number"}), 400
-    if stake <= 0:
-        return jsonify({"success": False, "message": "Stake must be greater than zero"}), 400
-
-    units_val = None
-    if data.get("units") is not None:
-        try:
-            parsed_units = float(data.get("units"))
-            if parsed_units > 0:
-                units_val = parsed_units
-        except (TypeError, ValueError):
-            units_val = None
-    parlay_id = Bet.generate_parlay_id()
-
-    errors = []
-    created_bets: list[Bet] = []
-    for i, leg in enumerate(legs):
-        if not isinstance(leg, dict):
-            errors.append(f"Leg {i + 1}: must be an object")
-            continue
-        if not leg.get("team_a") or not leg.get("team_b"):
-            errors.append(f"Leg {i + 1}: team_a and team_b are required")
-            continue
-
-        try:
-            match_date = datetime.strptime(leg.get("match_date", ""), "%Y-%m-%d")
-        except ValueError:
-            match_date = datetime.now(timezone.utc)
-
-        bet_type = leg.get("bet_type", BetType.MONEYLINE.value)
-        player_name = str(leg.get("player_name") or "")[:100] or None
-        prop_type = str(leg.get("prop_type") or "")[:40] or None
-        prop_line = None
-        if leg.get("prop_line"):
-            try:
-                prop_line = float(leg["prop_line"])
-            except (ValueError, TypeError):
-                errors.append(f"Leg {i + 1}: prop_line must be a number")
-                continue
-            if not (-50 < prop_line < 100):
-                errors.append(f"Leg {i + 1}: prop_line out of range (-50, 100)")
-                continue
-
-        ou_line = None
-        if bet_type in (BetType.OVER.value, BetType.UNDER.value) and not player_name:
-            try:
-                ou_line = float(leg["over_under_line"]) if leg.get("over_under_line") else None
-            except (ValueError, TypeError):
-                pass
-
-        leg_odds = leg.get("american_odds", leg.get("odds"))
-        parsed_odds = None
-        if leg_odds not in (None, ""):
-            try:
-                parsed_odds = int(leg_odds)
-            except (TypeError, ValueError):
-                errors.append(f"Leg {i + 1}: american_odds must be an integer")
-                continue
-            if not (-5000 <= parsed_odds <= 5000):
-                errors.append(f"Leg {i + 1}: american_odds out of range (-5000, 5000)")
-                continue
-            if parsed_odds == 0:
-                parsed_odds = None
-
-        bet_obj = Bet(
+        stake = parse_stake(data.get('stake'))
+        created_bets = build_manual_parlay_bets(
             user_id=current_user.id,
-            team_a=str(leg["team_a"])[:80],
-            team_b=str(leg["team_b"])[:80],
-            match_date=match_date,
-            bet_amount=stake,
-            units=units_val,
+            legs=legs,
+            stake=stake,
+            units=parse_optional_units(data.get('units')),
             outcome=outcome,
-            american_odds=parsed_odds,
-            bet_type=bet_type,
-            over_under_line=ou_line,
-            prop_line=prop_line,
-            player_name=player_name,
-            prop_type=prop_type,
-            picked_team=str(leg.get("picked_team") or "")[:80] or None,
-            external_game_id=leg.get("game_id") or None,
-            is_parlay=True,
-            parlay_id=parlay_id,
-            source=BetSource.MANUAL.value,
         )
-        db.session.add(bet_obj)
-        created_bets.append(bet_obj)
-
-    if errors:
+    except BetPlacementError as exc:
         db.session.rollback()
-        return jsonify({"success": False, "message": "; ".join(errors)}), 400
+        return jsonify({"success": False, "message": str(exc)}), 400
 
-    db.session.flush()
-    detector = ValueDetector(ProjectionEngine())
-    for bet_obj in created_bets:
-        create_pick_context_for_bet(
-            bet_obj=bet_obj,
-            detector=detector,
-            selected_odds=bet_obj.american_odds,
-        )
-
-    db.session.commit()
-
-    if created_bets:
-        leg_count = len(created_bets)
-        for leg_obj in created_bets:
-            leg_obj.parlay_leg_count = leg_count
-        db.session.commit()
+    persist_new_bets(created_bets)
 
     return jsonify({
         "success": True,

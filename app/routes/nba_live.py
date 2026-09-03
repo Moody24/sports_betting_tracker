@@ -10,7 +10,7 @@ from flask import render_template, redirect, url_for, flash, request, jsonify, c
 from flask_login import login_required, current_user
 
 from app import db
-from app.enums import BetSource, BetType, Outcome
+from app.enums import Outcome
 from app.models import Bet, GameSnapshot
 from app.utils import safe_float
 from app.services.nba_service import (
@@ -24,10 +24,16 @@ from app.services.nba_service import (
 )
 from app.services.espn_client import EspnClientError, fetch_summary_payload
 from app.services.market_recommender import recommend_market_sides
-from app.services.projection_engine import ProjectionEngine
-from app.services.value_detector import ValueDetector
 from app.services.postmortem_service import create_or_update_postmortem
-from app.services.bet_context_service import create_pick_context_for_bet
+from app.services.bet_placement_service import (
+    BetPlacementError,
+    build_nba_bets,
+    parse_bonus_multiplier,
+    parse_optional_units,
+    parse_round_robin_size,
+    parse_stake,
+    persist_new_bets,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -437,135 +443,26 @@ def nba_place_bets():
     legs = data.get("legs", [])
     is_parlay = bool(data.get("is_parlay", False))
 
-    rr_payload = data.get("round_robin")
-    rr_size = None
-    if rr_payload and isinstance(rr_payload, dict):
-        try:
-            rr_size = int(rr_payload.get("size") or 0) or None
-        except (TypeError, ValueError):
-            rr_size = None
-
     if not legs:
         return jsonify({"success": False, "message": "No selections provided"}), 400
 
     try:
-        stake = float(data.get("stake") or 0)
-    except (TypeError, ValueError):
-        return jsonify({"success": False, "message": "Stake must be a number"}), 400
-    if stake <= 0:
-        return jsonify({"success": False, "message": "Stake must be greater than zero"}), 400
-
-    units_payload = data.get("units")
-    units_val = None
-    if units_payload is not None:
-        try:
-            parsed_units = float(units_payload)
-            if parsed_units > 0:
-                units_val = parsed_units
-        except (TypeError, ValueError):
-            units_val = None
-
-    try:
-        bonus_mult = float(data.get("bonus_multiplier") or 1.0)
-        if bonus_mult < 1.0:
-            bonus_mult = 1.0
-    except (TypeError, ValueError):
-        bonus_mult = 1.0
-
-    parlay_id = Bet.generate_parlay_id() if is_parlay else None
-
-    created = []
-    errors = []
-    for i, leg in enumerate(legs):
-        if not isinstance(leg, dict):
-            errors.append(f"Leg {i + 1}: must be an object")
-            continue
-        if not leg.get("team_a") or not leg.get("team_b"):
-            errors.append(f"Leg {i + 1}: team_a and team_b are required")
-            continue
-
-        try:
-            match_date = datetime.strptime(leg.get("match_date", ""), "%Y-%m-%d")
-        except ValueError:
-            from datetime import timezone
-            match_date = datetime.now(timezone.utc)
-
-        try:
-            prop_line_val = float(leg["prop_line"]) if leg.get("prop_line") is not None else None
-        except (TypeError, ValueError):
-            prop_line_val = None
-
-        try:
-            american_odds_val = int(leg["american_odds"]) if leg.get("american_odds") is not None else None
-        except (TypeError, ValueError):
-            american_odds_val = None
-
-        player_name_val = str(leg.get("player_name") or "")[:100] or None
-        prop_type_val = str(leg.get("prop_type") or "")[:40] or None
-        is_player_prop = bool(player_name_val and prop_type_val and prop_line_val is not None)
-
-        over_under_line_val = None
-        if not is_player_prop and leg.get("over_under_line") is not None:
-            try:
-                over_under_line_val = float(leg.get("over_under_line"))
-            except (TypeError, ValueError):
-                over_under_line_val = None
-        if not is_player_prop and over_under_line_val is None and prop_line_val is not None:
-            over_under_line_val = prop_line_val
-        picked_team_val = str(leg.get("picked_team") or "")[:80] or None
-
-        bet_obj = Bet(
+        stake = parse_stake(data.get('stake'))
+        rr_size = parse_round_robin_size(data.get('round_robin'))
+        created = build_nba_bets(
             user_id=current_user.id,
-            team_a=str(leg["team_a"])[:80],
-            team_b=str(leg["team_b"])[:80],
-            match_date=match_date,
-            bet_amount=stake,
-            units=units_val,
-            outcome=Outcome.PENDING.value,
-            bet_type=leg.get("bet_type", BetType.OVER.value),
-            over_under_line=None if is_player_prop else over_under_line_val,
-            picked_team=picked_team_val if leg.get("bet_type") == BetType.MONEYLINE.value else None,
-            american_odds=american_odds_val,
-            external_game_id=leg.get("game_id") or None,
-            player_name=player_name_val,
-            prop_type=prop_type_val,
-            prop_line=prop_line_val if is_player_prop else None,
+            legs=legs,
+            stake=stake,
+            units=parse_optional_units(data.get('units')),
             is_parlay=is_parlay,
-            parlay_id=parlay_id,
-            source=BetSource.NBA_PROPS.value,
-            bonus_multiplier=bonus_mult,
+            bonus_multiplier=parse_bonus_multiplier(data.get('bonus_multiplier')),
             round_robin_size=rr_size,
-            parlay_group_id=None,  # set below for RR bets
         )
-        db.session.add(bet_obj)
-        created.append(bet_obj)
-
-    if errors:
+    except BetPlacementError as exc:
         db.session.rollback()
-        return jsonify({"success": False, "message": "; ".join(errors)}), 400
+        return jsonify({"success": False, "message": str(exc)}), 400
 
-    if rr_size and len(created) >= rr_size:
-        import uuid
-        rr_group_id = str(uuid.uuid4())[:40]
-        for leg_obj in created:
-            leg_obj.parlay_group_id = rr_group_id
-
-    db.session.flush()
-    detector = ValueDetector(ProjectionEngine())
-    for bet_obj in created:
-        create_pick_context_for_bet(
-            bet_obj=bet_obj,
-            detector=detector,
-            selected_odds=bet_obj.american_odds,
-        )
-
-    db.session.commit()
-
-    if is_parlay and parlay_id and created:
-        leg_count = len(created)
-        for leg_obj in created:
-            leg_obj.parlay_leg_count = leg_count
-        db.session.commit()
+    persist_new_bets(created, round_robin_size=rr_size)
 
     if is_parlay:
         msg = f"Parlay with {len(created)} leg(s) placed — ${stake:.2f} wagered!"
