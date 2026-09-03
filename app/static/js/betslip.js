@@ -25,7 +25,7 @@
   // ── State ──────────────────────────────────────────────────────
   var slip = [];
   var propsCache = {};
-  // Uses global MARKET_LABELS from display_config.js
+  // Uses MARKET_LABELS generated from the server-side display contract.
 
   // ── DOM refs ───────────────────────────────────────────────────
   var slipEl          = document.getElementById('bet-slip');
@@ -84,8 +84,8 @@
       slipBody.style.display = slipCollapsed ? 'none' : '';
       slipToggle.setAttribute('aria-expanded', slipCollapsed ? 'false' : 'true');
       slipToggle.setAttribute('aria-label', slipCollapsed ? 'Expand bet slip' : 'Collapse bet slip');
-      slipToggle.querySelector('i').className = slipCollapsed
-        ? 'bi bi-chevron-up' : 'bi bi-chevron-down';
+      var chevron = slipToggle.querySelector('.slip-toggle-icon');
+      if (chevron) chevron.classList.toggle('is-collapsed', slipCollapsed);
     });
   }
 
@@ -109,7 +109,7 @@
     if (!container) return;
     container.innerHTML =
       '<div class="small text-danger py-2 text-center">' +
-      '<i class="bi bi-exclamation-triangle me-1"></i>' + (COPY.unableToLoadPlayerProps || 'Unable to load player props.') +
+      '<span aria-hidden="true">! </span>' + (COPY.unableToLoadPlayerProps || 'Unable to load player props.') +
       '<button type="button" class="btn btn-xs btn-outline-danger ms-2 props-retry-btn">Retry</button>' +
       '</div>';
     var retryBtn = container.querySelector('.props-retry-btn');
@@ -324,8 +324,8 @@
         + ' <span class="slip-leg-odds">' + escapeHtml(formatOdds(leg.american_odds)) + '</span></div>';
       html += '      <div class="slip-leg-game">' + escapeHtml(leg.team_a) + ' @ ' + escapeHtml(leg.team_b) + '</div>';
       html += '    </div>';
-      html += '    <button class="btn btn-sm border-0 text-secondary slip-remove" data-index="' + i + '">';
-      html += '      <i class="bi bi-x-lg"></i>';
+      html += '    <button class="btn btn-sm border-0 text-secondary slip-remove" data-index="' + i + '" aria-label="Remove selection">';
+      html += '      <span aria-hidden="true">×</span>';
       html += '    </button>';
       html += '  </div>';
       html += '</div>';
@@ -515,7 +515,7 @@
         showSlipFeedback(data.message || 'Bet placed successfully.', 'success');
         slipLegsEl.innerHTML =
           '<div class="text-center py-3 text-success">'
-          + '<i class="bi bi-check-circle" style="font-size:1.5rem"></i>'
+          + '<span aria-hidden="true">✓</span>'
           + '<p class="mb-0 mt-1 small">' + escapeHtml(data.message || 'Bet placed successfully.') + '</p>'
           + '</div>';
         slip = [];
@@ -535,7 +535,7 @@
     })
     .finally(function () {
       submitBtn.disabled = false;
-      submitBtn.innerHTML = '<i class="bi bi-check-lg me-1"></i>Place Bet';
+      submitBtn.textContent = 'Place Bet';
     });
   });
 })();

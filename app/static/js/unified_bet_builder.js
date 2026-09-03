@@ -1,4 +1,4 @@
-/* unified_bet_builder.js — single-flow game -> selections -> shared slip */
+/* unified_bet_builder.js — single-flow game -> selections -> shared slip. */
 (function () {
   'use strict';
 
@@ -711,13 +711,13 @@
         if (typeof trackUxEvent === 'function') trackUxEvent('unified_slip_submit_error');
         setFeedback((data && data.error) ? data.error : (COPY.unableToSubmitSlip || 'Unable to submit slip.'), 'danger');
         submitBtn.disabled = false;
-        submitBtn.innerHTML = '<i class="bi bi-check-lg me-1"></i>Submit Slip';
+        submitBtn.textContent = 'Submit Slip';
       })
       .catch(function () {
         if (typeof trackUxEvent === 'function') trackUxEvent('unified_slip_submit_network_error');
         setFeedback(COPY.networkSubmitError || 'Network error while submitting slip.', 'danger');
         submitBtn.disabled = false;
-        submitBtn.innerHTML = '<i class="bi bi-check-lg me-1"></i>Submit Slip';
+        submitBtn.textContent = 'Submit Slip';
       });
   }
 
@@ -814,7 +814,7 @@
       .finally(function () {
         if (refreshBtn) {
           refreshBtn.disabled = false;
-          refreshBtn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Refresh Odds';
+          refreshBtn.textContent = 'Refresh Odds';
         }
       });
   }

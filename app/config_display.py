@@ -1,9 +1,4 @@
-"""Centralized display configuration for prop labels, badge styles, and UI constants.
-
-This is the single source of truth for all display-related mappings used
-across Python templates, Jinja macros, and JavaScript.  Individual pages
-should import from here rather than defining their own inline dicts.
-"""
+"""Canonical server-side prop-market mappings and template labels."""
 
 # ---------------------------------------------------------------------------
 # Prop / Market labels
@@ -23,7 +18,7 @@ PROP_LABELS_SHORT: dict[str, str] = {
     "player_rebounds_assists": "REB+AST",
 }
 
-# Long labels used in dropdowns, full-text displays
+# Long labels used by browser-side market selectors and bet slips.
 PROP_LABELS_LONG: dict[str, str] = {
     "player_points": "Points",
     "player_rebounds": "Rebounds",
@@ -79,16 +74,6 @@ def prop_label_short(prop_type: str) -> str:
     )
 
 
-def prop_label_long(prop_type: str) -> str:
-    """Return long display label for a prop type, with fallback."""
-    if not prop_type:
-        return "Stat"
-    return PROP_LABELS_LONG.get(
-        prop_type,
-        prop_type.replace("player_", "").replace("_", " ").title(),
-    )
-
-
 # ---------------------------------------------------------------------------
 # stat_key -> opponent defense allowed field on TeamDefenseSnapshot
 # ---------------------------------------------------------------------------
@@ -113,79 +98,56 @@ PROP_TO_OPP_ALLOWED: dict[str, str] = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Confidence / indicator tier display
-# ---------------------------------------------------------------------------
-
-CONFIDENCE_TIERS: dict[str, dict] = {
-    "strong":   {"label": "STRONG", "css_class": "tier-strong",   "badge_class": "text-bg-success"},
-    "moderate": {"label": "MODERATE", "css_class": "tier-moderate", "badge_class": "text-bg-warning text-dark"},
-    "slight":   {"label": "SLIGHT", "css_class": "tier-slight",   "badge_class": "text-bg-secondary"},
-    "no_edge":  {"label": "NO EDGE", "css_class": "tier-slight",  "badge_class": "text-bg-secondary"},
+INDICATOR_TIERS: dict[str, dict[str, str]] = {
+    "strong": {
+        "label": "STRONG",
+        "client_class": "tier-strong",
+        "badge_class": "sa-ind-badge-strong",
+    },
+    "value": {
+        "label": "VALUE",
+        "client_class": "tier-moderate",
+        "badge_class": "sa-ind-badge-value",
+    },
+    "slight": {
+        "label": "SLIGHT",
+        "client_class": "tier-slight",
+        "badge_class": "sa-ind-badge-slight",
+    },
+    "avoid": {
+        "label": "AVOID",
+        "client_class": "sa-badge-avoid",
+        "badge_class": "sa-ind-badge-avoid",
+    },
 }
 
-# Stat analysis indicator tiers (different vocabulary from confidence tiers)
-INDICATOR_TIERS: dict[str, dict] = {
-    "strong": {"label": "STRONG", "css_class": "tier-strong",     "badge_class": "sa-ind-badge-strong"},
-    "value":  {"label": "VALUE",  "css_class": "tier-moderate",   "badge_class": "sa-ind-badge-value"},
-    "slight": {"label": "SLIGHT", "css_class": "tier-slight",     "badge_class": "sa-ind-badge-slight"},
-    "avoid":  {"label": "AVOID",  "css_class": "sa-badge-avoid",  "badge_class": "sa-ind-badge-avoid"},
-}
-
-
-# ---------------------------------------------------------------------------
-# Outcome / status display
-# ---------------------------------------------------------------------------
-
-OUTCOME_DISPLAY: dict[str, dict] = {
-    "win":     {"label": "Win",     "css_class": "text-bg-success"},
-    "lose":    {"label": "Loss",    "css_class": "text-bg-danger"},
-    "push":    {"label": "Push",    "css_class": "text-bg-warning text-dark"},
-    "pending": {"label": "Pending", "css_class": "text-bg-secondary"},
-}
-
-
-# ---------------------------------------------------------------------------
-# Button semantic hierarchy (documentation / reference)
-# ---------------------------------------------------------------------------
-# Primary CTA:      btn-primary (solid blue)
-# Secondary CTA:    btn-outline-secondary (neutral outline)
-# Success/confirm:  btn-success (green) — positive confirmed states
-# Warning/manual:   btn-warning text-dark (amber) — manual intervention
-# Destructive:      btn-outline-danger (red outline) — delete, remove
-# Info/navigation:  btn-outline-info (cyan outline) — refresh, view
-# Quick-add bet:    btn-outline-success (green outline) — add to bets
-# Quick-add parlay: btn-outline-info (cyan outline) — add to parlay
-
-
-# ---------------------------------------------------------------------------
-# Player position display
-# ---------------------------------------------------------------------------
-
-# Player positions are INFERRED from stat profile heuristics, NOT from
-# authoritative roster data.  UI should label accordingly.
-POSITION_IS_ESTIMATED = True
-POSITION_LABEL_PREFIX = "Est."  # e.g., "Est. PG" instead of just "PG"
-
-# Position matchup (Pos Edge) is only meaningful for player_points props.
-# Do not display Pos Edge for other stat types.
-POS_EDGE_APPLICABLE_PROPS: set[str] = {"player_points"}
+POS_EDGE_APPLICABLE_PROPS: tuple[str, ...] = ("player_points",)
 
 
 # ---------------------------------------------------------------------------
 # Helpers for injecting display config into Jinja context
 # ---------------------------------------------------------------------------
 
+def get_client_display_config() -> dict:
+    """Build the browser display contract from the canonical Python mappings."""
+    return {
+        "market_labels": PROP_LABELS_LONG,
+        "market_labels_short": PROP_LABELS_SHORT,
+        "prop_to_stat_col": PROP_STAT_KEY,
+        "indicator_classes": {
+            key: value["client_class"] for key, value in INDICATOR_TIERS.items()
+        },
+        "indicator_labels": {
+            key: value["label"] for key, value in INDICATOR_TIERS.items()
+        },
+        "pos_edge_applicable_props": list(POS_EDGE_APPLICABLE_PROPS),
+    }
+
+
 def get_template_display_config() -> dict:
-    """Return a dict of display constants suitable for Jinja template context."""
+    """Return canonical display data for Jinja and browser bootstrap code."""
     return {
         "PROP_LABELS_SHORT": PROP_LABELS_SHORT,
-        "PROP_LABELS_LONG": PROP_LABELS_LONG,
-        "CONFIDENCE_TIERS": CONFIDENCE_TIERS,
         "INDICATOR_TIERS": INDICATOR_TIERS,
-        "OUTCOME_DISPLAY": OUTCOME_DISPLAY,
-        "POSITION_IS_ESTIMATED": POSITION_IS_ESTIMATED,
-        "POSITION_LABEL_PREFIX": POSITION_LABEL_PREFIX,
-        "POS_EDGE_APPLICABLE_PROPS": POS_EDGE_APPLICABLE_PROPS,
-        "SUPPORTED_PROP_MARKETS": SUPPORTED_PROP_MARKETS,
+        "CLIENT_DISPLAY_CONFIG": get_client_display_config(),
     }

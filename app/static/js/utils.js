@@ -1,5 +1,5 @@
 /**
- * Shared utilities — loaded before betslip.js and bet_builder.js.
+ * Shared utilities — loaded before the active bet-slip scripts.
  */
 
 function escapeHtml(value) {

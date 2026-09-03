@@ -224,17 +224,18 @@ four raised surfaces on the page the rule was being invented on. Corrected:
 - Whether the tier scales (`value` / `slight` / `avoid`) keep amber for the top
   tier or move to win-green. Decided per page, deliberately not globally.
 
-## Known debt, explicitly not riding along
+## Known debt and cleanup status
 
-- **124 orphaned selectors** of 650 total (word-boundary scan across
-  `app/templates`, `app/static/js`, `tests/**`). The earlier figures of 132 and
-  158 were both wrong. A large share are `bb-*` classes belonging to
-  `app/static/js/bet_builder.js` (1,349 lines), which **no template loads** —
-  `form.html` loads `unified_bet_builder.js`. Retiring that file first would
-  shrink the backlog cheaply.
-- Twelve blank-rendering `bi-*` icon references remain in `betslip.js` (6),
-  `unified_bet_builder.js` (3), and `bet_builder.js` (3). No Bootstrap Icons
-  CSS or font is loaded anywhere. Ratcheted by `tests/test_icon_macro.py`.
+- [x] **Legacy builder debt retired 2026-09-03.** Deleted the unreferenced
+  1,349-line `bet_builder.js`, the uncalled FanDuel import template/form, and
+  419 lines of builder-only CSS. Every remaining `bb-*` selector has a live
+  template or Unified Builder consumer.
+- [x] **Blank icon debt retired 2026-09-03.** Removed all twelve `bi-*`
+  references and upgraded the ratchet to require zero Bootstrap Icon classes
+  across active JavaScript.
+- [x] **Display configuration consolidated 2026-09-03.** Deleted the static
+  JavaScript mirror and generate browser globals from `app/config_display.py`;
+  Jinja display macros consume the same context mappings.
 - **No mobile navigation design.** The sidebar was deleted in Phase 0 and the
   responsive spec now asserts one nav at every width. That is seven masthead
   links at 320px. It fits today; it is not designed, and no phase owns it.

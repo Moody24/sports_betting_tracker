@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import prop_label_short, indicator_badge, position_badge %}
+{% from "_macros.html" import prop_label_short, indicator_badge with context %}
 
 {% block title %}Stat Analysis · Edge Tracker{% endblock %}
 {% block page_title %}Stat Analysis{% endblock %}
@@ -11,7 +11,7 @@
 {% include 'bets/_workflow_nav.html' %}
 
 {# ── Display maps from centralized config (context processor) ─── #}
-{# PROP_LABELS_SHORT and INDICATOR_TIERS available via context_processor #}
+{# PROP_LABELS_SHORT is available via the context processor. #}
 
 {# ── KPI Row ─────────────────────────────────────────────────── #}
 <div class="row g-3 mb-4 fade-up fade-up-1">
@@ -388,7 +388,7 @@
 
 {% block scripts %}
 <script nonce="{{ csp_nonce }}">
-// Use centralized display_config.js globals
+// Use display globals generated from the server-side canonical mappings.
 const SA_PROP_LABELS = MARKET_LABELS_SHORT;
 SA_PROP_LABELS['player_points_rebounds_assists'] = 'PRA';
 const SA_BADGE_CLASS = INDICATOR_CLASSES;

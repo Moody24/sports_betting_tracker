@@ -135,7 +135,15 @@
 
   <script src="{{ url_for('static', filename='js/ux_telemetry.js') }}"></script>
   <script src="{{ url_for('static', filename='js/ux_copy.js') }}"></script>
-  <script src="{{ url_for('static', filename='js/display_config.js') }}"></script>
+  <script nonce="{{ csp_nonce }}">
+    var EDGE_DISPLAY_CONFIG = {{ CLIENT_DISPLAY_CONFIG|tojson }};
+    var MARKET_LABELS = EDGE_DISPLAY_CONFIG.market_labels;
+    var MARKET_LABELS_SHORT = EDGE_DISPLAY_CONFIG.market_labels_short;
+    var PROP_TO_STAT_COL = EDGE_DISPLAY_CONFIG.prop_to_stat_col;
+    var INDICATOR_CLASSES = EDGE_DISPLAY_CONFIG.indicator_classes;
+    var INDICATOR_LABELS = EDGE_DISPLAY_CONFIG.indicator_labels;
+    var POS_EDGE_APPLICABLE_PROPS = EDGE_DISPLAY_CONFIG.pos_edge_applicable_props;
+  </script>
   <script src="{{ url_for('static', filename='js/utils.js') }}"></script>
   <script src="{{ url_for('static', filename='js/script.js') }}"></script>
   {% block scripts %}{% endblock %}

@@ -60,31 +60,14 @@ class TestIconMacro(BaseTestCase):
             rendered = render_template_string("{{ icon('graph-up') }}")
         self.assertIn("<svg", rendered)
 
-    def test_bootstrap_icon_debt_in_js_does_not_grow(self):
-        """No new blank-rendering `bi-*` icons in JS.
-
-        No Bootstrap Icons CSS or font is loaded anywhere (base.html links only
-        theme.css, and CSP pins font-src to 'self'), so every `<i class="bi ...">`
-        these files inject renders as an empty element. This is pre-existing debt
-        retired with the page that owns each file; the counts below are a ratchet
-        so it cannot get worse in the meantime.
-        """
-        budget = {
-            "bet_builder.js": 3,  # dead file, unreferenced by any template
-            "betslip.js": 6,  # retires with Bet Builder
-            "unified_bet_builder.js": 3,  # retires with Bet Builder
-        }
-        actual = {}
+    def test_no_bootstrap_icon_classes_remain_in_js(self):
+        """JS must not inject Bootstrap Icons because no icon font is loaded."""
+        offenders = {}
         for js in sorted((REPO / "app/static/js").glob("*.js")):
             found = len(re.findall(r"\bbi-[a-z0-9-]+", js.read_text()))
             if found:
-                actual[js.name] = found
-        self.assertEqual(
-            actual,
-            budget,
-            "bi-* icon debt changed. Reduce the budget when you retire a file; "
-            "never raise it — these icons render blank.",
-        )
+                offenders[js.name] = found
+        self.assertEqual(offenders, {}, "bi-* classes render blank without Bootstrap Icons")
 
 
 if __name__ == "__main__":

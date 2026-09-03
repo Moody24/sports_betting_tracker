@@ -1,5 +1,4 @@
 from flask_wtf import FlaskForm
-from flask_wtf.file import FileField, FileRequired, FileAllowed
 from wtforms import StringField, PasswordField, FloatField, SubmitField, BooleanField, DateField, SelectField, HiddenField, TextAreaField
 from wtforms.validators import DataRequired, Length, EqualTo, NumberRange, Optional, Email
 
@@ -47,14 +46,6 @@ class BetForm(FlaskForm):
     external_game_id = HiddenField('Game ID')
     notes = TextAreaField('Notes / Reasoning', validators=[Optional(), Length(max=1000)])
     submit = SubmitField('Submit Bet')
-
-
-class FanDuelImportForm(FlaskForm):
-    csv_file = FileField(
-        'FanDuel CSV Export',
-        validators=[FileRequired(), FileAllowed(['csv'], 'CSV files only!')],
-    )
-    submit = SubmitField('Import Bets')
 
 
 class DeleteBetForm(FlaskForm):
