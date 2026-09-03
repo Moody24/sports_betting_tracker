@@ -344,7 +344,7 @@ class TestWiring(BaseTestCase):
         right id, cron kwargs (05:10 ET), and replace_existing=True.
 
         Mirrors the FakeScheduler pattern in
-        tests/test_services.py::TestScheduler.test_init_scheduler_adds_jobs
+        tests/test_scheduler_services.py::TestScheduler.test_init_scheduler_adds_jobs
         (defined inline there, so not importable).
         """
         from app.services import scheduler as scheduler_module

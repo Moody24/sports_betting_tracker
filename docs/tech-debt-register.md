@@ -50,6 +50,9 @@ and architecture-contract tests are the reproducible measures for this repo.
 - Decomposed current odds parsing, historical game-snapshot backfill, and
   provider historical-market ingestion, with tests for partial bookmaker data,
   bet-derived enrichment, and force/no-force updates.
+- Split the 7,613-line service test monolith into seven domain modules plus a
+  shared fixture module. All 489 migrated test identities were retained and
+  passed together.
 - Consolidated two conflicting inactive Railway runbooks.
 - Blocked accidental external HTTP in the shared test fixture.
 - Moved stale virtualenvs and generated test/browser artifacts to Trash,
@@ -60,13 +63,11 @@ and architecture-contract tests are the reproducible measures for this repo.
 | Priority | Item | Evidence and exit condition |
 |---|---|---|
 | P1 | Remaining high-complexity workflows | 38 C901 findings remain. The originally prioritized eight workflows are complete. Continue later with the two 18-complexity model commands, then the 17-complexity rolling backtest and prop snapshot workflows. Preserve behavior with focused tests per extraction. |
-| P2 | Oversized service test module | `tests/test_services.py` is 7,613 lines across 55 test classes. Split by service only in a dedicated mechanical commit; do not mix that move with production changes. |
 | P2 | Historical local model artifacts | `app/ml_models/` contains 190 ignored artifacts (about 76 MB). Active database metadata still references July artifacts, so retain them until `flask retrain --force` succeeds and the active paths are re-audited. |
 | P2 before hosted deployment | Inactive Railway scripts and configuration | They are intentionally retained for restoration work and the surviving runbook is explicitly marked inactive. Revalidate or delete them when a hosting decision is made. |
 
 ## Next cleanup order
 
-1. Split `tests/test_services.py` mechanically by domain.
-2. Retrain models, verify active artifact paths, then prune unreferenced files.
-3. Continue reducing the remaining C901 inventory in focused commits.
-4. Re-run the canonical guardrail and update this register's dated baseline.
+1. Retrain models, verify active artifact paths, then prune unreferenced files.
+2. Continue reducing the remaining C901 inventory in focused commits.
+3. Re-run the canonical guardrail and update this register's dated baseline.
