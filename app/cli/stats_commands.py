@@ -380,26 +380,27 @@ def cli_data_quality_report(stale_hours):
     now_utc = datetime.now(timezone.utc)
     stale_cutoff_date = (now_utc - timedelta(hours=stale_hours)).date()
     report_today_et = datetime.now(APP_TIMEZONE).date()
+    player_logs = _player_log_quality()
+    context = _context_table_quality(report_today_et)
+    stale_running_count = _stale_running_job_count(now_utc)
+    issues = _data_quality_issues(
+        player_logs, context, stale_running_count, stale_cutoff_date,
+    )
+    _print_data_quality_report(
+        now_utc, report_today_et, stale_cutoff_date, player_logs, context,
+        stale_running_count, issues,
+    )
 
-    total_logs = PlayerGameLog.query.count()
-    max_game_date = db.session.query(func.max(PlayerGameLog.game_date)).scalar()
-    min_game_date = db.session.query(func.min(PlayerGameLog.game_date)).scalar()
-    unique_players = db.session.query(PlayerGameLog.player_id).distinct().count()
 
-    null_pts = PlayerGameLog.query.filter(PlayerGameLog.pts.is_(None)).count()
-    null_reb = PlayerGameLog.query.filter(PlayerGameLog.reb.is_(None)).count()
-    null_ast = PlayerGameLog.query.filter(PlayerGameLog.ast.is_(None)).count()
-    null_fg3m = PlayerGameLog.query.filter(PlayerGameLog.fg3m.is_(None)).count()
-    null_minutes = PlayerGameLog.query.filter(PlayerGameLog.minutes.is_(None)).count()
-
-    bad_minutes = PlayerGameLog.query.filter(
-        (PlayerGameLog.minutes < 0) | (PlayerGameLog.minutes > 60)
-    ).count()
-    bad_points = PlayerGameLog.query.filter(
-        (PlayerGameLog.pts < 0) | (PlayerGameLog.pts > 100)
-    ).count()
-
-    duplicate_player_dates = (
+def _player_log_quality() -> dict:
+    null_columns = ('pts', 'reb', 'ast', 'fg3m', 'minutes')
+    nulls = {
+        column: PlayerGameLog.query.filter(
+            getattr(PlayerGameLog, column).is_(None),
+        ).count()
+        for column in null_columns
+    }
+    duplicates = (
         db.session.query(
             PlayerGameLog.player_id,
             PlayerGameLog.game_date,
@@ -409,69 +410,118 @@ def cli_data_quality_report(stale_hours):
         .having(func.count(PlayerGameLog.id) > 1)
         .count()
     )
+    return {
+        'total': PlayerGameLog.query.count(),
+        'max_date': db.session.query(func.max(PlayerGameLog.game_date)).scalar(),
+        'min_date': db.session.query(func.min(PlayerGameLog.game_date)).scalar(),
+        'unique_players': db.session.query(
+            PlayerGameLog.player_id,
+        ).distinct().count(),
+        'nulls': nulls,
+        'bad_minutes': PlayerGameLog.query.filter(
+            (PlayerGameLog.minutes < 0) | (PlayerGameLog.minutes > 60),
+        ).count(),
+        'bad_points': PlayerGameLog.query.filter(
+            (PlayerGameLog.pts < 0) | (PlayerGameLog.pts > 100),
+        ).count(),
+        'duplicates': duplicates,
+    }
 
-    injury_total = InjuryReport.query.count()
-    injury_today = InjuryReport.query.filter(
-        InjuryReport.date_reported == report_today_et
-    ).count()
-    defense_total = TeamDefenseSnapshot.query.count()
-    defense_today = TeamDefenseSnapshot.query.filter(
-        TeamDefenseSnapshot.snapshot_date == report_today_et
-    ).count()
 
-    stale_running_jobs = (
+def _context_table_quality(report_date) -> dict:
+    return {
+        'injury_total': InjuryReport.query.count(),
+        'injury_today': InjuryReport.query.filter(
+            InjuryReport.date_reported == report_date,
+        ).count(),
+        'defense_total': TeamDefenseSnapshot.query.count(),
+        'defense_today': TeamDefenseSnapshot.query.filter(
+            TeamDefenseSnapshot.snapshot_date == report_date,
+        ).count(),
+    }
+
+
+def _stale_running_job_count(now_utc: datetime) -> int:
+    running_jobs = (
         JobLog.query
         .filter_by(status='running')
         .filter(JobLog.started_at.isnot(None))
         .all()
     )
-    stale_running_count = 0
-    for job in stale_running_jobs:
+    count = 0
+    for job in running_jobs:
         started = job.started_at
         if started and started.tzinfo is None:
             started = started.replace(tzinfo=timezone.utc)
         if started and (now_utc - started).total_seconds() > (180 * 60):
-            stale_running_count += 1
+            count += 1
+    return count
 
+
+def _data_quality_issues(player_logs: dict, context: dict,
+                         stale_running_count: int,
+                         stale_cutoff_date) -> list[str]:
     issues = []
-    if total_logs == 0:
+    if player_logs['total'] == 0:
         issues.append('PlayerGameLog has zero rows.')
-    elif not max_game_date or max_game_date < stale_cutoff_date:
+    elif (not player_logs['max_date']
+          or player_logs['max_date'] < stale_cutoff_date):
         issues.append(
-            f'PlayerGameLog is stale: max game_date={max_game_date}, cutoff={stale_cutoff_date}.'
+            'PlayerGameLog is stale: '
+            f"max game_date={player_logs['max_date']}, "
+            f'cutoff={stale_cutoff_date}.'
         )
-    if null_pts or null_reb or null_ast or null_fg3m or null_minutes:
+    if any(player_logs['nulls'].values()):
         issues.append('Null core stat values found in PlayerGameLog.')
-    if bad_minutes or bad_points:
+    if player_logs['bad_minutes'] or player_logs['bad_points']:
         issues.append('Out-of-range values found in PlayerGameLog (minutes/points).')
-    if duplicate_player_dates:
+    if player_logs['duplicates']:
         issues.append('Duplicate player_id+game_date rows found in PlayerGameLog.')
-    if injury_today == 0:
+    if context['injury_today'] == 0:
         issues.append('No injuries recorded for today.')
-    if defense_today == 0:
+    if context['defense_today'] == 0:
         issues.append('No defense snapshots recorded for today.')
     if stale_running_count:
         issues.append(f'{stale_running_count} running JobLog entries exceed 180 minutes.')
+    return issues
 
+
+def _print_data_quality_report(now_utc: datetime, report_today_et,
+                               stale_cutoff_date, player_logs: dict,
+                               context: dict, stale_running_count: int,
+                               issues: list[str]) -> None:
     click.echo('=== Data Quality Report ===')
     click.echo(f'Generated UTC: {now_utc.isoformat()}')
     click.echo(f'Report day (ET): {report_today_et}')
     click.echo(f'Staleness cutoff (date): {stale_cutoff_date}')
 
     click.echo('\n=== PlayerGameLog ===')
-    click.echo(f'Rows: {total_logs}')
-    click.echo(f'Unique players: {unique_players}')
-    click.echo(f'Date range: {min_game_date} -> {max_game_date}')
+    click.echo(f"Rows: {player_logs['total']}")
+    click.echo(f"Unique players: {player_logs['unique_players']}")
+    click.echo(
+        f"Date range: {player_logs['min_date']} -> {player_logs['max_date']}"
+    )
+    nulls = player_logs['nulls']
     click.echo(
         'Nulls pts/reb/ast/fg3m/minutes: '
-        f'{null_pts}/{null_reb}/{null_ast}/{null_fg3m}/{null_minutes}'
+        f"{nulls['pts']}/{nulls['reb']}/{nulls['ast']}/"
+        f"{nulls['fg3m']}/{nulls['minutes']}"
     )
-    click.echo(f'Out-of-range minutes/points: {bad_minutes}/{bad_points}')
-    click.echo(f'Duplicate player+date keys: {duplicate_player_dates}')
+    click.echo(
+        'Out-of-range minutes/points: '
+        f"{player_logs['bad_minutes']}/{player_logs['bad_points']}"
+    )
+    click.echo(f"Duplicate player+date keys: {player_logs['duplicates']}")
 
     click.echo('\n=== Context Tables ===')
-    click.echo(f'InjuryReport total/today: {injury_total}/{injury_today}')
-    click.echo(f'TeamDefenseSnapshot total/today: {defense_total}/{defense_today}')
+    click.echo(
+        'InjuryReport total/today: '
+        f"{context['injury_total']}/{context['injury_today']}"
+    )
+    click.echo(
+        'TeamDefenseSnapshot total/today: '
+        f"{context['defense_total']}/{context['defense_today']}"
+    )
 
     click.echo('\n=== Scheduler/Jobs ===')
     click.echo(f'Running jobs older than 180m: {stale_running_count}')

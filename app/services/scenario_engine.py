@@ -7,6 +7,7 @@ DELETE+INSERT ScenarioSplit. Derived data only.
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timezone
 from itertools import combinations
@@ -14,7 +15,9 @@ from itertools import combinations
 import pandas as pd
 
 from app import db
-from app.models import HistoricalGameLog, JobLog, ScenarioSplit
+from app.models import (
+    HistoricalGameLog, JobLog, ScenarioContextPack, ScenarioSplit,
+)
 from app.services.scenario_dimensions import (
     DIMENSIONS, SPLIT_STATS, build_context, build_context_pack, load_frame,
     load_odds_frame,
@@ -89,8 +92,150 @@ def _last_success_utc() -> datetime | None:
     return job.finished_at if job else None
 
 
+def _refresh_skip_reason(sport: str, force: bool) -> str | None:
+    if force:
+        return None
+    last = _last_success_utc()
+    newest = db.session.query(
+        db.func.max(HistoricalGameLog.fetched_at),
+    ).filter(HistoricalGameLog.sport == sport).scalar()
+    if last is not None and newest is not None \
+            and _naive(newest) <= _naive(last):
+        return 'no_new_data'
+    return None
+
+
+def _eligible_split_scope(ctx: pd.DataFrame, min_games: int) -> tuple:
+    """Return trailing-season data, current season, and eligible players."""
+    seasons = sorted(ctx['season'].unique())[-2:]
+    scope_all = ctx[ctx['season'].isin(seasons)]
+    counts = scope_all.groupby('player_id')['game_id'].nunique()
+    eligible = set(counts[counts >= min_games].index)
+    return scope_all, seasons[-1], eligible
+
+
+def _stat_split_part(agg: pd.DataFrame, baselines: pd.DataFrame,
+                     names: dict, stat: str, dim1: str, dim2: str | None,
+                     scope_name: str) -> pd.DataFrame | None:
+    counts = agg[(stat, 'count')].to_numpy()
+    mask = counts >= MIN_N
+    if not mask.any():
+        return None
+    n_arr = counts[mask]
+    raw_arr = agg[(stat, 'mean')].to_numpy()[mask]
+    index = agg.index
+    player_ids = index.get_level_values(0).to_numpy()[mask]
+    bucket1 = index.get_level_values(1).to_numpy()[mask]
+    bucket2 = (index.get_level_values(2).to_numpy()[mask]
+               if dim2 else None)
+    base_arr = pd.Series(player_ids).map(baselines[stat]).to_numpy()
+    return pd.DataFrame({
+        'player_id': player_ids,
+        'player_name': pd.Series(player_ids).map(names),
+        'stat': stat,
+        'dim1': dim1,
+        'bucket1': pd.Series(bucket1).astype(str),
+        'dim2': dim2,
+        'bucket2': (pd.Series(bucket2).astype(str)
+                    if bucket2 is not None else None),
+        'season_scope': scope_name,
+        'n': n_arr.astype(int),
+        'raw_mean': raw_arr.astype(float),
+        'baseline_mean': base_arr.astype(float),
+    })
+
+
+def _scope_split_parts(frame: pd.DataFrame, scope_name: str, eligible: set,
+                       prior_strengths: dict) -> list[pd.DataFrame]:
+    frame = frame[frame['player_id'].isin(eligible)]
+    if frame.empty:
+        return []
+    names = frame.groupby('player_id')['player_name'].first().to_dict()
+    baselines = frame.groupby('player_id')[list(SPLIT_STATS)].mean()
+    dimensions = list(DIMENSIONS)
+    dimension_pairs = ([(dimension, None) for dimension in dimensions]
+                       + list(combinations(dimensions, 2)))
+    parts = []
+    for dim1, dim2 in dimension_pairs:
+        columns = ['player_id', f'ctx_{dim1}']
+        columns.extend([f'ctx_{dim2}'] if dim2 else [])
+        subset = frame.dropna(subset=columns[1:])
+        if subset.empty:
+            continue
+        aggregate = subset.groupby(columns, observed=True)[
+            list(SPLIT_STATS)].agg(['mean', 'count'])
+        for stat in SPLIT_STATS:
+            part = _stat_split_part(
+                aggregate, baselines, names, stat, dim1, dim2, scope_name,
+            )
+            if part is None:
+                continue
+            k = prior_strengths[stat]
+            part['shrunk_mean'] = (
+                part['n'] * part['raw_mean']
+                + k * part['baseline_mean']
+            ) / (part['n'] + k)
+            parts.append(part)
+    return parts
+
+
+def _split_batch(ctx: pd.DataFrame, sport: str, min_games: int,
+                 computed_at: datetime) -> tuple[int, list[dict]]:
+    scope_all, current, eligible = _eligible_split_scope(ctx, min_games)
+    prior_strengths = {
+        stat: fit_prior_strength(scope_all, stat) for stat in SPLIT_STATS
+    }
+    parts = []
+    for scope_name, frame in (
+        ('all', scope_all),
+        (current, scope_all[scope_all['season'] == current]),
+    ):
+        parts.extend(_scope_split_parts(
+            frame, scope_name, eligible, prior_strengths,
+        ))
+    if not parts:
+        return len(eligible), []
+    final = pd.concat(parts, ignore_index=True)
+    for column in ('dim2', 'bucket2'):
+        final[column] = final[column].astype(object)
+        final.loc[final[column].isna(), column] = None
+    records = final.to_dict('records')
+    for record in records:
+        record.update(sport=sport, computed_at=computed_at)
+    return len(eligible), records
+
+
+def _replace_materialization(sport: str, batch: list[dict],
+                             pack_payload: dict,
+                             computed_at: datetime) -> None:
+    ScenarioSplit.query.filter_by(sport=sport).delete()
+    chunk_size = 50_000
+    for offset in range(0, len(batch), chunk_size):
+        db.session.bulk_insert_mappings(
+            ScenarioSplit, batch[offset:offset + chunk_size],
+        )
+    existing_pack = ScenarioContextPack.query.filter_by(sport=sport).first()
+    if existing_pack is not None:
+        db.session.delete(existing_pack)
+    db.session.flush()
+    db.session.add(ScenarioContextPack(
+        sport=sport, payload=json.dumps(pack_payload),
+        computed_at=computed_at,
+    ))
+    db.session.commit()
+
+
+def _finish_refresh_job(job: JobLog, players: int, rows_written: int,
+                        skipped_reason: str | None, failed: bool) -> None:
+    job.finished_at = datetime.now(timezone.utc)
+    job.status = 'failed' if failed else 'success'
+    suffix = f" skipped={skipped_reason}" if skipped_reason else ""
+    job.message = f"players={players} rows={rows_written}{suffix}"
+    db.session.commit()
+
+
 def refresh_splits(sport: str = 'nba', min_games: int = MIN_GAMES_DEFAULT,
-                    force: bool = False) -> dict:
+                   force: bool = False) -> dict:
     job = JobLog(job_name='refresh-scenario-splits',
                  started_at=datetime.now(timezone.utc), status='running')
     db.session.add(job)
@@ -99,138 +244,24 @@ def refresh_splits(sport: str = 'nba', min_games: int = MIN_GAMES_DEFAULT,
     skipped_reason = None
     failed = False
     try:
-        if not force:
-            last = _last_success_utc()
-            newest = db.session.query(
-                db.func.max(HistoricalGameLog.fetched_at)).filter(
-                HistoricalGameLog.sport == sport).scalar()
-            if last is not None and newest is not None and \
-                    _naive(newest) <= _naive(last):
-                skipped_reason = 'no_new_data'
-                return {'players': 0, 'rows': 0,
-                        'skipped_reason': skipped_reason}
-
-        df = load_frame(sport=sport)
-        if df.empty:
+        skipped_reason = _refresh_skip_reason(sport, force)
+        if skipped_reason:
+            return {'players': 0, 'rows': 0,
+                    'skipped_reason': skipped_reason}
+        frame = load_frame(sport=sport)
+        if frame.empty:
             skipped_reason = 'empty_store'
-            return {'players': 0, 'rows': 0, 'skipped_reason': skipped_reason}
-        odds_df = load_odds_frame()
-        ctx = build_context(df, odds_df=odds_df)
-
-        # gate: >= min_games in the trailing 2 seasons
-        seasons = sorted(ctx['season'].unique())[-2:]
-        scope_all = ctx[ctx['season'].isin(seasons)]
-        counts = scope_all.groupby('player_id')['game_id'].nunique()
-        eligible = set(counts[counts >= min_games].index)
-        players = len(eligible)
-
-        ks = {stat: fit_prior_strength(scope_all, stat)
-              for stat in SPLIT_STATS}
-        current = seasons[-1]
+            return {'players': 0, 'rows': 0,
+                    'skipped_reason': skipped_reason}
+        odds_frame = load_odds_frame()
+        context = build_context(frame, odds_df=odds_frame)
         computed_at = datetime.now(timezone.utc)
-        parts: list[pd.DataFrame] = []
-        for scope_name, frame in (('all', scope_all),
-                                  (current,
-                                   scope_all[scope_all['season'] == current])):
-            frame = frame[frame['player_id'].isin(eligible)]
-            if frame.empty:
-                continue
-            names = {pid: n for pid, n in
-                     frame.groupby('player_id')['player_name'].first().items()}
-            baselines = frame.groupby('player_id')[list(SPLIT_STATS)].mean()
-            dims = list(DIMENSIONS)
-            combos = ([(d, None) for d in dims]
-                      + list(combinations(dims, 2)))
-            for dim1, dim2 in combos:
-                cols = ['player_id', f'ctx_{dim1}'] + (
-                    [f'ctx_{dim2}'] if dim2 else [])
-                sub = frame.dropna(subset=cols[1:])
-                if sub.empty:
-                    continue
-                agg = sub.groupby(cols, observed=True)[
-                    list(SPLIT_STATS)].agg(['mean', 'count'])
-                idx = agg.index
-                pid_vals = idx.get_level_values(0).to_numpy()
-                b1_vals = idx.get_level_values(1).to_numpy()
-                b2_vals = idx.get_level_values(2).to_numpy() if dim2 else None
-                for stat in SPLIT_STATS:
-                    counts = agg[(stat, 'count')].to_numpy()
-                    mask = counts >= MIN_N
-                    if not mask.any():
-                        continue
-                    n_arr = counts[mask]
-                    raw_arr = agg[(stat, 'mean')].to_numpy()[mask]
-                    pid_stat = pid_vals[mask]
-                    b1_stat = b1_vals[mask]
-                    b2_stat = b2_vals[mask] if b2_vals is not None else None
-
-                    base_arr = pd.Series(pid_stat).map(
-                        baselines[stat]).to_numpy()
-                    k = ks[stat]
-                    # mirrors shrink() above, vectorized over the group array
-                    shrunk_arr = (n_arr * raw_arr + k * base_arr) / (
-                        n_arr + k)
-
-                    part = pd.DataFrame({
-                        'player_id': pid_stat,
-                        'bucket1': pd.Series(b1_stat).astype(str),
-                        'n': n_arr.astype(int),
-                        'raw_mean': raw_arr.astype(float),
-                        'baseline_mean': base_arr.astype(float),
-                        'shrunk_mean': shrunk_arr.astype(float),
-                    })
-                    part['bucket2'] = (
-                        pd.Series(b2_stat).astype(str)
-                        if b2_stat is not None else None)
-                    part['stat'] = stat
-                    part['dim1'] = dim1
-                    part['dim2'] = dim2
-                    part['season_scope'] = scope_name
-                    part['player_name'] = part['player_id'].map(names)
-                    parts.append(part)
-
-        if parts:
-            final = pd.concat(parts, ignore_index=True)
-            # Guard against pandas silently upcasting an all-None object
-            # column to float64 NaN during concat -- bucket2/dim2 must
-            # stay Python None (-> SQL NULL) for single-dim splits.
-            for col in ('dim2', 'bucket2'):
-                final[col] = final[col].astype(object)
-                final.loc[final[col].isna(), col] = None
-            batch = [dict(
-                sport=sport, player_id=pid, player_name=pname, stat=stat,
-                dim1=dim1, bucket1=b1, dim2=dim2, bucket2=b2,
-                season_scope=scope, n=int(n), raw_mean=float(raw),
-                shrunk_mean=float(shr), baseline_mean=float(base),
-                computed_at=computed_at)
-                for pid, pname, stat, dim1, b1, dim2, b2, scope, n, raw,
-                shr, base in zip(
-                    final['player_id'].tolist(), final['player_name'].tolist(),
-                    final['stat'].tolist(), final['dim1'].tolist(),
-                    final['bucket1'].tolist(), final['dim2'].tolist(),
-                    final['bucket2'].tolist(), final['season_scope'].tolist(),
-                    final['n'].tolist(), final['raw_mean'].tolist(),
-                    final['shrunk_mean'].tolist(),
-                    final['baseline_mean'].tolist())]
-        else:
-            batch = []
-
-        ScenarioSplit.query.filter_by(sport=sport).delete()
-        CHUNK = 50_000
-        for i in range(0, len(batch), CHUNK):
-            db.session.bulk_insert_mappings(
-                ScenarioSplit, batch[i:i + CHUNK])
-        import json as _json
-        from app.models import ScenarioContextPack
-        pack_payload = build_context_pack(df, odds_df)
-        existing_pack = ScenarioContextPack.query.filter_by(sport=sport).first()
-        if existing_pack is not None:
-            db.session.delete(existing_pack)
-        db.session.flush()
-        db.session.add(ScenarioContextPack(
-            sport=sport, payload=_json.dumps(pack_payload),
-            computed_at=computed_at))
-        db.session.commit()
+        players, batch = _split_batch(
+            context, sport, min_games, computed_at,
+        )
+        _replace_materialization(
+            sport, batch, build_context_pack(frame, odds_frame), computed_at,
+        )
         from app.services.player_crosswalk import clear_cache
         clear_cache()
         rows_written = len(batch)
@@ -243,12 +274,9 @@ def refresh_splits(sport: str = 'nba', min_games: int = MIN_GAMES_DEFAULT,
         logger.error("refresh-scenario-splits failed: %s", exc)
         raise
     finally:
-        job.finished_at = datetime.now(timezone.utc)
-        job.status = 'failed' if failed else 'success'
-        job.message = (f"players={players} rows={rows_written}"
-                       + (f" skipped={skipped_reason}" if skipped_reason
-                          else ""))
-        db.session.commit()
+        _finish_refresh_job(
+            job, players, rows_written, skipped_reason, failed,
+        )
 
 
 def load_agreement_splits(player_id: str, stat: str,

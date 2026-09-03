@@ -206,6 +206,85 @@ def _new_bet_error(form, current_tab: str, message: str):
         current_tab=current_tab,
     ), 400
 
+
+def _backfill_pending_prop_game_ids(bets: list[Bet]) -> None:
+    now = time.monotonic()
+    pending_props = [
+        bet for bet in bets
+        if bet.outcome == Outcome.PENDING.value
+        and bet.is_player_prop
+        and not bet.external_game_id
+        and now - _BACKFILL_ATTEMPTED.get(bet.id, 0) >= _BACKFILL_TTL
+    ]
+    if not pending_props:
+        return
+    for bet in pending_props:
+        _BACKFILL_ATTEMPTED[bet.id] = now
+    try:
+        backfill_game_ids(pending_props)
+    except Exception:
+        logger.exception("Game-id backfill failed")
+
+
+def _group_parlays(bets: list[Bet]) -> dict:
+    groups = {}
+    for bet in bets:
+        if bet.is_parlay and bet.parlay_id:
+            groups.setdefault(bet.parlay_id, []).append(bet)
+    return groups
+
+
+def _parlay_outcome(legs: list[Bet]) -> str:
+    outcomes = [leg.outcome for leg in legs]
+    if any(outcome == Outcome.LOSE.value for outcome in outcomes):
+        return 'lose'
+    if all(outcome == Outcome.WIN.value for outcome in outcomes):
+        return 'win'
+    settled = (Outcome.WIN.value, Outcome.PUSH.value)
+    if all(outcome in settled for outcome in outcomes):
+        return 'push'
+    return 'pending'
+
+
+def _parlay_metadata(groups: dict) -> tuple[dict, dict, dict]:
+    statuses = {}
+    profit_loss = {}
+    game_counts = {}
+    for parlay_id, legs in groups.items():
+        for leg in legs:
+            setattr(leg, '_parlay_legs_count', len(legs))
+        statuses[parlay_id] = _parlay_outcome(legs)
+        profit_loss[parlay_id] = Bet.parlay_profit_loss(legs)
+        matchups = {
+            (leg.team_a, leg.team_b, leg.match_date.date()) for leg in legs
+        }
+        game_counts[parlay_id] = len(matchups) or 1
+    return statuses, profit_loss, game_counts
+
+
+def _bet_list_filters(args) -> dict:
+    return {
+        'status': args.get('status', '').strip(),
+        'q': args.get('q', '').strip(),
+        'start_date': args.get('start_date', '').strip(),
+        'end_date': args.get('end_date', '').strip(),
+        'type': args.get('type', '').strip(),
+    }
+
+
+def _bet_filter_stats(bets: list[Bet]) -> dict:
+    return {
+        'count': len(bets),
+        'wins': sum(1 for bet in bets if bet.outcome == Outcome.WIN.value),
+        'losses': sum(1 for bet in bets if bet.outcome == Outcome.LOSE.value),
+        'pending': sum(
+            1 for bet in bets if bet.outcome == Outcome.PENDING.value
+        ),
+        'wagered': sum(bet.bet_amount for bet in bets),
+        'net': compute_bets_net_pl(bets),
+    }
+
+
 @login_required
 def place_bet():
     query = _filtered_bets_query(current_user.id, request.args)
@@ -216,87 +295,20 @@ def place_bet():
     per_page = 25
     pagination = ordered_query.paginate(page=page, per_page=per_page, error_out=False)
     bets = list(pagination.items)
-
-    _now_bt = time.monotonic()
-    pending_props = [
-        b for b in bets
-        if b.outcome == Outcome.PENDING.value
-        and b.is_player_prop
-        and not b.external_game_id
-        and _now_bt - _BACKFILL_ATTEMPTED.get(b.id, 0) >= _BACKFILL_TTL
-    ]
-    if pending_props:
-        for _b in pending_props:
-            _BACKFILL_ATTEMPTED[_b.id] = _now_bt
-        try:
-            backfill_game_ids(pending_props)
-        except Exception:
-            logger.exception("Game-id backfill failed")
-
-    status = request.args.get('status', '').strip()
-    search_query = request.args.get('q', '').strip()
-    start_date = request.args.get('start_date', '').strip()
-    end_date = request.args.get('end_date', '').strip()
-    bet_type_filter = request.args.get('type', '').strip()
-
-    parlay_groups: dict = {}
-    for b in bets:
-        if b.is_parlay and b.parlay_id:
-            parlay_groups.setdefault(b.parlay_id, []).append(b)
-
+    _backfill_pending_prop_game_ids(bets)
     all_filtered_bets = ordered_query.all()
-    all_parlay_groups: dict = {}
-    for b in all_filtered_bets:
-        if b.is_parlay and b.parlay_id:
-            all_parlay_groups.setdefault(b.parlay_id, []).append(b)
-
-    parlay_status: dict = {}
-    for pid, legs in all_parlay_groups.items():
-        outcomes = [leg.outcome for leg in legs]
-        leg_count = len(legs)
-        for leg in legs:
-            setattr(leg, "_parlay_legs_count", leg_count)
-        if any(o == Outcome.LOSE.value for o in outcomes):
-            parlay_status[pid] = 'lose'
-        elif all(o == Outcome.WIN.value for o in outcomes):
-            parlay_status[pid] = 'win'
-        elif all(o in (Outcome.WIN.value, Outcome.PUSH.value) for o in outcomes):
-            parlay_status[pid] = 'push'
-        else:
-            parlay_status[pid] = 'pending'
-
-    parlay_pl_map: dict = {}
-    parlay_game_count: dict = {}
-    for pid, legs in all_parlay_groups.items():
-        parlay_pl_map[pid] = Bet.parlay_profit_loss(legs)
-        unique_matchups = {(leg.team_a, leg.team_b, leg.match_date.date()) for leg in legs}
-        parlay_game_count[pid] = len(unique_matchups) or 1
-
-    filters = {
-        'status': status,
-        'q': search_query,
-        'start_date': start_date,
-        'end_date': end_date,
-        'type': bet_type_filter,
-    }
-
-    filter_stats = {
-        'count': len(all_filtered_bets),
-        'wins': sum(1 for b in all_filtered_bets if b.outcome == 'win'),
-        'losses': sum(1 for b in all_filtered_bets if b.outcome == 'lose'),
-        'pending': sum(1 for b in all_filtered_bets if b.outcome == 'pending'),
-        'wagered': sum(b.bet_amount for b in all_filtered_bets),
-        'net': compute_bets_net_pl(all_filtered_bets),
-    }
+    parlay_status, parlay_pl_map, parlay_game_count = _parlay_metadata(
+        _group_parlays(all_filtered_bets),
+    )
 
     return render_template(
         'bets/list.html',
         bets=bets,
-        filters=filters,
+        filters=_bet_list_filters(request.args),
         parlay_status=parlay_status,
         parlay_pl_map=parlay_pl_map,
         parlay_game_count=parlay_game_count,
-        filter_stats=filter_stats,
+        filter_stats=_bet_filter_stats(all_filtered_bets),
         now_date=date_type.today(),
         pagination=pagination,
     )

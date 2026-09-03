@@ -13,7 +13,7 @@ than remaining as an open checklist.
 - Full verification: 1,265 tests passing, 80% application coverage
 - Static/security gates: Ruff, Bandit, detect-secrets, Git-history credential
   scanning, and pip-audit passing
-- Ruff C901 inventory: 28 functions, down from 59 before this cleanup
+- Ruff C901 inventory: 25 functions, down from 59 before this cleanup
 - Working tree expectation: no generated files; personal untracked files are
   outside project scope
 
@@ -77,7 +77,7 @@ and architecture-contract tests are the reproducible measures for this repo.
 
 | Priority | Item | Evidence and exit condition |
 |---|---|---|
-| P1 | Remaining high-complexity workflows | 28 C901 findings remain. Continue with the complexity-15 scenario refresh, then the two complexity-14 data-quality and bet-placement workflows. Preserve behavior with focused tests per extraction. |
+| P1 | Remaining high-complexity workflows | 25 C901 findings remain. The complexity-15 scenario refresh and both complexity-14 workflows are resolved; continue with the complexity-13 import, model-training, odds, and scheduler workflows. Preserve behavior with focused tests per extraction. |
 | P2 before hosted deployment | Inactive Railway scripts and configuration | They are intentionally retained for restoration work and the surviving runbook is explicitly marked inactive. Revalidate or delete them when a hosting decision is made. |
 
 ## Next cleanup order
