@@ -6834,6 +6834,116 @@ class TestNBAServiceDirect(BaseTestCase):
         self.assertEqual(result['created'], 0)
         self.assertEqual(result['updated'], 1)
 
+    @patch('app.services.nba_service.fetch_espn_scoreboard')
+    def test_backfill_game_snapshots_enriches_historical_bet_lines(
+        self,
+        mock_scoreboard,
+    ):
+        from app.models import GameSnapshot
+        from app.services.nba_service import backfill_game_snapshots
+
+        game_date = date(2025, 1, 3)
+        mock_scoreboard.return_value = [{
+            'espn_id': 'test_snap_003',
+            'home': {'name': 'Lakers', 'logo': '', 'score': 110},
+            'away': {'name': 'Celtics', 'logo': '', 'score': 105},
+            'status': 'STATUS_FINAL',
+        }]
+        with self.app.app_context():
+            user = make_user('line_user', 'line@test.com')
+            db.session.add(user)
+            db.session.flush()
+            for bet in (
+                make_bet(
+                    user.id,
+                    match_date=datetime(2025, 1, 3, tzinfo=timezone.utc),
+                    bet_type='over',
+                    over_under_line=221.5,
+                ),
+                make_bet(
+                    user.id,
+                    match_date=datetime(2025, 1, 3, tzinfo=timezone.utc),
+                    picked_team='Lakers',
+                    american_odds=-130,
+                ),
+                make_bet(
+                    user.id,
+                    match_date=datetime(2025, 1, 3, tzinfo=timezone.utc),
+                    picked_team='Celtics',
+                    american_odds=115,
+                ),
+            ):
+                db.session.add(bet)
+            db.session.commit()
+
+            result = backfill_game_snapshots(game_date, game_date, sleep_seconds=0)
+            stored = GameSnapshot.query.one()
+
+        self.assertEqual(result['ou_filled'], 1)
+        self.assertEqual(result['moneyline_filled'], 1)
+        self.assertEqual(stored.over_under_line, 221.5)
+        self.assertEqual(stored.moneyline_home, -130)
+        self.assertEqual(stored.moneyline_away, 115)
+
+    @patch('app.services.nba_service._fetch_historical_odds_for_date')
+    def test_ingest_historical_market_odds_respects_force(
+        self,
+        fetch_historical,
+    ):
+        from app.models import GameSnapshot
+        from app.services.nba_service import ingest_historical_market_odds
+
+        game_date = date(2025, 1, 4)
+        payload = [{
+            'home_team': 'Lakers',
+            'away_team': 'Celtics',
+            'bookmakers': [{'markets': [
+                {'key': 'totals', 'outcomes': [
+                    {'name': 'Over', 'point': 222.5},
+                ]},
+                {'key': 'h2h', 'outcomes': [
+                    {'name': 'Lakers', 'price': -135},
+                    {'name': 'Celtics', 'price': 120},
+                ]},
+            ]}],
+        }]
+        fetch_historical.return_value = (payload, 'ok')
+        with self.app.app_context():
+            snapshot = GameSnapshot(
+                espn_id='historical_001',
+                game_date=game_date,
+                home_team='Lakers',
+                away_team='Celtics',
+                over_under_line=220.0,
+                moneyline_home=-125,
+                moneyline_away=110,
+            )
+            db.session.add(snapshot)
+            db.session.commit()
+
+            unchanged = ingest_historical_market_odds(
+                game_date,
+                game_date,
+                force=False,
+                sleep_seconds=0,
+            )
+            updated = ingest_historical_market_odds(
+                game_date,
+                game_date,
+                force=True,
+                sleep_seconds=0,
+            )
+            stored = GameSnapshot.query.one()
+
+        self.assertEqual(unchanged['matched_snapshots'], 1)
+        self.assertEqual(unchanged['ou_updated'], 0)
+        self.assertEqual(unchanged['moneyline_updated'], 0)
+        self.assertEqual(updated['ou_updated'], 1)
+        self.assertEqual(updated['moneyline_updated'], 2)
+        self.assertEqual(stored.over_under_line, 222.5)
+        self.assertEqual(stored.moneyline_home, -135)
+        self.assertEqual(stored.moneyline_away, 120)
+
     def test_resolve_pending_bets_no_pending(self):
         """resolve_pending_bets returns [] when no bets are pending."""
         from app.services.nba_service import resolve_pending_bets

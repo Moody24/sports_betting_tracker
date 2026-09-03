@@ -13,7 +13,7 @@ than remaining as an open checklist.
 - Full verification: 1,265 tests passing, 80% application coverage
 - Static/security gates: Ruff, Bandit, detect-secrets, Git-history credential
   scanning, and pip-audit passing
-- Ruff C901 inventory: 41 functions, down from 59 before this cleanup
+- Ruff C901 inventory: 38 functions, down from 59 before this cleanup
 - Working tree expectation: no generated files; personal untracked files are
   outside project scope
 
@@ -47,6 +47,9 @@ and architecture-contract tests are the reproducible measures for this repo.
   identity, and persistence steps while preserving idempotency.
 - Decomposed historical pick-context backfill into explicit inference, scoring,
   feature-building, and persistence stages.
+- Decomposed current odds parsing, historical game-snapshot backfill, and
+  provider historical-market ingestion, with tests for partial bookmaker data,
+  bet-derived enrichment, and force/no-force updates.
 - Consolidated two conflicting inactive Railway runbooks.
 - Blocked accidental external HTTP in the shared test fixture.
 - Moved stale virtualenvs and generated test/browser artifacts to Trash,
@@ -56,14 +59,14 @@ and architecture-contract tests are the reproducible measures for this repo.
 
 | Priority | Item | Evidence and exit condition |
 |---|---|---|
-| P1 | Remaining high-complexity workflows | 41 C901 findings remain. Continue with the 20-complexity NBA ingestion/fetch workflows. Preserve behavior with focused tests per extraction. |
+| P1 | Remaining high-complexity workflows | 38 C901 findings remain. The originally prioritized eight workflows are complete. Continue later with the two 18-complexity model commands, then the 17-complexity rolling backtest and prop snapshot workflows. Preserve behavior with focused tests per extraction. |
 | P2 | Oversized service test module | `tests/test_services.py` is 7,613 lines across 55 test classes. Split by service only in a dedicated mechanical commit; do not mix that move with production changes. |
 | P2 | Historical local model artifacts | `app/ml_models/` contains 190 ignored artifacts (about 76 MB). Active database metadata still references July artifacts, so retain them until `flask retrain --force` succeeds and the active paths are re-audited. |
 | P2 before hosted deployment | Inactive Railway scripts and configuration | They are intentionally retained for restoration work and the surviving runbook is explicitly marked inactive. Revalidate or delete them when a hosting decision is made. |
 
 ## Next cleanup order
 
-1. Refactor the six highest remaining C901 workflows with parity tests.
-2. Split `tests/test_services.py` mechanically by domain.
-3. Retrain models, verify active artifact paths, then prune unreferenced files.
+1. Split `tests/test_services.py` mechanically by domain.
+2. Retrain models, verify active artifact paths, then prune unreferenced files.
+3. Continue reducing the remaining C901 inventory in focused commits.
 4. Re-run the canonical guardrail and update this register's dated baseline.

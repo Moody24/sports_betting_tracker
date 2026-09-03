@@ -132,6 +132,84 @@ def fetch_odds() -> dict:
     return totals
 
 
+def _total_line_from_market(market: dict) -> float | None:
+    for outcome in market.get('outcomes', []):
+        if outcome.get('name') == 'Over' and outcome.get('point'):
+            return float(outcome['point'])
+    return None
+
+
+def _moneylines_from_market(
+    market: dict,
+    home_team: str,
+    away_team: str,
+) -> tuple[int | None, int | None]:
+    home_ml = None
+    away_ml = None
+    for outcome in market.get('outcomes', []):
+        name = outcome.get('name', '')
+        if name == home_team:
+            home_ml = outcome.get('price')
+        elif name == away_team:
+            away_ml = outcome.get('price')
+    return home_ml, away_ml
+
+
+def _home_spread_from_market(market: dict, home_team: str) -> float | None:
+    for outcome in market.get('outcomes', []):
+        if outcome.get('name') == home_team and outcome.get('point') is not None:
+            return float(outcome['point'])
+    return None
+
+
+def _extract_current_game_markets(game: dict):
+    home_team = game.get('home_team', '')
+    away_team = game.get('away_team', '')
+    ou_line = None
+    home_ml = None
+    away_ml = None
+    home_spread = None
+    for bookmaker in game.get('bookmakers', []):
+        for market in bookmaker.get('markets', []):
+            market_key = market.get('key', '')
+            if market_key == 'totals' and ou_line is None:
+                ou_line = _total_line_from_market(market)
+            if market_key == 'h2h' and home_ml is None:
+                next_home_ml, next_away_ml = _moneylines_from_market(
+                    market,
+                    home_team,
+                    away_team,
+                )
+                if next_home_ml is not None:
+                    home_ml = next_home_ml
+                if next_away_ml is not None:
+                    away_ml = next_away_ml
+            if market_key == 'spreads' and home_spread is None:
+                home_spread = _home_spread_from_market(market, home_team)
+        if ou_line is not None and home_ml is not None and home_spread is not None:
+            break
+    return ou_line, home_ml, away_ml, home_spread
+
+
+def _record_current_game_markets(
+    game: dict,
+    totals_map: dict,
+    h2h_map: dict,
+    spreads_map: dict,
+) -> None:
+    key = _matchup_key(game.get('home_team', ''), game.get('away_team', ''))
+    ou_line, home_ml, away_ml, home_spread = _extract_current_game_markets(game)
+    if ou_line is not None:
+        totals_map[key] = ou_line
+    if home_ml is not None or away_ml is not None:
+        h2h_map[key] = {'home': home_ml, 'away': away_ml}
+    if home_spread is not None:
+        spreads_map[key] = {
+            'spread': abs(home_spread),
+            'favored': 'home' if home_spread < 0 else 'away',
+        }
+
+
 def fetch_odds_combined() -> tuple:
     """Return (totals_map, h2h_map, spreads_map) from a single Odds API request.
 
@@ -167,54 +245,7 @@ def fetch_odds_combined() -> tuple:
     spreads_map: dict = {}
 
     for game in data:
-        home_team = game.get("home_team", "")
-        away_team = game.get("away_team", "")
-        key = _matchup_key(home_team, away_team)
-
-        ou_line = None
-        home_ml = away_ml = None
-        home_spread = None
-
-        for bookmaker in game.get("bookmakers", []):
-            for market in bookmaker.get("markets", []):
-                mkey = market.get("key", "")
-
-                if mkey == "totals" and ou_line is None:
-                    for outcome in market.get("outcomes", []):
-                        if outcome.get("name") == "Over" and outcome.get("point"):
-                            ou_line = float(outcome["point"])
-                            break
-
-                if mkey == "h2h" and home_ml is None:
-                    for outcome in market.get("outcomes", []):
-                        name = outcome.get("name", "")
-                        price = outcome.get("price")
-                        if name == home_team:
-                            home_ml = price
-                        elif name == away_team:
-                            away_ml = price
-
-                if mkey == "spreads" and home_spread is None:
-                    for outcome in market.get("outcomes", []):
-                        if outcome.get("name") == home_team and \
-                                outcome.get("point") is not None:
-                            home_spread = float(outcome["point"])
-                            break
-
-            if ou_line is not None and home_ml is not None and \
-                    home_spread is not None:
-                break
-
-        if ou_line is not None:
-            totals_map[key] = ou_line
-        if home_ml is not None or away_ml is not None:
-            h2h_map[key] = {"home": home_ml, "away": away_ml}
-        if home_spread is not None:
-            # Home outcome's point is negative when home is favored.
-            spreads_map[key] = {
-                "spread": abs(home_spread),
-                "favored": "home" if home_spread < 0 else "away",
-            }
+        _record_current_game_markets(game, totals_map, h2h_map, spreads_map)
 
     return totals_map, h2h_map, spreads_map
 
@@ -342,6 +373,137 @@ def backfill_game_ids(pending_bets: list) -> int:
     return updated
 
 
+def _historical_bet_lines(bet_rows: list) -> tuple[dict, dict]:
+    line_by_key = {}
+    ml_by_key = {}
+    for bet in bet_rows:
+        try:
+            bet_date = (
+                bet.match_date.date()
+                if isinstance(bet.match_date, datetime)
+                else bet.match_date
+            )
+        except (AttributeError, TypeError):
+            logger.warning(
+                'Skipping bet id=%s: invalid match_date %r',
+                bet.id,
+                bet.match_date,
+            )
+            continue
+        if not isinstance(bet_date, date_type):
+            continue
+        key = (
+            bet_date.isoformat(),
+            _matchup_key(bet.team_a or '', bet.team_b or ''),
+        )
+        if (
+            bet.bet_type in (BetType.OVER.value, BetType.UNDER.value)
+            and bet.over_under_line is not None
+        ):
+            line_by_key.setdefault(key, float(bet.over_under_line))
+        if bet.bet_type == BetType.MONEYLINE.value and bet.american_odds is not None:
+            picked = _normalize_team_name((bet.picked_team or '').strip())
+            if picked:
+                ml_by_key.setdefault(key, {})[picked] = int(bet.american_odds)
+    return line_by_key, ml_by_key
+
+
+def _new_historical_game_snapshot(game: dict, game_date: date_type):
+    from app.models import GameSnapshot
+
+    return GameSnapshot(
+        espn_id=game.get('espn_id'),
+        game_date=game_date,
+        home_team=game.get('home', {}).get('name', ''),
+        away_team=game.get('away', {}).get('name', ''),
+        home_logo=game.get('home', {}).get('logo', ''),
+        away_logo=game.get('away', {}).get('logo', ''),
+        home_score=game.get('home', {}).get('score'),
+        away_score=game.get('away', {}).get('score'),
+        status=game.get('status') or 'STATUS_SCHEDULED',
+        is_final=(game.get('status') == _STATUS_FINAL),
+    )
+
+
+def _refresh_historical_game_snapshot(snap, game: dict) -> None:
+    snap.home_team = game.get('home', {}).get('name', snap.home_team)
+    snap.away_team = game.get('away', {}).get('name', snap.away_team)
+    snap.home_logo = snap.home_logo or game.get('home', {}).get('logo', '')
+    snap.away_logo = snap.away_logo or game.get('away', {}).get('logo', '')
+    snap.home_score = game.get('home', {}).get('score')
+    snap.away_score = game.get('away', {}).get('score')
+    snap.status = game.get('status') or snap.status
+    if game.get('status') == _STATUS_FINAL:
+        snap.is_final = True
+
+
+def _enrich_historical_game_snapshot(
+    snap,
+    game_date: date_type,
+    line_by_key: dict,
+    ml_by_key: dict,
+) -> tuple[int, int]:
+    odds_key = (
+        game_date.isoformat(),
+        _matchup_key(snap.home_team, snap.away_team),
+    )
+    ou_filled = 0
+    if snap.over_under_line is None and odds_key in line_by_key:
+        snap.over_under_line = line_by_key[odds_key]
+        ou_filled = 1
+
+    ml_filled = 0
+    needs_moneyline = snap.moneyline_home is None or snap.moneyline_away is None
+    if needs_moneyline and odds_key in ml_by_key:
+        slot = ml_by_key[odds_key]
+        if snap.moneyline_home is None:
+            snap.moneyline_home = slot.get(_normalize_team_name(snap.home_team))
+        if snap.moneyline_away is None:
+            snap.moneyline_away = slot.get(_normalize_team_name(snap.away_team))
+        if snap.moneyline_home is not None or snap.moneyline_away is not None:
+            ml_filled = 1
+    return ou_filled, ml_filled
+
+
+def _backfill_game_snapshot_day(
+    game_date: date_type,
+    *,
+    include_existing: bool,
+    line_by_key: dict,
+    ml_by_key: dict,
+) -> dict:
+    from app import db
+    from app.models import GameSnapshot
+
+    counts = {'scanned_games': 0, 'created': 0, 'updated': 0,
+              'ou_filled': 0, 'moneyline_filled': 0}
+    for game in fetch_espn_scoreboard(game_date.strftime('%Y%m%d')):
+        counts['scanned_games'] += 1
+        espn_id = game.get('espn_id')
+        if not espn_id:
+            continue
+        snap = GameSnapshot.query.filter_by(
+            espn_id=espn_id,
+            game_date=game_date,
+        ).first()
+        if snap is None:
+            snap = _new_historical_game_snapshot(game, game_date)
+            db.session.add(snap)
+            counts['created'] += 1
+        elif include_existing:
+            _refresh_historical_game_snapshot(snap, game)
+            counts['updated'] += 1
+        ou_filled, ml_filled = _enrich_historical_game_snapshot(
+            snap,
+            game_date,
+            line_by_key,
+            ml_by_key,
+        )
+        counts['ou_filled'] += ou_filled
+        counts['moneyline_filled'] += ml_filled
+    return counts
+
+
 def backfill_game_snapshots(
     start_date: date_type,
     end_date: date_type,
@@ -355,7 +517,7 @@ def backfill_game_snapshots(
     fills those fields from matching historical Bet records when possible.
     """
     from app import db
-    from app.models import Bet, GameSnapshot
+    from app.models import Bet
 
     if end_date < start_date:
         return {'error': 'invalid_date_range'}
@@ -368,25 +530,7 @@ def backfill_game_snapshots(
         .all()
     )
 
-    # Match key: (game_date_iso, matchup_key)
-    line_by_key: dict = {}
-    ml_by_key: dict = {}
-    for b in bet_rows:
-        try:
-            b_date = b.match_date.date() if isinstance(b.match_date, datetime) else b.match_date
-        except (AttributeError, TypeError):
-            logger.warning("Skipping bet id=%s: invalid match_date %r", b.id, b.match_date)
-            continue
-        if not isinstance(b_date, date_type):
-            continue
-        key = (b_date.isoformat(), _matchup_key(b.team_a or '', b.team_b or ''))
-        if b.bet_type in (BetType.OVER.value, BetType.UNDER.value) and b.over_under_line is not None:
-            line_by_key.setdefault(key, float(b.over_under_line))
-        if b.bet_type == BetType.MONEYLINE.value and b.american_odds is not None:
-            picked = _normalize_team_name((b.picked_team or '').strip())
-            if picked:
-                slot = ml_by_key.setdefault(key, {})
-                slot[picked] = int(b.american_odds)
+    line_by_key, ml_by_key = _historical_bet_lines(bet_rows)
 
     created = 0
     updated = 0
@@ -398,59 +542,17 @@ def backfill_game_snapshots(
     cur = start_date
     while cur <= end_date:
         scanned_days += 1
-        date_key = cur.strftime('%Y%m%d')
-        games = fetch_espn_scoreboard(date_key)
-        for game in games:
-            scanned_games += 1
-            espn_id = game.get('espn_id')
-            if not espn_id:
-                continue
-
-            snap = GameSnapshot.query.filter_by(espn_id=espn_id, game_date=cur).first()
-            if snap is None:
-                snap = GameSnapshot(
-                    espn_id=espn_id,
-                    game_date=cur,
-                    home_team=game.get('home', {}).get('name', ''),
-                    away_team=game.get('away', {}).get('name', ''),
-                    home_logo=game.get('home', {}).get('logo', ''),
-                    away_logo=game.get('away', {}).get('logo', ''),
-                    home_score=game.get('home', {}).get('score'),
-                    away_score=game.get('away', {}).get('score'),
-                    status=game.get('status') or 'STATUS_SCHEDULED',
-                    is_final=(game.get('status') == _STATUS_FINAL),
-                )
-                db.session.add(snap)
-                created += 1
-            else:
-                if include_existing:
-                    snap.home_team = game.get('home', {}).get('name', snap.home_team)
-                    snap.away_team = game.get('away', {}).get('name', snap.away_team)
-                    snap.home_logo = snap.home_logo or game.get('home', {}).get('logo', '')
-                    snap.away_logo = snap.away_logo or game.get('away', {}).get('logo', '')
-                    snap.home_score = game.get('home', {}).get('score')
-                    snap.away_score = game.get('away', {}).get('score')
-                    snap.status = game.get('status') or snap.status
-                    if game.get('status') == _STATUS_FINAL:
-                        snap.is_final = True
-                    updated += 1
-
-            odds_key = (cur.isoformat(), _matchup_key(snap.home_team, snap.away_team))
-            if snap.over_under_line is None and odds_key in line_by_key:
-                snap.over_under_line = line_by_key[odds_key]
-                ou_filled += 1
-
-            if (snap.moneyline_home is None or snap.moneyline_away is None) and odds_key in ml_by_key:
-                slot = ml_by_key[odds_key]
-                home_norm = _normalize_team_name(snap.home_team)
-                away_norm = _normalize_team_name(snap.away_team)
-                if snap.moneyline_home is None:
-                    snap.moneyline_home = slot.get(home_norm)
-                if snap.moneyline_away is None:
-                    snap.moneyline_away = slot.get(away_norm)
-                if snap.moneyline_home is not None or snap.moneyline_away is not None:
-                    ml_filled += 1
-
+        day_counts = _backfill_game_snapshot_day(
+            cur,
+            include_existing=include_existing,
+            line_by_key=line_by_key,
+            ml_by_key=ml_by_key,
+        )
+        scanned_games += day_counts['scanned_games']
+        created += day_counts['created']
+        updated += day_counts['updated']
+        ou_filled += day_counts['ou_filled']
+        ml_filled += day_counts['moneyline_filled']
         db.session.commit()
         if sleep_seconds > 0:
             _time.sleep(sleep_seconds)
@@ -580,6 +682,88 @@ def _fetch_standard_odds_for_date_window(target_date: date_type) -> tuple[list[d
     return data if isinstance(data, list) else [], 'ok'
 
 
+def _historical_market_games_for_date(
+    target_date: date_type,
+) -> tuple[list[dict], bool, bool]:
+    games, status = _fetch_historical_odds_for_date(target_date)
+    fallback_used = False
+    if not games:
+        games, fallback_status = _fetch_standard_odds_for_date_window(target_date)
+        fallback_used = fallback_status == 'ok'
+        if fallback_status != 'ok':
+            status = fallback_status
+    is_error = not games and status not in (
+        'missing_api_key',
+        'historical_payload_empty',
+    )
+    return games, fallback_used, is_error
+
+
+def _market_lines_by_matchup(
+    games: list[dict],
+) -> dict[tuple, tuple[float | None, int | None, int | None]]:
+    by_matchup = {}
+    for game in games:
+        home = game.get('home_team', '')
+        away = game.get('away_team', '')
+        if not home or not away:
+            continue
+        key = _matchup_key(home, away)
+        new_lines = _extract_market_lines_from_odds_game(game)
+        if key not in by_matchup:
+            by_matchup[key] = new_lines
+            continue
+        previous = by_matchup[key]
+        by_matchup[key] = tuple(
+            old if old is not None else new
+            for old, new in zip(previous, new_lines)
+        )
+    return by_matchup
+
+
+def _update_market_value(snapshot, field: str, value, force: bool) -> int:
+    current = getattr(snapshot, field)
+    if value is None or (not force and current is not None) or current == value:
+        return 0
+    setattr(snapshot, field, value)
+    return 1
+
+
+def _apply_historical_market_lines(
+    snapshots,
+    by_matchup: dict,
+    force: bool,
+) -> tuple[int, int, int]:
+    matched = 0
+    ou_updated = 0
+    ml_updated = 0
+    for snapshot in snapshots:
+        key = _matchup_key(snapshot.home_team, snapshot.away_team)
+        if key not in by_matchup:
+            continue
+        matched += 1
+        ou_line, home_ml, away_ml = by_matchup[key]
+        ou_updated += _update_market_value(
+            snapshot,
+            'over_under_line',
+            ou_line,
+            force,
+        )
+        ml_updated += _update_market_value(
+            snapshot,
+            'moneyline_home',
+            home_ml,
+            force,
+        )
+        ml_updated += _update_market_value(
+            snapshot,
+            'moneyline_away',
+            away_ml,
+            force,
+        )
+    return matched, ou_updated, ml_updated
+
+
 def ingest_historical_market_odds(
     start_date: date_type,
     end_date: date_type,
@@ -605,65 +789,25 @@ def ingest_historical_market_odds(
     cur = start_date
     while cur <= end_date:
         scanned_days += 1
-
-        games, status = _fetch_historical_odds_for_date(cur)
+        games, used_fallback, day_error = _historical_market_games_for_date(cur)
+        fallback_days += int(used_fallback)
         if not games:
-            games, status2 = _fetch_standard_odds_for_date_window(cur)
-            if status2 == 'ok':
-                fallback_days += 1
-            status = status2 if status2 != 'ok' else status
-
-        if not games:
-            if status not in ('missing_api_key', 'historical_payload_empty'):
-                errors += 1
+            errors += int(day_error)
             cur += timedelta(days=1)
             if sleep_seconds > 0:
                 _time.sleep(sleep_seconds)
             continue
-
         odds_games += len(games)
-        by_matchup: dict[tuple, tuple[float | None, int | None, int | None]] = {}
-        for g in games:
-            home = g.get("home_team", "")
-            away = g.get("away_team", "")
-            if not home or not away:
-                continue
-            key = _matchup_key(home, away)
-            ou_line, home_ml, away_ml = _extract_market_lines_from_odds_game(g)
-            if key not in by_matchup:
-                by_matchup[key] = (ou_line, home_ml, away_ml)
-                continue
-            # Keep first non-null values encountered.
-            prev_ou, prev_h, prev_a = by_matchup[key]
-            by_matchup[key] = (
-                prev_ou if prev_ou is not None else ou_line,
-                prev_h if prev_h is not None else home_ml,
-                prev_a if prev_a is not None else away_ml,
-            )
-
+        by_matchup = _market_lines_by_matchup(games)
         snaps = GameSnapshot.query.filter_by(game_date=cur).all()
-        for snap in snaps:
-            key = _matchup_key(snap.home_team, snap.away_team)
-            if key not in by_matchup:
-                continue
-            matched_snapshots += 1
-            ou_line, home_ml, away_ml = by_matchup[key]
-
-            if ou_line is not None and (force or snap.over_under_line is None):
-                if snap.over_under_line != ou_line:
-                    snap.over_under_line = ou_line
-                    ou_updated += 1
-
-            if home_ml is not None and (force or snap.moneyline_home is None):
-                if snap.moneyline_home != home_ml:
-                    snap.moneyline_home = home_ml
-                    ml_updated += 1
-
-            if away_ml is not None and (force or snap.moneyline_away is None):
-                if snap.moneyline_away != away_ml:
-                    snap.moneyline_away = away_ml
-                    ml_updated += 1
-
+        matched, day_ou_updated, day_ml_updated = _apply_historical_market_lines(
+            snaps,
+            by_matchup,
+            force,
+        )
+        matched_snapshots += matched
+        ou_updated += day_ou_updated
+        ml_updated += day_ml_updated
         db.session.commit()
         cur += timedelta(days=1)
         if sleep_seconds > 0:

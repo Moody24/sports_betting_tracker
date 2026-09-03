@@ -5,6 +5,27 @@ from unittest.mock import patch
 
 
 class TestNBAService(unittest.TestCase):
+    def test_extract_current_markets_combines_partial_moneylines(self):
+        from app.services.nba_service import _extract_current_game_markets
+
+        game = {
+            'home_team': 'Denver Nuggets',
+            'away_team': 'Los Angeles Lakers',
+            'bookmakers': [
+                {'markets': [{'key': 'h2h', 'outcomes': [
+                    {'name': 'Los Angeles Lakers', 'price': 260},
+                ]}]},
+                {'markets': [{'key': 'h2h', 'outcomes': [
+                    {'name': 'Denver Nuggets', 'price': -320},
+                ]}]},
+            ],
+        }
+
+        self.assertEqual(
+            _extract_current_game_markets(game),
+            (None, -320, 260, None),
+        )
+
     @patch.dict("os.environ", {"ODDS_API_KEY": "test-key"})
     def test_fetch_odds_combined_returns_spreads_map(self):
         canned = [{
