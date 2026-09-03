@@ -1,13 +1,25 @@
 import logging
 from collections import defaultdict
+from xml.sax.saxutils import escape
 
-from flask import Blueprint, jsonify, render_template, request, redirect, url_for, flash
+from flask import (
+    Blueprint,
+    Response,
+    current_app,
+    flash,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    url_for,
+)
 from flask_login import current_user, fresh_login_required, login_required
 from sqlalchemy import func, case, text
 
 from app import db, csrf, limiter
 from app.enums import Outcome
 from app.models import Bet, compute_bets_net_pl, compute_bets_wagered
+from app.public_pages import HOME_PAGE, PUBLIC_PAGE_BY_ENDPOINT, PUBLIC_PAGES
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +146,84 @@ def ready_model2():
 
 @main.route('/')
 def home():
-    return render_template('home.html')
+    return render_template('home.html', page=HOME_PAGE)
+
+
+def _render_public_page():
+    return render_template(
+        'public_page.html',
+        page=PUBLIC_PAGE_BY_ENDPOINT[request.endpoint],
+    )
+
+
+@main.route('/methodology')
+def methodology():
+    return _render_public_page()
+
+
+@main.route('/responsible-gambling')
+def responsible_gambling():
+    return _render_public_page()
+
+
+@main.route('/privacy')
+def privacy():
+    return _render_public_page()
+
+
+@main.route('/terms')
+def terms():
+    return _render_public_page()
+
+
+@main.route('/data-sources')
+def data_sources():
+    return _render_public_page()
+
+
+@main.route('/about')
+def about():
+    return _render_public_page()
+
+
+@main.route('/robots.txt')
+def robots_txt():
+    if not current_app.config['DEPLOYMENT_IS_PRODUCTION']:
+        body = 'User-agent: *\nDisallow: /\n'
+    else:
+        base_url = current_app.config['PUBLIC_BASE_URL']
+        body = (
+            'User-agent: *\n'
+            'Allow: /\n'
+            'Disallow: /auth/\n'
+            'Disallow: /bets\n'
+            'Disallow: /dashboard\n'
+            'Disallow: /nba/\n'
+            'Disallow: /health\n'
+            'Disallow: /ready\n'
+            'Disallow: /telemetry/\n'
+            f'Sitemap: {base_url}/sitemap.xml\n'
+        )
+    return Response(body, content_type='text/plain; charset=utf-8')
+
+
+@main.route('/sitemap.xml')
+def sitemap_xml():
+    base_url = current_app.config['PUBLIC_BASE_URL']
+    entries = '\n'.join(
+        '  <url>'
+        f'<loc>{escape(base_url + page.path)}</loc>'
+        f'<lastmod>{page.last_modified}</lastmod>'
+        '</url>'
+        for page in (HOME_PAGE, *PUBLIC_PAGES)
+    )
+    body = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        f'{entries}\n'
+        '</urlset>\n'
+    )
+    return Response(body, content_type='application/xml; charset=utf-8')
 
 
 @main.route('/telemetry/ux', methods=['POST'])

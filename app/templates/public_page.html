@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block title %}{{ page.title }} · Edge Tracker{% endblock %}
+{% block page_title %}{{ page.title }}{% endblock %}
+{% block page_subtitle %}Last updated {{ page.last_modified }}{% endblock %}
+
+{% block content %}
+<article class="public-document">
+  <header class="public-document-lead">
+    <span class="eyebrow">{{ page.kicker }}</span>
+    <p>{{ page.intro }}</p>
+  </header>
+
+  {% for heading, paragraphs in page.sections %}
+    <section class="public-document-section" aria-labelledby="section-{{ loop.index }}">
+      <div class="band">
+        <h2 id="section-{{ loop.index }}">{{ heading }}</h2>
+        <span>{{ '%02d'|format(loop.index) }}</span>
+      </div>
+      <div class="public-document-copy">
+        {% for paragraph in paragraphs %}<p>{{ paragraph }}</p>{% endfor %}
+      </div>
+    </section>
+  {% endfor %}
+
+  {% if request.endpoint == 'main.about' %}
+    <div class="public-document-action">
+      <a class="act act-primary" href="https://github.com/Moody24/sports_betting_tracker/issues">Open the issue tracker</a>
+    </div>
+  {% endif %}
+</article>
+{% endblock %}

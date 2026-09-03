@@ -1,101 +1,66 @@
 {% extends "base.html" %}
 
-{% block title %}Home · Edge Tracker{% endblock %}
+{% block title %}{{ page.title }} · Edge Tracker{% endblock %}
 {% block page_title %}Edge Tracker{% endblock %}
-{% block page_subtitle %}Your edge. Tracked.{% endblock %}
+{% block page_subtitle %}Track the record. Inspect the model. Keep the claims honest.{% endblock %}
 
 {% block content %}
-<div class="card-soft overflow-hidden mb-4">
-  <div class="home-hero">
-    <span class="home-hero-badge">NBA · Player Props · ML Projections</span>
-    <h2 class="home-hero-headline">
-      Track Every Bet.<br>
-      <span class="home-headline-accent">Find Your Edge.</span>
-    </h2>
-    <p class="home-hero-sub">
-      A professional-grade dashboard to monitor ROI, units won, and betting discipline —
-      powered by ML projections and real-time stat tracking.
-    </p>
-    <div class="home-cta-group">
+<section class="home-sheet" aria-labelledby="home-heading">
+  <div class="home-sheet-lead">
+    <span class="eyebrow">{{ page.kicker }}</span>
+    <h2 id="home-heading">A betting ledger built for review, not hype.</h2>
+    <p>{{ page.intro }}</p>
+    <div class="home-sheet-actions">
       {% if current_user.is_authenticated %}
-        <a href="{{ url_for('main.dashboard') }}" class="btn btn-primary btn-lg px-4">
-          {{ icon('grid-1x2', classes='me-2') }}Dashboard
-        </a>
-        <a href="{{ url_for('bet.nba_today') }}" class="btn btn-outline-light btn-lg px-4">
-          {{ icon('dribbble', classes='me-2') }}NBA Today
-        </a>
+        <a href="{{ url_for('main.dashboard') }}" class="act act-primary">Open dashboard</a>
+        <a href="{{ url_for('bet.nba_today') }}" class="act">Review NBA today</a>
       {% else %}
-        <a href="{{ url_for('auth.register') }}" class="btn btn-primary btn-lg px-4">
-          {{ icon('person-plus', classes='me-2') }}Get Started Free
-        </a>
-        <a href="{{ url_for('auth.login') }}" class="btn btn-outline-light btn-lg px-4">
-          Sign In
-        </a>
+        <a href="{{ url_for('auth.register') }}" class="act act-primary">Create account</a>
+        <a href="{{ url_for('auth.login') }}" class="act">Sign in</a>
       {% endif %}
     </div>
   </div>
 
-  <div class="home-stat-strip">
-    <div class="home-stat-item">
-      <div class="home-stat-value">37</div>
-      <div class="home-stat-label">ML Features</div>
-    </div>
-    <div class="home-stat-item">
-      <div class="home-stat-value">6</div>
-      <div class="home-stat-label">Stat Types</div>
-    </div>
-    <div class="home-stat-item">
-      <div class="home-stat-value">XGBoost</div>
-      <div class="home-stat-label">Model Engine</div>
-    </div>
-    <div class="home-stat-item">
-      <div class="home-stat-value">Live</div>
-      <div class="home-stat-label">Prop Tracker</div>
-    </div>
+  <div class="band home-capability-band">
+    <span>Current capability</span>
+    <span>Scope</span>
   </div>
-
-  <div class="px-3 pb-4">
-    <p class="text-secondary small text-center mb-3 text-uppercase fw-semibold home-section-kicker">Everything you need</p>
-    <div class="home-feature-grid">
-      <div class="home-feature-card">
-        {{ icon('graph-up-arrow', classes='home-feature-icon') }}
-        <div class="home-feature-title">Performance Dashboard</div>
-        <div class="home-feature-desc">Net P/L, ROI, win rate, and streak tracking with interactive charts.</div>
-      </div>
-      <div class="home-feature-card">
-        {{ icon('cpu', classes='home-feature-icon') }}
-        <div class="home-feature-title">ML Projections</div>
-        <div class="home-feature-desc">XGBoost models project player stats and surface +EV edges automatically.</div>
-      </div>
-      <div class="home-feature-card">
-        {{ icon('activity', classes='home-feature-icon') }}
-        <div class="home-feature-title">Live Prop Tracker</div>
-        <div class="home-feature-desc">Real-time stat tracking during NBA games with period and clock display.</div>
-      </div>
-      <div class="home-feature-card">
-        {{ icon('stars', classes='home-feature-icon') }}
-        <div class="home-feature-title">Auto Picks</div>
-        <div class="home-feature-desc">Daily top plays and best parlay recommendations with confidence tiers.</div>
-      </div>
-      <div class="home-feature-card">
-        {{ icon('search', classes='home-feature-icon') }}
-        <div class="home-feature-title">Bet Postmortems</div>
-        <div class="home-feature-desc">Understand why each bet won or lost with detailed stat breakdowns.</div>
-      </div>
-      <div class="home-feature-card">
-        {{ icon('download', classes='home-feature-icon') }}
-        <div class="home-feature-title">CSV Export</div>
-        <div class="home-feature-desc">Export your full bet history for external analysis anytime.</div>
-      </div>
+  <div class="row-line home-capability-row">
+    <div>
+      <div class="row-lead">Private bet ledger</div>
+      <div class="row-sub">Record stakes, odds, notes, outcomes, parlays, and exports.</div>
     </div>
+    <span class="tag">Account</span>
   </div>
-</div>
+  <div class="row-line home-capability-row">
+    <div>
+      <div class="row-lead">Performance review</div>
+      <div class="row-sub">Measure settled results, units, ROI, streaks, and bet history.</div>
+    </div>
+    <span class="tag">NBA</span>
+  </div>
+  <div class="row-line home-capability-row">
+    <div>
+      <div class="row-lead">Projection analysis</div>
+      <div class="row-sub">Compare model estimates with available player-prop lines and uncertainty.</div>
+    </div>
+    <span class="tag">Informational</span>
+  </div>
+  <div class="row-line home-capability-row">
+    <div>
+      <div class="row-lead">Live game context</div>
+      <div class="row-sub">Follow available scores and prop progress when configured providers respond.</div>
+    </div>
+    <span class="tag">Provider-led</span>
+  </div>
+</section>
 
-{% if not current_user.is_authenticated %}
-<div class="card-soft p-4 text-center">
-  <h4 class="h5 mb-2">Ready to track your edge?</h4>
-  <p class="text-secondary small mb-3">Create a free account and start logging bets in seconds.</p>
-  <a href="{{ url_for('auth.register') }}" class="btn btn-primary px-4">Create Account</a>
-</div>
-{% endif %}
+<section class="home-disclosure" aria-labelledby="disclosure-heading">
+  <div>
+    <span class="eyebrow">Evidence boundary</span>
+    <h2 id="disclosure-heading">A projection is not a guaranteed edge.</h2>
+  </div>
+  <p>Profitability is unproven until enough real, time-stamped market quotes and graded outcomes pass the validation gates. Betting involves financial risk.</p>
+  <a href="{{ url_for('main.methodology') }}">Read the methodology</a>
+</section>
 {% endblock %}

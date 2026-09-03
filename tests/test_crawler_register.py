@@ -30,7 +30,15 @@ PRIVATE_PAGES = [
     '/nba/analysis',
     '/nba/stat-analysis',
 ]
-PUBLIC_PAGES = ['/']
+PUBLIC_PAGES = [
+    '/',
+    '/methodology',
+    '/responsible-gambling',
+    '/privacy',
+    '/terms',
+    '/data-sources',
+    '/about',
+]
 
 
 class TestCrawlerRegister(BaseTestCase):
@@ -80,7 +88,18 @@ class TestCrawlerRegister(BaseTestCase):
         page's copy reviewed against the honesty contract (no fabricated win
         rates or accuracy claims), not slipped in with a refactor.
         """
-        self.assertEqual(set(PUBLIC_ENDPOINTS), {'main.home'})
+        self.assertEqual(
+            set(PUBLIC_ENDPOINTS),
+            {
+                'main.home',
+                'main.methodology',
+                'main.responsible_gambling',
+                'main.privacy',
+                'main.terms',
+                'main.data_sources',
+                'main.about',
+            },
+        )
 
 
 if __name__ == '__main__':

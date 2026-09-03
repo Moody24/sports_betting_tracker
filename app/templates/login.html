@@ -5,52 +5,55 @@
 {% block page_subtitle %}Sign in to continue tracking your edge.{% endblock %}
 
 {% block content %}
-<div class="row justify-content-center">
-  <div class="col-12 col-md-8 col-lg-5">
-    <div class="card-soft overflow-hidden">
-      <div class="auth-brand-header">
-        <div class="brand-dot"></div>
-        <div class="auth-brand-title">Edge Tracker</div>
-        <p class="text-secondary small mb-0 auth-brand-subtitle">Sign in to your account</p>
-      </div>
-      <div class="auth-card-body">
-        <form method="POST" novalidate class="vstack gap-3">
-          {{ form.hidden_tag() }}
-
-          <div>
-            <label class="form-label small fw-semibold" for="username">Username</label>
-            <div class="input-group">
-              <span class="input-group-text">{{ icon('person') }}</span>
-              {{ form.username(class='form-control' ~ (' is-invalid' if form.username.errors else ''), id='username', placeholder='Enter username', autocomplete='username', **({'aria-invalid': 'true'} if form.username.errors else {})) }}
-            </div>
-            {% for e in form.username.errors %}<div class="invalid-feedback d-block">{{ e }}</div>{% endfor %}
-          </div>
-
-          <div>
-            <label class="form-label small fw-semibold" for="password">Password</label>
-            <div class="input-group">
-              <span class="input-group-text">{{ icon('lock') }}</span>
-              {{ form.password(class='form-control' ~ (' is-invalid' if form.password.errors else ''), id='password', placeholder='Enter password', autocomplete='current-password', **({'aria-invalid': 'true'} if form.password.errors else {})) }}
-            </div>
-            {% for e in form.password.errors %}<div class="invalid-feedback d-block">{{ e }}</div>{% endfor %}
-          </div>
-
-          <div class="d-flex justify-content-between align-items-center">
-            <div class="form-check mb-0">
-              {{ form.remember(class="form-check-input", id="remember") }}
-              <label class="form-check-label small" for="remember">Remember me</label>
-            </div>
-          </div>
-
-          {{ form.submit(class="btn btn-primary btn-lg w-100 fw-semibold") }}
-        </form>
-
-        <p class="text-secondary small mb-0 mt-4 text-center">
-          Don't have an account?
-          <a class="link-light fw-semibold" href="{{ url_for('auth.register') }}">Create one</a>
-        </p>
-      </div>
+<div class="auth-layout">
+  <section class="auth-sheet" aria-labelledby="login-heading">
+    <div class="band">
+      <span>Account access</span>
+      <span class="tag">Private</span>
     </div>
-  </div>
+    <div class="auth-intro">
+      <span class="eyebrow">Edge Tracker</span>
+      <h2 id="login-heading">Sign in</h2>
+      <p>Use your account to open the private betting ledger and analysis tools.</p>
+    </div>
+
+    <form method="POST" novalidate class="auth-form">
+      {{ form.hidden_tag() }}
+
+      <div class="field-row">
+        <label for="username">Username</label>
+        {{ form.username(class='field-input' ~ (' is-invalid' if form.username.errors else ''), id='username', placeholder='Enter username', autocomplete='username', **({'aria-invalid': 'true', 'aria-describedby': 'username-errors'} if form.username.errors else {})) }}
+        {% if form.username.errors %}
+          <div class="field-errors" id="username-errors">
+            {% for error in form.username.errors %}<span>{{ error }}</span>{% endfor %}
+          </div>
+        {% endif %}
+      </div>
+
+      <div class="field-row">
+        <label for="password">Password</label>
+        {{ form.password(class='field-input' ~ (' is-invalid' if form.password.errors else ''), id='password', placeholder='Enter password', autocomplete='current-password', **({'aria-invalid': 'true', 'aria-describedby': 'password-errors'} if form.password.errors else {})) }}
+        {% if form.password.errors %}
+          <div class="field-errors" id="password-errors">
+            {% for error in form.password.errors %}<span>{{ error }}</span>{% endfor %}
+          </div>
+        {% endif %}
+      </div>
+
+      <div class="auth-options">
+        <div class="form-check mb-0">
+          {{ form.remember(class="form-check-input", id="remember") }}
+          <label class="form-check-label" for="remember">Remember me</label>
+        </div>
+      </div>
+
+      {{ form.submit(class="act act-primary auth-submit") }}
+    </form>
+
+    <div class="row-line auth-switch">
+      <span>New to Edge Tracker?</span>
+      <a href="{{ url_for('auth.register') }}">Create an account</a>
+    </div>
+  </section>
 </div>
 {% endblock %}

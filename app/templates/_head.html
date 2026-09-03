@@ -14,6 +14,19 @@
 #}
 {% if page_is_public %}
   <meta name="robots" content="index, follow">
+  <meta name="description" content="{{ public_page_meta.description }}">
+  <link rel="canonical" href="{{ canonical_url }}">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Edge Tracker">
+  <meta property="og:title" content="{{ public_page_meta.title }} · Edge Tracker">
+  <meta property="og:description" content="{{ public_page_meta.description }}">
+  <meta property="og:url" content="{{ canonical_url }}">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="{{ public_page_meta.title }} · Edge Tracker">
+  <meta name="twitter:description" content="{{ public_page_meta.description }}">
+  {% for data in structured_data %}
+    <script type="application/ld+json" nonce="{{ csp_nonce }}">{{ data|tojson }}</script>
+  {% endfor %}
 {% else %}
   <meta name="robots" content="noindex, nofollow">
 {% endif %}

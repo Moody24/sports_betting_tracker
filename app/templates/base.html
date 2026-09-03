@@ -98,7 +98,23 @@
       <div class="sheet">
 
       <header class="topbar">
-        {% block topbar_breadcrumb %}{% endblock %}
+        {% block topbar_breadcrumb %}
+          {% if breadcrumbs %}
+            <nav class="breadcrumbs" aria-label="Breadcrumb">
+              <ol>
+                {% for item in breadcrumbs %}
+                  <li>
+                    {% if item.current %}
+                      <span aria-current="page">{{ item.label }}</span>
+                    {% else %}
+                      <a href="{{ item.url }}">{{ item.label }}</a>
+                    {% endif %}
+                  </li>
+                {% endfor %}
+              </ol>
+            </nav>
+          {% endif %}
+        {% endblock %}
         <h1 class="h4 mb-0">{% block page_title %}Overview{% endblock %}</h1>
         <p class="mb-0 topbar-subtitle">{% block page_subtitle %}Track your edge.{% endblock %}</p>
       </header>
@@ -130,7 +146,17 @@
       </div>{# /.sheet #}
     </main>
 
-    <div class="colophon">&copy; {{ current_year }} Edge Tracker</div>
+    <footer class="colophon">
+      <span>&copy; {{ current_year }} Edge Tracker</span>
+      <nav aria-label="Trust and legal">
+        <a href="{{ url_for('main.methodology') }}">Methodology</a>
+        <a href="{{ url_for('main.responsible_gambling') }}">Responsible gambling</a>
+        <a href="{{ url_for('main.data_sources') }}">Data sources</a>
+        <a href="{{ url_for('main.privacy') }}">Privacy</a>
+        <a href="{{ url_for('main.terms') }}">Terms</a>
+        <a href="{{ url_for('main.about') }}">About</a>
+      </nav>
+    </footer>
   </div>
 
   <script src="{{ url_for('static', filename='js/ux_telemetry.js') }}"></script>

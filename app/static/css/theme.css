@@ -304,6 +304,10 @@ h1, h2, h3, h4, h5, h6,
 
 /* The colophon — a newspaper's imprint line, set at the foot of the desk. */
 .colophon {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-3);
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.62rem;
   letter-spacing: 0.06em;
@@ -315,6 +319,16 @@ h1, h2, h3, h4, h5, h6,
   width: 100%;
   margin-inline: auto;
   text-align: left;
+}
+
+.colophon nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+}
+
+.colophon a {
+  color: inherit;
 }
 
 /* the heavy nameplate rule — the thing every masthead has */
@@ -448,6 +462,38 @@ h1, h2, h3, h4, h5, h6,
   font-size: var(--type-xs);
   letter-spacing: 0.03em;
   line-height: 1.35;
+  color: var(--text-muted);
+}
+
+.breadcrumbs {
+  max-width: 100%;
+  margin-bottom: var(--space-2);
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.breadcrumbs ol {
+  display: flex;
+  align-items: center;
+  width: max-content;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--font-mono);
+  font-size: var(--type-2xs);
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.breadcrumbs li + li::before {
+  content: '/';
+  padding-inline: var(--space-2);
+  color: var(--text-dim);
+}
+
+.breadcrumbs a,
+.breadcrumbs span {
   color: var(--text-muted);
 }
 
@@ -4766,6 +4812,260 @@ a:hover {
 @media (max-width: 47.99rem) {
   .dashboard-quick-bet {
     justify-content: flex-start;
+  }
+}
+
+/* Public trust pages */
+.home-sheet {
+  border: 1px solid var(--border-mid);
+}
+
+.home-sheet-lead {
+  padding: clamp(1.5rem, 6vw, 4.5rem) clamp(var(--space-4), 6vw, 4rem);
+  border-bottom: 1px solid var(--border-mid);
+}
+
+.home-sheet-lead h2 {
+  max-width: 52rem;
+  margin: var(--space-3) 0;
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 6vw, 4.75rem);
+  font-weight: 700;
+  letter-spacing: -.045em;
+  line-height: .98;
+}
+
+.home-sheet-lead > p {
+  max-width: 42rem;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: clamp(1rem, 2vw, 1.15rem);
+}
+
+.home-sheet-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: 1.5rem;
+}
+
+.home-capability-band,
+.home-capability-row {
+  --cols: minmax(0, 1fr) auto;
+}
+
+.home-capability-band {
+  align-items: center;
+  color: var(--text-dim);
+  font-family: var(--font-display);
+  font-size: var(--type-xs);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.home-disclosure {
+  display: grid;
+  grid-template-columns: minmax(12rem, .8fr) minmax(16rem, 1.2fr) auto;
+  align-items: end;
+  gap: clamp(var(--space-4), 4vw, 2rem);
+  margin-top: 1.5rem;
+  padding: clamp(var(--space-4), 4vw, 2rem) 0;
+  border-block: 1px solid var(--border-mid);
+}
+
+.home-disclosure h2 {
+  margin: var(--space-2) 0 0;
+  font-family: var(--font-display);
+  font-size: clamp(1.2rem, 3vw, 1.75rem);
+}
+
+.home-disclosure p {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.home-disclosure a {
+  white-space: nowrap;
+  font-weight: 700;
+}
+
+@media (max-width: 47.99rem) {
+  .home-disclosure {
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+}
+
+.public-document {
+  width: min(100%, 52rem);
+  margin-inline: auto;
+  border: 1px solid var(--border-mid);
+}
+
+.public-document-lead {
+  padding: clamp(var(--space-4), 5vw, 2.5rem);
+  border-bottom: 1px solid var(--border-mid);
+}
+
+.public-document-lead p {
+  max-width: 46rem;
+  margin: var(--space-3) 0 0;
+  font-family: var(--font-display);
+  font-size: clamp(1.1rem, 2vw, 1.35rem);
+  line-height: 1.45;
+}
+
+.public-document-section .band {
+  --cols: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.public-document-section .band h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--type-sm);
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.public-document-section .band span {
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: var(--type-xs);
+}
+
+.public-document-copy {
+  padding: clamp(var(--space-4), 5vw, 2rem);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.public-document-copy p {
+  max-width: 44rem;
+  margin: 0;
+  color: var(--text-muted);
+  line-height: var(--lh-body);
+}
+
+.public-document-copy p + p {
+  margin-top: var(--space-3);
+}
+
+.public-document-action {
+  padding: var(--space-4);
+}
+
+/* Authentication sheets */
+.auth-layout {
+  display: grid;
+  place-items: start center;
+  padding: clamp(var(--space-4), 5vw, 3rem) 0;
+}
+
+.auth-sheet {
+  width: min(100%, 42rem);
+  border: 1px solid var(--border-mid);
+  background: var(--bg-panel);
+}
+
+.auth-sheet .band {
+  --cols: minmax(0, 1fr) auto;
+}
+
+.auth-intro {
+  padding: clamp(var(--space-4), 5vw, 2rem);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.auth-intro h2 {
+  margin: var(--space-2) 0 var(--space-2);
+  font-family: var(--font-display);
+  font-size: clamp(1.6rem, 4vw, 2.25rem);
+}
+
+.auth-intro p {
+  max-width: 34rem;
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.auth-form {
+  display: grid;
+  gap: var(--space-4);
+  padding: clamp(var(--space-4), 5vw, 2rem);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.auth-field-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.field-row {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.field-row > label {
+  color: var(--text-muted);
+  font-family: var(--font-display);
+  font-size: var(--type-xs);
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.field-input {
+  width: 100%;
+  min-height: 2.75rem;
+  border: 1px solid var(--border-mid);
+  border-radius: 0;
+  background: var(--bg);
+  color: var(--text-main);
+  padding: .65rem .75rem;
+}
+
+.field-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--focus-ring-shadow);
+  outline: 0;
+}
+
+.field-input.is-invalid {
+  border-color: var(--loss);
+}
+
+.field-errors {
+  display: grid;
+  color: var(--loss);
+  font-size: var(--type-sm);
+}
+
+.auth-options {
+  color: var(--text-muted);
+  font-size: var(--type-sm);
+}
+
+.auth-submit {
+  width: 100%;
+  justify-content: center;
+}
+
+.auth-switch {
+  --cols: minmax(0, 1fr) auto;
+  padding-inline: clamp(var(--space-4), 5vw, 2rem);
+  color: var(--text-muted);
+}
+
+.auth-switch a {
+  font-weight: 700;
+}
+
+@media (max-width: 35.99rem) {
+  .auth-field-pair,
+  .auth-switch {
+    --cols: 1fr;
+    grid-template-columns: 1fr;
   }
 }
 

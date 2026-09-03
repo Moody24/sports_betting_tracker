@@ -6,6 +6,7 @@ import secrets
 import sys
 from time import perf_counter
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlparse
 
 from flask import Flask, g, get_template_attribute, request
 from flask_limiter import Limiter
@@ -15,6 +16,12 @@ from flask_migrate import Migrate, upgrade as _upgrade
 from flask_sqlalchemy import SQLAlchemy
 from flask_wtf.csrf import CSRFProtect
 from sqlalchemy.exc import DBAPIError, OperationalError
+
+from app.public_pages import (
+    PUBLIC_ENDPOINTS,
+    PUBLIC_PAGE_BY_ENDPOINT,
+    breadcrumbs_for,
+)
 
 if 'unittest' in ' '.join(str(a).lower() for a in (sys.argv or [])):
     os.environ.setdefault('SECRET_KEY', 'test-only-insecure-key')
@@ -49,21 +56,6 @@ def _is_non_server_invocation(argv: list[str] | None = None) -> bool:
             and args[1] in {'-c', '-m', '-'}
         )
     )
-
-
-# Endpoints a search engine may index. Everything else renders
-# `noindex, nofollow`.
-#
-# This is an allowlist rather than a blocklist on purpose: it FAILS CLOSED, so
-# a route added later is private until somebody deliberately publishes it. The
-# opposite default leaks user-specific betting data — bet history, stakes,
-# P/L — into a search index, and no later fix un-indexes it.
-#
-# Adding to this set is a publishing decision. `tests/test_crawler_register.py`
-# asserts every HTML-rendering GET route resolves to exactly one register.
-PUBLIC_ENDPOINTS = frozenset({
-    'main.home',
-})
 
 
 def _database_url(testing: bool) -> str:
@@ -152,6 +144,23 @@ def _configure_app(app: Flask, testing: bool) -> None:
         or os.getenv('FLASK_ENV') == 'production'
     )
     app.config['DEPLOYMENT_IS_PRODUCTION'] = is_production
+    public_base_url = os.getenv('PUBLIC_BASE_URL', 'http://localhost:5000').rstrip('/')
+    parsed_public_url = urlparse(public_base_url)
+    if (
+        parsed_public_url.scheme not in {'http', 'https'}
+        or not parsed_public_url.netloc
+        or parsed_public_url.path not in {'', '/'}
+        or parsed_public_url.params
+        or parsed_public_url.query
+        or parsed_public_url.fragment
+    ):
+        raise RuntimeError(
+            'PUBLIC_BASE_URL must be an absolute origin without a path, query, '
+            'or fragment.'
+        )
+    if is_production and parsed_public_url.scheme != 'https':
+        raise RuntimeError('PUBLIC_BASE_URL must use HTTPS in production.')
+    app.config['PUBLIC_BASE_URL'] = public_base_url
     app.config['WEB_CONCURRENCY'] = _positive_int_env('WEB_CONCURRENCY', 1)
     secure_default = 'true' if is_production else 'false'
     app.config['SESSION_COOKIE_SECURE'] = (
@@ -231,12 +240,50 @@ def _register_template_context(app: Flask) -> None:
     def inject_user():
         if request.endpoint in ('health', 'ready', 'healthcheck'):
             return {}
+        endpoint = request.endpoint
+        page_is_public = endpoint in PUBLIC_ENDPOINTS
+        public_page = PUBLIC_PAGE_BY_ENDPOINT.get(endpoint)
+        breadcrumbs = breadcrumbs_for(endpoint)
+        canonical_url = None
+        structured_data = []
+        if page_is_public and public_page:
+            canonical_url = f"{app.config['PUBLIC_BASE_URL']}{public_page.path}"
+            if breadcrumbs:
+                structured_data.append({
+                    '@context': 'https://schema.org',
+                    '@type': 'BreadcrumbList',
+                    'itemListElement': [
+                        {
+                            '@type': 'ListItem',
+                            'position': position,
+                            'name': item['label'],
+                            'item': canonical_url if item['current'] else (
+                                f"{app.config['PUBLIC_BASE_URL']}{item['url']}"
+                            ),
+                        }
+                        for position, item in enumerate(breadcrumbs, start=1)
+                    ],
+                })
+            if endpoint == 'main.home':
+                structured_data.append({
+                    '@context': 'https://schema.org',
+                    '@type': 'SoftwareApplication',
+                    'name': 'Edge Tracker',
+                    'applicationCategory': 'FinanceApplication',
+                    'operatingSystem': 'Web',
+                    'url': canonical_url,
+                    'description': public_page.description,
+                })
         return {
             'current_user': current_user,
             'current_year': datetime.now(timezone.utc).year,
             'logout_form': LogoutForm(),
             'csp_nonce': _csp_nonce(),
-            'page_is_public': request.endpoint in PUBLIC_ENDPOINTS,
+            'page_is_public': page_is_public,
+            'public_page_meta': public_page,
+            'canonical_url': canonical_url,
+            'breadcrumbs': breadcrumbs,
+            'structured_data': structured_data,
             **display_config,
         }
 
