@@ -108,7 +108,8 @@ SECRET_KEY=test python -m coverage run -m unittest discover -s tests -v
 python -m coverage report --include="app/*"
 ```
 
-CI coverage gate: 75% · roadmap target: 80%. Test runner is **unittest** (not pytest).
+CI coverage gate: 75% · current application coverage: 85%. Test runner is
+**unittest** (not pytest).
 
 Current cleanup status and deliberately retained follow-up work are tracked in
 [`docs/tech-debt-register.md`](docs/tech-debt-register.md).

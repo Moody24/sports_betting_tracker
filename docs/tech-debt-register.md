@@ -10,7 +10,7 @@ than remaining as an open checklist.
 
 - Canonical guardrail: `scripts/predeploy_guardrails.sh`
 - Test runner: `unittest`
-- Full verification: 1,265 tests passing, 80% application coverage
+- Full verification: 1,300 tests passing, 85% application coverage
 - Static/security gates: Ruff, Bandit, detect-secrets, Git-history credential
   scanning, and pip-audit passing
 - Ruff C901 inventory: 0 functions, down from 59 before this cleanup
@@ -83,5 +83,5 @@ and architecture-contract tests are the reproducible measures for this repo.
 
 ## Next cleanup order
 
-1. Re-run the canonical guardrail and update this register's dated baseline.
-2. Revisit inactive Railway material only after a hosting decision is made.
+The repository cleanup is complete. Revisit inactive Railway material only
+after a hosting decision is made.
