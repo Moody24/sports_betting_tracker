@@ -2,6 +2,19 @@
 
 A Flask web application for recording bets, tracking outcomes, projecting player props via XGBoost ML models, and understanding betting performance over time. Currently focused on NBA with architecture in place for multi-sport expansion.
 
+## Project Status
+
+The repository-owned NBA scope is complete: the application, Sheet UI, security
+contracts, migration tooling, test coverage, and technical-debt cleanup have been
+implemented and verified. The current release baseline passes 1,323 unittests at
+85% application coverage and 58 Playwright browser tests.
+
+Hosted deployment is intentionally inactive. A production launch still requires
+operator-owned infrastructure, secrets, backups, monitoring, and legal/product
+decisions. Model profitability is not claimed; promotion remains gated on licensed
+real decision/closing lines and at least 400 eligible resolved picks. MLB and NFL
+are separate future product scopes, not partially implemented features.
+
 ## Features
 
 - User registration, login, and logout with secure password hashing
@@ -13,6 +26,10 @@ A Flask web application for recording bets, tracking outcomes, projecting player
 - Automated bet grading and postmortem diagnostics
 - ML model health monitoring and calibration drift detection
 - Database migrations with Flask-Migrate (Alembic)
+- Explicit authentication, ownership, CSRF, response, and rate-limit policy for every route
+- Safe HTML/JSON error handling with request correlation
+- Public methodology, data-source, privacy, terms, and responsible-gambling pages
+- Guarded SQLite-to-PostgreSQL migration tooling and production readiness checks
 
 ## Tech Stack
 
@@ -117,6 +134,22 @@ Current cleanup status and deliberately retained follow-up work are tracked in
 [`docs/tech-debt-register.md`](docs/tech-debt-register.md).
 The repository/external launch boundary is tracked in
 [`docs/launch-readiness-and-expansion-todo.md`](docs/launch-readiness-and-expansion-todo.md).
+
+Run the browser suite after installing the Node development dependencies and
+Playwright Chromium:
+
+```bash
+npm ci
+npx playwright install chromium
+npm run test:e2e
+```
+
+The canonical combined release check runs linting, security and secret scans,
+dependency auditing, the full unittest suite, and the coverage gate:
+
+```bash
+./scripts/predeploy_guardrails.sh
+```
 
 ## Linting
 
