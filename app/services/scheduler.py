@@ -403,10 +403,246 @@ def _build_straight_plays(qualifying: list, min_edge_straight: float) -> list:
     return straight_plays
 
 
+def _market_key(play: dict) -> tuple:
+    return (
+        play.get('player'),
+        play.get('prop_type'),
+        play.get('line'),
+        play.get('recommended_side'),
+        play.get('game_id'),
+    )
+
+
+def _pick_distinct_legs(
+    pool: list,
+    count: int,
+    min_edge: float,
+    used_players: set,
+) -> list:
+    """Pick legs with unique players and games, updating used_players."""
+    legs = []
+    used_games = set()
+    for play in pool:
+        if len(legs) >= count:
+            break
+        player = play.get('player') or ''
+        game_id = play.get('game_id') or ''
+        if (play.get('edge') or 0) < min_edge or player in used_players:
+            continue
+        if game_id and game_id in used_games:
+            continue
+        legs.append(play)
+        used_games.add(game_id)
+        used_players.add(player)
+    return legs
+
+
+def _build_parlay_groups(qualifying: list, straight_plays: list, Bet) -> list:
+    """Build three-leg groups first, then two-leg groups within the daily cap."""
+    used_players = {play.get('player') or '' for play in straight_plays}
+    remaining = [
+        play for play in qualifying
+        if (play.get('edge') or 0) >= AUTO_PICK_MIN_EDGE_2LEG
+        and play not in straight_plays
+    ]
+    groups = []
+    budget = AUTO_PICK_MAX_TOTAL - len(straight_plays)
+    for size, minimum_edge in (
+        (3, AUTO_PICK_MIN_EDGE_3LEG),
+        (2, AUTO_PICK_MIN_EDGE_2LEG),
+    ):
+        while budget >= size:
+            legs = _pick_distinct_legs(
+                remaining, size, minimum_edge, used_players
+            )
+            if len(legs) < size:
+                break
+            groups.append((Bet.generate_parlay_id(), legs))
+            remaining = [play for play in remaining if play not in legs]
+            budget -= size
+    return groups
+
+
+def _persist_auto_pick(
+    db,
+    Bet,
+    PickContext,
+    *,
+    user_id: int,
+    play: dict,
+    today,
+    day_start: datetime,
+    is_parlay: bool,
+    parlay_id: str | None,
+    notes_tag: str,
+):
+    """Persist one auto pick and its immutable scoring context."""
+    from app.enums import BetSource, Outcome
+
+    try:
+        match_date = datetime.strptime(
+            play.get('match_date') or today.isoformat(), '%Y-%m-%d'
+        )
+    except ValueError:
+        match_date = day_start
+    bet_obj = Bet(
+        user_id=user_id,
+        team_a=str(play.get('away_team') or '')[:80] or 'Away',
+        team_b=str(play.get('home_team') or '')[:80] or 'Home',
+        match_date=match_date,
+        bet_amount=10.0,
+        outcome=Outcome.PENDING.value,
+        american_odds=int(play.get('recommended_odds') or -110),
+        is_parlay=is_parlay,
+        parlay_id=parlay_id,
+        source=BetSource.AUTO_GENERATED.value,
+        bet_type=str(play.get('recommended_side') or 'over'),
+        over_under_line=None,
+        external_game_id=play.get('game_id') or None,
+        player_name=str(play.get('player') or '')[:100] or None,
+        prop_type=str(play.get('prop_type') or '')[:40] or None,
+        prop_line=float(play.get('line') or 0.0),
+        notes=notes_tag,
+    )
+    db.session.add(bet_obj)
+    db.session.flush()
+    context = _build_auto_pick_context(bet_obj, play)
+    if context:
+        db.session.add(PickContext(
+            bet_id=bet_obj.id,
+            context_json=json.dumps(context),
+            projected_stat=play.get('projection'),
+            projected_edge=play.get('edge'),
+            confidence_tier=play.get('confidence_tier'),
+        ))
+    return bet_obj
+
+
+def _persist_production_picks(
+    db,
+    Bet,
+    PickContext,
+    *,
+    user_id: int,
+    straight_plays: list,
+    parlay_groups: list,
+    today,
+    day_start: datetime,
+) -> tuple[list, set]:
+    created = []
+    market_keys = set()
+    for play in straight_plays:
+        created.append(_persist_auto_pick(
+            db, Bet, PickContext,
+            user_id=user_id,
+            play=play,
+            today=today,
+            day_start=day_start,
+            is_parlay=False,
+            parlay_id=None,
+            notes_tag='AUTO_PICK_BUCKET:straight',
+        ))
+        market_keys.add(_market_key(play))
+    for parlay_id, legs in parlay_groups:
+        bucket = '3leg_parlay' if len(legs) == 3 else '2leg_parlay'
+        for play in legs:
+            created.append(_persist_auto_pick(
+                db, Bet, PickContext,
+                user_id=user_id,
+                play=play,
+                today=today,
+                day_start=day_start,
+                is_parlay=True,
+                parlay_id=parlay_id,
+                notes_tag=f'AUTO_PICK_BUCKET:{bucket}',
+            ))
+            market_keys.add(_market_key(play))
+    return created, market_keys
+
+
+def _paper_play_qualifies(
+    play: dict,
+    *,
+    market_keys: set,
+    paper_players: set,
+    min_edge: float,
+    max_edge: float,
+    min_tier_rank: int,
+    tier_rank: dict,
+) -> bool:
+    player = str(play.get('player') or '')
+    edge = abs(float(play.get('edge') or 0.0))
+    confidence_rank = int(
+        tier_rank.get(str(play.get('confidence_tier') or 'no_edge'), 0)
+    )
+    return (
+        _market_key(play) not in market_keys
+        and bool(player)
+        and player not in paper_players
+        and min_edge <= edge < max_edge
+        and confidence_rank >= min_tier_rank
+    )
+
+
+def _persist_paper_picks(
+    db,
+    Bet,
+    PickContext,
+    *,
+    user_id: int,
+    candidates: list,
+    market_keys: set,
+    today,
+    day_start: datetime,
+) -> tuple[list, dict[str, int]]:
+    if not AUTO_PAPER_ENABLED or AUTO_PAPER_MAX_PER_COHORT <= 0:
+        return [], {}
+    tier_rank = {'no_edge': 0, 'slight': 1, 'moderate': 2, 'strong': 3}
+    created = []
+    counts = {}
+    paper_players = set()
+    for cohort in AUTO_PAPER_COHORTS:
+        cohort_name = str(cohort.get('name') or '').strip()
+        if not cohort_name:
+            continue
+        cohort_count = 0
+        for play in candidates:
+            if cohort_count >= AUTO_PAPER_MAX_PER_COHORT:
+                break
+            qualifies = _paper_play_qualifies(
+                play,
+                market_keys=market_keys,
+                paper_players=paper_players,
+                min_edge=float(cohort.get('min_edge', 0.0) or 0.0),
+                max_edge=float(cohort.get('max_edge', 1.0) or 1.0),
+                min_tier_rank=tier_rank.get(
+                    str(cohort.get('min_tier') or 'slight'), 1
+                ),
+                tier_rank=tier_rank,
+            )
+            if not qualifies:
+                continue
+            created.append(_persist_auto_pick(
+                db, Bet, PickContext,
+                user_id=user_id,
+                play=play,
+                today=today,
+                day_start=day_start,
+                is_parlay=False,
+                parlay_id=None,
+                notes_tag=f'AUTO_PAPER_COHORT:{cohort_name}',
+            ))
+            market_keys.add(_market_key(play))
+            paper_players.add(str(play.get('player') or ''))
+            cohort_count += 1
+        counts[cohort_name] = cohort_count
+    return created, counts
+
+
 def generate_daily_auto_picks():
     """Generate a separated daily basket of auto picks for faster model learning."""
     from app import db
-    from app.enums import BetSource, Outcome
+    from app.enums import BetSource
     from app.models import Bet, PickContext, User
     from app.services.projection_engine import ProjectionEngine
     from app.services.value_detector import ValueDetector
@@ -434,8 +670,6 @@ def generate_daily_auto_picks():
         detector = ValueDetector(ProjectionEngine())
         scores = detector.score_all_todays_props()
 
-        tier_rank = {'no_edge': 0, 'slight': 1, 'moderate': 2, 'strong': 3}
-
         all_candidates = _build_candidates(scores, AUTO_PAPER_MIN_GAMES)
         all_qualifying = _filter_qualifying(
             all_candidates, AUTO_PICK_MIN_GAMES, AUTO_PICK_CONFIDENCE_TIER,
@@ -446,63 +680,10 @@ def generate_daily_auto_picks():
             db.session.commit()
             return
 
-        # ── Straight bets: one per player, strong tier only (edge ≥ 15%) ───
-        straight_plays = _build_straight_plays(all_qualifying, AUTO_PICK_MIN_EDGE_STRAIGHT)
-        scored_players = {s.get('player') or '' for s in straight_plays}
-
-        # ── Parlay pool: remaining strong-tier plays not already straight-bet ──
-        # Each parlay leg must be strong tier (edge ≥ 15%); legs come from
-        # different games; at most one prop type per player across all parlays.
-        parlay_players: set = set(scored_players)  # don't re-use straight-bet players
-        parlay_pool: list = [
-            s for s in all_qualifying
-            if (s.get('edge') or 0) >= AUTO_PICK_MIN_EDGE_2LEG
-            and s not in straight_plays
-        ]
-
-        def _pick_legs(pool: list, n: int, min_edge: float) -> list:
-            """Pick n legs from pool: different games, different players, all ≥ min_edge."""
-            legs: list = []
-            used_games: set = set()
-            for play in pool:
-                if len(legs) >= n:
-                    break
-                if (play.get('edge') or 0) < min_edge:
-                    continue
-                player = play.get('player') or ''
-                game_id = play.get('game_id') or ''
-                if player in parlay_players:
-                    continue
-                if game_id and game_id in used_games:
-                    continue
-                legs.append(play)
-                used_games.add(game_id)
-                parlay_players.add(player)
-            return legs
-
-        parlay_groups: list = []  # [(parlay_id, [plays])]
-        budget = AUTO_PICK_MAX_TOTAL - len(straight_plays)
-
-        # Tier 1: 3-leg parlays (all legs edge ≥ 8%) → highest EV / model signal
-        remaining_pool = list(parlay_pool)
-        while budget >= 3:
-            legs = _pick_legs(remaining_pool, 3, AUTO_PICK_MIN_EDGE_3LEG)
-            if len(legs) < 3:
-                break
-            parlay_groups.append((Bet.generate_parlay_id(), legs))
-            for leg in legs:
-                remaining_pool.remove(leg)
-            budget -= 3
-
-        # Tier 2: 2-leg parlays (both legs edge ≥ 5%)
-        while budget >= 2:
-            legs = _pick_legs(remaining_pool, 2, AUTO_PICK_MIN_EDGE_2LEG)
-            if len(legs) < 2:
-                break
-            parlay_groups.append((Bet.generate_parlay_id(), legs))
-            for leg in legs:
-                remaining_pool.remove(leg)
-            budget -= 2
+        straight_plays = _build_straight_plays(
+            all_qualifying, AUTO_PICK_MIN_EDGE_STRAIGHT
+        )[:AUTO_PICK_MAX_TOTAL]
+        parlay_groups = _build_parlay_groups(all_qualifying, straight_plays, Bet)
 
         if not straight_plays and not parlay_groups:
             logger.info(
@@ -512,107 +693,27 @@ def generate_daily_auto_picks():
             db.session.commit()
             return
 
-        # ── Helper: persist one bet + context ─────────────────────────────
-        def _persist_bet(play: dict, is_parlay: bool, parlay_id: str | None, notes_tag: str) -> Bet:
-            match_date = play.get('match_date') or today.isoformat()
-            try:
-                match_dt = datetime.strptime(match_date, '%Y-%m-%d')
-            except ValueError:
-                match_dt = day_start
-            bet_obj = Bet(
-                user_id=system_user.id,
-                team_a=str(play.get('away_team') or '')[:80] or 'Away',
-                team_b=str(play.get('home_team') or '')[:80] or 'Home',
-                match_date=match_dt,
-                bet_amount=10.0,
-                outcome=Outcome.PENDING.value,
-                american_odds=int(play.get('recommended_odds') or -110),
-                is_parlay=is_parlay,
-                parlay_id=parlay_id,
-                source=BetSource.AUTO_GENERATED.value,
-                bet_type=str(play.get('recommended_side') or 'over'),
-                over_under_line=None,
-                external_game_id=play.get('game_id') or None,
-                player_name=str(play.get('player') or '')[:100] or None,
-                prop_type=str(play.get('prop_type') or '')[:40] or None,
-                prop_line=float(play.get('line') or 0.0),
-                notes=notes_tag,
-            )
-            db.session.add(bet_obj)
-            db.session.flush()
-            context = _build_auto_pick_context(bet_obj, play)
-            if context:
-                db.session.add(PickContext(
-                    bet_id=bet_obj.id,
-                    context_json=json.dumps(context),
-                    projected_stat=play.get('projection'),
-                    projected_edge=play.get('edge'),
-                    confidence_tier=play.get('confidence_tier'),
-                ))
-            return bet_obj
-
-        created_bets: list = []
-        persisted_market_keys: set = set()
-
-        for play in straight_plays:
-            created_bets.append(_persist_bet(play, False, None, 'AUTO_PICK_BUCKET:straight'))
-            persisted_market_keys.add((
-                play.get('player'), play.get('prop_type'), play.get('line'),
-                play.get('recommended_side'), play.get('game_id'),
-            ))
-
-        for pid, legs in parlay_groups:
-            n = len(legs)
-            bucket = '3leg_parlay' if n == 3 else '2leg_parlay'
-            for play in legs:
-                created_bets.append(_persist_bet(play, True, pid, f'AUTO_PICK_BUCKET:{bucket}'))
-                persisted_market_keys.add((
-                    play.get('player'), play.get('prop_type'), play.get('line'),
-                    play.get('recommended_side'), play.get('game_id'),
-                ))
-
-        paper_counts: dict[str, int] = {}
-        if AUTO_PAPER_ENABLED and AUTO_PAPER_MAX_PER_COHORT > 0:
-            paper_players: set = set()
-            # Avoid duplicate outcome rows across production+paper lanes.
-            for c in AUTO_PAPER_COHORTS:
-                cohort_name = str(c.get('name') or '').strip()
-                if not cohort_name:
-                    continue
-                min_edge = float(c.get('min_edge', 0.0) or 0.0)
-                max_edge = float(c.get('max_edge', 1.0) or 1.0)
-                min_tier_rank = int(tier_rank.get(str(c.get('min_tier') or 'slight'), 1))
-                created_for_cohort = 0
-
-                for play in all_candidates:
-                    if created_for_cohort >= AUTO_PAPER_MAX_PER_COHORT:
-                        break
-                    key = (
-                        play.get('player'), play.get('prop_type'), play.get('line'),
-                        play.get('recommended_side'), play.get('game_id'),
-                    )
-                    if key in persisted_market_keys:
-                        continue
-                    player = str(play.get('player') or '')
-                    if not player or player in paper_players:
-                        continue
-                    edge_abs = abs(float(play.get('edge') or 0.0))
-                    if edge_abs < min_edge or edge_abs >= max_edge:
-                        continue
-                    if int(tier_rank.get(str(play.get('confidence_tier') or 'no_edge'), 0)) < min_tier_rank:
-                        continue
-
-                    created_bets.append(_persist_bet(
-                        play,
-                        False,
-                        None,
-                        f'AUTO_PAPER_COHORT:{cohort_name}',
-                    ))
-                    persisted_market_keys.add(key)
-                    paper_players.add(player)
-                    created_for_cohort += 1
-
-                paper_counts[cohort_name] = created_for_cohort
+        created_bets, persisted_market_keys = _persist_production_picks(
+            db,
+            Bet,
+            PickContext,
+            user_id=system_user.id,
+            straight_plays=straight_plays,
+            parlay_groups=parlay_groups,
+            today=today,
+            day_start=day_start,
+        )
+        paper_bets, paper_counts = _persist_paper_picks(
+            db,
+            Bet,
+            PickContext,
+            user_id=system_user.id,
+            candidates=all_candidates,
+            market_keys=persisted_market_keys,
+            today=today,
+            day_start=day_start,
+        )
+        created_bets.extend(paper_bets)
 
         db.session.commit()
         logger.info(
