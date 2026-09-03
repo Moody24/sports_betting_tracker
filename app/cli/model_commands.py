@@ -353,6 +353,172 @@ def cli_model_accuracy(days, stat_type):
             click.echo(f'  {stype:<30} live={live_mae:.3f}  val=n/a (no active model)')
 
 
+def _load_distributional_backtest_inputs(stat_type: str):
+    from app.services.distributional_model import (
+        CALIBRATION_FRACTION,
+        DIST_STAT_TYPES,
+        POISSON_DIST_STAT_TYPES,
+        TRAIN_FRACTION,
+        _build_dist_training_rows,
+        _three_way_temporal_split,
+    )
+    from app.services.distributional_predictor import (
+        load_calibrator,
+        load_quantile_model,
+    )
+    from app.services.ml_model import load_active_model
+
+    if stat_type in DIST_STAT_TYPES:
+        model, feature_names = load_quantile_model(stat_type)
+        rows = _build_dist_training_rows(stat_type) if model is not None else []
+        missing_name = f'dist_{stat_type}'
+        mode = 'quantile'
+    elif stat_type in POISSON_DIST_STAT_TYPES:
+        from app.services.ml_model import _build_training_rows
+
+        model, feature_names = load_active_model(stat_type)
+        rows = _build_training_rows(stat_type, min_train_samples=0)
+        missing_name = f'projection_{stat_type}'
+        mode = 'poisson'
+    else:
+        click.echo(f'Unsupported stat_type: {stat_type}')
+        return None
+    if model is None:
+        click.echo(
+            f'No active {missing_name} model — '
+            'run `flask retrain --force` first.'
+        )
+        return None
+    if not rows:
+        click.echo('No training rows available for backtest.')
+        return None
+    _, _, test_idx, _, _ = _three_way_temporal_split(
+        rows,
+        train_frac=TRAIN_FRACTION,
+        calib_frac=CALIBRATION_FRACTION,
+    )
+    if not test_idx:
+        click.echo('No held-out rows available for backtest.')
+        return None
+    return {
+        'mode': mode,
+        'model': model,
+        'feature_names': feature_names,
+        'calibrator': load_calibrator(stat_type),
+        'rows': rows,
+        'test_idx': test_idx,
+    }
+
+
+def _normal_baseline_probability(line, projection, std_dev) -> float:
+    from scipy.stats import norm
+
+    return float(1.0 - norm.cdf(line, loc=projection, scale=std_dev))
+
+
+def _quantile_backtest_pairs(inputs: dict, stat_type: str):
+    import numpy as np
+    from app.services.distribution import (
+        median_from_quantiles,
+        prob_over,
+        rectify_quantiles,
+    )
+    from app.services.distribution_calibration import apply_calibrator
+    from app.services.distributional_model import QUANTILE_ALPHAS, replay_running_baseline
+
+    dist_pairs = []
+    baseline_pairs = []
+    for idx in inputs['test_idx']:
+        _, _, features, target = inputs['rows'][idx]
+        baseline = replay_running_baseline(inputs['rows'][idx], stat_type)
+        if baseline is None:
+            continue
+        baseline_projection, baseline_std_dev = baseline
+        feature_row = np.array([[
+            features.get(key, 0) for key in inputs['feature_names']
+        ]])
+        raw_quantiles = rectify_quantiles(
+            inputs['model'].predict(feature_row)[0].tolist()
+        )
+        median = median_from_quantiles(QUANTILE_ALPHAS, raw_quantiles)
+        for offset in (-6.0, -3.0, 0.0, 3.0, 6.0):
+            line = median + offset
+            probability = prob_over(line, QUANTILE_ALPHAS, raw_quantiles)
+            if inputs['calibrator'] is not None:
+                probability = apply_calibrator(inputs['calibrator'], probability)
+            observed = 1.0 if target > line else 0.0
+            dist_pairs.append((probability, observed))
+            baseline_pairs.append((
+                _normal_baseline_probability(
+                    line,
+                    baseline_projection,
+                    baseline_std_dev,
+                ),
+                observed,
+            ))
+    return dist_pairs, baseline_pairs
+
+
+def _poisson_backtest_pairs(inputs: dict, stat_type: str):
+    import math
+    import numpy as np
+    from app.services.distribution import prob_over_poisson
+    from app.services.distribution_calibration import apply_calibrator
+    from app.services.distributional_model import replay_running_baseline
+
+    dist_pairs = []
+    baseline_pairs = []
+    for idx in inputs['test_idx']:
+        _, _, features, target = inputs['rows'][idx]
+        baseline = replay_running_baseline(inputs['rows'][idx], stat_type)
+        if baseline is None:
+            continue
+        baseline_projection, baseline_std_dev = baseline
+        feature_row = np.array([[
+            features.get(key, 0) for key in inputs['feature_names']
+        ]])
+        lam = float(inputs['model'].predict(feature_row)[0])
+        if lam <= 0:
+            continue
+        for offset_fraction in (-0.9, -0.6, 0.0, 0.6, 0.9):
+            candidate = lam + offset_fraction * max(lam, 1.0)
+            line = max(0.5, math.floor(candidate) + 0.5)
+            probability = prob_over_poisson(line, lam)
+            if inputs['calibrator'] is not None:
+                probability = apply_calibrator(inputs['calibrator'], probability)
+            observed = 1.0 if target > line else 0.0
+            dist_pairs.append((probability, observed))
+            baseline_pairs.append((
+                _normal_baseline_probability(
+                    line,
+                    baseline_projection,
+                    baseline_std_dev,
+                ),
+                observed,
+            ))
+    return dist_pairs, baseline_pairs
+
+
+def _record_distributional_backtest(stat_type, dist_metrics, baseline_metrics):
+    from app.services.distributional_model import backtest_verdict
+
+    verdict = backtest_verdict(dist_metrics['ece'], baseline_metrics['ece'])
+    message = (
+        f"stat={stat_type} dist_ece={dist_metrics['ece']:.4f} "
+        f"baseline_ece={baseline_metrics['ece']:.4f} verdict={verdict}"
+    )
+    now = datetime.now(timezone.utc)
+    db.session.add(JobLog(
+        job_name='distributional_backtest',
+        started_at=now,
+        finished_at=now,
+        status='success' if verdict == 'PROMOTE' else 'warn',
+        message=message[:500],
+    ))
+    db.session.commit()
+    return verdict
+
+
 @click.command('backtest')
 @click.option(
     '--stat-type', default='player_points', show_default=True,
@@ -362,118 +528,22 @@ def cli_model_accuracy(days, stat_type):
 )
 def cli_backtest(stat_type):
     """Synthetic-line calibration smoke test (not an ROI backtest)."""
-    import math as _math
     import time as _time
-
-    from app import db
-    from app.models import JobLog
-    from app.services.distribution import (
-        median_from_quantiles,
-        prob_over,
-        prob_over_poisson,
-        rectify_quantiles,
-    )
-    from app.services.distribution_calibration import apply_calibrator
-    from app.services.distributional_model import (
-        DIST_STAT_TYPES,
-        POISSON_DIST_STAT_TYPES,
-        QUANTILE_ALPHAS,
-        CALIBRATION_FRACTION,
-        TRAIN_FRACTION,
-        _build_dist_training_rows,
-        _three_way_temporal_split,
-        backtest_verdict,
-        replay_running_baseline,
-    )
-    from app.services.distributional_predictor import load_calibrator, load_quantile_model
-    from app.services.ml_model import load_active_model
     from app.services.pick_quality_model import compute_calibration_metrics
 
     click.echo(f'=== Synthetic-Line Calibration Backtest: {stat_type} ===')
     click.echo('NOTE: This command does not measure real-line ROI or CLV.')
     _t0 = _time.perf_counter()
 
-    if stat_type in DIST_STAT_TYPES:
-        model, feature_names = load_quantile_model(stat_type)
-        if model is None:
-            click.echo(f'No active dist_{stat_type} model — run `flask retrain --force` first.')
-            return
-        calibrator = load_calibrator(stat_type)
-        rows = _build_dist_training_rows(stat_type)
-    elif stat_type in POISSON_DIST_STAT_TYPES:
-        from app.services.ml_model import _build_training_rows as _build_point_rows
-        rows = _build_point_rows(stat_type, min_train_samples=0)
-    else:
-        click.echo(f'Unsupported stat_type: {stat_type}')
+    inputs = _load_distributional_backtest_inputs(stat_type)
+    if inputs is None:
         return
-
-    if not rows:
-        click.echo('No training rows available for backtest.')
-        return
-
-    _, _, test_idx, _, _ = _three_way_temporal_split(
-        rows, train_frac=TRAIN_FRACTION, calib_frac=CALIBRATION_FRACTION,
+    pair_builder = (
+        _quantile_backtest_pairs
+        if inputs['mode'] == 'quantile'
+        else _poisson_backtest_pairs
     )
-    if not test_idx:
-        click.echo('No held-out rows available for backtest.')
-        return
-
-    dist_pairs = []
-    baseline_pairs = []
-
-    if stat_type in DIST_STAT_TYPES:
-        import numpy as np
-        from scipy.stats import norm
-        for idx in test_idx:
-            _, _, features, target = rows[idx]
-            baseline = replay_running_baseline(rows[idx], stat_type)
-            if baseline is None:
-                continue
-            baseline_projection, baseline_std_dev = baseline
-            X = np.array([[features.get(k, 0) for k in feature_names]])
-            raw_q = rectify_quantiles(model.predict(X)[0].tolist())
-            median = median_from_quantiles(QUANTILE_ALPHAS, raw_q)
-            for offset in (-6.0, -3.0, 0.0, 3.0, 6.0):
-                line = median + offset
-                p_dist = prob_over(line, QUANTILE_ALPHAS, raw_q)
-                if calibrator is not None:
-                    p_dist = apply_calibrator(calibrator, p_dist)
-                y = 1.0 if target > line else 0.0
-                dist_pairs.append((p_dist, y))
-                p_baseline = float(
-                    1.0 - norm.cdf(line, loc=baseline_projection, scale=baseline_std_dev)
-                )
-                baseline_pairs.append((p_baseline, y))
-    else:
-        model, feature_names = load_active_model(stat_type)
-        if model is None:
-            click.echo(f'No active projection_{stat_type} model — run `flask retrain --force` first.')
-            return
-        calibrator = load_calibrator(stat_type)
-        import numpy as np
-        from scipy.stats import norm
-        for idx in test_idx:
-            _, _, features, target = rows[idx]
-            baseline = replay_running_baseline(rows[idx], stat_type)
-            if baseline is None:
-                continue
-            baseline_projection, baseline_std_dev = baseline
-            X = np.array([[features.get(k, 0) for k in feature_names]])
-            lam = float(model.predict(X)[0])
-            if lam <= 0:
-                continue
-            for offset_frac in (-0.9, -0.6, 0.0, 0.6, 0.9):
-                candidate = lam + offset_frac * max(lam, 1.0)
-                line = max(0.5, _math.floor(candidate) + 0.5)
-                p_dist = prob_over_poisson(line, lam)
-                if calibrator is not None:
-                    p_dist = apply_calibrator(calibrator, p_dist)
-                y = 1.0 if target > line else 0.0
-                dist_pairs.append((p_dist, y))
-                p_baseline = float(
-                    1.0 - norm.cdf(line, loc=baseline_projection, scale=baseline_std_dev)
-                )
-                baseline_pairs.append((p_baseline, y))
+    dist_pairs, baseline_pairs = pair_builder(inputs, stat_type)
 
     if not dist_pairs:
         click.echo('No evaluable held-out pairs produced.')
@@ -494,20 +564,11 @@ def cli_backtest(stat_type):
     )
     click.echo(f"Backtest wall time: {elapsed:.1f}s")
 
-    verdict = backtest_verdict(dist_metrics['ece'], baseline_metrics['ece'])
-    message = (
-        f"stat={stat_type} dist_ece={dist_metrics['ece']:.4f} "
-        f"baseline_ece={baseline_metrics['ece']:.4f} verdict={verdict}"
+    verdict = _record_distributional_backtest(
+        stat_type,
+        dist_metrics,
+        baseline_metrics,
     )
-    db.session.add(JobLog(
-        job_name='distributional_backtest',
-        started_at=datetime.now(timezone.utc),
-        finished_at=datetime.now(timezone.utc),
-        status='success' if verdict == 'PROMOTE' else 'warn',
-        message=message[:500],
-    ))
-    db.session.commit()
-
     click.echo(f"\nVerdict: {verdict}  (gate: ECE <= 0.03 and beats incumbent)")
 
 
@@ -1100,6 +1161,116 @@ def cli_normalize_pick_context_flags(limit, dry_run):
 
 # ── Pollution report (standalone click command, not app.cli.command) ───────────
 
+
+_MATCHUP_CONTEXT_KEYS = (
+    'opp_defense_rating',
+    'opp_pace',
+    'opp_matchup_adj',
+)
+
+
+def _polluted_context(context_json: str | None) -> tuple[bool, bool]:
+    import json
+
+    try:
+        context = json.loads(context_json) if context_json else {}
+    except (ValueError, TypeError):
+        return True, False
+    zeroed = sum(
+        1
+        for key in _MATCHUP_CONTEXT_KEYS
+        if float(context.get(key, 0) or 0) == 0
+    )
+    return zeroed == len(_MATCHUP_CONTEXT_KEYS), True
+
+
+def _pollution_counts(all_contexts) -> dict:
+    counts = {'polluted': 0, 'bootstrap': 0, 'auto': 0, 'clean': 0}
+    for bet_obj, pick_context in all_contexts:
+        polluted, parsed = _polluted_context(pick_context.context_json)
+        if not polluted:
+            counts['clean'] += 1
+            continue
+        counts['polluted'] += 1
+        if not parsed:
+            continue
+        if (bet_obj.notes or '').startswith('AUTO_BOOTSTRAP_HIDDEN'):
+            counts['bootstrap'] += 1
+        elif bet_obj.source == 'auto_generated':
+            counts['auto'] += 1
+    return counts
+
+
+def _echo_pollution_counts(all_contexts, counts: dict) -> None:
+    click.echo(f'Resolved bets with PickContext: {len(all_contexts)}')
+    click.echo(f"  Clean (real matchup data): {counts['clean']}")
+    click.echo(f"  Polluted (zeroed matchup): {counts['polluted']}")
+    click.echo(f"    - Bootstrap synthetic: {counts['bootstrap']}")
+    click.echo(f"    - Auto picks (no opponent): {counts['auto']}")
+    other = counts['polluted'] - counts['bootstrap'] - counts['auto']
+    click.echo(f'    - Other: {other}')
+
+
+def _echo_pollution_model_audit() -> None:
+    active_models = ModelMetadata.query.filter_by(is_active=True).all()
+    inactive_models = ModelMetadata.query.filter_by(is_active=False).count()
+    click.echo(f'\nActive models: {len(active_models)}')
+    click.echo(f'Inactive (historical) models: {inactive_models}')
+    for model in active_models:
+        trained = model.training_date.isoformat() if model.training_date else 'n/a'
+        click.echo(
+            f'  {model.model_name} v{model.version} | '
+            f'samples={model.training_samples} | mae={model.val_mae} | '
+            f'acc={model.val_accuracy} | trained={trained}'
+        )
+
+
+def _echo_pollution_ratio(total: int, polluted: int) -> None:
+    if total == 0:
+        return
+    ratio = polluted / total
+    click.echo(f'\nPollution ratio: {ratio:.1%}')
+    if ratio > 0.3:
+        click.echo(
+            'CRITICAL: >30% of training data is polluted — '
+            'model drift is expected.'
+        )
+    elif ratio > 0.1:
+        click.echo('WARNING: >10% pollution — model accuracy degraded.')
+    else:
+        click.echo('OK: pollution level is manageable.')
+
+
+def _delete_polluted_bootstrap_bets() -> int:
+    bootstrap_bets = (
+        Bet.query
+        .filter(Bet.notes.like('AUTO_BOOTSTRAP_HIDDEN%'))
+        .all()
+    )
+    deleted = 0
+    for bet_obj in bootstrap_bets:
+        pick_context = PickContext.query.filter_by(bet_id=bet_obj.id).first()
+        if not pick_context:
+            continue
+        polluted, _ = _polluted_context(pick_context.context_json)
+        if polluted:
+            db.session.delete(bet_obj)
+            deleted += 1
+    db.session.commit()
+    return deleted
+
+
+def _deactivate_polluted_pick_quality_models() -> int:
+    models = ModelMetadata.query.filter_by(
+        model_name='pick_quality_nba',
+        is_active=True,
+    ).all()
+    for model in models:
+        model.is_active = False
+    db.session.commit()
+    return len(models)
+
+
 @click.command('pollution_report')
 @click.option('--fix', is_flag=True, default=False,
               help='Delete polluted bootstrap rows and deactivate stale models.')
@@ -1113,8 +1284,6 @@ def cli_pollution_report(fix, retrain_after):
     - Auto-pick bets with polluted (empty opponent/team) PickContext
     - Stale or orphaned model metadata entries
     """
-    import json as _json
-
     with current_app.app_context():
         click.echo('=== Data Pollution Report ===')
 
@@ -1137,57 +1306,10 @@ def cli_pollution_report(fix, retrain_after):
             .filter(Bet.outcome.in_(['win', 'lose']))
             .all()
         )
-        polluted_count = 0
-        polluted_bootstrap = 0
-        polluted_auto = 0
-        clean_count = 0
-        matchup_keys = ('opp_defense_rating', 'opp_pace', 'opp_matchup_adj')
-
-        for bet_obj, pick_ctx in all_contexts:
-            try:
-                ctx = _json.loads(pick_ctx.context_json) if pick_ctx.context_json else {}
-            except (ValueError, TypeError):
-                polluted_count += 1
-                continue
-            zeroed = sum(1 for k in matchup_keys if float(ctx.get(k, 0) or 0) == 0)
-            if zeroed == len(matchup_keys):
-                polluted_count += 1
-                if (bet_obj.notes or '').startswith('AUTO_BOOTSTRAP_HIDDEN'):
-                    polluted_bootstrap += 1
-                elif bet_obj.source == 'auto_generated':
-                    polluted_auto += 1
-            else:
-                clean_count += 1
-
-        click.echo(f'Resolved bets with PickContext: {len(all_contexts)}')
-        click.echo(f'  Clean (real matchup data): {clean_count}')
-        click.echo(f'  Polluted (zeroed matchup): {polluted_count}')
-        click.echo(f'    - Bootstrap synthetic: {polluted_bootstrap}')
-        click.echo(f'    - Auto picks (no opponent): {polluted_auto}')
-        click.echo(f'    - Other: {polluted_count - polluted_bootstrap - polluted_auto}')
-
-        # 3. Model metadata audit
-        active_models = ModelMetadata.query.filter_by(is_active=True).all()
-        inactive_models = ModelMetadata.query.filter_by(is_active=False).count()
-        click.echo(f'\nActive models: {len(active_models)}')
-        click.echo(f'Inactive (historical) models: {inactive_models}')
-        for m in active_models:
-            click.echo(
-                f'  {m.model_name} v{m.version} | samples={m.training_samples} | '
-                f'mae={m.val_mae} | acc={m.val_accuracy} | '
-                f'trained={m.training_date.isoformat() if m.training_date else "n/a"}'
-            )
-
-        # 4. Pollution ratio
-        if len(all_contexts) > 0:
-            ratio = polluted_count / len(all_contexts)
-            click.echo(f'\nPollution ratio: {ratio:.1%}')
-            if ratio > 0.3:
-                click.echo('CRITICAL: >30% of training data is polluted — model drift is expected.')
-            elif ratio > 0.1:
-                click.echo('WARNING: >10% pollution — model accuracy degraded.')
-            else:
-                click.echo('OK: pollution level is manageable.')
+        counts = _pollution_counts(all_contexts)
+        _echo_pollution_counts(all_contexts, counts)
+        _echo_pollution_model_audit()
+        _echo_pollution_ratio(len(all_contexts), counts['polluted'])
 
         if not fix:
             click.echo('\nRun with --fix to delete polluted bootstrap rows and deactivate stale models.')
@@ -1196,38 +1318,10 @@ def cli_pollution_report(fix, retrain_after):
         # === FIX MODE ===
         click.echo('\n=== Cleaning Polluted Data ===')
 
-        # Delete polluted bootstrap bets (and cascaded PickContext via FK)
-        deleted_bootstrap = 0
-        bootstrap_bets = (
-            Bet.query
-            .filter(Bet.notes.like('AUTO_BOOTSTRAP_HIDDEN%'))
-            .all()
-        )
-        for bet_obj in bootstrap_bets:
-            # Check if its context is polluted
-            pc = PickContext.query.filter_by(bet_id=bet_obj.id).first()
-            if pc:
-                try:
-                    ctx = _json.loads(pc.context_json) if pc.context_json else {}
-                except (ValueError, TypeError):
-                    ctx = {}
-                zeroed = sum(1 for k in matchup_keys if float(ctx.get(k, 0) or 0) == 0)
-                if zeroed == len(matchup_keys):
-                    db.session.delete(bet_obj)
-                    deleted_bootstrap += 1
-
-        db.session.commit()
+        deleted_bootstrap = _delete_polluted_bootstrap_bets()
         click.echo(f'Deleted {deleted_bootstrap} polluted bootstrap bets (+ cascaded PickContext).')
 
-        # Deactivate stale pick-quality models trained on polluted data
-        pq_models = ModelMetadata.query.filter_by(
-            model_name='pick_quality_nba', is_active=True,
-        ).all()
-        deactivated = 0
-        for m in pq_models:
-            m.is_active = False
-            deactivated += 1
-        db.session.commit()
+        deactivated = _deactivate_polluted_pick_quality_models()
         click.echo(f'Deactivated {deactivated} pick_quality_nba model(s) trained on polluted data.')
 
         if retrain_after:

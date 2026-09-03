@@ -13,7 +13,7 @@ than remaining as an open checklist.
 - Full verification: 1,265 tests passing, 80% application coverage
 - Static/security gates: Ruff, Bandit, detect-secrets, Git-history credential
   scanning, and pip-audit passing
-- Ruff C901 inventory: 38 functions, down from 59 before this cleanup
+- Ruff C901 inventory: 36 functions, down from 59 before this cleanup
 - Working tree expectation: no generated files; personal untracked files are
   outside project scope
 
@@ -57,6 +57,8 @@ and architecture-contract tests are the reproducible measures for this repo.
   calibrators against 79,603 permanent historical rows. Retained 17 active and
   17 rollback artifacts, and moved 163 unreferenced artifacts (58.3 MB) to
   Trash after verifying every metadata path.
+- Decomposed the synthetic-line backtest and pollution cleanup commands, with
+  direct quantile, Poisson, deletion, deactivation, and retraining tests.
 - Consolidated two conflicting inactive Railway runbooks.
 - Blocked accidental external HTTP in the shared test fixture.
 - Moved stale virtualenvs and generated test/browser artifacts to Trash,
@@ -66,7 +68,7 @@ and architecture-contract tests are the reproducible measures for this repo.
 
 | Priority | Item | Evidence and exit condition |
 |---|---|---|
-| P1 | Remaining high-complexity workflows | 38 C901 findings remain. The originally prioritized eight workflows are complete. Continue later with the two 18-complexity model commands, then the 17-complexity rolling backtest and prop snapshot workflows. Preserve behavior with focused tests per extraction. |
+| P1 | Remaining high-complexity workflows | 36 C901 findings remain. Continue with the two 17-complexity rolling-backtest and prop-snapshot workflows, then work downward by complexity. Preserve behavior with focused tests per extraction. |
 | P2 before hosted deployment | Inactive Railway scripts and configuration | They are intentionally retained for restoration work and the surviving runbook is explicitly marked inactive. Revalidate or delete them when a hosting decision is made. |
 
 ## Next cleanup order

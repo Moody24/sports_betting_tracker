@@ -1245,6 +1245,56 @@ class TestModelCommandsPollution(BaseTestCase):
         self.assertEqual(result.exit_code, 0)
         self.assertIn('Clean (real matchup data): 1', result.output)
 
+    @patch('app.services.pick_quality_model.train_pick_quality_model')
+    def test_pollution_report_fix_cleans_and_retrains(self, train_model):
+        from app.cli.model_commands import cli_pollution_report
+
+        train_model.return_value = {'status': 'ok'}
+        with self.app.app_context():
+            user = make_user('poll_fix_user', 'pollfix@test.com')
+            db.session.add(user)
+            db.session.flush()
+            bet = make_bet(
+                user.id,
+                outcome='win',
+                notes='AUTO_BOOTSTRAP_HIDDEN fixture',
+                source='auto_generated',
+            )
+            db.session.add(bet)
+            db.session.flush()
+            db.session.add(PickContext(
+                bet_id=bet.id,
+                context_json=json.dumps({
+                    'opp_defense_rating': 0,
+                    'opp_pace': 0,
+                    'opp_matchup_adj': 0,
+                }),
+            ))
+            model = ModelMetadata(
+                model_name='pick_quality_nba',
+                model_type='xgboost',
+                version='polluted',
+                file_path='/tmp/polluted.json',
+                training_date=datetime.now(timezone.utc),
+                is_active=True,
+            )
+            db.session.add(model)
+            db.session.commit()
+
+            result = self._invoke(
+                cli_pollution_report,
+                ['--fix', '--retrain-after'],
+            )
+            remaining_bets = Bet.query.count()
+            active_model = db.session.get(ModelMetadata, model.id).is_active
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn('Deleted 1 polluted bootstrap bets', result.output)
+        self.assertIn('Deactivated 1 pick_quality_nba model', result.output)
+        self.assertEqual(remaining_bets, 0)
+        self.assertFalse(active_model)
+        train_model.assert_called_once_with()
+
 
 class TestModelCommandsStatus(BaseTestCase):
     """Tests for cli_model_status, cli_retrain, cli_bootstrap_pick_quality."""
@@ -1375,6 +1425,63 @@ class TestModelCommandsStatus(BaseTestCase):
             result = self._invoke(cli_backtest, ['--stat-type', 'player_rebounds_per_minute'])
         self.assertEqual(result.exit_code, 0)
         self.assertIn('Unsupported stat_type', result.output)
+
+    @patch(
+        'app.services.distributional_model.replay_running_baseline',
+        return_value=(10.0, 2.0),
+    )
+    def test_quantile_backtest_pair_builder(self, _baseline):
+        import numpy as np
+        from app.cli.model_commands import _quantile_backtest_pairs
+
+        model = MagicMock()
+        model.predict.return_value = np.array([[
+            6.0, 7.0, 8.0, 9.0, 10.0,
+            11.0, 12.0, 13.0, 14.0, 15.0,
+        ]])
+        inputs = {
+            'model': model,
+            'feature_names': ['feature'],
+            'calibrator': None,
+            'rows': [(None, None, {'feature': 1.0}, 11.0)],
+            'test_idx': [0],
+        }
+
+        distributional, baseline = _quantile_backtest_pairs(
+            inputs,
+            'player_points',
+        )
+
+        self.assertEqual(len(distributional), 5)
+        self.assertEqual(len(baseline), 5)
+        self.assertTrue(all(observed in (0.0, 1.0) for _, observed in distributional))
+
+    @patch(
+        'app.services.distributional_model.replay_running_baseline',
+        return_value=(2.0, 1.0),
+    )
+    def test_poisson_backtest_pair_builder(self, _baseline):
+        import numpy as np
+        from app.cli.model_commands import _poisson_backtest_pairs
+
+        model = MagicMock()
+        model.predict.return_value = np.array([2.0])
+        inputs = {
+            'model': model,
+            'feature_names': ['feature'],
+            'calibrator': None,
+            'rows': [(None, None, {'feature': 1.0}, 3.0)],
+            'test_idx': [0],
+        }
+
+        distributional, baseline = _poisson_backtest_pairs(
+            inputs,
+            'player_threes',
+        )
+
+        self.assertEqual(len(distributional), 5)
+        self.assertEqual(len(baseline), 5)
+        self.assertTrue(all(0.0 <= probability <= 1.0 for probability, _ in distributional))
 
     @patch('app.services.scheduler.bootstrap_pick_quality_examples')
     def test_bootstrap_pick_quality_no_train(self, mock_bootstrap):
