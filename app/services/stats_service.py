@@ -11,14 +11,14 @@ from datetime import datetime, timezone, timedelta, date as date_type
 from difflib import SequenceMatcher
 from typing import Optional
 
-import requests
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app import db
 from app.models import PlayerGameLog
 from app.utils import safe_float
-from app.services.nba_service import ESPN_SUMMARY_URL, fetch_espn_scoreboard
+from app.services.espn_client import EspnClientError, fetch_summary_payload
+from app.services.nba_service import fetch_espn_scoreboard
 from app.utils.time_helpers import ET
 
 logger = logging.getLogger(__name__)
@@ -700,10 +700,8 @@ def refresh_completed_game_logs(days_back: int = 2) -> dict:
                 continue
 
             try:
-                resp = requests.get(ESPN_SUMMARY_URL, params={'event': espn_id}, timeout=10)
-                resp.raise_for_status()
-                summary = resp.json()
-            except (requests.RequestException, ValueError) as exc:
+                summary = fetch_summary_payload(espn_id)
+            except EspnClientError as exc:
                 logger.error("ESPN summary fetch failed for completed game %s: %s", espn_id, exc)
                 continue
 

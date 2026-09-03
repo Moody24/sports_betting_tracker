@@ -4,6 +4,8 @@ import json
 from datetime import datetime
 from unittest.mock import patch
 
+import requests
+
 from app import db
 from app.models import Bet, User, PickContext, GameSnapshot
 from app.services.nba_service import APP_TIMEZONE as NBA_APP_TIMEZONE
@@ -436,7 +438,7 @@ class TestBetRoutes(BaseTestCase):
             self.assertIsNotNone(snap.props_json)
 
     def test_extract_prop_boxscore_derives_pra(self):
-        from app.routes.nba_live import _extract_prop_boxscore
+        from app.services.espn_client import extract_prop_boxscore
         summary_data = {
             "boxscore": {
                 "players": [{
@@ -450,11 +452,11 @@ class TestBetRoutes(BaseTestCase):
                 }]
             }
         }
-        box = _extract_prop_boxscore(summary_data)
+        box = extract_prop_boxscore(summary_data)
         self.assertEqual(box['LeBron James']['player_points_rebounds_assists'], 37.0)
 
     def test_extract_prop_boxscore_extracts_blocks_and_steals(self):
-        from app.routes.nba_live import _extract_prop_boxscore
+        from app.services.espn_client import extract_prop_boxscore
         summary_data = {
             "boxscore": {
                 "players": [{
@@ -468,7 +470,7 @@ class TestBetRoutes(BaseTestCase):
                 }]
             }
         }
-        box = _extract_prop_boxscore(summary_data)
+        box = extract_prop_boxscore(summary_data)
         self.assertEqual(box['Anthony Davis']['player_blocks'], 3.0)
         self.assertEqual(box['Anthony Davis']['player_steals'], 2.0)
 
@@ -479,7 +481,7 @@ class TestBetRoutes(BaseTestCase):
         data = json.loads(resp.data)
         self.assertFalse(data["ok"])
 
-    @patch("app.routes.nba_live.requests.get")
+    @patch("app.services.espn_client.requests.get")
     def test_nba_prop_progress_success(self, mock_get):
         self.register_and_login()
         mock_resp = mock_get.return_value
@@ -520,7 +522,7 @@ class TestBetRoutes(BaseTestCase):
         self.assertEqual(mock_get.call_count, 1)
 
 
-    @patch("app.routes.nba_live.requests.get")
+    @patch("app.services.espn_client.requests.get")
     def test_nba_prop_progress_pra_success(self, mock_get):
         self.register_and_login()
         mock_resp = mock_get.return_value
@@ -551,7 +553,7 @@ class TestBetRoutes(BaseTestCase):
         self.assertTrue(data["ok"])
         self.assertEqual(data["stat"], 37.0)
 
-    @patch("app.routes.nba_live.requests.get")
+    @patch("app.services.espn_client.requests.get")
     def test_nba_prop_progress_over_under_on_track_logic(self, mock_get):
         self.register_and_login()
         mock_resp = mock_get.return_value
@@ -587,7 +589,7 @@ class TestBetRoutes(BaseTestCase):
         self.assertTrue(over_data["on_track"])
         self.assertFalse(under_data["on_track"])
 
-    @patch("app.routes.nba_live.requests.get")
+    @patch("app.services.espn_client.requests.get")
     def test_nba_prop_progress_cache_key_includes_line_and_bet_type(self, mock_get):
         self.register_and_login()
         mock_resp = mock_get.return_value
@@ -630,7 +632,7 @@ class TestBetRoutes(BaseTestCase):
         # ESPN API calls to 1 per game per TTL window.
         self.assertEqual(mock_get.call_count, 1)
 
-    @patch("app.routes.nba_live.requests.get")
+    @patch("app.services.espn_client.requests.get")
     def test_nba_prop_progress_blocks_success(self, mock_get):
         self.register_and_login()
         mock_resp = mock_get.return_value
@@ -661,7 +663,7 @@ class TestBetRoutes(BaseTestCase):
         self.assertTrue(data["ok"])
         self.assertEqual(data["stat"], 3.0)
 
-    @patch("app.routes.nba_live.requests.get")
+    @patch("app.services.espn_client.requests.get")
     def test_nba_prop_progress_steals_success(self, mock_get):
         self.register_and_login()
         mock_resp = mock_get.return_value
@@ -1088,7 +1090,10 @@ class TestBetRoutes(BaseTestCase):
         )
         self.assertIn(b"Bet recorded successfully", resp.data)
 
-    @patch("app.routes.nba_live.requests.get", side_effect=Exception("network error"))
+    @patch(
+        "app.services.espn_client.requests.get",
+        side_effect=requests.RequestException("network error"),
+    )
     def test_nba_prop_progress_request_exception_returns_200(self, _mock):
         """Network error from ESPN returns 200 with game_not_started status."""
         self.register_and_login()
@@ -1100,7 +1105,7 @@ class TestBetRoutes(BaseTestCase):
         self.assertFalse(data["ok"])
         self.assertEqual(data["status"], "game_not_started")
 
-    @patch("app.routes.nba_live.requests.get")
+    @patch("app.services.espn_client.requests.get")
     def test_nba_prop_progress_empty_boxscore_returns_200(self, mock_get):
         """ESPN response with no boxscore players returns 200 with game_not_started."""
         self.register_and_login()

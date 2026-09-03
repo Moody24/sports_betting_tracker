@@ -440,7 +440,7 @@ class TestStatsService(BaseTestCase):
                 self.assertEqual(count, 0)
 
     @patch('app.services.stats_service.find_player_id', return_value='101')
-    @patch('app.services.stats_service.requests.get')
+    @patch('app.services.espn_client.requests.get')
     @patch('app.services.stats_service.fetch_espn_scoreboard')
     def test_refresh_completed_game_logs_ingests_finals(self, mock_scoreboard, mock_get, _mock_pid):
         from app.services.stats_service import refresh_completed_game_logs
@@ -490,7 +490,7 @@ class TestStatsService(BaseTestCase):
             self.assertEqual(summary['final_games_seen'], 0)
 
     @patch('app.services.stats_service.find_player_id', return_value='2544')
-    @patch('app.services.stats_service.requests.get')
+    @patch('app.services.espn_client.requests.get')
     @patch('app.services.stats_service.fetch_espn_scoreboard')
     def test_refresh_completed_game_logs_handles_duplicate_player_rows(self, mock_scoreboard, mock_get, _mock_pid):
         from app.services.stats_service import refresh_completed_game_logs
@@ -571,7 +571,7 @@ class TestContextService(BaseTestCase):
 
     # -- fetch_espn_injuries --
 
-    @patch('app.services.context_service.requests.get')
+    @patch('app.services.espn_client.requests.get')
     def test_fetch_espn_injuries_success(self, mock_get):
         from app.services.context_service import fetch_espn_injuries
         mock_resp = MagicMock()
@@ -592,13 +592,13 @@ class TestContextService(BaseTestCase):
         self.assertEqual(injuries[0]['player_name'], 'LeBron James')
         self.assertEqual(injuries[0]['status'], 'questionable')
 
-    @patch('app.services.context_service.requests.get')
+    @patch('app.services.espn_client.requests.get')
     def test_fetch_espn_injuries_network_error(self, mock_get):
         from app.services.context_service import fetch_espn_injuries
         mock_get.side_effect = _requests.RequestException("timeout")
         self.assertEqual(fetch_espn_injuries(), [])
 
-    @patch('app.services.context_service.requests.get')
+    @patch('app.services.espn_client.requests.get')
     def test_fetch_espn_injuries_dict_status(self, mock_get):
         from app.services.context_service import fetch_espn_injuries
         mock_resp = MagicMock()
@@ -618,7 +618,7 @@ class TestContextService(BaseTestCase):
         self.assertEqual(len(injuries), 1)
         self.assertEqual(injuries[0]['status'], 'out')
 
-    @patch('app.services.context_service.requests.get')
+    @patch('app.services.espn_client.requests.get')
     def test_fetch_espn_injuries_skips_no_name(self, mock_get):
         from app.services.context_service import fetch_espn_injuries
         mock_resp = MagicMock()
@@ -632,7 +632,7 @@ class TestContextService(BaseTestCase):
         mock_get.return_value = mock_resp
         self.assertEqual(fetch_espn_injuries(), [])
 
-    @patch('app.services.context_service.requests.get')
+    @patch('app.services.espn_client.requests.get')
     def test_fetch_espn_injuries_new_payload_shape(self, mock_get):
         from app.services.context_service import fetch_espn_injuries
         mock_resp = MagicMock()
@@ -715,7 +715,7 @@ class TestContextService(BaseTestCase):
 
     # -- check_back_to_back --
 
-    @patch('app.services.context_service.requests.get')
+    @patch('app.services.espn_client.requests.get')
     def test_check_b2b_true(self, mock_get):
         from app.services.context_service import check_back_to_back
         mock_resp = MagicMock()
@@ -733,7 +733,7 @@ class TestContextService(BaseTestCase):
         mock_get.return_value = mock_resp
         self.assertTrue(check_back_to_back('Lakers'))
 
-    @patch('app.services.context_service.requests.get')
+    @patch('app.services.espn_client.requests.get')
     def test_check_b2b_false(self, mock_get):
         from app.services.context_service import check_back_to_back
         mock_resp = MagicMock()
@@ -742,7 +742,7 @@ class TestContextService(BaseTestCase):
         mock_get.return_value = mock_resp
         self.assertFalse(check_back_to_back('Lakers'))
 
-    @patch('app.services.context_service.requests.get')
+    @patch('app.services.espn_client.requests.get')
     def test_check_b2b_network_error(self, mock_get):
         from app.services.context_service import check_back_to_back
         mock_get.side_effect = _requests.RequestException("timeout")
@@ -750,7 +750,7 @@ class TestContextService(BaseTestCase):
 
     # -- get_days_rest --
 
-    @patch('app.services.context_service.requests.get')
+    @patch('app.services.espn_client.requests.get')
     def test_get_days_rest_found(self, mock_get):
         from app.services.context_service import get_days_rest
         from app.utils.time_helpers import et_today as _today_et
@@ -772,7 +772,7 @@ class TestContextService(BaseTestCase):
         mock_get.side_effect = side_effect
         self.assertEqual(get_days_rest('Lakers'), 2)
 
-    @patch('app.services.context_service.requests.get')
+    @patch('app.services.espn_client.requests.get')
     def test_get_days_rest_default(self, mock_get):
         from app.services.context_service import get_days_rest
         mock_resp = MagicMock()
@@ -781,7 +781,7 @@ class TestContextService(BaseTestCase):
         mock_get.return_value = mock_resp
         self.assertEqual(get_days_rest('Lakers', check_days=2), 2)
 
-    @patch('app.services.context_service.requests.get')
+    @patch('app.services.espn_client.requests.get')
     def test_get_days_rest_network_error(self, mock_get):
         from app.services.context_service import get_days_rest
         mock_get.side_effect = _requests.RequestException("timeout")
@@ -5405,7 +5405,7 @@ class TestNBALiveHelpers(BaseTestCase):
 
     def test_extract_prop_boxscore_parses_players(self):
         """_extract_prop_boxscore returns dict keyed by player name."""
-        from app.routes.nba_live import _extract_prop_boxscore
+        from app.services.espn_client import extract_prop_boxscore
         from app.config_display import PROP_ESPN_COLUMN
         col_names = list(PROP_ESPN_COLUMN.values())[:2]
         summary_data = {
@@ -5421,13 +5421,13 @@ class TestNBALiveHelpers(BaseTestCase):
                 }]
             }
         }
-        result = _extract_prop_boxscore(summary_data)
+        result = extract_prop_boxscore(summary_data)
         self.assertIn('Jayson Tatum', result)
 
     def test_extract_prop_boxscore_empty_on_missing_key(self):
         """_extract_prop_boxscore returns {} when boxscore key missing."""
-        from app.routes.nba_live import _extract_prop_boxscore
-        result = _extract_prop_boxscore({})
+        from app.services.espn_client import extract_prop_boxscore
+        result = extract_prop_boxscore({})
         self.assertEqual(result, {})
 
     def test_build_stat_context_no_game(self):
@@ -6299,7 +6299,7 @@ class TestNBALiveRouteAdditional(BaseTestCase):
         resp = self.client.get('/nba/prop-progress/12345?player=LeBron+James')
         self.assertEqual(resp.status_code, 400)
 
-    @patch('app.routes.nba_live.requests.get')
+    @patch('app.services.espn_client.requests.get')
     def test_nba_prop_progress_with_all_params(self, mock_get):
         """GET /nba/prop-progress/<id> with all required params attempts ESPN fetch."""
         mock_resp = MagicMock()
@@ -7414,7 +7414,7 @@ class TestResolveCardProgress(BaseTestCase):
         """Returns ok=False when player name doesn't match boxscore."""
         from app.services.nba_service import resolve_card_progress
         summary = self._make_summary(player_name='Anthony Davis')
-        with patch('app.services.nba_service._extract_prop_boxscore_from_summary',
+        with patch('app.services.nba_service.extract_prop_boxscore',
                    return_value={'Anthony Davis': {'player_points': 20}}):
             with patch('app.services.nba_service.derive_game_status_from_summary',
                        return_value={'elapsed_ratio': 0.5, 'status_text': 'Q3 5:30', 'period': 3, 'clock': '5:30', 'game_state': 'in_progress', 'final': False}):
@@ -7426,7 +7426,7 @@ class TestResolveCardProgress(BaseTestCase):
     def test_resolve_card_stat_unavailable(self):
         """Returns ok=False when requested stat not in boxscore for player."""
         from app.services.nba_service import resolve_card_progress
-        with patch('app.services.nba_service._extract_prop_boxscore_from_summary',
+        with patch('app.services.nba_service.extract_prop_boxscore',
                    return_value={'LeBron James': {'player_points': 22}}):
             with patch('app.services.nba_service.derive_game_status_from_summary',
                        return_value={'elapsed_ratio': 0.5, 'status_text': 'Q3 5:30', 'period': 3, 'clock': '5:30', 'game_state': 'in_progress', 'final': False}):
@@ -7438,7 +7438,7 @@ class TestResolveCardProgress(BaseTestCase):
     def test_resolve_card_success_over(self):
         """Returns ok=True with on_track=True when projected over line."""
         from app.services.nba_service import resolve_card_progress
-        with patch('app.services.nba_service._extract_prop_boxscore_from_summary',
+        with patch('app.services.nba_service.extract_prop_boxscore',
                    return_value={'LeBron James': {'player_points': 16}}):
             with patch('app.services.nba_service.derive_game_status_from_summary',
                        return_value={'elapsed_ratio': 0.5, 'status_text': 'Q3 5:30', 'period': 3, 'clock': '5:30', 'game_state': 'in_progress', 'final': False}):
@@ -7452,7 +7452,7 @@ class TestResolveCardProgress(BaseTestCase):
     def test_resolve_card_under_on_track(self):
         """on_track=True when projected under line for UNDER bet."""
         from app.services.nba_service import resolve_card_progress
-        with patch('app.services.nba_service._extract_prop_boxscore_from_summary',
+        with patch('app.services.nba_service.extract_prop_boxscore',
                    return_value={'LeBron James': {'player_points': 8}}):
             with patch('app.services.nba_service.derive_game_status_from_summary',
                        return_value={'elapsed_ratio': 0.5, 'status_text': 'Q3 5:30', 'period': 3, 'clock': '5:30', 'game_state': 'in_progress', 'final': False}):

@@ -1,8 +1,8 @@
 # Edge Tracker System Contract
 
 Status: **canonical architecture SSOT**  
-Contract version: **1.0**  
-Last verified against `main`: **2026-08-09 (`6b1e400`)**
+Contract version: **1.1**
+Last verified: **2026-09-03**
 
 Verified inventory at this version: **16 SQLAlchemy models**, **22 registered
 APScheduler jobs**, and **NBA as the only registered `SportService`**.
@@ -123,16 +123,10 @@ browser/templates
 | Provider adapters | HTTP clients, provider parsing, contracts | routes and UI concerns |
 | Models/enums | SQLAlchemy and pure utilities | routes, services, external APIs |
 
-Existing route-to-route imports are legacy exceptions, not examples to copy:
-
-- `nba_analysis.py` imports private helpers from `nba_live.py` and
-  `bet_import.py`;
-- `nba_live.py` and `bet_import.py` import `_create_pick_context_for_bet()`
-  from `bet_crud.py`;
-- `bet.py` aggregates route functions into the existing blueprint.
-
-New shared behavior MUST move to a service or pure utility instead of adding
-another route-to-route dependency.
+`app/routes/bet.py` is the blueprint composition module and MAY import route
+handlers from the other bet route modules. All other shared behavior MUST live
+in a service or pure utility; route modules MUST NOT import another route
+module's private functions.
 
 ### 2.2 Module ownership map
 
@@ -141,10 +135,11 @@ another route-to-route dependency.
 | App construction and blueprint wiring | `app/__init__.py` | server and tests | configured Flask app |
 | Authentication | `app/routes/auth.py`, Flask-Login | all protected routes | authenticated `current_user` |
 | Bet CRUD and import | `app/routes/bet_crud.py`, `bet_import.py` | browser | `BetPlacementV1`, `ApiResultV1` |
-| NBA HTTP/provider normalization | `app/services/nba_service.py` | routes, coordinator, grading | `GameV1`, `PropQuoteV1`, `LiveProgressV1` |
+| ESPN HTTP transport | `app/services/espn_client.py` | sports-data services | raw provider JSON or `EspnClientError` |
+| NBA provider normalization | `app/services/nba_service.py` | routes, coordinator, grading | `GameV1`, `PropQuoteV1`, `LiveProgressV1` |
 | Multi-sport interface | `app/services/base.py` | sport adapters | `SportService` plus boundary contracts |
 | Historical stat catalogs | `app/services/sport_config.py` | importers, scenarios, ML | `SportStatConfig` |
-| Historical ingestion | `espn_history_append.py`, CLI importers | coordinator, ML | ORM rows |
+| Historical ingestion | `espn_history_append.py`, `hoopr_import_service.py`, CLI adapters | coordinator, scheduler, ML | ORM rows |
 | Scenario computation | `scenario_dimensions.py`, `scenario_engine.py` | `live_context`, `value_detector` | persisted scenario rows and context mapping |
 | Projection | `projection_engine.py`, `ml_model.py` | `value_detector`, routes | `ProjectionV1` |
 | Distributional probability | `distributional_*`, `distribution_calibration.py` | `value_detector`, backtest | probability details |
@@ -521,11 +516,11 @@ HistoricalGameLog / resolved PickContext
 
 These are recorded exceptions, not approved patterns:
 
-- Cross-route imports expose private helpers.
 - Several service boundaries still exchange undocumented dictionaries.
 - The no-data `ScoredPropV1` path omits two optional Model 2 keys.
 - JSON response envelopes are inconsistent across legacy endpoints.
-- Provider normalization and application logic coexist in `nba_service.py`.
+- Some provider normalization and application logic still coexist in
+  `nba_service.py`; HTTP transport itself is isolated in `espn_client.py`.
 - `app/models.py` is a single large model module.
 - Process caches are not shared across workers.
 - `ARCHITECTURE.md` has stale table/job counts and is descriptive only.

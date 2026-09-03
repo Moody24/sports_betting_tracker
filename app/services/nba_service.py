@@ -8,22 +8,22 @@ from typing import Optional
 
 import requests
 
-from app.config_display import PROP_ESPN_COLUMN, SUPPORTED_PROP_MARKETS
+from app.config_display import SUPPORTED_PROP_MARKETS
 from app.enums import BetType, Outcome
 from app.services.api_budget import ODDS_BUDGET
 from app.services.base import SportService, SPORT_REGISTRY
+from app.services.espn_client import (
+    EspnClientError,
+    extract_prop_boxscore,
+    fetch_scoreboard_payload,
+    fetch_summary_payload,
+)
 from app.utils.odds import american_to_decimal
 from app.utils.time_helpers import et_date_str, ET
 
 logger = logging.getLogger(__name__)
 APP_TIMEZONE = ET
 
-ESPN_SCOREBOARD_URL = (
-    "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard"
-)
-ESPN_SUMMARY_URL = (
-    "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/summary"
-)
 ODDS_API_URL = "https://api.the-odds-api.com/v4/sports/basketball_nba/odds/"
 ODDS_API_EVENTS_URL = "https://api.the-odds-api.com/v4/sports/basketball_nba/events/"
 
@@ -36,9 +36,6 @@ _GAMES_CACHE: dict = {}
 _GAMES_CACHE_TTL = 60
 _UPCOMING_CACHE: dict = {}
 _UPCOMING_CACHE_TTL = 300
-
-_PROP_STAT_COLUMN = PROP_ESPN_COLUMN
-
 
 def _get_odds_api_key() -> str:
     return os.getenv("ODDS_API_KEY", "")
@@ -61,15 +58,9 @@ def fetch_espn_scoreboard(date_str: Optional[str] = None) -> list[dict]:
 
     Pass date_str as 'YYYYMMDD' to fetch a specific date; omit for today.
     """
-    params = {}
-    if date_str:
-        params["dates"] = date_str
-
     try:
-        resp = requests.get(ESPN_SCOREBOARD_URL, params=params, timeout=10)
-        resp.raise_for_status()
-        data = resp.json()
-    except (requests.RequestException, ValueError) as exc:
+        data = fetch_scoreboard_payload(date_str)
+    except EspnClientError as exc:
         logger.error("ESPN scoreboard fetch failed: %s", exc)
         return []
 
@@ -124,52 +115,12 @@ def fetch_espn_boxscore(espn_id: str) -> dict:
     {prop_type: stat_value} e.g. {"LeBron James": {"player_points": 28, ...}}.
     """
     try:
-        resp = requests.get(ESPN_SUMMARY_URL, params={"event": espn_id}, timeout=10)
-        resp.raise_for_status()
-        data = resp.json()
-    except (requests.RequestException, ValueError) as exc:
+        data = fetch_summary_payload(espn_id)
+    except EspnClientError as exc:
         logger.error("ESPN summary fetch failed for event %s: %s", espn_id, exc)
         return {}
 
-    player_stats: dict = {}
-
-    for team_block in data.get("boxscore", {}).get("players", []):
-        for stat_block in team_block.get("statistics", []):
-            column_names: list[str] = stat_block.get("names", [])
-            for athlete in stat_block.get("athletes", []):
-                name = athlete.get("athlete", {}).get("displayName", "")
-                if not name:
-                    continue
-                raw_stats: list[str] = athlete.get("stats", [])
-                entry: dict = {}
-                for prop_type, col_header in _PROP_STAT_COLUMN.items():
-                    if col_header not in column_names:
-                        continue
-                    idx = column_names.index(col_header)
-                    if idx >= len(raw_stats):
-                        continue
-                    raw = raw_stats[idx]
-                    # "3PT" comes as "M-A"; take made count
-                    if "-" in str(raw):
-                        try:
-                            raw = raw.split("-")[0]
-                        except Exception:
-                            logger.debug("Skipping prop parse row due to unexpected error", exc_info=True)
-                            continue
-                    try:
-                        entry[prop_type] = float(raw)
-                    except (ValueError, TypeError):
-                        pass
-                if entry:
-                    # Compute PRA so player_points_rebounds_assists bets can be graded
-                    pts = entry.get('player_points')
-                    reb = entry.get('player_rebounds')
-                    ast = entry.get('player_assists')
-                    if pts is not None and reb is not None and ast is not None:
-                        entry['player_points_rebounds_assists'] = pts + reb + ast
-                    player_stats[name] = entry
-
-    return player_stats
+    return extract_prop_boxscore(data)
 
 
 # ── The Odds API: over/under lines ──────────────────────────────────
@@ -1391,42 +1342,6 @@ def _normalize_player_name(value: str) -> str:
     return re.sub(r'[^a-z0-9]+', ' ', (value or '').lower()).strip()
 
 
-def _extract_prop_boxscore_from_summary(summary_data: dict) -> dict:
-    """Extract prop-relevant player stats from ESPN summary payload."""
-    stat_column_map = PROP_ESPN_COLUMN
-    player_stats: dict = {}
-    for team_block in summary_data.get("boxscore", {}).get("players", []):
-        for stat_block in team_block.get("statistics", []):
-            column_names: list[str] = stat_block.get("names", [])
-            for athlete in stat_block.get("athletes", []):
-                name = athlete.get("athlete", {}).get("displayName", "")
-                if not name:
-                    continue
-                raw_stats: list[str] = athlete.get("stats", [])
-                entry: dict = {}
-                for prop_type, col_header in stat_column_map.items():
-                    if col_header not in column_names:
-                        continue
-                    idx = column_names.index(col_header)
-                    if idx >= len(raw_stats):
-                        continue
-                    raw = raw_stats[idx]
-                    if "-" in str(raw):
-                        raw = str(raw).split("-")[0]
-                    try:
-                        entry[prop_type] = float(raw)
-                    except (ValueError, TypeError):
-                        continue
-                if entry:
-                    entry["player_points_rebounds_assists"] = (
-                        float(entry.get("player_points", 0) or 0)
-                        + float(entry.get("player_rebounds", 0) or 0)
-                        + float(entry.get("player_assists", 0) or 0)
-                    )
-                    player_stats[name] = entry
-    return player_stats
-
-
 def _clock_str_to_seconds(clock_value: str) -> int:
     if not clock_value or ':' not in str(clock_value):
         return 0
@@ -1495,7 +1410,7 @@ def resolve_card_progress(
     """
     from app.utils import safe_float  # local import to avoid circular dependency at module load
 
-    boxscore = _extract_prop_boxscore_from_summary(summary_data)
+    boxscore = extract_prop_boxscore(summary_data)
     if not boxscore:
         return {'ok': False, 'status': 'game_not_started', 'error': 'No boxscore data available yet'}
 

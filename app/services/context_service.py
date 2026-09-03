@@ -7,12 +7,15 @@ engine's situational adjustments.
 import logging
 import time as _time
 from datetime import date as date_type, timedelta
-from typing import Optional
-
-import requests
-
 from app import db
 from app.models import InjuryReport
+from app.services.espn_client import (
+    EspnClientError,
+    fetch_injuries_payload,
+    fetch_scoreboard_payload,
+    fetch_team_injuries_payload,
+    fetch_teams_payload,
+)
 from app.utils.time_helpers import et_today, ET
 
 logger = logging.getLogger(__name__)
@@ -36,32 +39,6 @@ _GAME_CONTEXT_CACHE_TTL = 600   # 10 min
 # that's one query per player-prop.  A 5-min TTL matches the game-context TTL.
 _INJURY_CACHE: dict[str, tuple] = {}   # name_lower → (result_dict, expires_monotonic)
 _INJURY_CACHE_TTL = 300   # 5 min
-
-ESPN_INJURIES_URL = (
-    "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries"
-)
-ESPN_TEAMS_URL = (
-    "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams"
-)
-ESPN_SCOREBOARD_URL = (
-    "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard"
-)
-
-
-def _safe_get_json(url: str, *, params: Optional[dict] = None, timeout: int = 10, attempts: int = 2) -> dict:
-    headers = {"User-Agent": "sports-betting-tracker/1.0"}
-    for attempt in range(1, attempts + 1):
-        try:
-            resp = requests.get(url, params=params, timeout=timeout, headers=headers)
-            resp.raise_for_status()
-            return resp.json()
-        except (requests.RequestException, ValueError) as exc:
-            if attempt == attempts:
-                logger.error("Request failed for %s: %s", url, exc)
-            else:
-                logger.warning("Request retry %d/%d for %s", attempt, attempts, url)
-    return {}
-
 
 def _parse_injury_payload(data: dict) -> list:
     injuries = []
@@ -102,7 +79,10 @@ def _parse_injury_payload(data: dict) -> list:
 
 
 def _fetch_team_injuries_fallback() -> list:
-    teams_payload = _safe_get_json(ESPN_TEAMS_URL, timeout=10, attempts=2)
+    try:
+        teams_payload = fetch_teams_payload(timeout=10, attempts=2)
+    except EspnClientError:
+        teams_payload = {}
     teams = teams_payload.get('sports', [{}])[0].get('leagues', [{}])[0].get('teams', [])
     if not teams:
         return []
@@ -114,8 +94,11 @@ def _fetch_team_injuries_fallback() -> list:
         team_id = team_obj.get('id')
         if not team_id:
             continue
-        team_inj_url = f"{ESPN_TEAMS_URL}/{team_id}/injuries"
-        payload = _safe_get_json(team_inj_url, timeout=8, attempts=2)
+        try:
+            payload = fetch_team_injuries_payload(
+                str(team_id), timeout=8, attempts=2)
+        except EspnClientError:
+            payload = {}
         parsed = _parse_injury_payload(payload)
         for item in parsed:
             key = (item['player_name'].lower().strip(), item['status'], item.get('team', '').lower().strip())
@@ -131,7 +114,10 @@ def fetch_espn_injuries() -> list:
 
     Returns a list of dicts: {player_name, team, status, detail}.
     """
-    data = _safe_get_json(ESPN_INJURIES_URL, timeout=10, attempts=2)
+    try:
+        data = fetch_injuries_payload(timeout=10, attempts=2)
+    except EspnClientError:
+        data = {}
     injuries = _parse_injury_payload(data) if data else []
     if injuries:
         return injuries
@@ -177,15 +163,8 @@ def _fetch_scoreboard_for_date(date_str: str) -> dict:
 
     t0 = _time.perf_counter()
     try:
-        resp = requests.get(
-            ESPN_SCOREBOARD_URL,
-            params={'dates': date_str},
-            timeout=10,
-            headers={"User-Agent": "sports-betting-tracker/1.0"},
-        )
-        resp.raise_for_status()
-        data = resp.json()
-    except (requests.RequestException, ValueError) as exc:
+        data = fetch_scoreboard_payload(date_str)
+    except EspnClientError as exc:
         logger.warning("ESPN scoreboard fetch failed for %s: %s", date_str, exc)
         data = {}
 

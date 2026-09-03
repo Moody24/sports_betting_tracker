@@ -9,20 +9,16 @@ retry naturally on their next tick.
 import logging
 from datetime import datetime
 
-import requests
-
 from app import db
 from app.models import HistoricalGameLog
 from app.services.espn_mapping import (
     NBA_TEAMS, normalize_abbr, season_for_date, usage_pct,
 )
+from app.services.espn_client import fetch_summary_payload
 from app.utils.time_helpers import ET
 from app.utils.data_coercion import normalize_player_id, safe_float, safe_str
 
 logger = logging.getLogger(__name__)
-
-ESPN_SUMMARY_URL = (
-    'https://site.api.espn.com/apis/site/v2/sports/basketball/nba/summary')
 
 # summary stat label → (stats-payload key, parser)
 def _made_attempted_part(value: str, part: int) -> float:
@@ -39,10 +35,7 @@ def history_rows_exist(espn_game_id: str) -> bool:
 
 
 def _fetch_summary(espn_id: str) -> dict:
-    resp = requests.get(ESPN_SUMMARY_URL, params={'event': espn_id},
-                        timeout=15)
-    resp.raise_for_status()
-    return resp.json()
+    return fetch_summary_payload(espn_id, timeout=15)
 
 
 def _player_records(payload: dict) -> list[dict]:

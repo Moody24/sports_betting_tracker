@@ -8,10 +8,8 @@ from datetime import datetime, timedelta
 
 from flask import render_template, redirect, url_for, flash, request, jsonify, current_app
 from flask_login import login_required, current_user
-import requests
 
 from app import db
-from app.config_display import PROP_ESPN_COLUMN
 from app.enums import BetSource, BetType, Outcome
 from app.models import Bet, GameSnapshot
 from app.utils import safe_float
@@ -22,9 +20,9 @@ from app.services.nba_service import (
     resolve_pending_bets,
     get_player_props,
     resolve_card_progress as _resolve_card_progress,
-    ESPN_SUMMARY_URL,
     APP_TIMEZONE as NBA_APP_TIMEZONE,
 )
+from app.services.espn_client import EspnClientError, fetch_summary_payload
 from app.services.market_recommender import recommend_market_sides
 from app.services.projection_engine import ProjectionEngine
 from app.services.value_detector import ValueDetector
@@ -52,42 +50,6 @@ _SNAPSHOT_WRITE_TTL = 60
 
 def _normalize_name(value: str) -> str:
     return re.sub(r'[^a-z0-9]+', ' ', (value or '').lower()).strip()
-
-
-def _extract_prop_boxscore(summary_data: dict) -> dict:
-    """Extract prop-relevant player stats from ESPN summary payload."""
-    stat_column_map = PROP_ESPN_COLUMN
-    player_stats: dict = {}
-    for team_block in summary_data.get("boxscore", {}).get("players", []):
-        for stat_block in team_block.get("statistics", []):
-            column_names: list[str] = stat_block.get("names", [])
-            for athlete in stat_block.get("athletes", []):
-                name = athlete.get("athlete", {}).get("displayName", "")
-                if not name:
-                    continue
-                raw_stats: list[str] = athlete.get("stats", [])
-                entry: dict = {}
-                for prop_type, col_header in stat_column_map.items():
-                    if col_header not in column_names:
-                        continue
-                    idx = column_names.index(col_header)
-                    if idx >= len(raw_stats):
-                        continue
-                    raw = raw_stats[idx]
-                    if "-" in str(raw):
-                        raw = str(raw).split("-")[0]
-                    try:
-                        entry[prop_type] = float(raw)
-                    except (ValueError, TypeError):
-                        continue
-                if entry:
-                    entry["player_points_rebounds_assists"] = (
-                        float(entry.get("player_points", 0) or 0)
-                        + float(entry.get("player_rebounds", 0) or 0)
-                        + float(entry.get("player_assists", 0) or 0)
-                    )
-                    player_stats[name] = entry
-    return player_stats
 
 
 def _clock_to_seconds(clock_value: str) -> int:
@@ -168,10 +130,8 @@ def _get_game_summary(espn_id: str, now_monotonic: float) -> dict:
     if cached and cached.get('expires_at', 0) > now_monotonic:
         return cached['data']
     try:
-        resp = requests.get(ESPN_SUMMARY_URL, params={'event': espn_id}, timeout=8)
-        resp.raise_for_status()
-        data = resp.json()
-    except Exception:
+        data = fetch_summary_payload(espn_id, timeout=8)
+    except EspnClientError:
         logger.warning("Live data fetch failed — returning empty result", exc_info=True)
         data = {}
     _GAME_SUMMARY_CACHE[espn_id] = {'data': data, 'expires_at': now_monotonic + _GAME_SUMMARY_TTL}
@@ -381,10 +341,8 @@ def nba_prop_progress(espn_id):
     summary_data = _get_game_summary(espn_id, now_monotonic) if use_cache else {}
     if not use_cache:
         try:
-            resp = requests.get(ESPN_SUMMARY_URL, params={'event': espn_id}, timeout=8)
-            resp.raise_for_status()
-            summary_data = resp.json()
-        except Exception:
+            summary_data = fetch_summary_payload(espn_id, timeout=8)
+        except EspnClientError:
             logger.warning("Summary fetch failed for espn_id=%s — returning empty", espn_id, exc_info=True)
             summary_data = {}
 
@@ -451,10 +409,8 @@ def nba_prop_progress_batch():
                 summary_data = _get_game_summary(espn_id, now_monotonic) if use_cache else {}
                 if not use_cache:
                     try:
-                        resp = requests.get(ESPN_SUMMARY_URL, params={'event': espn_id}, timeout=8)
-                        resp.raise_for_status()
-                        summary_data = resp.json()
-                    except Exception:
+                        summary_data = fetch_summary_payload(espn_id, timeout=8)
+                    except EspnClientError:
                         logger.warning("Summary fetch failed — returning empty", exc_info=True)
                         summary_data = {}
 
