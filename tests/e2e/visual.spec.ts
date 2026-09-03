@@ -159,7 +159,7 @@ test.describe('Visual Regression', () => {
     await page.goto('/auth/register');
     await page.locator('#username').fill(username);
     await page.locator('#email').fill('not-an-email');
-    await page.locator('#password').fill('password123');
+    await page.locator('#password').fill('E2e-safe-passphrase-2026!');
     await page.locator('#confirm_password').fill('doesNotMatch');
     await page.locator('form [type="submit"]').click();
 

@@ -32,7 +32,7 @@
           <div class="row g-3">
             <div class="col-md-6">
               <label class="form-label small fw-semibold" for="password">Password</label>
-              {{ form.password(class='form-control' ~ (' is-invalid' if form.password.errors else ''), id='password', placeholder='At least 6 characters', autocomplete='new-password', **({'aria-invalid': 'true'} if form.password.errors else {})) }}
+              {{ form.password(class='form-control' ~ (' is-invalid' if form.password.errors else ''), id='password', placeholder='12–256 character passphrase', autocomplete='new-password', **({'aria-invalid': 'true'} if form.password.errors else {})) }}
               {% for e in form.password.errors %}<div class="invalid-feedback d-block">{{ e }}</div>{% endfor %}
             </div>
             <div class="col-md-6">

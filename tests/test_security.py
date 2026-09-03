@@ -1,6 +1,8 @@
 """Security-focused tests."""
 
 import os
+from datetime import timedelta
+from unittest.mock import patch
 
 from app import create_app, db
 from app.models import Bet
@@ -40,6 +42,81 @@ class TestSecurity(BaseTestCase):
         finally:
             if original is not None:
                 os.environ["SECRET_KEY"] = original
+
+    def test_production_cookie_and_session_contract(self):
+        with patch.dict(
+            os.environ,
+            {
+                'SECRET_KEY': 'production-test-secret',
+                'FLASK_ENV': 'production',
+                'SESSION_IDLE_MINUTES': '30',
+                'SESSION_ABSOLUTE_HOURS': '12',
+                'REMEMBER_COOKIE_DAYS': '14',
+            },
+            clear=False,
+        ):
+            app = create_app(testing=True)
+
+        self.assertTrue(app.config['SESSION_COOKIE_SECURE'])
+        self.assertTrue(app.config['SESSION_COOKIE_HTTPONLY'])
+        self.assertEqual(app.config['SESSION_COOKIE_SAMESITE'], 'Lax')
+        self.assertTrue(app.config['REMEMBER_COOKIE_SECURE'])
+        self.assertTrue(app.config['REMEMBER_COOKIE_HTTPONLY'])
+        self.assertEqual(app.config['REMEMBER_COOKIE_SAMESITE'], 'Lax')
+        self.assertEqual(app.config['REMEMBER_COOKIE_DURATION'], timedelta(days=14))
+        self.assertEqual(app.config['PERMANENT_SESSION_LIFETIME'], timedelta(minutes=30))
+        self.assertEqual(app.config['SESSION_ABSOLUTE_LIFETIME'], timedelta(hours=12))
+        self.assertEqual(app.config['SESSION_PROTECTION'], 'strong')
+
+    def test_production_login_sets_hardened_session_and_remember_cookies(self):
+        with patch.dict(
+            os.environ,
+            {
+                'SECRET_KEY': 'production-test-secret',
+                'FLASK_ENV': 'production',
+            },
+            clear=False,
+        ):
+            app = create_app(testing=True)
+        app.config['WTF_CSRF_ENABLED'] = False
+        client = app.test_client()
+        with app.app_context():
+            db.drop_all()
+            db.create_all()
+            db.session.add(make_user('cookieuser', 'cookie@example.com'))
+            db.session.commit()
+
+        response = client.post(
+            '/auth/login',
+            data={
+                'username': 'cookieuser',
+                'password': 'password123',
+                'remember': 'y',
+            },
+            follow_redirects=False,
+        )
+        cookies = response.headers.getlist('Set-Cookie')
+        session_cookie = next(value for value in cookies if value.startswith('session='))
+        remember_cookie = next(
+            value for value in cookies if value.startswith('remember_token=')
+        )
+        for cookie in (session_cookie, remember_cookie):
+            self.assertIn('Secure', cookie)
+            self.assertIn('HttpOnly', cookie)
+            self.assertIn('SameSite=Lax', cookie)
+        self.assertNotIn('password123', ''.join(cookies))
+        self.assertNotIn('cookie@example.com', ''.join(cookies))
+
+        logout = client.post('/auth/logout', follow_redirects=False)
+        cleared = logout.headers.getlist('Set-Cookie')
+        with client.session_transaction() as client_session:
+            self.assertNotIn('_user_id', client_session)
+        self.assertTrue(
+            any(
+                value.startswith('remember_token=;') and 'Expires=' in value
+                for value in cleared
+            )
+        )
 
     def test_user_data_isolation(self):
         """User A's bets are not visible to user B."""

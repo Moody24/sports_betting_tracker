@@ -1,5 +1,7 @@
 """Tests for the main blueprint (home, dashboard)."""
 
+from unittest.mock import patch
+
 from app import db
 from app.models import User
 from app.enums import Outcome
@@ -21,6 +23,18 @@ class TestMainRoutes(BaseTestCase):
     def test_dashboard_settings_requires_auth(self):
         resp = self.client.post("/dashboard/settings", data={"unit_size": "25"}, follow_redirects=False)
         self.assertEqual(resp.status_code, 302)
+
+    def test_dashboard_settings_requires_fresh_authentication(self):
+        self.register_and_login()
+        with self.client.session_transaction() as client_session:
+            client_session['_fresh'] = False
+
+        resp = self.client.post(
+            '/dashboard/settings',
+            data={'unit_size': '25'},
+            follow_redirects=False,
+        )
+        self.assertEqual(resp.status_code, 401)
 
     def test_dashboard_no_bets(self):
         self.register_and_login()
@@ -133,12 +147,59 @@ class TestMainRoutes(BaseTestCase):
     def test_ux_telemetry_accepts_event_payload(self):
         resp = self.client.post(
             '/telemetry/ux',
-            json={'event': 'test_event', 'page': '/nba/today', 'meta': {'source': 'test'}},
+            json={
+                'event': 'stat_analysis_add_to_parlay',
+                'page': '/nba/stat-analysis',
+                'meta': {'side': 'over'},
+            },
         )
         self.assertEqual(resp.status_code, 204)
 
     def test_ux_telemetry_rejects_missing_event(self):
         resp = self.client.post('/telemetry/ux', json={'page': '/nba/today'})
+        self.assertEqual(resp.status_code, 400)
+
+    def test_ux_telemetry_rejects_unknown_event(self):
+        resp = self.client.post(
+            '/telemetry/ux',
+            json={'event': 'arbitrary_client_event', 'page': '/'},
+        )
+        self.assertEqual(resp.status_code, 400)
+
+    def test_ux_telemetry_rejects_non_json_payload(self):
+        resp = self.client.post(
+            '/telemetry/ux',
+            data='event=stat_analysis_refresh_started',
+            content_type='application/x-www-form-urlencoded',
+        )
+        self.assertEqual(resp.status_code, 415)
+
+    @patch('app.routes.main.logger.info')
+    def test_ux_telemetry_drops_unknown_or_sensitive_metadata(self, mock_info):
+        resp = self.client.post(
+            '/telemetry/ux',
+            json={
+                'event': 'unified_slip_submit_started',
+                'page': '/bets/new',
+                'meta': {
+                    'legs': 3,
+                    'password': 'must-not-be-logged',
+                    'notes': 'private note',
+                },
+            },
+        )
+        self.assertEqual(resp.status_code, 204)
+        logged_meta = mock_info.call_args.args[-1]
+        self.assertEqual(logged_meta, {'legs': 3})
+
+    def test_ux_telemetry_rejects_external_page_value(self):
+        resp = self.client.post(
+            '/telemetry/ux',
+            json={
+                'event': 'nba_today_refresh_started',
+                'page': 'https://example.com/private',
+            },
+        )
         self.assertEqual(resp.status_code, 400)
 
 

@@ -1,6 +1,31 @@
 from flask_wtf import FlaskForm
 from wtforms import StringField, PasswordField, FloatField, SubmitField, BooleanField, DateField, SelectField, HiddenField, TextAreaField
-from wtforms.validators import DataRequired, Length, EqualTo, NumberRange, Optional, Email
+from wtforms.validators import (
+    DataRequired,
+    Email,
+    EqualTo,
+    Length,
+    NumberRange,
+    Optional,
+    ValidationError,
+)
+
+
+COMMON_PASSWORDS = frozenset({
+    '123456789012',
+    'adminadmin',
+    'letmeinletmein',
+    'password123',
+    'passwordpassword',
+    'qwertyqwerty',
+    'welcome12345',
+})
+
+
+def reject_common_password(_form, field) -> None:
+    normalized = ''.join(str(field.data or '').casefold().split())
+    if normalized in COMMON_PASSWORDS:
+        raise ValidationError('That password is too common. Choose a unique passphrase.')
 
 
 class LoginForm(FlaskForm):
@@ -13,10 +38,17 @@ class LoginForm(FlaskForm):
 class RegisterForm(FlaskForm):
     username = StringField('Username', validators=[DataRequired(), Length(min=2, max=20)])
     email = StringField('Email', validators=[DataRequired(), Email(message='Enter a valid email address.'), Length(max=120)])
-    password = PasswordField('Password', validators=[DataRequired(), Length(min=6)])
+    password = PasswordField(
+        'Password',
+        validators=[DataRequired(), Length(min=12, max=256), reject_common_password],
+    )
     confirm_password = PasswordField(
         'Confirm Password',
-        validators=[DataRequired(), EqualTo('password', message='Passwords must match.')],
+        validators=[
+            DataRequired(),
+            Length(max=256),
+            EqualTo('password', message='Passwords must match.'),
+        ],
     )
     submit = SubmitField('Register')
 

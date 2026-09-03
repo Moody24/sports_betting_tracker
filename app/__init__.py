@@ -5,7 +5,7 @@ import os
 import secrets
 import sys
 from time import perf_counter
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from flask import Flask, g, get_template_attribute, render_template, request
 from flask_limiter import Limiter
@@ -75,6 +75,25 @@ def _database_url(testing: bool) -> str:
     ) else url
 
 
+def _positive_int_env(name: str, default: int) -> int:
+    raw = os.getenv(name, '').strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        logging.getLogger(__name__).warning(
+            'Invalid %s=%r; using default %d', name, raw, default
+        )
+        return default
+    if value <= 0:
+        logging.getLogger(__name__).warning(
+            '%s must be positive; using default %d', name, default
+        )
+        return default
+    return value
+
+
 def _database_engine_options(app: Flask, database_url: str) -> dict:
     options = dict(app.config.get('SQLALCHEMY_ENGINE_OPTIONS', {}))
     base_pool_options = {
@@ -103,6 +122,9 @@ def _configure_app(app: Flask, testing: bool) -> None:
             'Set it before starting the application.'
         )
     database_url = _database_url(testing)
+    session_idle_minutes = _positive_int_env('SESSION_IDLE_MINUTES', 30)
+    session_absolute_hours = _positive_int_env('SESSION_ABSOLUTE_HOURS', 12)
+    remember_cookie_days = _positive_int_env('REMEMBER_COOKIE_DAYS', 14)
     app.config.update(
         SECRET_KEY=secret_key,
         SQLALCHEMY_DATABASE_URI=database_url,
@@ -116,6 +138,13 @@ def _configure_app(app: Flask, testing: bool) -> None:
         RATELIMIT_STORAGE_URI=os.getenv('RATELIMIT_STORAGE_URI', 'memory://'),
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE='Lax',
+        SESSION_PROTECTION='strong',
+        PERMANENT_SESSION_LIFETIME=timedelta(minutes=session_idle_minutes),
+        SESSION_ABSOLUTE_LIFETIME=timedelta(hours=session_absolute_hours),
+        SESSION_REFRESH_EACH_REQUEST=True,
+        REMEMBER_COOKIE_HTTPONLY=True,
+        REMEMBER_COOKIE_SAMESITE='Lax',
+        REMEMBER_COOKIE_DURATION=timedelta(days=remember_cookie_days),
     )
     is_production = (
         bool(os.getenv('RAILWAY_ENVIRONMENT'))
@@ -124,6 +153,9 @@ def _configure_app(app: Flask, testing: bool) -> None:
     secure_default = 'true' if is_production else 'false'
     app.config['SESSION_COOKIE_SECURE'] = (
         os.getenv('SESSION_COOKIE_SECURE', secure_default).lower() == 'true'
+    )
+    app.config['REMEMBER_COOKIE_SECURE'] = (
+        os.getenv('REMEMBER_COOKIE_SECURE', secure_default).lower() == 'true'
     )
     if testing:
         app.config['TESTING'] = True

@@ -1,7 +1,7 @@
 # Edge Tracker System Contract
 
 Status: **canonical architecture SSOT**  
-Contract version: **1.1**
+Contract version: **1.2**
 Last verified: **2026-09-03**
 
 Verified inventory at this version: **16 SQLAlchemy models**, **22 registered
@@ -418,7 +418,7 @@ only with their JavaScript consumers and tests in the same change.
 | Scenario splits/context pack | SQLAlchemy DB | rebuildable derived state | scenario engine | atomic rebuild, then crosswalk cache clear |
 | Model registry/evaluations | `ModelMetadata`, `ModelEvaluationRun` | durable | ML training/evaluation | new run/activation decision |
 | Model binaries | `model_storage.py` | durable local artifact in current runtime | ML trainers | metadata reference; retrain to regenerate |
-| Authentication | Flask-Login signed session | browser session | auth routes | logout/session expiry |
+| Authentication | Flask-Login signed session | 30-minute sliding idle / 12-hour absolute; 14-day remember cookie | auth routes | logout/session expiry; see `docs/security/browser-persistence.md` |
 | Parlay composition | browser `sessionStorage` | tab/session | shared JS utilities | explicit clear or browser session end |
 | Today's scored props | `score_cache._cache` | process, 5-minute TTL | scoring service | scheduler/manual invalidation |
 | NBA games/provider payload | `nba_service` caches | process, short TTL | NBA adapter | TTL/date rollover |
@@ -451,6 +451,10 @@ only with their JavaScript consumers and tests in the same change.
    `sessionStorage`, DOM state, and JS globals are never authoritative.
 9. **Artifact activation is explicit.** Evaluation verdicts do not auto-activate
    models; activation remains a separate controlled action.
+10. **Authentication is bounded.** Authenticated sessions MUST have both an idle
+    and absolute lifetime. Production session and remember cookies MUST be
+    Secure, HttpOnly, and SameSite=Lax. Logout clears the current and legacy
+    user-specific browser-storage keys listed in the persistence inventory.
 
 ### 4.3 Time contract
 

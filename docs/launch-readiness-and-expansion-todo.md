@@ -31,8 +31,8 @@ published.
 |---|---|---|
 | ML validation | Under/overfitting diagnostics, mandatory temporal Model 2 partitions, real quote ingestion/capture contracts, rolling-origin evaluation, and ROI/CLV/drawdown/Kelly gates are merged | Accumulate or import enough licensed real prop decision/closing lines; run repeated shadow evaluations; profitability is not yet proven |
 | Shared architecture | A dependency map, shared schemas, state rules, and module ownership registry exist in `docs/architecture/system-contract.md` | Reconcile with Claude's work, commit it, add architecture tests to CI, and keep it synchronized with executable contracts |
-| Login security | Passwords are hashed with Werkzeug; CSRF, login/register rate limits, POST logout, secure production session-cookie default, CSP, HSTS, frame blocking, and generic login failures exist | Password policy, persistent-cookie hardening, session lifecycle, account recovery/verification, audit logging, shared rate-limit storage, security tests, and privacy review |
-| Browser persistence | No passwords, auth tokens, or API secrets were found in app-managed `localStorage`/`sessionStorage` | Fix logout cleanup for the current parlay key and add an inventory/regression test |
+| Login security | Passwords are hashed with Werkzeug; CSRF, login/register rate limits, POST logout, hardened production session/remember cookies, bounded session lifetimes, a 12–256 character password policy, CSP, HSTS, frame blocking, and generic login failures exist | Account recovery/verification, auth audit logging, breached-password coverage, shared rate-limit storage, and broader security review |
+| Browser persistence | The versioned parlay queue is the only active app-managed browser key; its contents/lifecycle are inventoried and current/legacy keys clear on logout | Keep the inventory and logout browser regression synchronized with any new browser state |
 | Environment/secrets | `.env` is ignored; `.env.example` exists; `SECRET_KEY` is required | Expand the example to cover every operator-facing variable, add secret scanning and an env-contract test, and store production values only in Railway variables |
 | Database/deployment | SQLAlchemy accepts SQLite or `DATABASE_URL`; `postgres://` is normalized; psycopg is installed; Alembic, Docker, Gunicorn, `/health`, and `/ready` exist | Test the complete migration chain on PostgreSQL, build a data-copy validator, use Railway pre-deploy migrations, establish backup/rollback, and separate web/scheduler ownership |
 | MLB/NFL | Sport stat catalogs exist for NBA, MLB, and NFL; `HistoricalGameLog` and scenario tables include `sport`; a `SportService` interface exists | Only NBA has a registered service. Bet/snapshot/context schemas, providers, features, models, calibration, grading, routes, schedules, and tests remain sport-specific or absent |
@@ -79,28 +79,28 @@ migration cost.
 
 ### Findings and work items
 
-- [ ] **P0: clear the real parlay storage key on logout.** The queue is stored in
+- [x] **P0: clear the real parlay storage key on logout.** The queue is stored in
   `sessionStorage` as `sbt_parlay_queue_v1`; the current logout script clears only
   the retired `parlayQueue` key. Clear both during the compatibility period, call
   the shared `clearParlayQueue()` function, and add a Playwright test covering
   logout then login as a different user in the same tab.
-- [ ] **P0: document browser persistence.** Keep an inventory of cookie names,
+- [x] **P0: document browser persistence.** Keep an inventory of cookie names,
   browser keys, contents, purpose, lifetime, and deletion event. Limit the parlay
   queue to non-sensitive bet composition; do not add bankroll notes, email,
   tokens, or provider payloads.
-- [ ] **P0: inspect real cookies in a controlled browser test.** Assert the
+- [x] **P0: inspect real cookies in a controlled response test.** Assert the
   session and remember cookies contain no password/email/API secret, have the
   expected `Secure`, `HttpOnly`, and `SameSite` flags in production mode, and are
   removed/invalidated on logout as intended.
-- [ ] **P0: harden remember-me separately.** Explicitly set
+- [-] **P0: harden remember-me separately.** Explicitly set
   `REMEMBER_COOKIE_SECURE`, `REMEMBER_COOKIE_HTTPONLY`,
   `REMEMBER_COOKIE_SAMESITE`, and a documented duration. Rotate or invalidate
   persistent sessions after password reset/change.
-- [ ] **P0: replace the six-character password minimum.** Prefer a minimum of 12
+- [-] **P0: replace the six-character password minimum.** Prefer a minimum of 12
   characters while allowing long passphrases; set a high maximum to prevent
   resource abuse; reject common/breached passwords without restrictive composition
   rules. Add tests for Unicode, long input, and denial-of-service bounds.
-- [ ] **P0: define session lifecycle.** Choose idle and absolute lifetimes, enable
+- [x] **P0: define session lifecycle.** Choose idle and absolute lifetimes, enable
   Flask-Login session protection, require fresh authentication for email/password
   or bankroll-security changes, and document multi-device logout behavior.
 - [ ] **P0: move production rate limits to a shared store.** `memory://` produces
@@ -110,7 +110,7 @@ migration cost.
   chosen non-disclosing response when reading, editing, grading, deleting, or
   exporting User A's bets/parlays/context. Prefer querying by both object ID and
   `user_id` instead of fetching first and checking ownership afterward.
-- [ ] **P0: protect telemetry.** Keep `/telemetry/ux` payloads allowlisted and
+- [-] **P0: protect telemetry.** Keep `/telemetry/ux` payloads allowlisted and
   bounded, never accept credentials/free-form private notes, add bot/abuse
   monitoring, and document why this endpoint is CSRF-exempt.
 - [ ] **P1: reduce account enumeration.** Decide whether duplicate registration
@@ -136,8 +136,8 @@ migration cost.
 ### Acceptance evidence
 
 - [ ] Two-user browser and request-level security suite passes.
-- [ ] Production-cookie assertions pass with no sensitive payload discovered.
-- [ ] Logout clears every documented user-specific browser key.
+- [x] Production-cookie assertions pass with no sensitive payload discovered.
+- [x] Logout clears every documented user-specific browser key.
 - [ ] Redis-backed rate limiting works across two Gunicorn workers.
 - [ ] Security logs contain request correlation but no secrets or sensitive form
   data.

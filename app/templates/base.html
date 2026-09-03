@@ -193,6 +193,7 @@
     // Clear parlay queue from storage on logout to avoid stale state for the next session
     document.querySelectorAll('form[action*="logout"]').forEach(function(form) {
       form.addEventListener('submit', function() {
+        if (typeof clearParlayQueue === 'function') clearParlayQueue();
         localStorage.removeItem('parlayQueue');
         sessionStorage.removeItem('parlayQueue');
       });

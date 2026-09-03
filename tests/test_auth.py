@@ -1,8 +1,10 @@
 """Tests for the auth blueprint."""
 
+import time
 from unittest.mock import patch
 
 from app import db
+from app.routes.auth import SESSION_STARTED_AT_KEY
 
 from tests.helpers import BaseTestCase, make_user
 
@@ -16,8 +18,8 @@ class TestAuthRoutes(BaseTestCase):
             data={
                 "username": "newuser",
                 "email": "new@example.com",
-                "password": "password123",
-                "confirm_password": "password123",
+                "password": "a-safe-test-passphrase",
+                "confirm_password": "a-safe-test-passphrase",
             },
             follow_redirects=True,
         )
@@ -28,8 +30,8 @@ class TestAuthRoutes(BaseTestCase):
         data = {
             "username": "dupeuser",
             "email": "dupe@example.com",
-            "password": "password123",
-            "confirm_password": "password123",
+            "password": "a-safe-test-passphrase",
+            "confirm_password": "a-safe-test-passphrase",
         }
         self.client.post("/auth/register", data=data, follow_redirects=True)
         resp = self.client.post("/auth/register", data=data, follow_redirects=True)
@@ -48,13 +50,56 @@ class TestAuthRoutes(BaseTestCase):
         )
         self.assertNotIn(b"Registration successful", resp.data)
 
+    def test_register_rejects_common_password(self):
+        resp = self.client.post(
+            "/auth/register",
+            data={
+                "username": "commonpw",
+                "email": "common@example.com",
+                "password": "passwordpassword",
+                "confirm_password": "passwordpassword",
+            },
+            follow_redirects=True,
+        )
+        self.assertNotIn(b"Registration successful", resp.data)
+        self.assertIn(b"too common", resp.data)
+
+    def test_register_accepts_unicode_passphrase(self):
+        password = "Möhämoud-safe-🔐-2026"
+        resp = self.client.post(
+            "/auth/register",
+            data={
+                "username": "unicodepw",
+                "email": "unicode@example.com",
+                "password": password,
+                "confirm_password": password,
+            },
+            follow_redirects=True,
+        )
+        self.assertIn(b"Registration successful", resp.data)
+
+    def test_register_rejects_password_over_resource_limit(self):
+        password = "x" * 257
+        resp = self.client.post(
+            "/auth/register",
+            data={
+                "username": "longpw",
+                "email": "long@example.com",
+                "password": password,
+                "confirm_password": password,
+            },
+            follow_redirects=True,
+        )
+        self.assertNotIn(b"Registration successful", resp.data)
+        self.assertIn(b"256 characters", resp.data)
+
     def test_register_mismatched_passwords(self):
         resp = self.client.post(
             "/auth/register",
             data={
                 "username": "mismatch",
                 "email": "mismatch@example.com",
-                "password": "password123",
+                "password": "a-safe-test-passphrase",
                 "confirm_password": "different456",
             },
             follow_redirects=True,
@@ -117,6 +162,25 @@ class TestAuthRoutes(BaseTestCase):
         resp2 = self.client.get("/dashboard", follow_redirects=True)
         self.assertIn(b"Login", resp2.data)
 
+    def test_login_starts_permanent_bounded_session(self):
+        self.register_and_login()
+        with self.client.session_transaction() as client_session:
+            self.assertTrue(client_session.permanent)
+            self.assertIsInstance(client_session[SESSION_STARTED_AT_KEY], int)
+
+    def test_absolute_session_lifetime_logs_user_out(self):
+        self.register_and_login()
+        with self.client.session_transaction() as client_session:
+            client_session[SESSION_STARTED_AT_KEY] = int(time.time()) - (13 * 3600)
+
+        resp = self.client.get('/dashboard', follow_redirects=False)
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn('/auth/login', resp.headers['Location'])
+
+        protected = self.client.get('/dashboard', follow_redirects=False)
+        self.assertEqual(protected.status_code, 302)
+        self.assertIn('/auth/login', protected.headers['Location'])
+
 
     def test_login_form_autocomplete_markup(self):
         resp = self.client.get('/auth/login')
@@ -134,8 +198,8 @@ class TestAuthRoutes(BaseTestCase):
             data={
                 'username': 'newuser',
                 'email': 'not-an-email',
-                'password': 'password123',
-                'confirm_password': 'password123',
+                'password': 'a-safe-test-passphrase',
+                'confirm_password': 'a-safe-test-passphrase',
             },
             follow_redirects=True,
         )

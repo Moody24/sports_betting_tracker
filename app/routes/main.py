@@ -2,7 +2,7 @@ import logging
 from collections import defaultdict
 
 from flask import Blueprint, jsonify, render_template, request, redirect, url_for, flash
-from flask_login import current_user, login_required
+from flask_login import current_user, fresh_login_required, login_required
 from sqlalchemy import func, case, text
 
 from app import db, csrf, limiter
@@ -12,6 +12,53 @@ from app.models import Bet, compute_bets_net_pl, compute_bets_wagered
 logger = logging.getLogger(__name__)
 
 main = Blueprint('main', __name__)
+
+UX_TELEMETRY_EVENTS = frozenset({
+    'nba_today_refresh_error',
+    'nba_today_refresh_retry',
+    'nba_today_refresh_started',
+    'nba_today_refresh_success',
+    'prop_analysis_quick_add_parlay',
+    'prop_analysis_quick_add_single',
+    'prop_analysis_refresh_error',
+    'prop_analysis_refresh_started',
+    'prop_analysis_refresh_success',
+    'stat_analysis_add_to_parlay',
+    'stat_analysis_refresh_error',
+    'stat_analysis_refresh_started',
+    'stat_analysis_refresh_success',
+    'unified_slip_no_games',
+    'unified_slip_refresh_error',
+    'unified_slip_refresh_started',
+    'unified_slip_refresh_success',
+    'unified_slip_submit_error',
+    'unified_slip_submit_network_error',
+    'unified_slip_submit_started',
+    'unified_slip_submit_success',
+})
+
+
+def _sanitize_ux_meta(event: str, raw_meta) -> dict:
+    if not isinstance(raw_meta, dict):
+        return {}
+
+    meta = {}
+    if event == 'stat_analysis_add_to_parlay':
+        side = str(raw_meta.get('side') or '').lower()
+        if side in {'over', 'under'}:
+            meta['side'] = side
+    elif event in {
+        'prop_analysis_quick_add_parlay',
+        'unified_slip_submit_started',
+        'unified_slip_submit_success',
+    }:
+        try:
+            legs = int(raw_meta.get('legs'))
+        except (TypeError, ValueError):
+            legs = 0
+        if 1 <= legs <= 20:
+            meta['legs'] = legs
+    return meta
 
 
 def _get_model2_probe() -> dict:
@@ -94,19 +141,25 @@ def home():
 @csrf.exempt
 @limiter.limit("60 per minute")
 def ux_telemetry():
-    """Receive lightweight UX events for interaction quality monitoring."""
-    payload = request.get_json(silent=True) or {}
-    event = str(payload.get('event') or '').strip()[:64]
-    if not event:
-        return jsonify(error='event required'), 400
+    """Receive a fixed, non-sensitive UX event vocabulary.
 
-    page = str(payload.get('page') or '').strip()[:120]
-    meta_in = payload.get('meta') if isinstance(payload.get('meta'), dict) else {}
-    meta = {}
-    for raw_key, raw_val in list(meta_in.items())[:20]:
-        key = str(raw_key)[:32]
-        val = str(raw_val)[:120]
-        meta[key] = val
+    This endpoint is CSRF-exempt because sendBeacon cannot supply the CSRF form
+    token and the endpoint performs no user or domain-state mutation. The strict
+    event/meta allowlists and rate limit are the abuse boundary.
+    """
+    if not request.is_json:
+        return jsonify(error='application/json required'), 415
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify(error='invalid JSON payload'), 400
+    event = str(payload.get('event') or '').strip()[:64]
+    if event not in UX_TELEMETRY_EVENTS:
+        return jsonify(error='unsupported event'), 400
+
+    page = str(payload.get('page') or '/').strip()[:120]
+    if not page.startswith('/') or page.startswith('//'):
+        return jsonify(error='invalid page'), 400
+    meta = _sanitize_ux_meta(event, payload.get('meta'))
 
     uid = current_user.id if current_user.is_authenticated else None
     logger.info('ux_event event=%s page=%s user_id=%s meta=%s', event, page, uid, meta)
@@ -283,7 +336,7 @@ def _get_cached_plays() -> tuple:
 
 
 @main.route('/dashboard/settings', methods=['POST'])
-@login_required
+@fresh_login_required
 def dashboard_settings():
     raw_unit_size = (request.form.get('unit_size') or '').strip()
     if raw_unit_size == '':

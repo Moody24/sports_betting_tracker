@@ -6,7 +6,7 @@ export async function registerAndLogin(page: Page): Promise<{ username: string; 
   // Keep entropy inside the form's 20-character username limit. Putting the
   // random suffix last caused parallel workers to submit identical truncations.
   const username = `e2e_${randomPart}_${timePart}`;
-  const password = 'password123';
+  const password = 'E2e-safe-passphrase-2026!';
   const email = `${username}@example.com`;
 
   await page.goto('/auth/register');
