@@ -481,6 +481,114 @@ def _find_local_model_fallback(model_name: str) -> Optional[str]:
     return None
 
 
+def _active_model_metadata(user_id: int | None):
+    if user_id is not None:
+        meta = ModelMetadata.query.filter_by(
+            model_name=_model_name(user_id), is_active=True,
+        ).first()
+        if meta is not None:
+            return meta
+    return ModelMetadata.query.filter_by(
+        model_name=_model_name(None), is_active=True,
+    ).first()
+
+
+def _prediction_metadata(meta) -> Optional[dict]:
+    try:
+        metadata = json.loads(meta.metadata_json) if meta.metadata_json else {}
+    except (ValueError, TypeError):
+        return None
+    if not metadata.get('feature_names'):
+        return None
+    return metadata
+
+
+def _prediction_model_path(meta) -> Optional[str]:
+    local_path = materialize_model_artifact(meta.file_path)
+    if local_path:
+        return local_path
+    return _find_local_model_fallback(meta.model_name)
+
+
+def _load_prediction_model(local_model_path: str, classifier_type):
+    try:
+        if local_model_path.endswith('.pkl'):
+            import joblib
+            return joblib.load(local_model_path)
+        model = classifier_type()
+        model.load_model(local_model_path)
+        return model
+    except Exception as exc:
+        logger.error("Failed to load pick quality model: %s", exc)
+        return None
+
+
+def _prediction_features(context: dict) -> dict[str, float]:
+    features = {}
+    for key in PICK_FEATURES:
+        value = context.get(key, 0)
+        if isinstance(value, bool):
+            value = int(value)
+        try:
+            features[key] = float(value)
+        except (ValueError, TypeError):
+            features[key] = 0.0
+
+    features['player_trend'] = TREND_MAP.get(
+        context.get('player_last5_trend', ''), 0
+    )
+    features['minutes_trend'] = MINUTES_MAP.get(
+        context.get('minutes_trend', ''), 0
+    )
+    features['confidence_tier_num'] = TIER_MAP.get(
+        context.get('confidence_tier', ''), 0
+    )
+    features['injury_returning'] = int(context.get('injury_returning', False))
+    return features
+
+
+def _prediction_red_flags(context: dict) -> list[str]:
+    red_flags = []
+    if context.get('back_to_back'):
+        red_flags.append('back-to-back game')
+    if context.get('player_variance', 0) > 8:
+        red_flags.append('high player variance')
+    if context.get('injury_returning'):
+        red_flags.append('returning from injury')
+    if context.get('player_last5_trend') == 'cold':
+        red_flags.append('cold streak')
+    return red_flags
+
+
+def _recommendation_thresholds(metadata: dict) -> tuple[float, float]:
+    defaults = (0.60, 0.56)
+    values = (
+        metadata.get(
+            'take_it_threshold', env_float('MODEL2_TAKE_IT_THRESHOLD', defaults[0])
+        ),
+        metadata.get(
+            'caution_threshold', env_float('MODEL2_CAUTION_THRESHOLD', defaults[1])
+        ),
+    )
+    parsed = []
+    for value, default in zip(values, defaults):
+        try:
+            parsed.append(float(value))
+        except (TypeError, ValueError):
+            parsed.append(default)
+    take_it_threshold, caution_threshold = parsed
+    return take_it_threshold, min(caution_threshold, take_it_threshold)
+
+
+def _recommendation_for_probability(win_probability: float, metadata: dict) -> str:
+    take_it_threshold, caution_threshold = _recommendation_thresholds(metadata)
+    if win_probability >= take_it_threshold:
+        return 'take_it'
+    if win_probability >= caution_threshold:
+        return 'caution'
+    return 'skip'
+
+
 def predict_pick_quality(context: dict, user_id: int | None = None) -> dict:
     """Predict whether a pick is likely to win.
 
@@ -498,105 +606,35 @@ def predict_pick_quality(context: dict, user_id: int | None = None) -> dict:
     except ImportError:
         return _no_model_result()
 
-    meta = None
-    if user_id is not None:
-        meta = ModelMetadata.query.filter_by(
-            model_name=_model_name(user_id), is_active=True,
-        ).first()
-    if meta is None:
-        meta = ModelMetadata.query.filter_by(
-            model_name=_model_name(None), is_active=True,
-        ).first()
-
+    meta = _active_model_metadata(user_id)
     if not meta:
         return _no_model_result()
-    local_model_path = materialize_model_artifact(meta.file_path)
-    # S3 unavailable — scan for most recent local model file
-    if not local_model_path:
-        local_model_path = _find_local_model_fallback(_model_name(user_id))
+    local_model_path = _prediction_model_path(meta)
     if not local_model_path:
         return _no_model_result()
 
-    try:
-        md = json.loads(meta.metadata_json) if meta.metadata_json else {}
-        feature_names = md.get('feature_names', [])
-    except (ValueError, TypeError):
+    metadata = _prediction_metadata(meta)
+    if metadata is None:
         return _no_model_result()
 
-    if not feature_names:
+    model = _load_prediction_model(local_model_path, XGBClassifier)
+    if model is None:
         return _no_model_result()
-
-    # Load model: .pkl = joblib-serialized (calibrated), .json = XGBoost native
-    if local_model_path.endswith('.pkl'):
-        try:
-            import joblib
-            model = joblib.load(local_model_path)
-        except Exception as exc:
-            logger.error("Failed to load calibrated model: %s", exc)
-            return _no_model_result()
-    else:
-        model = XGBClassifier()
-        model.load_model(local_model_path)
-
-    # Build feature vector from context
-    features = {}
-    for key in PICK_FEATURES:
-        val = context.get(key, 0)
-        if isinstance(val, bool):
-            val = int(val)
-        try:
-            features[key] = float(val)
-        except (ValueError, TypeError):
-            features[key] = 0.0
-
-    features['player_trend'] = TREND_MAP.get(context.get('player_last5_trend', ''), 0)
-    features['minutes_trend'] = MINUTES_MAP.get(context.get('minutes_trend', ''), 0)
-    features['confidence_tier_num'] = TIER_MAP.get(context.get('confidence_tier', ''), 0)
-    features['injury_returning'] = int(context.get('injury_returning', False))
-
-    X = np.array([[features.get(k, 0) for k in feature_names]])
+    features = _prediction_features(context)
+    feature_names = metadata['feature_names']
+    X = np.array([[features.get(key, 0) for key in feature_names]])
 
     try:
         win_prob_raw = float(model.predict_proba(X)[0][1])
     except Exception as exc:
         logger.error("Pick quality prediction failed: %s", exc)
         return _no_model_result()
-    win_prob = _stabilize_probability(win_prob_raw, md)
-
-    # Determine recommendation
-    red_flags = []
-    if context.get('back_to_back'):
-        red_flags.append('back-to-back game')
-    if context.get('player_variance', 0) > 8:
-        red_flags.append('high player variance')
-    if context.get('injury_returning'):
-        red_flags.append('returning from injury')
-    if context.get('player_last5_trend') == 'cold':
-        red_flags.append('cold streak')
-
-    take_it_threshold = md.get('take_it_threshold', env_float('MODEL2_TAKE_IT_THRESHOLD', 0.60))
-    caution_threshold = md.get('caution_threshold', env_float('MODEL2_CAUTION_THRESHOLD', 0.56))
-    try:
-        take_it_threshold = float(take_it_threshold)
-    except (TypeError, ValueError):
-        take_it_threshold = 0.60
-    try:
-        caution_threshold = float(caution_threshold)
-    except (TypeError, ValueError):
-        caution_threshold = 0.56
-    caution_threshold = min(caution_threshold, take_it_threshold)
-
-    if win_prob >= take_it_threshold:
-        recommendation = 'take_it'
-    elif win_prob >= caution_threshold:
-        recommendation = 'caution'
-    else:
-        recommendation = 'skip'
+    win_prob = _stabilize_probability(win_prob_raw, metadata)
 
     return {
         'win_probability': round(win_prob, 3),
-        'recommendation': recommendation,
-        'red_flags': red_flags,
+        'recommendation': _recommendation_for_probability(win_prob, metadata),
+        'red_flags': _prediction_red_flags(context),
         'model_version': meta.version,
     }
 
