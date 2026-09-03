@@ -146,73 +146,113 @@ def build_team_game_aggregates(rows: Iterable) -> Tuple[Dict[tuple, dict], Dict[
     return totals, counts
 
 
+def _team_game_key(game) -> tuple[str, date_type | None]:
+    team = (getattr(game, 'team_abbr', '') or '').strip().upper()
+    return team, getattr(game, 'game_date', None)
+
+
+def _eligible_team_usage_game(game, counts: dict, min_players: int) -> bool:
+    team, game_date = _team_game_key(game)
+    return bool(
+        team
+        and game_date
+        and counts.get((team, game_date), 0) >= int(min_players)
+    )
+
+
+def _team_share_average(
+    game_rows,
+    totals: dict,
+    counts: dict,
+    min_players: int,
+    numerator_key: str,
+    denominator_key: str,
+) -> float:
+    shares = []
+    for game in game_rows:
+        if not _eligible_team_usage_game(game, counts, min_players):
+            continue
+        denominator = float(
+            (totals.get(_team_game_key(game)) or {}).get(denominator_key, 0.0)
+            or 0.0
+        )
+        if denominator <= 0:
+            continue
+        numerator = float(getattr(game, numerator_key, 0.0) or 0.0)
+        shares.append(numerator / denominator)
+    return float(sum(shares) / len(shares)) if shares else 0.0
+
+
+def _usage_possessions(source) -> float:
+    getter = source.get if isinstance(source, dict) else lambda key, default: getattr(
+        source,
+        key,
+        default,
+    )
+    return (
+        float(getter('fga', 0.0) or 0.0)
+        + 0.44 * float(getter('fta', 0.0) or 0.0)
+        + float(getter('tov', 0.0) or 0.0)
+    )
+
+
+def _usage_share_average(
+    game_rows,
+    totals: dict,
+    counts: dict,
+    min_players: int,
+) -> float:
+    shares = []
+    for game in game_rows:
+        if not _eligible_team_usage_game(game, counts, min_players):
+            continue
+        team_usage = _usage_possessions(totals.get(_team_game_key(game)) or {})
+        if team_usage > 0:
+            shares.append(_usage_possessions(game) / team_usage)
+    return float(sum(shares) / len(shares)) if shares else 0.0
+
+
+def _lead_usage_rate(
+    game_rows,
+    totals: dict,
+    counts: dict,
+    min_players: int,
+    threshold: float = 0.22,
+) -> float:
+    valid_shares = []
+    for game in game_rows:
+        if not _eligible_team_usage_game(game, counts, min_players):
+            continue
+        team_fga = float(
+            (totals.get(_team_game_key(game)) or {}).get('fga', 0.0) or 0.0
+        )
+        if team_fga > 0:
+            valid_shares.append(float(getattr(game, 'fga', 0.0) or 0.0) / team_fga)
+    if not valid_shares:
+        return 0.0
+    return sum(share >= threshold for share in valid_shares) / len(valid_shares)
+
+
 def compute_team_usage_features_for_player(game_list: Iterable, totals: Dict[tuple, dict], counts: Dict[tuple, int], min_players: int = MIN_TEAM_PLAYERS_FOR_SHARE_FEATURES) -> dict:
     """Compute team share and usage features with completeness gating."""
     games = list(game_list or [])
-
-    def _is_eligible(game) -> bool:
-        team = (getattr(game, 'team_abbr', '') or '').strip().upper()
-        game_date = getattr(game, 'game_date', None)
-        if not team or not game_date:
-            return False
-        return counts.get((team, game_date), 0) >= int(min_players)
-
-    def _share_avg(game_rows, num_key: str, den_key: str) -> float:
-        shares = []
-        for game in game_rows:
-            if not _is_eligible(game):
-                continue
-            team = (getattr(game, 'team_abbr', '') or '').strip().upper()
-            key = (team, getattr(game, 'game_date', None))
-            game_totals = totals.get(key) or {}
-            den = float(game_totals.get(den_key, 0.0) or 0.0)
-            if den <= 0:
-                continue
-            shares.append(float(getattr(game, num_key, 0.0) or 0.0) / den)
-        return float(sum(shares) / len(shares)) if shares else 0.0
-
-    def _usage_share_avg(game_rows) -> float:
-        shares = []
-        for game in game_rows:
-            if not _is_eligible(game):
-                continue
-            team = (getattr(game, 'team_abbr', '') or '').strip().upper()
-            key = (team, getattr(game, 'game_date', None))
-            game_totals = totals.get(key) or {}
-            team_usage = float(game_totals.get('fga', 0.0) or 0.0) + 0.44 * float(game_totals.get('fta', 0.0) or 0.0) + float(game_totals.get('tov', 0.0) or 0.0)
-            if team_usage <= 0:
-                continue
-            player_usage = float(getattr(game, 'fga', 0.0) or 0.0) + 0.44 * float(getattr(game, 'fta', 0.0) or 0.0) + float(getattr(game, 'tov', 0.0) or 0.0)
-            shares.append(player_usage / team_usage)
-        return float(sum(shares) / len(shares)) if shares else 0.0
-
-    def _lead_rate(game_rows, threshold: float = 0.22) -> float:
-        leaders = 0
-        valid = 0
-        for game in game_rows:
-            if not _is_eligible(game):
-                continue
-            team = (getattr(game, 'team_abbr', '') or '').strip().upper()
-            key = (team, getattr(game, 'game_date', None))
-            game_totals = totals.get(key) or {}
-            team_fga = float(game_totals.get('fga', 0.0) or 0.0)
-            if team_fga <= 0:
-                continue
-            valid += 1
-            share = float(getattr(game, 'fga', 0.0) or 0.0) / team_fga
-            if share >= threshold:
-                leaders += 1
-        return float(leaders / valid) if valid else 0.0
-
     sorted_games = sort_logs_by_date(games, ascending=True)
     last_5 = sorted_games[-5:]
     last_10 = sorted_games[-10:]
 
     return {
-        'fga_share_last_5': _share_avg(last_5, 'fga', 'fga'),
-        'pts_share_last_5': _share_avg(last_5, 'pts', 'pts'),
-        'usage_share_last_5': _usage_share_avg(last_5),
-        'lead_usage_rate_last_10': _lead_rate(last_10),
+        'fga_share_last_5': _team_share_average(
+            last_5, totals, counts, min_players, 'fga', 'fga',
+        ),
+        'pts_share_last_5': _team_share_average(
+            last_5, totals, counts, min_players, 'pts', 'pts',
+        ),
+        'usage_share_last_5': _usage_share_average(
+            last_5, totals, counts, min_players,
+        ),
+        'lead_usage_rate_last_10': _lead_usage_rate(
+            last_10, totals, counts, min_players,
+        ),
     }
 
 

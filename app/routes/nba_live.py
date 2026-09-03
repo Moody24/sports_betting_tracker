@@ -330,44 +330,145 @@ def nba_prop_progress(espn_id):
     bet_type = (request.args.get('bet_type') or '').strip().lower()
 
     use_cache = not current_app.testing
-    cache_key = (
+    cache_key = _progress_cache_key(
+        espn_id,
+        player_name,
+        prop_type,
+        bet_type,
+        line,
+    )
+    now_monotonic = time.monotonic()
+    if use_cache:
+        _prune_prop_progress_cache(now_monotonic)
+        cached = _cached_progress_payload(cache_key, now_monotonic)
+        if cached is not None:
+            return jsonify(cached)
+
+    summary_data = _fetch_progress_summary(espn_id, now_monotonic, use_cache)
+
+    if not summary_data:
+        payload = {'ok': False, 'status': 'game_not_started', 'error': 'No boxscore data available yet'}
+        if use_cache:
+            _store_progress_payload(cache_key, payload, now_monotonic)
+        return jsonify(payload), 200
+
+    payload = _resolve_card_progress(espn_id, player_name, prop_type, line, bet_type, summary_data)
+    if use_cache:
+        _store_progress_payload(cache_key, payload, now_monotonic)
+
+    if not payload.get('ok'):
+        status_code = 404 if 'not found' in payload.get('error', '') or 'unavailable' in payload.get('error', '') else 200
+        return jsonify(payload), status_code
+    return jsonify(payload)
+
+
+def _progress_item_fields(item: dict) -> tuple[str, str, str, float, str]:
+    return (
+        str(item.get('card_id') or ''),
+        (item.get('player') or '').strip(),
+        (item.get('prop_type') or '').strip(),
+        safe_float(item.get('line'), 0.0),
+        (item.get('bet_type') or '').strip().lower(),
+    )
+
+
+def _progress_cache_key(
+    espn_id: str,
+    player_name: str,
+    prop_type: str,
+    bet_type: str,
+    line: float,
+) -> tuple:
+    return (
         espn_id,
         _normalize_name(player_name),
         prop_type,
         bet_type,
         round(line, 2),
     )
-    now_monotonic = time.monotonic()
+
+
+def _cached_progress_payload(cache_key: tuple, now_monotonic: float):
+    cached = _PROP_PROGRESS_CACHE.get(cache_key)
+    if cached and cached.get('expires_at', 0) > now_monotonic:
+        return cached['payload']
+    return None
+
+
+def _store_progress_payload(cache_key, payload, now_monotonic) -> None:
+    _PROP_PROGRESS_CACHE[cache_key] = {
+        'expires_at': now_monotonic + _PROP_PROGRESS_TTL_SECONDS,
+        'created_at': now_monotonic,
+        'payload': payload,
+    }
+
+
+def _fetch_progress_summary(
+    espn_id: str,
+    now_monotonic: float,
+    use_cache: bool,
+) -> dict:
     if use_cache:
-        _prune_prop_progress_cache(now_monotonic)
-        cached = _PROP_PROGRESS_CACHE.get(cache_key)
-        if cached and cached.get('expires_at', 0) > now_monotonic:
-            return jsonify(cached['payload'])
+        return _get_game_summary(espn_id, now_monotonic)
+    try:
+        return fetch_summary_payload(espn_id, timeout=8)
+    except EspnClientError:
+        logger.warning('Summary fetch failed — returning empty', exc_info=True)
+        return {}
 
-    summary_data = _get_game_summary(espn_id, now_monotonic) if use_cache else {}
-    if not use_cache:
-        try:
-            summary_data = fetch_summary_payload(espn_id, timeout=8)
-        except EspnClientError:
-            logger.warning("Summary fetch failed for espn_id=%s — returning empty", espn_id, exc_info=True)
-            summary_data = {}
 
-    if not summary_data:
-        payload = {'ok': False, 'status': 'game_not_started', 'error': 'No boxscore data available yet'}
+def _batch_progress_for_game(
+    espn_id: str,
+    items: list[dict],
+    *,
+    use_cache: bool,
+    now_monotonic: float,
+) -> dict[str, dict]:
+    results = {}
+    summary_data = None
+    for item in items:
+        card_id, player_name, prop_type, line, bet_type = _progress_item_fields(item)
+        if not card_id or not player_name or not prop_type:
+            if card_id:
+                results[card_id] = {'ok': False, 'error': 'Missing required fields'}
+            continue
+        cache_key = _progress_cache_key(
+            espn_id,
+            player_name,
+            prop_type,
+            bet_type,
+            line,
+        )
+        cached = _cached_progress_payload(cache_key, now_monotonic) if use_cache else None
+        if cached is not None:
+            results[card_id] = cached
+            continue
+        if summary_data is None:
+            summary_data = _fetch_progress_summary(
+                espn_id,
+                now_monotonic,
+                use_cache,
+            )
+        payload = (
+            _resolve_card_progress(
+                espn_id,
+                player_name,
+                prop_type,
+                line,
+                bet_type,
+                summary_data,
+            )
+            if summary_data
+            else {
+                'ok': False,
+                'status': 'game_not_started',
+                'error': 'No boxscore data available yet',
+            }
+        )
+        results[card_id] = payload
         if use_cache:
-            _PROP_PROGRESS_CACHE[cache_key] = {'expires_at': now_monotonic + _PROP_PROGRESS_TTL_SECONDS,
-                                               'created_at': now_monotonic, 'payload': payload}
-        return jsonify(payload), 200
-
-    payload = _resolve_card_progress(espn_id, player_name, prop_type, line, bet_type, summary_data)
-    if use_cache:
-        _PROP_PROGRESS_CACHE[cache_key] = {'expires_at': now_monotonic + _PROP_PROGRESS_TTL_SECONDS,
-                                           'created_at': now_monotonic, 'payload': payload}
-
-    if not payload.get('ok'):
-        status_code = 404 if 'not found' in payload.get('error', '') or 'unavailable' in payload.get('error', '') else 200
-        return jsonify(payload), status_code
-    return jsonify(payload)
+            _store_progress_payload(cache_key, payload, now_monotonic)
+    return results
 
 
 @login_required
@@ -388,47 +489,14 @@ def nba_prop_progress_batch():
         if eid:
             by_game.setdefault(eid, []).append(item)
 
-    results: dict[str, dict] = {}
+    results = {}
     for espn_id, items in by_game.items():
-        summary_data = None
-
-        for item in items:
-            card_id = str(item.get('card_id') or '')
-            player_name = (item.get('player') or '').strip()
-            prop_type = (item.get('prop_type') or '').strip()
-            line = safe_float(item.get('line'), 0.0)
-            bet_type = (item.get('bet_type') or '').strip().lower()
-
-            if not card_id or not player_name or not prop_type:
-                if card_id:
-                    results[card_id] = {'ok': False, 'error': 'Missing required fields'}
-                continue
-
-            cache_key = (espn_id, _normalize_name(player_name), prop_type, bet_type, round(line, 2))
-            if use_cache:
-                cached = _PROP_PROGRESS_CACHE.get(cache_key)
-                if cached and cached.get('expires_at', 0) > now_monotonic:
-                    results[card_id] = cached['payload']
-                    continue
-
-            if summary_data is None:
-                summary_data = _get_game_summary(espn_id, now_monotonic) if use_cache else {}
-                if not use_cache:
-                    try:
-                        summary_data = fetch_summary_payload(espn_id, timeout=8)
-                    except EspnClientError:
-                        logger.warning("Summary fetch failed — returning empty", exc_info=True)
-                        summary_data = {}
-
-            if not summary_data:
-                payload = {'ok': False, 'status': 'game_not_started', 'error': 'No boxscore data available yet'}
-            else:
-                payload = _resolve_card_progress(espn_id, player_name, prop_type, line, bet_type, summary_data)
-
-            results[card_id] = payload
-            if use_cache:
-                _PROP_PROGRESS_CACHE[cache_key] = {'expires_at': now_monotonic + _PROP_PROGRESS_TTL_SECONDS,
-                                                   'created_at': now_monotonic, 'payload': payload}
+        results.update(_batch_progress_for_game(
+            espn_id,
+            items,
+            use_cache=use_cache,
+            now_monotonic=now_monotonic,
+        ))
 
     return jsonify(results)
 

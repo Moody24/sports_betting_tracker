@@ -92,6 +92,165 @@ def devig_probs(over_odds: int, under_odds: int) -> tuple[float, float]:
     return over_raw / total, under_raw / total
 
 
+def _recommended_prop_edge(
+    model_prob_over: float,
+    book_prob_over: float,
+    book_prob_under: float,
+    over_odds: int,
+    under_odds: int,
+) -> tuple[float, float, float, str, int]:
+    edge_over = model_prob_over - book_prob_over
+    edge_under = (1.0 - model_prob_over) - book_prob_under
+    if edge_over >= edge_under:
+        return edge_over, edge_over, edge_under, 'over', over_odds
+    return edge_under, edge_over, edge_under, 'under', under_odds
+
+
+def _prop_confidence_tier(edge: float, projection_confidence: str) -> str:
+    abs_edge = abs(edge)
+    if abs_edge >= TIER_STRONG and projection_confidence in STRONG_CONFIDENCE_LEVELS:
+        return 'strong'
+    if abs_edge >= TIER_MODERATE:
+        return 'moderate'
+    if abs_edge >= TIER_SLIGHT:
+        return 'slight'
+    return 'no_edge'
+
+
+def _fallback_pick_quality_context(proj: dict, projection, edge, line, notes):
+    z_score = proj.get('z_score', 0)
+    if z_score > 1.5:
+        trend = 'hot'
+    elif z_score < -1.5:
+        trend = 'cold'
+    else:
+        trend = 'neutral'
+    return {
+        'projected_stat': projection,
+        'projected_edge': edge,
+        'prop_line': line,
+        'player_last5_trend': trend,
+        'back_to_back': int(any('back-to-back' in note for note in notes)),
+    }
+
+
+def _pick_quality_adjustment(
+    *,
+    player_name,
+    prop_type,
+    line,
+    recommended_odds,
+    projection,
+    edge,
+    confidence_tier,
+    opponent_name,
+    team_name,
+    is_home,
+    proj,
+    context_notes,
+):
+    win_probability = None
+    recommendation = 'no_model'
+    try:
+        player_id = find_player_id(player_name) or ''
+        quality_context = (
+            build_pick_context_features(
+                player_name=player_name,
+                player_id=player_id,
+                prop_type=prop_type,
+                prop_line=line,
+                american_odds=recommended_odds,
+                projected_stat=projection,
+                projected_edge=edge,
+                confidence_tier=confidence_tier,
+                opponent_name=opponent_name,
+                team_name=team_name,
+                is_home=is_home,
+            )
+            if player_id
+            else _fallback_pick_quality_context(
+                proj,
+                projection,
+                edge,
+                line,
+                context_notes,
+            )
+        )
+        quality = predict_pick_quality(quality_context)
+        win_prob = quality.get('win_probability', 0.5)
+        win_probability = round(win_prob, 3)
+        recommendation = quality.get('recommendation', 'no_model')
+        if win_prob < 0.42 and confidence_tier == 'moderate':
+            confidence_tier = 'slight'
+        if win_prob >= 0.60:
+            context_notes.append(f'ML quality: {win_prob:.0%} win prob')
+        elif win_prob < 0.40:
+            context_notes.append(f'ML caution: {win_prob:.0%} win prob')
+    except Exception as exc:
+        logger.warning(
+            'Model 2 quality scoring unavailable for %s/%s: %s',
+            player_name,
+            prop_type,
+            exc,
+        )
+    return confidence_tier, context_notes, win_probability, recommendation
+
+
+def _scenario_signal_adjustment(
+    detector,
+    *,
+    player_name,
+    prop_type,
+    line,
+    opponent_name,
+    team_name,
+    is_home,
+    game_date,
+    game_total_line,
+    spread,
+    favored_side,
+    confidence_tier,
+    context_notes,
+):
+    if not detector._use_scenario_signal():
+        return confidence_tier, context_notes, None, None
+    try:
+        signal = detector._scenario_signal(
+            player_name,
+            prop_type,
+            line,
+            opponent_name,
+            team_name,
+            is_home,
+            game_date,
+            game_total_line,
+            spread,
+            favored_side,
+        )
+    except Exception as exc:
+        logger.warning(
+            'Scenario signal failed for %s/%s: %s',
+            player_name,
+            prop_type,
+            exc,
+        )
+        signal = None
+    if signal is None:
+        return confidence_tier, context_notes, None, None
+    agreement, matches, pack_fresh = signal
+    lean = 'over' if agreement >= 0 else 'under'
+    context_notes.append(
+        f'Scenario splits: {matches} matches, lean {lean} {agreement:+.2f}'
+    )
+    if pack_fresh:
+        confidence_tier = _apply_scenario_nudge(
+            confidence_tier,
+            agreement,
+            matches,
+        )
+    return confidence_tier, context_notes, agreement, matches
+
+
 class ValueDetector:
     """Identifies value plays by comparing model projections to sportsbook lines."""
 
@@ -219,102 +378,60 @@ class ValueDetector:
         # Book no-vig probabilities
         book_prob_over, book_prob_under = devig_probs(over_odds, under_odds)
 
-        # Edge calculation
-        edge_over = model_prob_over - book_prob_over
-        edge_under = model_prob_under - book_prob_under
-
-        # Determine recommended side
-        if edge_over >= edge_under:
-            edge = edge_over
-            recommended_side = 'over'
-            recommended_odds = over_odds
-        else:
-            edge = edge_under
-            recommended_side = 'under'
-            recommended_odds = under_odds
-
-        # Confidence tier
-        abs_edge = abs(edge)
+        edge, edge_over, edge_under, recommended_side, recommended_odds = (
+            _recommended_prop_edge(
+                model_prob_over,
+                book_prob_over,
+                book_prob_under,
+                over_odds,
+                under_odds,
+            )
+        )
         projection_confidence = proj.get('confidence', 'low')
-        if abs_edge >= TIER_STRONG and projection_confidence in STRONG_CONFIDENCE_LEVELS:
-            confidence_tier = 'strong'
-        elif abs_edge >= TIER_MODERATE:
-            confidence_tier = 'moderate'
-        elif abs_edge >= TIER_SLIGHT:
-            confidence_tier = 'slight'
-        else:
-            confidence_tier = 'no_edge'
+        confidence_tier = _prop_confidence_tier(edge, projection_confidence)
 
-        # Model 2 (pick quality) enhancement
         context_notes = _sanitize_context_notes(proj.get('context_notes', []))
-        win_probability = None
-        pick_quality_recommendation = 'no_model'
-        try:
-            player_id = find_player_id(player_name) or ''
-            if player_id:
-                qctx = build_pick_context_features(
-                    player_name=player_name,
-                    player_id=player_id,
-                    prop_type=prop_type,
-                    prop_line=line,
-                    american_odds=recommended_odds,
-                    projected_stat=projection,
-                    projected_edge=edge,
-                    confidence_tier=confidence_tier,
-                    opponent_name=opponent_name,
-                    team_name=team_name,
-                    is_home=is_home,
-                )
-            else:
-                # Fallback when player_id cannot be resolved — minimal context only.
-                z = proj.get('z_score', 0)
-                trend_str = 'hot' if z > 1.5 else ('cold' if z < -1.5 else 'neutral')
-                b2b = any('back-to-back' in note for note in context_notes)
-                qctx = {
-                    'projected_stat': projection,
-                    'projected_edge': edge,
-                    'prop_line': line,
-                    'player_last5_trend': trend_str,
-                    'back_to_back': int(b2b),
-                }
-            quality = predict_pick_quality(qctx)
-            win_prob = quality.get('win_probability', 0.5)
-            win_probability = round(win_prob, 3)
-            pick_quality_recommendation = quality.get('recommendation', 'no_model')
-            # Downgrade moderate → slight if model says <42% win probability
-            if win_prob < 0.42 and confidence_tier == 'moderate':
-                confidence_tier = 'slight'
-            if win_prob >= 0.60:
-                context_notes.append(f'ML quality: {win_prob:.0%} win prob')
-            elif win_prob < 0.40:
-                context_notes.append(f'ML caution: {win_prob:.0%} win prob')
-        except Exception as exc:
-            logger.warning("Model 2 quality scoring unavailable for %s/%s: %s", player_name, prop_type, exc)
+        (
+            confidence_tier,
+            context_notes,
+            win_probability,
+            pick_quality_recommendation,
+        ) = _pick_quality_adjustment(
+            player_name=player_name,
+            prop_type=prop_type,
+            line=line,
+            recommended_odds=recommended_odds,
+            projection=projection,
+            edge=edge,
+            confidence_tier=confidence_tier,
+            opponent_name=opponent_name,
+            team_name=team_name,
+            is_home=is_home,
+            proj=proj,
+            context_notes=context_notes,
+        )
         context_notes = _sanitize_context_notes(context_notes)
 
-        # Scenario-split agreement signal (Plan C Increment 2). Applied after
-        # the Model 2 adjustment so the bounded nudge has the last word.
-        scenario_agreement = None
-        scenario_matches = None
-        if self._use_scenario_signal():
-            try:
-                signal = self._scenario_signal(
-                    player_name, prop_type, line, opponent_name, team_name,
-                    is_home, game_date, game_total_line, spread, favored_side)
-            except Exception as exc:
-                logger.warning(
-                    "Scenario signal failed for %s/%s: %s",
-                    player_name, prop_type, exc)
-                signal = None
-            if signal is not None:
-                scenario_agreement, scenario_matches, pack_fresh = signal
-                lean = 'over' if scenario_agreement >= 0 else 'under'
-                context_notes.append(
-                    f"Scenario splits: {scenario_matches} matches, "
-                    f"lean {lean} {scenario_agreement:+.2f}")
-                if pack_fresh:      # stale conditioning never nudges tiers
-                    confidence_tier = _apply_scenario_nudge(
-                        confidence_tier, scenario_agreement, scenario_matches)
+        (
+            confidence_tier,
+            context_notes,
+            scenario_agreement,
+            scenario_matches,
+        ) = _scenario_signal_adjustment(
+            self,
+            player_name=player_name,
+            prop_type=prop_type,
+            line=line,
+            opponent_name=opponent_name,
+            team_name=team_name,
+            is_home=is_home,
+            game_date=game_date,
+            game_total_line=game_total_line,
+            spread=spread,
+            favored_side=favored_side,
+            confidence_tier=confidence_tier,
+            context_notes=context_notes,
+        )
 
         return {
             'player': player_name,

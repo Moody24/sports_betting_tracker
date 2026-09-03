@@ -296,6 +296,50 @@ class TestNBALiveHelpers(BaseTestCase):
         data = resp.get_json()
         self.assertFalse(data.get('ok'))
 
+    def test_nba_prop_progress_batch_rejects_empty_body(self):
+        self.register_and_login()
+        response = self.client.post('/nba/prop-progress/batch', json=[])
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(response.get_json()['ok'])
+
+    @patch('app.routes.nba_live._resolve_card_progress')
+    @patch('app.routes.nba_live.fetch_summary_payload')
+    def test_nba_prop_progress_batch_fetches_once_per_game(
+        self,
+        fetch_summary,
+        resolve_progress,
+    ):
+        fetch_summary.return_value = {'boxscore': {'players': []}}
+        resolve_progress.side_effect = [
+            {'ok': True, 'actual': 10},
+            {'ok': True, 'actual': 5},
+        ]
+        self.register_and_login()
+
+        response = self.client.post('/nba/prop-progress/batch', json=[
+            {
+                'card_id': 'card-1',
+                'espn_id': 'game-1',
+                'player': 'Player A',
+                'prop_type': 'player_points',
+                'line': 20.5,
+                'bet_type': 'over',
+            },
+            {
+                'card_id': 'card-2',
+                'espn_id': 'game-1',
+                'player': 'Player B',
+                'prop_type': 'player_rebounds',
+                'line': 7.5,
+                'bet_type': 'under',
+            },
+        ])
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(set(response.get_json()), {'card-1', 'card-2'})
+        fetch_summary.assert_called_once_with('game-1', timeout=8)
+        self.assertEqual(resolve_progress.call_count, 2)
+
 
 class TestNBALiveRouteAdditional(BaseTestCase):
     """Additional tests targeting uncovered branches in nba_live.py routes."""

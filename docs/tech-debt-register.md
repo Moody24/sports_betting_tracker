@@ -13,7 +13,7 @@ than remaining as an open checklist.
 - Full verification: 1,265 tests passing, 80% application coverage
 - Static/security gates: Ruff, Bandit, detect-secrets, Git-history credential
   scanning, and pip-audit passing
-- Ruff C901 inventory: 34 functions, down from 59 before this cleanup
+- Ruff C901 inventory: 30 functions, down from 59 before this cleanup
 - Working tree expectation: no generated files; personal untracked files are
   outside project scope
 
@@ -62,6 +62,9 @@ and architecture-contract tests are the reproducible measures for this repo.
 - Decomposed leakage-safe rolling backtests and daily prop snapshot ingestion,
   including failure persistence, incumbent fallback, duplicate suppression,
   and scheduled/decision/close timing tests.
+- Decomposed single/batch live progress, team-usage feature construction, and
+  prop scoring across Model 1, Model 2, and scenario signals. Batch progress
+  now has an explicit one-summary-fetch-per-game contract test.
 - Consolidated two conflicting inactive Railway runbooks.
 - Blocked accidental external HTTP in the shared test fixture.
 - Moved stale virtualenvs and generated test/browser artifacts to Trash,
@@ -71,7 +74,7 @@ and architecture-contract tests are the reproducible measures for this repo.
 
 | Priority | Item | Evidence and exit condition |
 |---|---|---|
-| P1 | Remaining high-complexity workflows | 34 C901 findings remain. Continue downward from the three complexity-16 feature, live-route, and scoring workflows. Preserve behavior with focused tests per extraction. |
+| P1 | Remaining high-complexity workflows | 30 C901 findings remain. Continue downward from the two complexity-15 model-status and prop-fetch workflows. Preserve behavior with focused tests per extraction. |
 | P2 before hosted deployment | Inactive Railway scripts and configuration | They are intentionally retained for restoration work and the surviving runbook is explicitly marked inactive. Revalidate or delete them when a hosting decision is made. |
 
 ## Next cleanup order
