@@ -1,7 +1,8 @@
 # Deployment Runbook (Railway + Neon) — INACTIVE
 
 > ⚠️ **This runbook documents the former Railway + Neon deployment stack, which is currently disconnected.**
-> For local development, see [`README.md`](../README.md) and [`ARCHITECTURE.md`](../ARCHITECTURE.md).
+> For local development, see [`README.md`](../README.md). The canonical architecture
+> contract is [`docs/architecture/system-contract.md`](architecture/system-contract.md).
 > This file is preserved as a reference for when external deployment is restored.
 
 ---
@@ -38,7 +39,8 @@ Neon URL notes:
 1. Confirm migrations are committed and reviewed.
 2. Validate all tests locally before push:
    ```bash
-   .venv/bin/pytest -q
+   SECRET_KEY=test .venv/bin/python -m coverage run -m unittest discover -s tests -v
+   .venv/bin/python -m coverage report --include="app/*"
    ```
 3. Push branch and wait for CI to finish.
 4. Deploy to Railway only after CI is green (required gate).
@@ -54,7 +56,7 @@ Neon URL notes:
 ## Testing Safety Rules
 
 - Never run tests against production Neon DB.
-- Use local or dedicated test DB for `pytest`.
+- Use a local or dedicated test DB for the unittest suite.
 - Keep test config isolated from Railway runtime environment variables.
 
 ## CLI Runbook (Safe Operations)

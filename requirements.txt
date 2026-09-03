@@ -21,7 +21,6 @@ gunicorn==23.0.0
 python-dotenv==1.2.1
 email-validator==2.2.0
 requests==2.32.3
-coverage==7.6.1
 Pillow==11.1.0
 pytesseract==0.3.13
 nba_api==1.5.2

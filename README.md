@@ -32,7 +32,7 @@ git clone https://github.com/Moody24/sports_betting_tracker.git
 cd sports_betting_tracker
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 ```
 
 ### 2. Create your `.env` file
@@ -119,7 +119,9 @@ bandit -q -r app -x tests -ll
 
 ## Project Structure
 
-See [`ARCHITECTURE.md`](ARCHITECTURE.md) for a full module map, data flow diagrams, and multi-sport expansion guide.
+[`docs/architecture/system-contract.md`](docs/architecture/system-contract.md) is the
+canonical architecture contract. See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the
+descriptive module map, data flows, and multi-sport expansion guide.
 
 Key directories:
 
@@ -132,9 +134,11 @@ app/
 ├── ml_models/    Local model artifact JSON files (gitignored)
 └── templates/    Jinja2 HTML templates
 docs/
-├── ARCHITECTURE.md        System overview and expansion guide
+├── architecture/
+│   └── system-contract.md Canonical module and state ownership contract
 ├── runbooks/              Operational guides (DB, retrain, incident response)
 └── postmortem_system.md   Bet diagnostic system
+ARCHITECTURE.md             Descriptive system overview and expansion guide
 ```
 
 ## Contributing

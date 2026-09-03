@@ -18,10 +18,7 @@ echo "== Guardrail: lint =="
 echo "== Guardrail: security scan =="
 "$PY_BIN" -m bandit -q -r app -x tests -ll
 
-echo "== Guardrail: test suite =="
-"$PY_BIN" -m pytest -q
-
-echo "== Guardrail: coverage =="
+echo "== Guardrail: test suite + coverage =="
 "$PY_BIN" -m coverage run -m unittest discover -s tests -v
 "$PY_BIN" -m coverage report --include="app/*" --fail-under=80
 

@@ -314,6 +314,6 @@ Tests use `sqlite:///:memory:` — no external DB required.
 | ML model retrain | `docs/runbooks/retrain.md` |
 | Database maintenance | `docs/runbooks/db-maintenance.md` |
 | Incident response | `docs/runbooks/incident-response.md` |
-| Railway deployment (inactive) | `docs/runbooks/deployment.md` |
+| Railway deployment (inactive) | `docs/deploy.md` |
 | Bet postmortem system | `docs/postmortem_system.md` |
 | UI QA checklist | `docs/ui_v1_baseline.md` |

@@ -1,3 +1,4 @@
 -r requirements.txt
+coverage==7.6.1
 ruff==0.15.5
 bandit==1.9.4
