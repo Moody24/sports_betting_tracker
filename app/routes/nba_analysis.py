@@ -67,6 +67,47 @@ def _compute_hit_rates(player_name: str, prop_type: str, line: float, n: int = 2
     return _hit_rates_from_logs(logs, col_name, line)
 
 
+def _analysis_probability(play: dict, side: str) -> float:
+    key = 'model_prob_under' if side == 'under' else 'model_prob_over'
+    probability = play.get(key)
+    if probability is None:
+        probability = play.get('win_probability')
+    try:
+        return min(max(float(probability), 0.0), 1.0)
+    except (TypeError, ValueError):
+        return 0.5
+
+
+def _analysis_recent_form(play: dict, logs: list[PlayerGameLog],
+                          side: str) -> list[dict]:
+    try:
+        line = float(play.get('line'))
+    except (TypeError, ValueError):
+        line = 0.0
+    try:
+        spread = max(abs(float(play.get('std_dev') or 0.0)) * 2.0, 1.0)
+    except (TypeError, ValueError):
+        spread = 1.0
+    stat_col = _STAT_COL.get(play.get('prop_type', ''))
+    recent_form = []
+    for log in reversed(logs):
+        value = getattr(log, stat_col, None) if stat_col else None
+        if value is None:
+            continue
+        value = float(value)
+        margin = value - line
+        result = 'push' if margin == 0 else ('over' if margin > 0 else 'under')
+        won = result == side
+        recent_form.append({
+            'date': log.game_date.strftime('%b %d') if log.game_date else '',
+            'value': value,
+            'margin_normalized': round(max(-1.0, min(1.0, margin / spread)), 3),
+            'tone': 'push' if result == 'push' else ('win' if won else 'loss'),
+            'result': result,
+        })
+    return recent_form
+
+
 def _analysis_play_view_models(plays: list[dict]) -> list[dict]:
     """Copy and enrich analysis plays for the probability-first board.
 
@@ -91,50 +132,16 @@ def _analysis_play_view_models(plays: list[dict]) -> list[dict]:
 
     for play in view_models:
         side = (play.get('recommended_side') or 'over').lower()
-        probability_key = 'model_prob_under' if side == 'under' else 'model_prob_over'
-        probability = play.get(probability_key)
-        if probability is None:
-            probability = play.get('win_probability')
-        try:
-            probability = min(max(float(probability), 0.0), 1.0)
-        except (TypeError, ValueError):
-            probability = 0.5
-
+        probability = _analysis_probability(play, side)
         play['side_probability'] = probability
         play['natural_frequency'] = int(probability * 10 + 0.5)
         play['fair_odds'] = (
             american_from_decimal(1.0 / probability)
             if 0.0 < probability < 1.0 else None
         )
-
-        try:
-            line = float(play.get('line'))
-        except (TypeError, ValueError):
-            line = 0.0
-        try:
-            spread = max(abs(float(play.get('std_dev') or 0.0)) * 2.0, 1.0)
-        except (TypeError, ValueError):
-            spread = 1.0
-
-        stat_col = _STAT_COL.get(play.get('prop_type', ''))
-        recent_form = []
-        # Rows were collected newest-first; the strip reads oldest to newest.
-        for log in reversed(logs_by_player.get(play.get('player', ''), [])):
-            value = getattr(log, stat_col, None) if stat_col else None
-            if value is None:
-                continue
-            value = float(value)
-            margin = value - line
-            result = 'push' if margin == 0 else ('over' if margin > 0 else 'under')
-            won = result == side
-            recent_form.append({
-                'date': log.game_date.strftime('%b %d') if log.game_date else '',
-                'value': value,
-                'margin_normalized': round(max(-1.0, min(1.0, margin / spread)), 3),
-                'tone': 'push' if result == 'push' else ('win' if won else 'loss'),
-                'result': result,
-            })
-        play['recent_form'] = recent_form
+        play['recent_form'] = _analysis_recent_form(
+            play, logs_by_player.get(play.get('player', ''), []), side,
+        )
 
     return view_models
 

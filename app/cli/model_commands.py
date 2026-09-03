@@ -1,5 +1,6 @@
 """Model, pick-quality, postmortem, and accuracy Flask CLI commands."""
 
+import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
@@ -1120,7 +1121,6 @@ def cli_backfill_pick_context(limit, dry_run, allow_weak_context):
               help='Preview changes without writing to DB.')
 def cli_normalize_pick_context_flags(limit, dry_run):
     """Normalize/enrich context_flags for existing PickContext rows."""
-    import json as _json
     from app.services.feature_engine import derive_context_flags_from_snapshot
 
     with current_app.app_context():
@@ -1130,38 +1130,15 @@ def cli_normalize_pick_context_flags(limit, dry_run):
             .limit(int(limit))
             .all()
         )
-        updated = 0
-        invalid_json = 0
-        already_ok = 0
-
-        for row in rows:
-            try:
-                ctx = _json.loads(row.context_json or '{}')
-                if not isinstance(ctx, dict):
-                    invalid_json += 1
-                    continue
-            except (TypeError, ValueError):
-                invalid_json += 1
-                continue
-
-            new_flags = derive_context_flags_from_snapshot(ctx)
-            old_flags = ctx.get('context_flags')
-            if isinstance(old_flags, list):
-                merged = list(old_flags)
-                for flag in new_flags:
-                    if flag not in merged:
-                        merged.append(flag)
-            else:
-                merged = new_flags
-
-            if old_flags == merged:
-                already_ok += 1
-                continue
-
-            ctx['context_flags'] = merged
-            if not dry_run:
-                row.context_json = _json.dumps(ctx)
-            updated += 1
+        outcomes = [
+            _normalize_pick_context_row(
+                row, derive_context_flags_from_snapshot, dry_run,
+            )
+            for row in rows
+        ]
+        updated = outcomes.count('updated')
+        invalid_json = outcomes.count('invalid')
+        already_ok = outcomes.count('same')
 
         if not dry_run and updated:
             db.session.commit()
@@ -1172,6 +1149,28 @@ def cli_normalize_pick_context_flags(limit, dry_run):
         click.echo(f'Invalid JSON skipped: {invalid_json}')
         if dry_run:
             click.echo('Dry-run only; no writes committed.')
+
+
+def _normalize_pick_context_row(row, derive_flags, dry_run: bool) -> str:
+    try:
+        context = json.loads(row.context_json or '{}')
+    except (TypeError, ValueError):
+        return 'invalid'
+    if not isinstance(context, dict):
+        return 'invalid'
+    old_flags = context.get('context_flags')
+    new_flags = derive_flags(context)
+    if isinstance(old_flags, list):
+        merged = list(old_flags)
+        merged.extend(flag for flag in new_flags if flag not in merged)
+    else:
+        merged = new_flags
+    if old_flags == merged:
+        return 'same'
+    context['context_flags'] = merged
+    if not dry_run:
+        row.context_json = json.dumps(context)
+    return 'updated'
 
 
 # ── Pollution report (standalone click command, not app.cli.command) ───────────

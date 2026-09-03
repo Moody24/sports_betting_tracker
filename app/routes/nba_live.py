@@ -146,64 +146,80 @@ def _get_game_summary(espn_id: str, now_monotonic: float) -> dict:
 
 # ── Routes ────────────────────────────────────────────────────────────────
 
+
+def _new_game_snapshot(game: dict, today) -> GameSnapshot:
+    return GameSnapshot(
+        espn_id=game['espn_id'],
+        game_date=today,
+        home_team=game['home']['name'],
+        away_team=game['away']['name'],
+        home_logo=game['home'].get('logo', ''),
+        away_logo=game['away'].get('logo', ''),
+        home_score=game['home']['score'],
+        away_score=game['away']['score'],
+        status=game['status'],
+        over_under_line=game.get('over_under_line'),
+        moneyline_home=game.get('moneyline_home'),
+        moneyline_away=game.get('moneyline_away'),
+        is_final=game['status'] == 'STATUS_FINAL',
+    )
+
+
+def _update_game_snapshot(snapshot: GameSnapshot, game: dict) -> None:
+    snapshot.home_score = game['home']['score']
+    snapshot.away_score = game['away']['score']
+    snapshot.status = game['status']
+    if game['status'] == 'STATUS_FINAL':
+        snapshot.is_final = True
+    if not snapshot.home_logo:
+        snapshot.home_logo = game['home'].get('logo', '')
+    if not snapshot.away_logo:
+        snapshot.away_logo = game['away'].get('logo', '')
+
+
+def _hydrate_snapshot_props(snapshot: GameSnapshot, game: dict) -> None:
+    if snapshot.props_json is not None:
+        return
+    event_id = (game.get('odds_event_id') or '').strip()
+    if not event_id:
+        return
+    props = fetch_player_props_for_event(event_id)
+    if props:
+        snapshot.props_json = json.dumps(props)
+
+
+def _sync_game_snapshots(games: list[dict], today) -> None:
+    espn_ids = [game['espn_id'] for game in games]
+    existing = (
+        GameSnapshot.query
+        .filter(GameSnapshot.espn_id.in_(espn_ids),
+                GameSnapshot.game_date == today)
+        .all()
+    ) if espn_ids else []
+    snapshots = {snapshot.espn_id: snapshot for snapshot in existing}
+    now = time.monotonic()
+    for game in games:
+        event_id = game['espn_id']
+        snapshot = snapshots.get(event_id)
+        if snapshot is None:
+            snapshot = _new_game_snapshot(game, today)
+            db.session.add(snapshot)
+            _SNAPSHOT_WRITE_TS[event_id] = now
+        elif now - _SNAPSHOT_WRITE_TS.get(event_id, 0) >= _SNAPSHOT_WRITE_TTL:
+            _update_game_snapshot(snapshot, game)
+            _SNAPSHOT_WRITE_TS[event_id] = now
+        _hydrate_snapshot_props(snapshot, game)
+    if db.session.new or db.session.dirty:
+        db.session.commit()
+
+
 @login_required
 def nba_today():
     games = get_todays_games()
     upcoming_games = fetch_upcoming_games()
     today = datetime.now(NBA_APP_TIMEZONE).date()
 
-    espn_ids = [g['espn_id'] for g in games]
-    existing_snaps = (
-        GameSnapshot.query
-        .filter(GameSnapshot.espn_id.in_(espn_ids), GameSnapshot.game_date == today)
-        .all()
-    ) if espn_ids else []
-    snap_map = {s.espn_id: s for s in existing_snaps}
-
-    now_mono = time.monotonic()
-    for game in games:
-        snap = snap_map.get(game['espn_id'])
-        eid = game['espn_id']
-
-        if snap is None:
-            snap = GameSnapshot(
-                espn_id=eid,
-                game_date=today,
-                home_team=game['home']['name'],
-                away_team=game['away']['name'],
-                home_logo=game['home'].get('logo', ''),
-                away_logo=game['away'].get('logo', ''),
-                home_score=game['home']['score'],
-                away_score=game['away']['score'],
-                status=game['status'],
-                over_under_line=game.get('over_under_line'),
-                moneyline_home=game.get('moneyline_home'),
-                moneyline_away=game.get('moneyline_away'),
-                is_final=(game['status'] == 'STATUS_FINAL'),
-            )
-            db.session.add(snap)
-            _SNAPSHOT_WRITE_TS[eid] = now_mono
-        elif now_mono - _SNAPSHOT_WRITE_TS.get(eid, 0) >= _SNAPSHOT_WRITE_TTL:
-            snap.home_score = game['home']['score']
-            snap.away_score = game['away']['score']
-            snap.status = game['status']
-            if game['status'] == 'STATUS_FINAL':
-                snap.is_final = True
-            if not snap.home_logo:
-                snap.home_logo = game['home'].get('logo', '')
-            if not snap.away_logo:
-                snap.away_logo = game['away'].get('logo', '')
-            _SNAPSHOT_WRITE_TS[eid] = now_mono
-
-        if snap.props_json is None:
-            event_id = (game.get('odds_event_id') or '').strip()
-            if event_id:
-                props = fetch_player_props_for_event(event_id)
-                if props:
-                    snap.props_json = json.dumps(props)
-
-    if db.session.new or db.session.dirty:
-        db.session.commit()
+    _sync_game_snapshots(games, today)
 
     active_games = [g for g in games if g['status'] != 'STATUS_FINAL']
     market_recs = {}

@@ -11,6 +11,58 @@ from app.cli import APP_TIMEZONE
 logger = logging.getLogger(__name__)
 
 
+def _print_calibration_bins(bins: list[dict]) -> None:
+    click.echo('Calibration bins:')
+    for bucket in bins:
+        if bucket.get('count', 0) == 0:
+            click.echo(f"  - {bucket.get('range')}: count=0")
+            continue
+        click.echo(
+            f"  - {bucket.get('range')}: count={bucket.get('count')}, "
+            f"pred={bucket.get('avg_pred')}, "
+            f"actual={bucket.get('win_rate')}, gap={bucket.get('gap')}"
+        )
+
+
+def _print_market_metrics(market_name: str, metrics: dict,
+                          drift_threshold: float) -> str | None:
+    click.echo(f'\n--- {market_name} ---')
+    if metrics.get('error'):
+        click.echo(f"Error: {metrics['error']}")
+        return None
+    click.echo(
+        f"Rows={metrics.get('rows', 0)} | "
+        f"Accuracy={metrics.get('accuracy')} | "
+        f"Brier={metrics.get('brier')} | LogLoss={metrics.get('logloss')}"
+    )
+    click.echo(
+        f"AvgPred={metrics.get('avg_pred')} vs "
+        f"Actual={metrics.get('actual_rate')} | "
+        f"Gap={metrics.get('overconfidence_gap')}"
+    )
+    click.echo(
+        f"Recommended bets={metrics.get('recommended_bets')} "
+        f"({metrics.get('recommended_bet_rate')}) | "
+        f"Recommended hit rate={metrics.get('recommended_hit_rate')} | "
+        f"ROI/bet={metrics.get('roi_per_bet')} | "
+        f"CLV-proxy={metrics.get('closing_edge_proxy')}"
+    )
+    click.echo(
+        f"Train val_acc={metrics.get('train_val_accuracy')} | "
+        f"Delta={metrics.get('accuracy_delta')} | "
+        f"Train logloss={metrics.get('train_val_logloss')} | "
+        f"Logloss delta={metrics.get('logloss_delta')}"
+    )
+    _print_calibration_bins(metrics.get('bins', []))
+    accuracy_delta = metrics.get('accuracy_delta')
+    if accuracy_delta is None or abs(float(accuracy_delta)) <= drift_threshold:
+        return None
+    return (
+        f"{market_name}: accuracy delta {accuracy_delta:+.3f} "
+        f"exceeds {drift_threshold:.3f}"
+    )
+
+
 @click.command('train-market-models')
 @click.option('--min-samples', type=int, default=60, show_default=True)
 def cli_train_market_models(min_samples):
@@ -52,52 +104,14 @@ def cli_market_model_report(days, bins, drift_threshold):
 
     drift_flags = []
     for market_name in ('moneyline', 'total_ou'):
-        m = markets.get(market_name)
-        if not m:
+        metrics = markets.get(market_name)
+        if not metrics:
             continue
-        click.echo(f'\n--- {market_name} ---')
-        if m.get('error'):
-            click.echo(f"Error: {m['error']}")
-            continue
-        click.echo(
-            f"Rows={m.get('rows', 0)} | "
-            f"Accuracy={m.get('accuracy')} | "
-            f"Brier={m.get('brier')} | "
-            f"LogLoss={m.get('logloss')}"
+        drift_flag = _print_market_metrics(
+            market_name, metrics, drift_threshold,
         )
-        click.echo(
-            f"AvgPred={m.get('avg_pred')} vs Actual={m.get('actual_rate')} | "
-            f"Gap={m.get('overconfidence_gap')}"
-        )
-        click.echo(
-            f"Recommended bets={m.get('recommended_bets')} "
-            f"({m.get('recommended_bet_rate')}) | "
-            f"Recommended hit rate={m.get('recommended_hit_rate')} | "
-            f"ROI/bet={m.get('roi_per_bet')} | "
-            f"CLV-proxy={m.get('closing_edge_proxy')}"
-        )
-        click.echo(
-            f"Train val_acc={m.get('train_val_accuracy')} | "
-            f"Delta={m.get('accuracy_delta')} | "
-            f"Train logloss={m.get('train_val_logloss')} | "
-            f"Logloss delta={m.get('logloss_delta')}"
-        )
-
-        acc_delta = m.get('accuracy_delta')
-        if acc_delta is not None and abs(float(acc_delta)) > drift_threshold:
-            drift_flags.append(
-                f"{market_name}: accuracy delta {acc_delta:+.3f} exceeds {drift_threshold:.3f}",
-            )
-
-        click.echo('Calibration bins:')
-        for b in m.get('bins', []):
-            if b.get('count', 0) == 0:
-                click.echo(f"  - {b.get('range')}: count=0")
-                continue
-            click.echo(
-                f"  - {b.get('range')}: count={b.get('count')}, "
-                f"pred={b.get('avg_pred')}, actual={b.get('win_rate')}, gap={b.get('gap')}"
-            )
+        if drift_flag:
+            drift_flags.append(drift_flag)
 
     click.echo('\n=== Verdict ===')
     if drift_flags:
