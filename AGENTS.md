@@ -3,6 +3,11 @@
 ## Project
 Flask + SQLAlchemy NBA betting tracker with XGBoost ML projections and APScheduler background jobs. Running locally; Railway deployment inactive.
 
+## Football Pick Research
+
+- Before researching or revising football picks, plays, parlays, or postmortems, read [the pick-selection SSOT](docs/research/football-pick-selection-ssot.md) and follow its current version.
+- Keep that file as the single editable method; session reports record evidence and decisions. The shared brain points to the same file.
+
 ## Local Dev Startup
 ```bash
 source .venv/bin/activate && export $(grep -v '^#' .env | grep -v '^\s*$' | xargs) 2>/dev/null; flask run
