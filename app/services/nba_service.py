@@ -1037,6 +1037,7 @@ def _collect_prop_market_quotes(
     per_book: dict,
     book_name: str,
     market: dict,
+    source_updated_at: str | None = None,
 ) -> None:
     market_key = market.get('key', '')
     if market_key not in SUPPORTED_PROP_MARKETS:
@@ -1060,6 +1061,7 @@ def _collect_prop_market_quotes(
                 if under.get('odds') is not None
                 else None
             ),
+            'last_update': market.get('last_update') or source_updated_at,
         }
 
 
@@ -1068,7 +1070,9 @@ def _collect_prop_quotes(data: dict) -> dict:
     for bookmaker in data.get('bookmakers', []):
         book_name = (bookmaker.get('key') or _TARGET_BOOKMAKERS[0]).lower()
         for market in bookmaker.get('markets', []):
-            _collect_prop_market_quotes(per_book, book_name, market)
+            _collect_prop_market_quotes(
+                per_book, book_name, market, bookmaker.get('last_update'),
+            )
     return per_book
 
 
@@ -1101,6 +1105,16 @@ def _consensus_prop(player: str, book_data: dict) -> dict | None:
     )
     best_over_odds, best_over_book = _best_odds(books, 'over', line)
     best_under_odds, best_under_book = _best_odds(books, 'under', line)
+    updates = []
+    for book in (best_over_book, best_under_book):
+        raw = books.get(book, {}).get('last_update')
+        if raw:
+            try:
+                updated_at = datetime.fromisoformat(raw.replace('Z', '+00:00'))
+                if updated_at.tzinfo:
+                    updates.append(updated_at.astimezone(timezone.utc))
+            except (TypeError, ValueError):
+                pass
     return {
         'player': player,
         'line': float(line),
@@ -1109,6 +1123,7 @@ def _consensus_prop(player: str, book_data: dict) -> dict | None:
         'books': books,
         'best_over_book': best_over_book,
         'best_under_book': best_under_book,
+        'source_last_update': min(updates).isoformat() if updates else None,
     }
 
 

@@ -17,6 +17,7 @@ from app.services.nba_service import (
     fetch_player_props_for_event,
 )
 from app.services.projection_engine import ProjectionEngine
+from app.services.player_identity_service import get_verified_history
 from app.services.stats_service import find_player_id, get_cached_logs, get_player_stats_summary
 from app.services.analysis_context import POSITION_ORDER, build_stat_context
 from app.utils.odds import american_from_decimal
@@ -60,6 +61,9 @@ def _compute_hit_rates(player_name: str, prop_type: str, line: float, n: int = 2
     col_name = _STAT_COL.get(prop_type)
     if not col_name:
         return {'over_pct': None, 'under_pct': None, 'games': [], 'sample': 0}
+    history = get_verified_history(player_name, as_of=et_today(), limit=n)
+    if history:
+        return _hit_rates_from_logs(history, col_name, line)
     col = getattr(PlayerGameLog, col_name)
     logs = (PlayerGameLog.query.filter_by(player_name=player_name)
             .filter(col.isnot(None))
@@ -116,19 +120,7 @@ def _analysis_play_view_models(plays: list[dict]) -> list[dict]:
     presentation-only fields into other consumers of the shared cache.
     """
     view_models = [dict(play) for play in plays]
-    player_names = {play.get('player') for play in view_models if play.get('player')}
-
-    logs_by_player: dict[str, list[PlayerGameLog]] = defaultdict(list)
-    if player_names:
-        logs = (
-            PlayerGameLog.query
-            .filter(PlayerGameLog.player_name.in_(list(player_names)))
-            .order_by(PlayerGameLog.player_name, PlayerGameLog.game_date.desc())
-            .all()
-        )
-        for log in logs:
-            if len(logs_by_player[log.player_name]) < 7:
-                logs_by_player[log.player_name].append(log)
+    logs_by_player = _recent_logs_by_player(view_models, limit=7)
 
     for play in view_models:
         side = (play.get('recommended_side') or 'over').lower()
@@ -163,9 +155,13 @@ def _resolve_player_team_abbrs(player_names: set[str]) -> dict[str, str]:
             resolved[row.player_name] = (row.team_abbr or "").upper()
 
     for player_name in player_names:
-        if player_name in resolved:
-            continue
         try:
+            history = get_verified_history(player_name, as_of=et_today(), limit=1)
+            if history and history[0].team_abbr:
+                resolved[player_name] = history[0].team_abbr.upper()
+                continue
+            if player_name in resolved:
+                continue
             player_id = find_player_id(player_name)
             if not player_id:
                 continue
@@ -184,9 +180,16 @@ def _recent_logs_by_player(scores: list[dict], limit: int = 20) -> dict[str, lis
     logs_by_player: dict[str, list] = defaultdict(list)
     if not player_names:
         return logs_by_player
+    for player_name in player_names:
+        history = get_verified_history(player_name, as_of=et_today(), limit=limit)
+        if history:
+            logs_by_player[player_name] = history
+    missing = player_names - logs_by_player.keys()
+    if not missing:
+        return logs_by_player
     logs = (
         PlayerGameLog.query
-        .filter(PlayerGameLog.player_name.in_(list(player_names)))
+        .filter(PlayerGameLog.player_name.in_(list(missing)))
         .order_by(PlayerGameLog.game_date.desc())
         .all()
     )
@@ -545,11 +548,18 @@ def nba_player_analysis(player_name):
     """Return detailed analysis data for a player as JSON (used by modal)."""
     prop_type = request.args.get('prop_type', 'player_points')
 
-    player_id = find_player_id(player_name)
-    if not player_id:
-        return jsonify({'error': 'Player not found', 'game_log': [], 'breakdown': {}})
-
-    logs = get_cached_logs(player_id, last_n=10)
+    logs = get_verified_history(player_name, as_of=et_today(), limit=10)
+    history_source = 'espn_history' if logs else 'nba_cache'
+    if logs:
+        player_id = logs[0].player_id
+    else:
+        player_id = find_player_id(player_name)
+        if not player_id:
+            return jsonify({
+                'error': 'Player history unavailable', 'game_log': [],
+                'breakdown': {}, 'context_notes': ['player identity unresolved'],
+            })
+        logs = get_cached_logs(player_id, last_n=10)
     summary = get_player_stats_summary(player_id, logs)
 
     engine = ProjectionEngine()
@@ -579,6 +589,8 @@ def nba_player_analysis(player_name):
         'z_score': projection.get('z_score', 0),
         'games_played': projection.get('games_played', 0),
         'projection_source': projection.get('projection_source', 'heuristic'),
+        'history_source': history_source if logs else 'unavailable',
+        'history_observed_through': logs[0].game_date.isoformat() if logs else None,
     })
 
 

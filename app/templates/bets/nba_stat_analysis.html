@@ -626,7 +626,10 @@ const SA_PROP_TO_COL = PROP_TO_STAT_COL;
 
         // Z-score and source
         setText('sp-zscore', data.z_score != null ? (+data.z_score).toFixed(2) : '—');
-        setText('sp-source', data.projection_source || '—');
+        const historyLabel = data.history_source === 'espn_history' ? 'ESPN games' :
+          data.history_source === 'nba_cache' ? 'NBA cache' : 'History unavailable';
+        const observed = data.history_observed_through ? ` through ${data.history_observed_through}` : '';
+        setText('sp-source', `${data.projection_source || '—'} · ${historyLabel}${observed}`);
 
         // Season avg for active stat
         const seaKey = {'pts':'pts_avg','reb':'reb_avg','ast':'ast_avg','fg3m':'fg3m_avg'}[activeCol] || 'pts_avg';

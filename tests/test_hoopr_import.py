@@ -4,6 +4,7 @@ from datetime import date
 from unittest.mock import patch
 
 import pandas as pd
+import requests
 
 from tests.helpers import BaseTestCase
 
@@ -319,6 +320,30 @@ class TestImportCallable(BaseTestCase):
             result = import_hoopr_seasons(seasons=1)
         self.assertEqual(result['inserted'], 4)
         self.assertEqual(result['errors'], [])
+
+    @patch('app.services.hoopr_import_service._load_player_box_df')
+    def test_unpublished_current_release_is_distinct_from_fetch_failure(self, mock_load):
+        from app import db
+        from app.models import DataFetchReceipt, HistoricalGameLog, JobLog
+        from app.services.hoopr_import_service import import_hoopr_seasons
+
+        response = requests.Response()
+        response.status_code = 404
+        mock_load.side_effect = requests.HTTPError('release missing', response=response)
+        with self.app.app_context():
+            db.session.add(HistoricalGameLog(
+                sport='nba', player_id='123', player_name='Example Player',
+                game_id='401', game_date=date(2026, 10, 21),
+                season='2026-27', stats={'pts': 15, 'minutes': 30},
+            ))
+            db.session.commit()
+            with patch('app.services.hoopr_import_service.recent_nba_seasons',
+                       return_value=['2026-27']):
+                result = import_hoopr_seasons(seasons=1, skip_missing_current=True)
+            self.assertEqual(result['errors'], [])
+            self.assertIn('release not published yet', result['warnings'][0])
+            self.assertEqual(DataFetchReceipt.query.one().status, 'not_published')
+            self.assertEqual(JobLog.query.one().status, 'success')
 
 
 class TestScoreEnrichment(BaseTestCase):

@@ -4,7 +4,7 @@ Status: **canonical architecture SSOT**
 Contract version: **1.5**
 Last verified: **2026-10-01**
 
-Verified inventory at this version: **16 SQLAlchemy models**, **22 registered
+Verified inventory at this version: **18 SQLAlchemy models**, **22 registered
 APScheduler jobs**, and **NBA as the only registered `SportService`**.
 
 This document is the single source of truth for module ownership, allowed
@@ -68,6 +68,7 @@ flowchart TB
     Artifacts[Model artifact storage]
     DB[(PostgreSQL 16 local / hosted)]
     ESPN[ESPN]
+    Releases[SportsDataverse ESPN releases]
     Odds[The Odds API]
 
     Browser -->|HTTP + Contract V1 JSON| HTTP
@@ -97,6 +98,7 @@ flowchart TB
     Data --> Cache
     Betting --> Cache
     Data --> ESPN
+    Data --> Releases
     Data --> Odds
 ```
 
@@ -164,15 +166,15 @@ module's private functions.
 
 ### 3.1 Persistent schemas
 
-`app/models.py` and the migration chain are authoritative for the 16 current
+`app/models.py` and the migration chain are authoritative for the 18 current
 SQLAlchemy models:
 
 | Category | Models |
 |---|---|
-| Identity and betting | `User`, `Bet`, `PickContext`, `BetPostmortem` |
+| Identity and betting | `User`, `PlayerIdentity`, `Bet`, `PickContext`, `BetPostmortem` |
 | Live and historical sports data | `GameSnapshot`, `PlayerGameLog`, `HistoricalGameLog`, `HistoricalGameOdds`, `OddsSnapshot`, `TeamDefenseSnapshot`, `InjuryReport` |
 | Scenario data | `ScenarioSplit`, `ScenarioContextPack` |
-| ML and operations | `ModelMetadata`, `ModelEvaluationRun`, `JobLog` |
+| ML and operations | `ModelMetadata`, `ModelEvaluationRun`, `JobLog`, `DataFetchReceipt` |
 
 Rules:
 
@@ -184,6 +186,18 @@ Rules:
   `Bet.prop_line`, `PlayerGameLog.win_loss`.
 - Identifiers from different providers MUST retain their namespace. Do not
   silently treat an ESPN player/event ID as an Odds API ID.
+- `PlayerIdentity.espn_id` is the permanent-history namespace. `nba_id` is
+  nullable until an exact, reviewed crosswalk is available. Duplicate names
+  remain ambiguous; fuzzy name similarity is never evidence for an automatic
+  pick. Completed-game refresh and release reconciliation update the identity
+  index when new history arrives.
+- `TeamDefenseSnapshot.snapshot_date` is the calculation date, while
+  `observed_through` is the last completed game behind the values. A prior
+  season is labeled as such; synthetic estimates are not persisted as fresh
+  snapshots. Positional allowances remain null unless observed.
+- `InjuryReport.date_reported` retains the source report date. A successful
+  zero-row `DataFetchReceipt` verifies an empty report; a failed fetch never
+  carries old injury designations forward as current.
 
 ### 3.2 Enums and controlled vocabularies
 
@@ -421,6 +435,7 @@ only with their JavaScript consumers and tests in the same change.
 |---|---|---|---|---|
 | Users, bets, contexts, postmortems | SQLAlchemy DB | durable | authenticated routes and grading services | transaction rollback; migrations |
 | Game/player history and snapshots | SQLAlchemy DB | durable | provider ingestion and coordinator | freshness rules; idempotent upsert |
+| Player identity and source receipts | SQLAlchemy DB | durable | identity sync and provider adapters | exact IDs, source timestamps, unresolved states |
 | Odds decisions and closes | `OddsSnapshot` | durable | scheduled capture/import CLI | source key uniqueness and coverage checks |
 | Scenario splits/context pack | SQLAlchemy DB | rebuildable derived state | scenario engine | atomic rebuild, then crosswalk cache clear |
 | Model registry/evaluations | `ModelMetadata`, `ModelEvaluationRun` | durable | ML training/evaluation | new run/activation decision |
@@ -538,6 +553,25 @@ HistoricalGameLog / resolved PickContext
   -> SHADOW / PROMOTE_CANDIDATE / PROMOTE verdict
   -> separate explicit activation
 ```
+
+The weekly Model 1 retrain guard compares permanent NBA history row counts
+when that store supplies training data. It uses operational `PlayerGameLog`
+counts only when permanent history is empty.
+
+### 5.5 Automated recommendation data gate
+
+Analysis may show a projection with dated warnings. Automatic pick creation
+requires unique ESPN player history with a game in the preceding 30 days, a
+same-day successful injury report, a current-season opponent defense profile
+from at least five games observed within 21 days, a
+verified team assignment, and an offered event quote seen within 10 minutes.
+Missing or ambiguous inputs cause abstention, including for paper cohorts.
+The release injury feed is ESPN-sourced and retains its own `as_of_date`;
+an empty direct report that conflicts with same-day rows, or a direct and
+release report that disagree on a same-day designation, remains unresolved
+until a later successful fetch;
+SportsDataverse software licensing does not establish rights to republish ESPN
+data to beta users.
 
 ## 6. Known architecture debt
 

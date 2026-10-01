@@ -11,6 +11,7 @@ from datetime import datetime
 
 from app import db
 from app.models import HistoricalGameLog
+from app.services.data_receipts import record_fetch
 from app.services.espn_mapping import (
     NBA_TEAMS, normalize_abbr, season_for_date, usage_pct,
 )
@@ -45,7 +46,7 @@ def _player_records(payload: dict) -> list[dict]:
         abbr = normalize_abbr(
             safe_str(team_block.get('team', {}).get('abbreviation')))
         stats_block = (team_block.get('statistics') or [{}])[0]
-        labels = stats_block.get('labels') or []
+        labels = stats_block.get('labels') or stats_block.get('names') or []
         idx = {label: i for i, label in enumerate(labels)}
 
         def col(stats, label, default=0.0):
@@ -57,14 +58,17 @@ def _player_records(payload: dict) -> list[dict]:
             stats = ath.get('stats') or []
             if ath.get('didNotPlay') or not stats:
                 continue
+            player_id = normalize_player_id(ath.get('athlete', {}).get('id'))
+            player_name = safe_str(ath.get('athlete', {}).get('displayName'))
+            if not player_id or not player_name:
+                continue
             fg = stats[idx['FG']] if 'FG' in idx else '0-0'
             fg3 = stats[idx['3PT']] if '3PT' in idx else '0-0'
             ft = stats[idx['FT']] if 'FT' in idx else '0-0'
             pm_raw = stats[idx['+/-']] if '+/-' in idx else '0'
             records.append({
-                'player_id': normalize_player_id(ath.get('athlete', {}).get('id')),
-                'player_name': safe_str(
-                    ath.get('athlete', {}).get('displayName')),
+                'player_id': player_id,
+                'player_name': player_name,
                 'team_abbr': abbr,
                 'starter': bool(ath.get('starter')),
                 'minutes': col(stats, 'MIN'),
@@ -141,7 +145,8 @@ def _historical_rows(records: list[dict], *, espn_id: str, game_date,
     return rows
 
 
-def append_final_game(game: dict) -> int:
+def append_final_game(game: dict, summary: dict | None = None, *,
+                      reconcile: bool = False) -> int:
     """Insert HistoricalGameLog rows for one final scoreboard game dict."""
     espn_id = str(game.get('espn_id') or '')
     if not espn_id:
@@ -152,17 +157,23 @@ def append_final_game(game: dict) -> int:
         logger.info("history-append: %s skipped (non-NBA teams %s/%s)",
                     espn_id, home_abbr, away_abbr)
         return 0
-    if history_rows_exist(espn_id):
+    if summary is None and not reconcile and history_rows_exist(espn_id):
         return 0                                  # no-refetch guard
 
     try:
-        payload = _fetch_summary(espn_id)
+        payload = summary if summary is not None else _fetch_summary(espn_id)
         records = _player_records(payload)
     except Exception as exc:
         logger.warning("history-append: %s fetch/parse failed: %s",
                        espn_id, exc)
+        record_fetch(f'espn_final_game:{espn_id}', 'failed',
+                     detail=f'Fetch or parse failed: {exc}')
+        db.session.commit()
         return 0
     if not records:
+        record_fetch(f'espn_final_game:{espn_id}', 'failed',
+                     detail='Final summary contained no played player rows')
+        db.session.commit()
         return 0
 
     game_date = _scoreboard_game_date(game, espn_id)
@@ -177,10 +188,18 @@ def append_final_game(game: dict) -> int:
             home_abbr=home_abbr, away_abbr=away_abbr,
             home_score=home_score, away_score=away_score,
         )
-        db.session.add_all(rows)
+        existing_ids = {
+            player_id for (player_id,) in db.session.query(HistoricalGameLog.player_id)
+            .filter_by(sport='nba', game_id=espn_id)
+        }
+        missing = [row for row in rows if row.player_id not in existing_ids]
+        db.session.add_all(missing)
+        record_fetch(f'espn_final_game:{espn_id}', 'success', len(rows),
+                     data_through=game_date, source_version='espn_site',
+                     detail=f'{len(missing)} newly inserted')
         db.session.commit()
-        logger.info("history-append: %s +%d rows", espn_id, len(rows))
-        return len(rows)
+        logger.info("history-append: %s +%d rows", espn_id, len(missing))
+        return len(missing)
     except Exception as exc:
         db.session.rollback()
         logger.warning("history-append: %s insert failed: %s", espn_id, exc)

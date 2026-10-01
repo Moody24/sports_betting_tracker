@@ -145,6 +145,9 @@ def refresh_player_stats():
         from app.services.stats_service import refresh_completed_game_logs, update_player_logs_for_games
 
         completed_summary = refresh_completed_game_logs(days_back=2)
+        if completed_summary.get('final_games_seen', 0):
+            from app.services.player_identity_service import sync_player_identities
+            sync_player_identities()
         logger.info(
             "Completed-game refresh: final_games=%d players=%d inserted=%d updated=%d",
             completed_summary.get('final_games_seen', 0),
@@ -358,7 +361,7 @@ def resolve_and_grade():
         db.session.commit()
 
 
-def _projection_retrain_allowed(ModelMetadata, PlayerGameLog) -> bool:
+def _projection_retrain_allowed(ModelMetadata, PlayerGameLog, HistoricalGameLog) -> bool:
     models = (
         ModelMetadata.query
         .filter(ModelMetadata.model_name.like('projection_%'))
@@ -378,11 +381,14 @@ def _projection_retrain_allowed(ModelMetadata, PlayerGameLog) -> bool:
         points_model.metadata_json if points_model
         else models[0].metadata_json if models else None
     )
+    historical_rows = HistoricalGameLog.query.filter_by(sport='nba').count()
+    source_key = ('historical_game_log_rows' if historical_rows
+                  else 'player_game_log_rows')
     last_logged_rows = None
     if metadata_source:
         try:
             last_logged_rows = json.loads(metadata_source).get(
-                'player_game_log_rows',
+                source_key,
             )
         except (TypeError, ValueError):
             pass
@@ -402,12 +408,12 @@ def _projection_retrain_allowed(ModelMetadata, PlayerGameLog) -> bool:
                          if last_logged_rows is not None else None)
     except (TypeError, ValueError):
         previous_rows = None
-    current_rows = PlayerGameLog.query.count()
+    current_rows = historical_rows or PlayerGameLog.query.count()
     if previous_rows is not None and current_rows <= previous_rows:
         logger.info(
-            "Skipping projection retrain: no new PlayerGameLog rows since "
-            "last training (current=%d, last=%d).",
-            current_rows, previous_rows,
+            "Skipping projection retrain: no new %s rows since last "
+            "training (current=%d, last=%d).",
+            source_key, current_rows, previous_rows,
         )
         should_train = False
     return should_train
@@ -417,11 +423,12 @@ def retrain_models():
     """Scheduled model retrain using accumulated game log data."""
     app = _get_app()
     with app.app_context():
-        from app.models import ModelMetadata, PlayerGameLog
+        from app.models import HistoricalGameLog, ModelMetadata, PlayerGameLog
         from app.services.ml_model import retrain_all_models
         from app.services.pick_quality_model import train_pick_quality_model
 
-        if _projection_retrain_allowed(ModelMetadata, PlayerGameLog):
+        if _projection_retrain_allowed(
+                ModelMetadata, PlayerGameLog, HistoricalGameLog):
             results = retrain_all_models()
             logger.info("Projection model retrain complete: %s", results)
         else:
@@ -786,7 +793,10 @@ def _run_hoopr_reconcile():
     from app.services.hoopr_import_service import import_hoopr_seasons
     app = _get_app()
     with app.app_context():
-        result = import_hoopr_seasons(seasons=1)
+        result = import_hoopr_seasons(seasons=2, skip_missing_current=True)
+        if result.get('inserted') or result.get('updated'):
+            from app.services.player_identity_service import sync_player_identities
+            sync_player_identities()
         logger.info("hoopr reconcile: %s", result)
 
 

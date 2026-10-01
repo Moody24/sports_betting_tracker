@@ -51,7 +51,7 @@ def upgrade():
                         (c for c in constraints if c['column_names'] == ['bet_id']),
                         None,
                     )
-                    if old_constraint:
+                    if old_constraint and old_constraint['name']:
                         batch_op.drop_constraint(old_constraint['name'], type_='unique')
                 batch_op.create_unique_constraint(
                     'bet_postmortem_bet_id_key', ['bet_id']

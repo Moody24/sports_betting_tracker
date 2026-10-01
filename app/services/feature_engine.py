@@ -209,7 +209,14 @@ def build_pick_context_features(
     This dict is stored as JSON in ``PickContext.context_json`` at bet
     placement time.
     """
-    logs = get_cached_logs(player_id, last_n=82)
+    from app.services.player_identity_service import get_verified_history
+    from app.utils.time_helpers import et_today
+
+    logs = get_verified_history(player_name, as_of=et_today())
+    if logs:
+        player_id = logs[0].player_id
+    else:
+        logs = get_cached_logs(player_id, last_n=82)
     summary = get_player_stats_summary(player_id, logs)
     # Player context
     season_avg = _summary_stat_for_prop(summary, prop_type, 'season')

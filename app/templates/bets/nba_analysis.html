@@ -114,6 +114,7 @@
           {{ play.confidence_tier|replace('_', ' ') }} confidence
           · <span class="is-compact-only">edge +{{ '%.1f'|format(play.edge * 100) }}% · price {{ '%+d'|format(play.recommended_odds) if play.recommended_odds is not none else '—' }} · fair {{ '%+d'|format(play.fair_odds) if play.fair_odds is not none else '—' }}</span>
           {% if play.context_notes %}{{ play.context_notes[:2]|join(' · ') }}{% endif %}
+          {% if play.history_source %} · {{ 'ESPN games' if play.history_source == 'espn_history' else 'NBA cache' }}{% if play.history_observed_through %} through {{ play.history_observed_through }}{% endif %}{% endif %}
         </span>
       </div>
 

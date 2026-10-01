@@ -6,6 +6,7 @@ from datetime import date, datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 from app import db
 from app.models import (
+    HistoricalGameLog,
     JobLog,
     ModelMetadata,
     PickContext,
@@ -190,6 +191,32 @@ class TestScheduler(BaseTestCase):
                     scheduler_module.retrain_models()
             retrain_mock.assert_called_once()
 
+    def test_retrain_guard_counts_permanent_history_when_available(self):
+        from app.services.scheduler import _projection_retrain_allowed
+
+        with self.app.app_context():
+            db.session.add(ModelMetadata(
+                model_name='projection_player_points',
+                model_type='xgboost_regressor', version='old',
+                file_path='/tmp/old.json',
+                training_date=datetime.now(timezone.utc) - timedelta(days=10),
+                training_samples=10, val_mae=4.6, is_active=True,
+                metadata_json='{"historical_game_log_rows": 1}',
+            ))
+            for game_id in ('401', '402'):
+                db.session.add(HistoricalGameLog(
+                    sport='nba', player_id='espn1', player_name='Example Player',
+                    game_id=game_id, game_date=date(2026, 1, int(game_id[-1])),
+                    season='2025-26', stats={'pts': 20, 'minutes': 30},
+                ))
+            db.session.commit()
+            self.assertTrue(_projection_retrain_allowed(
+                ModelMetadata, PlayerGameLog, HistoricalGameLog))
+            ModelMetadata.query.one().metadata_json = '{"historical_game_log_rows": 2}'
+            db.session.commit()
+            self.assertFalse(_projection_retrain_allowed(
+                ModelMetadata, PlayerGameLog, HistoricalGameLog))
+
     def test_bootstrap_pick_quality_creates_context_pair(self):
         from app.services import scheduler as scheduler_module
 
@@ -282,7 +309,8 @@ class TestScheduler(BaseTestCase):
             with patch('app.services.value_detector.ValueDetector', return_value=fake_detector):
                 with patch('app.services.projection_engine.ProjectionEngine', return_value=MagicMock()):
                     with patch('app.services.stats_service.find_player_id', return_value='123'):
-                        scheduler_module.generate_daily_auto_picks()
+                        with patch('app.services.auto_pick_service.auto_pick_data_issues', return_value=[]):
+                            scheduler_module.generate_daily_auto_picks()
 
         with self.app.app_context():
             auto_bets = Bet.query.filter_by(source='auto_generated').all()

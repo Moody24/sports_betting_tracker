@@ -4,7 +4,7 @@ import json
 import logging
 import os
 import secrets
-from datetime import datetime, timedelta, time as dt_time
+from datetime import date, datetime, timedelta, time as dt_time, timezone
 
 from app import db
 from app.enums import BetSource, Outcome
@@ -28,13 +28,63 @@ AUTO_PAPER_COHORTS = (
 )
 
 
-def _build_auto_pick_context(bet_obj, score: dict) -> dict:
-    from app.services.stats_service import find_player_id
-    from app.services.feature_engine import build_pick_context_features
+def auto_pick_data_issues(score: dict, today: date) -> list[str]:
+    from app.services.context_service import player_availability
+    from app.services.espn_mapping import season_for_date
+    from app.services.matchup_service import get_team_defense
 
-    player_id = find_player_id(bet_obj.player_name or '')
-    if not player_id:
+    issues = []
+    if score.get('history_source') != 'espn_history':
+        issues.append('player identity or history unverified')
+    observed = score.get('history_observed_through')
+    try:
+        history_date = date.fromisoformat(str(observed))
+    except ValueError:
+        history_date = None
+    if (history_date is None or (today - history_date).days < 0
+            or (today - history_date).days > 30):
+        issues.append('player game history stale')
+
+    if not score.get('player_team') or not score.get('opponent_team'):
+        issues.append('player team unresolved')
+
+    if player_availability(str(score.get('player') or '')) != 'available':
+        issues.append('injury availability unverified')
+
+    opponent = str(score.get('opponent_team') or '')
+    defense = get_team_defense(opponent) if opponent else {}
+    observed_defense = defense.get('observed_through')
+    season_start = date(int(season_for_date(today)[:4]), 10, 1)
+    if (not observed_defense or defense.get('source') not in
+            ('espn_boxscore_current', 'nba_api', 'sportsdataverse_team_box')
+            or observed_defense < season_start
+            or not 0 <= (today - observed_defense).days <= 21
+            or (defense.get('sample_games') or 0) < 5):
+        issues.append('opponent defense unverified')
+
+    try:
+        quote_time = datetime.fromisoformat(str(score.get('quote_observed_at')))
+        if quote_time.tzinfo is None:
+            raise ValueError('naive quote timestamp')
+        quote_age = datetime.now(timezone.utc) - quote_time.astimezone(timezone.utc)
+    except ValueError:
+        quote_age = timedelta.max
+    if (score.get('quote_source') != 'odds_api'
+            or not score.get('odds_event_id') or quote_age < timedelta(0)
+            or quote_age > timedelta(minutes=10)):
+        issues.append('offered prop quote unverified')
+    return issues
+
+
+def _build_auto_pick_context(bet_obj, score: dict) -> dict:
+    from app.services.feature_engine import build_pick_context_features
+    from app.services.player_identity_service import get_verified_history
+    from app.utils.time_helpers import et_today
+
+    history = get_verified_history(bet_obj.player_name or '', as_of=et_today(), limit=1)
+    if not history:
         return {}
+    player_id = history[0].player_id
 
     selected_odds = int(score.get('recommended_odds') or -110)
     projected_edge = score.get('edge', 0.0)
@@ -74,12 +124,19 @@ def _ensure_autopicks_user(db, User):
     return system_user
 
 
-def _build_candidates(scores: list, min_games: int) -> list:
+def _build_candidates(scores: list, min_games: int, *,
+                      require_verified: bool = False, today: date | None = None) -> list:
     seen_keys: set = set()
     candidates: list = []
     for score in sorted(scores, key=lambda item: item.get('edge', 0), reverse=True):
         if (score.get('games_played') or 0) < min_games:
             continue
+        if require_verified:
+            issues = auto_pick_data_issues(score, today or datetime.now(ET).date())
+            if issues:
+                logger.info('Auto pick abstained for %s: %s',
+                            score.get('player'), ', '.join(issues))
+                continue
         key = (score.get('player'), score.get('prop_type'), score.get('line'),
                score.get('recommended_side'), score.get('game_id'))
         if key in seen_keys:
@@ -353,7 +410,9 @@ def generate_daily_auto_picks(app):
         detector = ValueDetector(ProjectionEngine())
         scores = detector.score_all_todays_props()
 
-        all_candidates = _build_candidates(scores, AUTO_PAPER_MIN_GAMES)
+        all_candidates = _build_candidates(
+            scores, AUTO_PAPER_MIN_GAMES, require_verified=True, today=today,
+        )
         all_qualifying = _filter_qualifying(
             all_candidates, AUTO_PICK_MIN_GAMES, AUTO_PICK_CONFIDENCE_TIER,
         )

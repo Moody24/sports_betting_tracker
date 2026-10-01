@@ -560,6 +560,23 @@ class HistoricalGameLog(db.Model):
         return f"<HistoricalGameLog {self.sport} {self.player_name} {self.game_date}>"
 
 
+class PlayerIdentity(db.Model):
+    """Verified link between ESPN history and the NBA API identifier."""
+
+    id = db.Column(db.Integer, primary_key=True)
+    espn_id = db.Column(db.String(20), nullable=False, unique=True)
+    nba_id = db.Column(db.String(20), unique=True)
+    player_name = db.Column(db.String(120), nullable=False)
+    name_key = db.Column(db.String(120), nullable=False, index=True)
+    team_abbr = db.Column(db.String(10))
+    status = db.Column(db.String(20), nullable=False, default='unresolved')
+    evidence = db.Column(db.String(160))
+    checked_at = db.Column(
+        db.DateTime(timezone=True), nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+
 class ScenarioSplit(db.Model):
     """Materialized conditional split (single or pairwise) per player/stat.
 
@@ -642,6 +659,9 @@ class TeamDefenseSnapshot(db.Model):
     team_name = db.Column(db.String(100), nullable=False)
     team_abbr = db.Column(db.String(10), nullable=True, index=True)
     snapshot_date = db.Column(db.Date, nullable=False, index=True)
+    source = db.Column(db.String(40), nullable=False, default='legacy_unverified')
+    observed_through = db.Column(db.Date)
+    sample_games = db.Column(db.Integer)
     opp_pts_pg = db.Column(db.Float, nullable=True)
     opp_reb_pg = db.Column(db.Float, nullable=True)
     opp_ast_pg = db.Column(db.Float, nullable=True)
@@ -678,6 +698,7 @@ class InjuryReport(db.Model):
     status = db.Column(db.String(20), nullable=False)
     detail = db.Column(db.String(300), nullable=True)
     date_reported = db.Column(db.Date, nullable=False, index=True)
+    source = db.Column(db.String(40), nullable=False, default='legacy_unverified')
     fetched_at = db.Column(
         db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
     )
@@ -759,6 +780,19 @@ class JobLog(db.Model):
 
     def __repr__(self) -> str:
         return f"<JobLog {self.job_name} {self.status}>"
+
+
+class DataFetchReceipt(db.Model):
+    """Source-level fetch outcome, including successful zero-row reports."""
+
+    id = db.Column(db.Integer, primary_key=True)
+    feed = db.Column(db.String(60), nullable=False, index=True)
+    status = db.Column(db.String(20), nullable=False)
+    fetched_at = db.Column(db.DateTime(timezone=True), nullable=False)
+    data_through = db.Column(db.Date)
+    source_version = db.Column(db.String(120))
+    row_count = db.Column(db.Integer, nullable=False, default=0)
+    detail = db.Column(db.String(300))
 
 
 class OddsSnapshot(db.Model):

@@ -29,8 +29,8 @@ class SystemContractTests(unittest.TestCase):
             flags=re.MULTILINE,
         )
 
-        self.assertEqual(16, len(model_names))
-        self.assertIn("16 SQLAlchemy models", self.contract)
+        self.assertEqual(18, len(model_names))
+        self.assertIn("18 SQLAlchemy models", self.contract)
         for model_name in model_names:
             with self.subTest(model=model_name):
                 self.assertIn(f"`{model_name}`", self.contract)

@@ -81,13 +81,12 @@ flask --app run db upgrade heads
 ### 4. Start the app
 
 ```bash
-.venv/bin/python scripts/run_local.py
+.venv/bin/python scripts/run_local.py --with-scheduler
 ```
 
-App runs at `http://127.0.0.1:5000`. Pass `--with-scheduler` when the local
-data jobs should run; that uses the same single worker and may consume Odds
-API credits. The local launcher keeps the scheduler off unless that flag is
-passed, regardless of the ambient `.env` value.
+App runs at `http://127.0.0.1:5000` with one scheduler owner. The jobs may
+consume Odds API credits. Omit `--with-scheduler` when only the web UI is
+needed; the local launcher keeps jobs off in that mode regardless of `.env`.
 
 The project-scoped PostgreSQL files stay under ignored `instance/postgres/`.
 `scripts/local_postgres.sh backup` writes a restricted custom-format dump under

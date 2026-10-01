@@ -15,7 +15,7 @@ from datetime import datetime, timezone, date as date_type
 
 from app import db
 from app.config_display import PROP_STAT_KEY
-from app.models import ModelMetadata, PlayerGameLog, TeamDefenseSnapshot
+from app.models import HistoricalGameLog, ModelMetadata, PlayerGameLog, TeamDefenseSnapshot
 from app.services.model_storage import materialize_model_artifact, persist_model_artifact
 from app.services.ml_feature_builder import build_ml_features_from_history, build_team_game_aggregates
 from app.utils.time_helpers import ET
@@ -367,6 +367,7 @@ def train_model(stat_type: str) -> dict:
         return {'error': 'Missing ML dependencies'}
 
     player_game_log_rows = PlayerGameLog.query.count()
+    historical_game_log_rows = HistoricalGameLog.query.filter_by(sport='nba').count()
     training_rows = _build_training_rows(stat_type)
     if not training_rows:
         return {'error': 'Insufficient training data', 'stat_type': stat_type}
@@ -467,6 +468,7 @@ def train_model(stat_type: str) -> dict:
             'val_samples': len(X_val),
             'train_samples': len(X_train),
             'player_game_log_rows': player_game_log_rows,
+            'historical_game_log_rows': historical_game_log_rows,
             'split_method': split_method,
             'cutoff_date': cutoff_date.isoformat() if cutoff_date else None,
             'cv_mean_mae': round(cv_mean_mae, 3),

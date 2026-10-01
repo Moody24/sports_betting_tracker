@@ -14,11 +14,13 @@ from app import db
 from app.models import (
     Bet,
     BetPostmortem,
+    HistoricalGameLog,
     JobLog,
     ModelMetadata,
     OddsSnapshot,
     PickContext,
     PlayerGameLog,
+    PlayerIdentity,
     TeamDefenseSnapshot,
 )
 from app.cli import _as_utc, _resolved_win_rate
@@ -121,6 +123,10 @@ def cli_model_diagnostics(stat_type, learning_curves):
             f"train_mae={result['train_mae']:.4f}  val_mae={result['val_mae']:.4f}  "
             f"gap={result['generalization_gap']:+.4f}  "
             f"baseline_improvement={result['baseline_improvement']:.1%}"
+        )
+        click.echo(
+            f"Recent-five-game baseline MAE: "
+            f"{result['recent_average_baseline_mae']:.4f}"
         )
         status = 'UNDERFIT' if result['likely_underfit'] else (
             'OVERFIT' if result['likely_overfit'] else 'OK'
@@ -810,21 +816,29 @@ def _check_model2_drift() -> CheckResult:
     return CheckResult('Model2:drift', passed, detail)
 
 
-def _check_team_defense_snapshot(today) -> CheckResult:
-    """Check TeamDefenseSnapshot freshness."""
-    latest = db.session.query(func.max(TeamDefenseSnapshot.snapshot_date)).scalar()
+def _check_team_defense_snapshot(today, slate_games=None) -> CheckResult:
+    """Check observed defense age, not the date a row was copied or calculated."""
+    latest = (TeamDefenseSnapshot.query
+              .order_by(TeamDefenseSnapshot.snapshot_date.desc())
+              .first())
     if latest is None:
-        return CheckResult('TeamDefenseSnapshot', False, 'no TeamDefenseSnapshot rows', critical=True)
-    days_old = (today - latest).days
-    detail = f'latest TeamDefenseSnapshot: {latest} ({days_old}d old)'
-    if days_old <= 2:
-        return CheckResult('TeamDefenseSnapshot', True, detail)
-    if days_old <= 7:
-        return CheckResult('TeamDefenseSnapshot', False, detail)
-    return CheckResult('TeamDefenseSnapshot', False, detail, critical=True)
+        return CheckResult('TeamDefenseSnapshot', False, 'no TeamDefenseSnapshot rows',
+                           critical=slate_games != 0)
+    if latest.observed_through is None or latest.source == 'legacy_unverified':
+        return CheckResult('TeamDefenseSnapshot', False,
+                           f'latest snapshot {latest.snapshot_date} has no verified source date',
+                           critical=slate_games != 0)
+    days_old = (today - latest.observed_through).days
+    detail = (f'{latest.source}: observed through {latest.observed_through} '
+              f'({days_old}d old; {latest.sample_games or 0} games)')
+    if latest.source.endswith('_prior'):
+        return CheckResult('TeamDefenseSnapshot', False,
+                           f'prior-season defense — {detail}')
+    return CheckResult('TeamDefenseSnapshot', days_old <= 2, detail,
+                       critical=slate_games != 0 and days_old > 7)
 
 
-def _check_odds_snapshot(today) -> CheckResult:
+def _check_odds_snapshot(today, slate_games=None) -> CheckResult:
     """Check OddsSnapshot freshness."""
     latest = db.session.query(func.max(OddsSnapshot.game_date)).scalar()
     if latest is None:
@@ -832,21 +846,71 @@ def _check_odds_snapshot(today) -> CheckResult:
                            'no OddsSnapshot rows (line movement features unavailable)')
     days_old = (today - latest).days
     detail = f'latest OddsSnapshot: {latest} ({days_old}d old)'
-    return CheckResult('OddsSnapshot', days_old <= 3, detail)
+    return CheckResult('OddsSnapshot', days_old <= 3 or slate_games == 0, detail)
 
 
-def _check_player_game_log(today) -> CheckResult:
-    """Check PlayerGameLog freshness."""
+def _check_player_game_log(today, slate_games=None) -> CheckResult:
+    """Report the operational cache and the permanent projection fallback."""
     latest = db.session.query(func.max(PlayerGameLog.game_date)).scalar()
     if latest is None:
-        return CheckResult('PlayerGameLog', False, 'no PlayerGameLog rows', critical=True)
+        history = db.session.query(func.max(HistoricalGameLog.game_date)).filter_by(
+            sport='nba',
+        ).scalar()
+        if history is None:
+            return CheckResult('PlayerGameLog', False,
+                               'no operational or permanent player history',
+                               critical=slate_games != 0)
+        return CheckResult('PlayerGameLog', False,
+                           f'no PlayerGameLog rows; permanent history through {history}')
     days_old = (today - latest).days
     detail = f'latest PlayerGameLog: {latest} ({days_old}d old)'
     if days_old <= 2:
         return CheckResult('PlayerGameLog', True, detail)
     if days_old <= 7:
         return CheckResult('PlayerGameLog', False, detail)
-    return CheckResult('PlayerGameLog', False, detail, critical=True)
+    return CheckResult('PlayerGameLog', False, detail, critical=slate_games != 0)
+
+
+def _slate_games(today) -> int | None:
+    from app.services.espn_client import EspnClientError, fetch_scoreboard_payload
+    from app.utils.time_helpers import ET
+
+    try:
+        payload = fetch_scoreboard_payload(today.strftime('%Y%m%d'),
+                                           timeout=5, attempts=1)
+    except EspnClientError:
+        return None
+    events = payload.get('events')
+    if not isinstance(events, list):
+        return None
+    count = 0
+    for event in events:
+        try:
+            start = datetime.fromisoformat(event['date'].replace('Z', '+00:00'))
+        except (KeyError, TypeError, ValueError):
+            continue
+        count += start.astimezone(ET).date() == today
+    return count
+
+
+def _check_injury_receipt(today) -> CheckResult:
+    from app.services.data_receipts import latest_fetch
+
+    receipt = latest_fetch('espn_injuries')
+    if receipt is None:
+        return CheckResult('InjuryReport', False, 'no verified injury fetch')
+    detail = (f'last fetch {receipt.status}; source data through '
+              f'{receipt.data_through}; {receipt.row_count} rows')
+    return CheckResult('InjuryReport',
+                       receipt.status == 'success' and receipt.data_through == today,
+                       detail)
+
+
+def _check_player_identities() -> CheckResult:
+    indexed = PlayerIdentity.query.count()
+    ambiguous = PlayerIdentity.query.filter_by(status='ambiguous').count()
+    return CheckResult('PlayerIdentity', indexed > 0 and ambiguous == 0,
+                       f'{indexed} ESPN identities indexed; {ambiguous} ambiguous')
 
 
 @click.command('prod-readiness')
@@ -888,11 +952,16 @@ def cli_prod_readiness():
         click.echo(f'  {_status(r)}  {r.detail}')
         checks.append(r)
 
-    click.echo('\n--- Data Freshness ---')
+    slate_games = _slate_games(today)
+    slate_detail = ('unavailable' if slate_games is None else
+                    f'{slate_games} NBA games today')
+    click.echo(f'\n--- Data Freshness (slate: {slate_detail}) ---')
     for r in [
-        _check_team_defense_snapshot(today),
-        _check_odds_snapshot(today),
-        _check_player_game_log(today),
+        _check_team_defense_snapshot(today, slate_games),
+        _check_odds_snapshot(today, slate_games),
+        _check_player_game_log(today, slate_games),
+        _check_injury_receipt(today),
+        _check_player_identities(),
     ]:
         click.echo(f'  {_status(r)}  {r.detail}')
         checks.append(r)

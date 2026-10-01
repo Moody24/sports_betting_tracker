@@ -794,6 +794,9 @@ def _refresh_completed_game(game: dict, target_date) -> dict:
         logger.error("ESPN summary fetch failed for completed game %s: %s",
                      espn_id, exc)
         return counts
+    if game.get('season_type') == 2:
+        from app.services.espn_history_append import append_final_game
+        append_final_game(game, summary=summary)
     rows = _extract_logs_from_espn_summary(summary, game, target_date)
     grouped: dict[str, list] = {}
     for row in rows:

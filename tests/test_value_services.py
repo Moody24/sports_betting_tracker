@@ -16,8 +16,11 @@ class TestValueDetector(BaseTestCase):
 
     def test_dist_features_receive_real_game_total_line(self):
         from app.services.value_detector import ValueDetector
+        from app.utils.time_helpers import et_today
         detector = ValueDetector()
-        detector.engine._player_state_cache['test player'] = ('1', [MagicMock()] * 10, {})
+        detector.engine._player_state_cache[('test player', et_today())] = (
+            '1', [MagicMock()] * 10, {},
+        )
         detector.engine._build_ml_features = MagicMock(return_value={'game_total_line': 228.5})
         detector.engine._context_cache['__dist_defense_lookup__'] = {}
 
@@ -42,6 +45,8 @@ class TestValueDetector(BaseTestCase):
                 )
             self.assertEqual(result['confidence_tier'], 'no_edge')
             self.assertEqual(result['projection'], 0)
+            self.assertTrue(any('five required' in note
+                                for note in result['context_notes']))
 
     def test_score_prop_full_with_edge(self):
         from app.services.value_detector import ValueDetector
@@ -713,7 +718,7 @@ class TestValueDetectorModel2Integration(BaseTestCase):
 
         with self.app.app_context():
             # Force fallback path (no player_id) so B2B is read from context_notes.
-            with patch('app.services.value_detector.find_player_id', return_value=''), \
+            with patch('app.services.value_detector.get_verified_history', return_value=[]), \
                  patch('app.services.value_detector.predict_pick_quality',
                        side_effect=capture_ctx):
                 detector.score_prop('LeBron James', 'player_points', 22.5, -110, -110)

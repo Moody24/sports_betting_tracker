@@ -51,6 +51,54 @@ def cli_refresh_injuries():
     click.echo('Done.')
 
 
+@click.command('sync-player-identities')
+def cli_sync_player_identities():
+    from app.services.player_identity_service import sync_player_identities
+
+    result = sync_player_identities()
+    click.echo(
+        f"Indexed {result['indexed']} ESPN players; "
+        f"{result['created']} new, {result['ambiguous']} ambiguous."
+    )
+
+
+@click.command('link-player-identity')
+@click.argument('espn_id')
+@click.argument('nba_id')
+@click.option('--evidence', required=True, help='Verification source or review note')
+def cli_link_player_identity(espn_id, nba_id, evidence):
+    from app.services.player_identity_service import link_nba_identity
+
+    try:
+        identity = link_nba_identity(espn_id, nba_id, evidence)
+    except (ValueError, LookupError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(f'Linked ESPN {identity.espn_id} to NBA {identity.nba_id}.')
+
+
+@click.command('import-release-defense')
+@click.option('--season-end-year', type=int, required=True)
+@click.option('--from-dir', type=click.Path(exists=True, file_okay=False))
+def cli_import_release_defense(season_end_year, from_dir):
+    from app.services.release_data_service import import_release_defense
+
+    result = import_release_defense(season_end_year, from_dir=from_dir)
+    click.echo(
+        f"Imported {result['teams']} observed team profiles; "
+        f"data through {result['observed_through']}."
+    )
+
+
+@click.command('import-release-injuries')
+@click.option('--season-end-year', type=int, required=True)
+@click.option('--from-dir', type=click.Path(exists=True, file_okay=False))
+def cli_import_release_injuries(season_end_year, from_dir):
+    from app.services.release_data_service import import_release_injuries
+
+    result = import_release_injuries(season_end_year, from_dir=from_dir)
+    click.echo(f"Imported {result['rows']} injury rows as of {result['date']}.")
+
+
 def _select_backfill_players(nba_players, player_ids, players_scope, max_players):
     explicit_player_ids = _parse_player_ids(player_ids)
     if explicit_player_ids:
@@ -539,6 +587,10 @@ def register_stats_commands(app):
     app.cli.add_command(cli_refresh_stats)
     app.cli.add_command(cli_refresh_defense)
     app.cli.add_command(cli_refresh_injuries)
+    app.cli.add_command(cli_sync_player_identities)
+    app.cli.add_command(cli_link_player_identity)
+    app.cli.add_command(cli_import_release_defense)
+    app.cli.add_command(cli_import_release_injuries)
     app.cli.add_command(cli_backfill_player_logs)
     app.cli.add_command(cli_prune_player_logs)
     app.cli.add_command(cli_backfill_game_snapshots)

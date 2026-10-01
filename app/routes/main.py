@@ -81,29 +81,32 @@ def _get_model2_probe() -> dict:
 @main.route('/ready')
 def ready():
     """Readiness endpoint that verifies dependencies like the database."""
-    from datetime import datetime, timezone
+    from datetime import datetime, time
     from app.models import TeamDefenseSnapshot
+    from app.utils.time_helpers import ET
     try:
         db.session.execute(text('SELECT 1'))
     except Exception as exc:
         logger.error('Health check failed: %s', exc)
         return jsonify(status='unhealthy', database='disconnected'), 503
 
-    # Staleness check for defense data
     defense_age_hours = None
     defense_data_stale = True
+    defense_source = None
+    defense_observed_through = None
     try:
         latest_defense = (
             TeamDefenseSnapshot.query
-            .order_by(TeamDefenseSnapshot.fetched_at.desc())
+            .filter(TeamDefenseSnapshot.observed_through.isnot(None))
+            .order_by(TeamDefenseSnapshot.observed_through.desc())
             .first()
         )
-        if latest_defense and latest_defense.fetched_at:
-            fetched = latest_defense.fetched_at
-            if fetched.tzinfo is None:
-                fetched = fetched.replace(tzinfo=timezone.utc)
+        if latest_defense:
+            defense_source = latest_defense.source
+            defense_observed_through = latest_defense.observed_through.isoformat()
+            observed = datetime.combine(latest_defense.observed_through, time.min, ET)
             defense_age_hours = round(
-                (datetime.now(timezone.utc) - fetched).total_seconds() / 3600, 2
+                (datetime.now(ET) - observed).total_seconds() / 3600, 2
             )
             defense_data_stale = defense_age_hours > 24
     except Exception as exc:
@@ -114,6 +117,8 @@ def ready():
         database='connected',
         defense_data_age_hours=defense_age_hours,
         defense_data_stale=defense_data_stale,
+        defense_source=defense_source,
+        defense_observed_through=defense_observed_through,
     ), 200
 
 

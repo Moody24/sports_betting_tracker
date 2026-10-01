@@ -618,27 +618,30 @@ class TestContextService(BaseTestCase):
 
     # -- refresh_injuries --
 
-    @patch('app.services.context_service.fetch_espn_injuries')
+    @patch('app.services.context_service._fetch_injury_report')
     def test_refresh_injuries_success(self, mock_fetch):
         from app.services.context_service import refresh_injuries
         with self.app.app_context():
-            mock_fetch.return_value = [
+            mock_fetch.return_value = ([
                 {'player_name': 'LeBron James', 'team': 'Lakers',
                  'status': 'questionable', 'detail': 'Knee'},
                 {'player_name': 'AD', 'team': 'Lakers',
                  'status': 'out', 'detail': 'Foot'},
-            ]
+            ], True)
             count = refresh_injuries()
             self.assertEqual(count, 2)
             self.assertEqual(InjuryReport.query.count(), 2)
 
-    @patch('app.services.context_service.fetch_espn_injuries')
+    @patch('app.services.context_service._fetch_injury_report')
     def test_refresh_injuries_empty(self, mock_fetch):
         from app.services.context_service import refresh_injuries
         with self.app.app_context():
-            mock_fetch.return_value = []
+            mock_fetch.return_value = ([], True)
             count = refresh_injuries()
             self.assertEqual(count, 0)
+            from app.services.data_receipts import latest_fetch
+            self.assertEqual(latest_fetch('espn_injuries').status, 'success')
+            self.assertEqual(latest_fetch('espn_injuries').row_count, 0)
 
     # -- get_player_injury_status --
 
@@ -754,11 +757,11 @@ class TestContextService(BaseTestCase):
     @patch('app.services.context_service.get_days_rest', return_value=2)
     @patch('app.services.context_service.check_back_to_back', return_value=False)
     @patch('app.services.context_service.is_player_available', return_value=True)
-    def test_get_game_context_healthy(self, _avail, _b2b, _rest):
+    def test_get_game_context_without_verified_report(self, _avail, _b2b, _rest):
         from app.services.context_service import get_game_context
         with self.app.app_context():
             ctx = get_game_context('LeBron James', 'Lakers')
-            self.assertEqual(ctx['injury_status'], 'healthy')
+            self.assertEqual(ctx['injury_status'], 'unknown')
             self.assertFalse(ctx['back_to_back'])
             self.assertEqual(ctx['days_rest'], 2)
             self.assertTrue(ctx['is_available'])
@@ -827,7 +830,7 @@ class TestMatchupService(BaseTestCase):
         self.assertEqual(len(stats), 1)
         self.assertEqual(stats[0]['team_name'], 'Boston Celtics')
         self.assertIn('opp_pts_allowed_pg', stats[0])
-        self.assertGreater(stats[0]['opp_pts_allowed_pg'], 0)
+        self.assertIsNone(stats[0]['opp_pts_allowed_pg'])
 
     def test_fetch_team_defense_stats_exception(self):
         from app.services import matchup_service
@@ -849,7 +852,7 @@ class TestMatchupService(BaseTestCase):
 
         self.assertEqual(result, [])
 
-    def test_fetch_team_defense_stats_fills_missing_pace_and_def_rating(self):
+    def test_fetch_team_defense_stats_keeps_missing_pace_and_rating_unknown(self):
         from app.services import matchup_service
 
         df = _FakeDataFrame([{
@@ -878,8 +881,8 @@ class TestMatchupService(BaseTestCase):
                 stats = matchup_service.fetch_team_defense_stats()
 
         self.assertEqual(len(stats), 1)
-        self.assertEqual(stats[0]['pace'], 100.0)
-        self.assertEqual(stats[0]['def_rating'], 114.0)
+        self.assertIsNone(stats[0]['pace'])
+        self.assertIsNone(stats[0]['def_rating'])
 
     # -- refresh_all_team_defense --
 
@@ -919,10 +922,12 @@ class TestMatchupService(BaseTestCase):
     @patch('app.services.matchup_service.fetch_team_defense_stats')
     def test_refresh_all_team_defense_empty(self, mock_fetch):
         from app.services.matchup_service import refresh_all_team_defense
-        with patch('app.services.matchup_service._build_baseline_team_stats', return_value=[]):
-            with self.app.app_context():
-                mock_fetch.return_value = []
-                self.assertEqual(refresh_all_team_defense(), 0)
+        with self.app.app_context():
+            mock_fetch.return_value = []
+            self.assertEqual(refresh_all_team_defense(), 0)
+            self.assertEqual(TeamDefenseSnapshot.query.count(), 0)
+            from app.services.data_receipts import latest_fetch
+            self.assertEqual(latest_fetch('nba_team_defense').status, 'failed')
 
     # -- get_matchup_adjustment --
 
@@ -2251,3 +2256,22 @@ class TestDefenseStaleness(BaseTestCase):
         resp = self.client.get('/ready')
         data = json.loads(resp.data)
         self.assertTrue(data['defense_data_stale'])
+
+    def test_recent_fetch_does_not_make_old_observations_fresh(self):
+        from app.utils.time_helpers import et_today
+
+        observed = et_today() - timedelta(days=60)
+        with self.app.app_context():
+            db.session.add(TeamDefenseSnapshot(
+                team_id='1610612738', team_name='Boston Celtics',
+                team_abbr='BOS', snapshot_date=et_today(),
+                source='sportsdataverse_team_prior',
+                observed_through=observed, sample_games=82,
+                fetched_at=datetime.now(timezone.utc),
+            ))
+            db.session.commit()
+        response = self.client.get('/ready')
+        data = response.get_json()
+        self.assertTrue(data['defense_data_stale'])
+        self.assertEqual(data['defense_observed_through'], observed.isoformat())
+        self.assertEqual(data['defense_source'], 'sportsdataverse_team_prior')

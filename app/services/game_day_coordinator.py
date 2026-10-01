@@ -91,7 +91,7 @@ def _catch_up_lookback(today) -> int:
         for game in fetch_espn_scoreboard(day.strftime('%Y%m%d')):
             if (game.get('status') == _STATUS_FINAL
                     and game.get('season_type') == 2):
-                appended += 1 if append_final_game(game) else 0
+                appended += 1 if append_final_game(game, reconcile=True) else 0
     return appended
 
 
