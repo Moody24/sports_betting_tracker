@@ -53,6 +53,9 @@ class DatabaseSchemaContractTests(unittest.TestCase):
     def test_odds_snapshot_timestamp_is_required(self):
         self.assertFalse(OddsSnapshot.__table__.c.snapped_at.nullable)
 
+    def test_model_version_fits_long_distributional_stat_names(self):
+        self.assertGreaterEqual(ModelMetadata.__table__.c.version.type.length, 41)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -53,7 +53,9 @@ jobs:
           cache: "npm"
 
       - name: Install Python dependencies
-        run: pip install -r requirements.txt
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install -r requirements.txt
 
       - name: Install Node dependencies
         run: npm ci

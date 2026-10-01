@@ -1,11 +1,16 @@
 # Edge Tracker Completion and Launch Readiness
 
-Last reconciled: 2026-09-03
+Last reconciled: 2026-10-01
 
-This is the current completion record for the NBA application. It replaces the
-old speculative implementation backlog. The repository-owned launch foundation
-is complete; the remaining gates require deployment access, third-party data, or
-product/legal decisions and must not be represented as unfinished code.
+The dated [local launch audit](audits/2026-10-01-local-launch-audit.md) records
+the current PostgreSQL cutover, model evidence, live-data gaps, and release
+checks. Its observed results supersede the September baseline below when
+assessing readiness for the 2026-27 season.
+
+This is the completion record for the NBA application. The repository has a
+substantial launch foundation, but the October 1 audit found remaining code,
+data, and operating gates. The dated audit above is the evidence-based launch
+verdict.
 
 The architecture source of truth is
 [`docs/architecture/system-contract.md`](architecture/system-contract.md). The
@@ -18,11 +23,11 @@ deliberately retained engineering debt is listed only in
 |---|---|---|
 | NBA ledger and analysis | Complete | Live lines require an Odds API subscription/key and provider availability. |
 | Sheet UI | Complete | None for local use; final public brand/domain choices may change marketing assets. |
-| Security and privacy foundation | Complete for the one-worker baseline | A hosted multi-user product needs an explicit account-lifecycle policy and legal review. |
+| Security and privacy foundation | One-worker baseline tested; registration is still open | An invited beta needs invitation-only admission, account removal, and isolation checks. |
 | Route and error contracts | Complete | Hosted error monitoring requires a monitoring vendor and credentials. |
-| SQLite/PostgreSQL portability | Complete and CI-enforced | A real cutover requires a provisioned empty PostgreSQL database, backup window, and operator access. |
-| Deployment topology | Safe one-worker contract complete | Railway is inactive; staging/production services, secrets, backups, and domain are not provisioned. |
-| ML engineering | Training, inference, calibration, and promotion gates complete | Recommendation promotion requires licensed real decision/closing quotes and at least 400 clean dated resolved picks. |
+| SQLite/PostgreSQL portability | Local PostgreSQL cutover, independent copy check, and restore drill passed October 1 | A hosted cutover still needs a provisioned target and operator access. |
+| Deployment topology | Local one-worker Gunicorn is running with scheduler disabled | Railway is inactive; staging/production services, secrets, backups, and domain are not provisioned. |
+| ML engineering | Historical validation and inference smoke passed | Recommendation promotion requires real decision/closing quotes, at least 400 clean dated resolved picks, and prospective evaluation. |
 | MLB/NFL | Intentionally not implemented | Each sport needs approved product scope, licensed providers, sport-specific historical data, grading rules, and models. |
 | Webhooks | Not applicable to current providers | Implement only after a selected provider supplies a real signed webhook contract. |
 | Shared Redis cache | Not required for the one-worker baseline | Required before deliberately scaling to multiple web workers. |
@@ -114,8 +119,8 @@ npx playwright test
 ```
 
 CI additionally exercises the full Alembic chain on PostgreSQL 16. The local
-machine does not need a resident PostgreSQL server or Docker daemon to duplicate
-that provider-specific job.
+machine now also runs a private PostgreSQL 16 cluster through
+`scripts/local_postgres.sh` for database and browser verification.
 
 ## External completion gates
 
@@ -146,8 +151,8 @@ Owner: operator with Railway/database/DNS access.
 - Keep `WEB_CONCURRENCY=1`, `SCHEDULER_ENABLED=false` on web, and exactly one
   scheduler owner. Add Redis before raising web concurrency.
 - Configure automated database backups and complete a documented restore drill.
-- Run the guarded SQLite copy in staging, inspect its sanitized report, and rehearse
-  rollback before the production maintenance window.
+- Copy or restore the validated PostgreSQL dataset in staging, inspect its
+  report, and rehearse rollback before the production maintenance window.
 - Run smoke tests behind the real proxy/TLS/domain and observe error, latency,
   connection, scheduler, and data-count signals.
 

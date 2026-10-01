@@ -243,6 +243,30 @@ class TestStatsService(BaseTestCase):
         self.assertEqual(logs[0]['pts'], 28.0)
         self.assertEqual(logs[0]['home_away'], 'home')
 
+    def test_fetch_player_game_logs_names_player_missing_from_static_list(self):
+        from app.services.stats_service import fetch_player_game_logs
+
+        frame = _FakeDataFrame([{
+            'GAME_DATE': 'Feb 20, 2026', 'MATCHUP': 'DAL vs. BOS',
+            'TEAM_ABBREVIATION': 'DAL', 'MIN': '30:00', 'PTS': 20,
+        }])
+        endpoint = MagicMock()
+        endpoint.get_data_frames.return_value = [frame]
+        playergamelog = MagicMock()
+        playergamelog.PlayerGameLog.return_value = endpoint
+        players = MagicMock()
+        players.get_active_players.return_value = []
+        with patch.dict(sys.modules, {
+            'nba_api': MagicMock(),
+            'nba_api.stats': MagicMock(),
+            'nba_api.stats.endpoints': MagicMock(playergamelog=playergamelog),
+            'nba_api.stats.static': MagicMock(players=players),
+        }):
+            with patch('app.services.stats_service.time.sleep'):
+                rows = fetch_player_game_logs('1642843', season='2025-26')
+
+        self.assertEqual(rows[0]['player_name'], 'Cooper Flagg')
+
     def test_fetch_player_game_logs_api_failure(self):
         from app.services import stats_service
 
@@ -264,6 +288,53 @@ class TestStatsService(BaseTestCase):
         self.assertEqual(result, [])
 
     # -- find_player_id --
+
+    def test_find_player_id_recent_players_missing_from_static_list(self):
+        from app.services.stats_service import find_player_id
+
+        self.assertEqual(find_player_id('Cooper Flagg'), '1642843')
+        self.assertEqual(find_player_id('Dylan Harper'), '1642844')
+        self.assertEqual(find_player_id('VJ Edgecombe'), '1642845')
+        self.assertEqual(find_player_id('Kon Knueppel'), '1642851')
+        self.assertEqual(find_player_id('Jahmai Mashack'), '1642942')
+        self.assertEqual(find_player_id('LJ Cryer'), '1643018')
+        self.assertEqual(find_player_id('Chaney Johnson'), '1643052')
+        self.assertEqual(find_player_id('Bez Mbeng'), '1643016')
+        self.assertEqual(find_player_id('Blake Hinson'), '1642396')
+        self.assertEqual(find_player_id('Nate Williams'), '1631466')
+        self.assertIsNone(find_player_id('  '))
+
+    def test_find_player_id_uses_inactive_players_and_normalizes_accents(self):
+        from app.services.stats_service import find_player_id
+
+        nba_players = MagicMock()
+        nba_players.get_players.return_value = [
+            {'id': 1630249, 'full_name': 'Vít Krejčí'},
+            {'id': 1630695, 'full_name': 'Micah Potter'},
+        ]
+        nba_players.get_active_players.return_value = []
+        with patch.dict(sys.modules, {
+            'nba_api': MagicMock(),
+            'nba_api.stats': MagicMock(),
+            'nba_api.stats.static': MagicMock(players=nba_players),
+        }):
+            self.assertEqual(find_player_id('Vit Krejci'), '1630249')
+            self.assertEqual(find_player_id('Micah Potter'), '1630695')
+
+    def test_find_player_id_prefers_unique_active_name_collision(self):
+        from app.services.stats_service import find_player_id
+
+        nba_players = MagicMock()
+        nba_players.get_players.return_value = [
+            {'id': 1585, 'full_name': 'Brandon Williams', 'is_active': False},
+            {'id': 1630314, 'full_name': 'Brandon Williams', 'is_active': True},
+        ]
+        with patch.dict(sys.modules, {
+            'nba_api': MagicMock(),
+            'nba_api.stats': MagicMock(),
+            'nba_api.stats.static': MagicMock(players=nba_players),
+        }):
+            self.assertEqual(find_player_id('Brandon Williams'), '1630314')
 
     def test_find_player_id_exact_match(self):
         from app.services import stats_service

@@ -7,9 +7,12 @@ Keep this repository focused on the tracker application and its engineering docu
 
 ## Local Dev Startup
 ```bash
-source .venv/bin/activate && export $(grep -v '^#' .env | grep -v '^\s*$' | xargs) 2>/dev/null; flask run
+scripts/local_postgres.sh start
+.venv/bin/python scripts/run_local.py
 ```
 - `SECRET_KEY` is required — app raises `RuntimeError` if missing
+- `.env` now points to the project-scoped local PostgreSQL 16 database; `instance/app.db` is retained as a SQLite rollback source
+- Pass `--with-scheduler` to `scripts/run_local.py` when live jobs should run; the default local server leaves them disabled
 - `.venv/` is the active virtualenv; `venv/` and `venv310/` are stale
 
 ## Running Tests

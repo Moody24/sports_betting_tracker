@@ -18,6 +18,10 @@ __pycache__/
 
 instance/app.db
 instance/*.bak*
+instance/backups/
+instance/postgres/
+instance/postgres-local.log
+instance/.s.PGSQL.*
 
 # Coverage reports
 .coverage

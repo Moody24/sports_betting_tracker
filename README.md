@@ -4,10 +4,11 @@ A Flask web application for recording bets, tracking outcomes, projecting player
 
 ## Project Status
 
-The repository-owned NBA scope is complete: the application, Sheet UI, security
-contracts, migration tooling, test coverage, and technical-debt cleanup have been
-implemented and verified. The current release baseline passes 1,326 unittests at
-85% application coverage and 58 Playwright browser tests.
+The NBA application and local database path are implemented. The current
+[launch audit](docs/audits/2026-10-01-local-launch-audit.md) separates verified
+local behavior from the remaining season-opening and invited-beta gates. The
+September release baseline was 1,326 unit tests at 85% application coverage
+and 58 Playwright browser tests; current results belong in the dated audit.
 
 Hosted deployment is intentionally inactive. A production launch still requires
 operator-owned infrastructure, secrets, backups, monitoring, and legal/product
@@ -35,7 +36,7 @@ are separate future product scopes, not partially implemented features.
 
 - **Backend:** Flask, SQLAlchemy, Flask-Login, Flask-Migrate, Gunicorn
 - **Frontend:** Jinja2 templates + owned CSS design system + vanilla JavaScript
-- **Database:** SQLite for local dev · PostgreSQL when deploying to a hosted environment
+- **Database:** PostgreSQL 16 for local and hosted operation; SQLite remains a supported import source
 - **ML:** XGBoost, scikit-learn (model artifacts stored locally in `app/ml_models/`)
 - **Odds:** The Odds API (player props, moneyline, totals)
 - **Scores:** ESPN API (free, no auth)
@@ -62,26 +63,37 @@ Minimum required values for local development:
 
 ```env
 SECRET_KEY=<generate with: python -c "import secrets; print(secrets.token_hex(32))">
-DATABASE_URL=sqlite:///app.db
+DATABASE_URL=postgresql:///edge_tracker_local?host=/absolute/path/to/sports_betting_tracker/instance&port=5433
 ODDS_API_KEY=<your key from the-odds-api.com — optional, needed for live lines>
-FLASK_DEBUG=true
+FLASK_DEBUG=false
 SCHEDULER_ENABLED=false
 ```
 
-### 3. Run migrations
+### 3. Start local PostgreSQL and run migrations
 
 ```bash
-flask --app run.py db upgrade heads
+brew install postgresql@16
+scripts/local_postgres.sh start
+# Put the exact URL printed by scripts/local_postgres.sh url in .env.
+flask --app run db upgrade heads
 ```
 
 ### 4. Start the app
 
 ```bash
-flask run
-# or: python run.py
+.venv/bin/python scripts/run_local.py
 ```
 
-App runs at `http://localhost:5000`.
+App runs at `http://127.0.0.1:5000`. Pass `--with-scheduler` when the local
+data jobs should run; that uses the same single worker and may consume Odds
+API credits. The local launcher keeps the scheduler off unless that flag is
+passed, regardless of the ambient `.env` value.
+
+The project-scoped PostgreSQL files stay under ignored `instance/postgres/`.
+`scripts/local_postgres.sh backup` writes a restricted custom-format dump under
+`instance/backups/`; `scripts/local_postgres.sh stop` stops the database. A fresh checkout has no
+historical rows or trained model artifacts; import/retrain those before
+assessing projection quality.
 
 > By default, startup does **not** auto-run migrations. Set `AUTO_DB_UPGRADE=true` only if you want boot-time migrations.
 

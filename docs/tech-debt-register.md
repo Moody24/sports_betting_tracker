@@ -1,6 +1,6 @@
 # Technical Debt Register
 
-Last audited: 2026-09-03
+Last audited: 2026-10-01
 
 This is the current engineering-health baseline for Edge Tracker. It records
 deliberately retained debt; completed cleanup belongs in Git history rather
@@ -10,7 +10,9 @@ than remaining as an open checklist.
 
 - Canonical guardrail: `scripts/predeploy_guardrails.sh`
 - Test runner: `unittest`
-- Full verification: 1,326 tests passing, 85% application coverage
+- Last completed full baseline (2026-09-03): 1,326 tests passing, 85%
+  application coverage. See `docs/audits/2026-10-01-local-launch-audit.md`
+  for current verification and launch gaps.
 - Static/security gates: Ruff, Bandit, detect-secrets, Git-history credential
   scanning, and pip-audit passing
 - Ruff C901 inventory: 0 functions, down from 59 before this cleanup
@@ -101,8 +103,15 @@ and architecture-contract tests are the reproducible measures for this repo.
 | Priority | Item | Evidence and exit condition |
 |---|---|---|
 | P2 before hosted deployment | Inactive Railway scripts and configuration | They are intentionally retained for restoration work and the surviving runbook is explicitly marked inactive. Revalidate or delete them when a hosting decision is made. |
+| P1 before invited beta | Account admission and lifecycle | Registration is currently open. Add invitation-only admission, account removal, and user-isolation checks before granting other users access. |
+| P1 before automated local operation | Scheduler and quote freshness | Jobs are disabled in the active local configuration. Verify one-worker job ownership, provider budget, current-season data, and decision/closing snapshots with jobs enabled. |
+| P1 before hosted model inference | Model artifact persistence | Model metadata refers to local artifacts. Materialize them through the configured persistent store and verify inference after a clean deployment. |
+| P1 before recommendations | Prospective evaluation | The local database has no resolved bets or decision/closing quote snapshots; historical validation cannot establish live profitability. |
 
 ## Next cleanup order
 
-The repository cleanup is complete. Revisit inactive Railway material only
-after a hosting decision is made.
+Complete the current launch gates in priority order, then revisit inactive
+Railway material after a hosting decision is made. Refactor individual modules
+when a measurable defect, boundary violation, or maintenance cost justifies
+the change; the September complexity cleanup is not a claim of season-ready
+operations.

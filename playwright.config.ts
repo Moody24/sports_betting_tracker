@@ -6,6 +6,7 @@ const runLocalServer = !process.env.E2E_BASE_URL;
 const e2eSecret = E2E_SECRET_KEY;
 const e2eDatabaseUrl = E2E_DATABASE_URL;
 const rateLimitEnabled = E2E_RATELIMIT_ENABLED;
+const shellQuote = (value: string) => "'" + value.replace(/'/g, "'\\''") + "'";
 // The sqlite branch used to call `db.create_all()`, which creates missing
 // TABLES but never adds columns to one that already exists. /tmp/e2e.sqlite
 // survives between runs, so the first migration that added a column failed the
@@ -17,12 +18,12 @@ const rateLimitEnabled = E2E_RATELIMIT_ENABLED;
 const sqlitePath = e2eDatabaseUrl.startsWith('sqlite:///')
   ? e2eDatabaseUrl.replace(/^sqlite:\/\/\//, '')
   : null;
-const migrateCommand = `SECRET_KEY=${e2eSecret} DATABASE_URL=${e2eDatabaseUrl} RATELIMIT_ENABLED=${rateLimitEnabled} ./.venv/bin/python -c "from app import create_app; from flask_migrate import upgrade; app = create_app();\nwith app.app_context(): upgrade(directory='migrations')"`;
+const migrateCommand = `SECRET_KEY=${shellQuote(e2eSecret)} DATABASE_URL=${shellQuote(e2eDatabaseUrl)} RATELIMIT_ENABLED=${shellQuote(rateLimitEnabled)} ./.venv/bin/python -c "from app import create_app; from flask_migrate import upgrade; app = create_app();\nwith app.app_context(): upgrade(directory='migrations')"`;
 const bootstrapCommand = sqlitePath
-  ? `rm -f ${sqlitePath} && ${migrateCommand}`
+  ? `rm -f ${shellQuote(sqlitePath)} && ${migrateCommand}`
   : migrateCommand;
 
-const runServerCommand = `SECRET_KEY=${e2eSecret} DATABASE_URL=${e2eDatabaseUrl} RATELIMIT_ENABLED=${rateLimitEnabled} ./.venv/bin/flask run --host 127.0.0.1 --port 5010`;
+const runServerCommand = `SECRET_KEY=${shellQuote(e2eSecret)} DATABASE_URL=${shellQuote(e2eDatabaseUrl)} RATELIMIT_ENABLED=${shellQuote(rateLimitEnabled)} ./.venv/bin/flask run --host 127.0.0.1 --port 5010`;
 
 export default defineConfig({
   testDir: './tests/e2e',

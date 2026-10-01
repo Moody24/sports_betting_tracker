@@ -722,7 +722,7 @@ class ModelMetadata(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     model_name = db.Column(db.String(80), nullable=False)
     model_type = db.Column(db.String(40), nullable=False)
-    version = db.Column(db.String(40), nullable=False)
+    version = db.Column(db.String(80), nullable=False)
     file_path = db.Column(db.String(300), nullable=False)
     training_date = db.Column(db.DateTime, nullable=False)
     training_samples = db.Column(db.Integer, nullable=True)

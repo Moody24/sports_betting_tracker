@@ -1,8 +1,8 @@
 # Edge Tracker System Contract
 
 Status: **canonical architecture SSOT**  
-Contract version: **1.3**
-Last verified: **2026-09-03**
+Contract version: **1.4**
+Last verified: **2026-10-01**
 
 Verified inventory at this version: **16 SQLAlchemy models**, **22 registered
 APScheduler jobs**, and **NBA as the only registered `SportService`**.
@@ -66,7 +66,7 @@ flowchart TB
 
     ORM[SQLAlchemy models]
     Artifacts[Model artifact storage]
-    DB[(SQLite local / PostgreSQL-compatible)]
+    DB[(PostgreSQL 16 local / hosted)]
     ESPN[ESPN]
     Odds[The Odds API]
 
@@ -99,6 +99,11 @@ flowchart TB
     Data --> ESPN
     Data --> Odds
 ```
+
+The local runtime uses a project-scoped PostgreSQL 16 cluster started by
+`scripts/local_postgres.sh`. SQLite remains a supported source for the guarded
+`migrate-sqlite-to-postgres` CLI and an offline rollback image. Hosted
+PostgreSQL uses the same Alembic model contract.
 
 ### 2.1 Dependency direction
 

@@ -301,7 +301,9 @@ class TestImportCommand(BaseTestCase):
                 season='2025-26', stats={'pts': 28.0}))
             db.session.commit()
         mock_load.return_value = _player_box_df()
-        result = self._run(['--sport', 'nba', '--seasons', '1'])
+        with patch('app.services.hoopr_import_service.recent_nba_seasons',
+                   return_value=['2025-26']):
+            result = self._run(['--sport', 'nba', '--seasons', '1'])
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertIn('WARNING', result.output)
         self.assertIn('stats.nba.com', result.output)
