@@ -22,10 +22,13 @@ The [player](https://github.com/sportsdataverse/sportsdataverse-data/releases/ta
 [team](https://github.com/sportsdataverse/sportsdataverse-data/releases/tag/espn_nba_team_boxscores),
 and [injury](https://github.com/sportsdataverse/sportsdataverse-data/releases/tag/espn_nba_injuries)
 releases are useful for reproducible history. SportsDataverse's MIT software
-license does not necessarily cover
-upstream ESPN data redistribution. The releases do not include the sportsbook's
-past offered and closing prop prices. Those must be captured prospectively by
-the existing Odds API jobs, with decision and close coverage checked before
+license does not necessarily cover upstream ESPN data redistribution. The
+releases do not include sportsbook player-prop quotes. [The Odds API's paid
+historical event-odds endpoint](https://the-odds-api.com/liveapi/guides/v4/index.html#historical-event-odds)
+offers player-prop snapshots from May 2023 onward, but none have been imported
+or coverage-checked here. The existing CSV/JSON quote importer can accept
+licensed history; scheduled jobs will capture new decision and close quotes.
+Both paths need timestamp, bookmaker, market, and game joins checked before
 any ROI or CLV claim.
 
 [hoopR's player crosswalk](https://github.com/sportsdataverse/hoopR/releases)
