@@ -130,6 +130,22 @@ flask health-report --days 7
 
 See `docs/runbooks/retrain.md` for the full retrain guide.
 
+## Historical Matchup Research
+
+The read-only matchup screen compares a player's results with their previous
+ten games and the opponent's previous ten defensive box scores. It discovers
+patterns in 2023–24 and 2024–25, then checks them in 2025–26:
+
+```bash
+.venv/bin/python -m scripts.matchup_pattern_research \
+  --output-dir /absolute/path/outside/this/repository
+```
+
+The report and CSVs include repeated matchups, defensive profiles, schedule
+effects, and final-score associations. They are exploratory: historical
+player-prop quotes are not yet in the local database, and box scores cannot
+identify tactical coverage schemes. Keep research output outside this repository.
+
 ## Running Tests
 
 ```bash
@@ -138,7 +154,7 @@ SECRET_KEY=test python -m coverage run -m unittest discover -s tests -v
 python -m coverage report --include="app/*"
 ```
 
-CI coverage gate: 80% · current application coverage: 85%. Test runner is
+CI coverage gate: 80% · application coverage at the October 1 audit: 82%. Test runner is
 **unittest** (not pytest).
 
 Current cleanup status and deliberately retained follow-up work are tracked in
