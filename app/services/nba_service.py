@@ -132,29 +132,6 @@ def fetch_odds() -> dict:
     return totals
 
 
-def _total_line_from_market(market: dict) -> float | None:
-    for outcome in market.get('outcomes', []):
-        if outcome.get('name') == 'Over' and outcome.get('point'):
-            return float(outcome['point'])
-    return None
-
-
-def _moneylines_from_market(
-    market: dict,
-    home_team: str,
-    away_team: str,
-) -> tuple[int | None, int | None]:
-    home_ml = None
-    away_ml = None
-    for outcome in market.get('outcomes', []):
-        name = outcome.get('name', '')
-        if name == home_team:
-            home_ml = outcome.get('price')
-        elif name == away_team:
-            away_ml = outcome.get('price')
-    return home_ml, away_ml
-
-
 def _home_spread_from_market(market: dict, home_team: str) -> float | None:
     for outcome in market.get('outcomes', []):
         if outcome.get('name') == home_team and outcome.get('point') is not None:
@@ -173,20 +150,14 @@ def _extract_current_game_markets(game: dict):
         for market in bookmaker.get('markets', []):
             market_key = market.get('key', '')
             if market_key == 'totals' and ou_line is None:
-                ou_line = _total_line_from_market(market)
-            if market_key == 'h2h' and home_ml is None:
-                next_home_ml, next_away_ml = _moneylines_from_market(
-                    market,
-                    home_team,
-                    away_team,
+                ou_line = _total_line(market)
+            if market_key == 'h2h' and (home_ml is None or away_ml is None):
+                home_ml, away_ml = _moneylines(
+                    market, home_team, away_team, home_ml, away_ml,
                 )
-                if next_home_ml is not None:
-                    home_ml = next_home_ml
-                if next_away_ml is not None:
-                    away_ml = next_away_ml
             if market_key == 'spreads' and home_spread is None:
                 home_spread = _home_spread_from_market(market, home_team)
-        if ou_line is not None and home_ml is not None and home_spread is not None:
+        if all(value is not None for value in (ou_line, home_ml, away_ml, home_spread)):
             break
     return ou_line, home_ml, away_ml, home_spread
 

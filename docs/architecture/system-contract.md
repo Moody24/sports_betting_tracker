@@ -1,7 +1,7 @@
 # Edge Tracker System Contract
 
 Status: **canonical architecture SSOT**  
-Contract version: **1.4**
+Contract version: **1.5**
 Last verified: **2026-10-01**
 
 Verified inventory at this version: **16 SQLAlchemy models**, **22 registered
@@ -151,6 +151,8 @@ module's private functions.
 | Edge and pick scoring | `value_detector.py` | pages, recommender, pick context | `ScoredPropV1` |
 | Market governance | `market_recommender.py` | scheduler, CLI, dashboard | market recommendation mappings |
 | Pick-quality classifier | `pick_quality_model.py` | `value_detector`, CLI | Model 2 feature vector and probability |
+| Daily auto-pick selection and persistence | `auto_pick_service.py` | scheduler, login hook | auto-generated `Bet` and `PickContext` rows |
+| Pick-quality bootstrap examples | `pick_quality_bootstrap.py` | scheduler, CLI | synthetic resolved `Bet` and `PickContext` rows |
 | Grading/postmortem | `nba_service.py`, `postmortem_service.py` | coordinator, routes | outcome tuple and ORM rows |
 | Game-day orchestration | `game_day_coordinator.py` | scheduler | idempotent tier/result string |
 | ML diagnostics and validation | `model_diagnostics.py`, `rolling_backtest.py` | CLI | `ModelEvaluationRun` |

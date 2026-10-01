@@ -46,6 +46,8 @@ is checked against Flask's URL map in tests.
   `player_crosswalk.py`, and `espn_mapping.py`.
 - Position lifecycle: `bet_placement_service.py`, `bet_context_service.py`,
   `postmortem_service.py`, `score_cache.py`, and `game_day_coordinator.py`.
+- Pick generation: `auto_pick_service.py` selects and stores daily picks;
+  `pick_quality_bootstrap.py` creates synthetic training examples.
 - Analysis: `stats_service.py`, `matchup_service.py`, `analysis_context.py`,
   `context_service.py`, `live_context.py`, and scenario modules.
 - ML: `ml_feature_builder.py`, `ml_model.py`, `pick_quality_model.py`,
@@ -112,7 +114,8 @@ profitability. See `docs/runbooks/ml-validation.md`.
 
 ## Runtime ownership
 
-- Local development: SQLite, `SCHEDULER_ENABLED=false`, manual CLI jobs.
+- Local development: project-scoped PostgreSQL with the scheduler disabled by
+  default; tests use SQLite.
 - Hosted safe baseline: one Gunicorn web worker with scheduler disabled, plus at
   most one dedicated scheduler process.
 - Process-local rate limiting is accepted only for one web worker. Multiple web
@@ -128,16 +131,12 @@ Health probes:
 ## Local development
 
 ```bash
-source .venv/bin/activate
-export SECRET_KEY=dev-only-change-me
-export DATABASE_URL=sqlite:///app.db
-export SCHEDULER_ENABLED=false
-flask --app run.py db upgrade heads
-flask run
+.venv/bin/python scripts/run_local.py
 ```
 
-Live odds need `ODDS_API_KEY`; the application degrades explicitly when it is
-absent or a provider is unavailable.
+Configure `.env` and apply migrations as described in `README.md` before
+starting the launcher. Live odds need `ODDS_API_KEY`; the application degrades
+explicitly when it is absent or a provider is unavailable.
 
 ## Verification
 
