@@ -286,7 +286,8 @@
     {# ── Defensive context ─── #}
     <div class="stat-section-label">Matchup Defense</div>
     <div class="small mb-1 fw-semibold" id="sp-opp-stat">—</div>
-    <div class="small text-secondary mb-3" id="sp-def-rating">—</div>
+    <div class="small text-secondary mb-1" id="sp-def-rating">—</div>
+    <div class="small text-secondary mb-3" id="sp-h2h">—</div>
 
     {# ── Game Script ─── #}
     <div class="stat-section-label">Game Script</div>
@@ -574,15 +575,20 @@ const SA_PROP_TO_COL = PROP_TO_STAT_COL;
 
     // Defensive context
     const propLabel = SA_PROP_LABELS[prop.prop_type] || prop.prop_type;
-    const defPos = gc.player_position || bd.player_position || '';
-    const defPosLabel = defPos ? ('est. ' + defPos.toUpperCase()) : 'this position';
     setText('sp-opp-stat', gc.opp_stat_allowed != null
-      ? (gc.opp_abbr || 'Opp') + ' allows ' + (+gc.opp_stat_allowed).toFixed(1) + ' ' + propLabel + '/g to ' + defPosLabel
+      ? (gc.opp_abbr || 'Opp') + ' allows ' + (+gc.opp_stat_allowed).toFixed(1) + ' team ' + propLabel.toLowerCase() + '/g'
       : 'Defensive data unavailable');
     const defParts = [];
     if (gc.opp_def_rating != null) defParts.push('Def Rtg: ' + (+gc.opp_def_rating).toFixed(1));
     if (gc.opp_pace != null) defParts.push('Pace: ' + (+gc.opp_pace).toFixed(1));
+    if (gc.defense_sample_games != null) defParts.push(gc.defense_sample_games + ' games');
+    if (gc.defense_observed_through) defParts.push('through ' + gc.defense_observed_through);
+    if (gc.defense_age_days > 21) defParts.push('historical profile');
+    if (gc.defense_source) defParts.push(gc.defense_source.replaceAll('_', ' '));
     setText('sp-def-rating', defParts.join(' · ') || '—');
+    setText('sp-h2h', gc.prior_opponent_games
+      ? (+gc.prior_opponent_average).toFixed(1) + ' ' + propLabel + '/g in ' + gc.prior_opponent_games + ' prior meetings among the last ' + gc.player_history_window + ' player games'
+      : 'No prior meeting in the available recent player history');
 
     // Game script
     const gsParts = [];

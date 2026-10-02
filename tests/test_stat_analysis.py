@@ -2,11 +2,12 @@
 
 import unittest
 from datetime import date
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from tests.helpers import BaseTestCase
 from app import db
-from app.models import PlayerGameLog
+from app.models import PlayerGameLog, TeamDefenseSnapshot
 from app.routes.nba_analysis import _compute_hit_rates
 from app.services.analysis_context import build_stat_context
 
@@ -84,6 +85,49 @@ class TestBuildStatContext(BaseTestCase):
             ctx = build_stat_context(score, [])
             self.assertIsNone(ctx['opp_def_rating'])
             self.assertIsNone(ctx['opp_stat_allowed'])
+            self.assertIsNone(ctx['defense_observed_through'])
+
+    @patch('app.services.analysis_context.et_today', return_value=date(2026, 10, 1))
+    def test_defense_context_shows_observed_date_and_sample(self, _today):
+        score = {'game_id': 'g1', 'player_team_abbr': 'LAL',
+                 'prop_type': 'player_points', 'breakdown': {}}
+        game = {'espn_id': 'g1', 'home': {'abbr': 'BOS'},
+                'away': {'abbr': 'LAL'}}
+        defense = TeamDefenseSnapshot(
+            team_abbr='BOS', source='espn_boxscore_prior',
+            observed_through=date(2026, 4, 12), sample_games=82,
+            opp_pts_pg=112.0,
+        )
+        with self.app.app_context():
+            context = build_stat_context(score, [game], {'BOS': defense})
+
+        self.assertEqual(context['opp_stat_allowed'], 112.0)
+        self.assertEqual(context['defense_sample_games'], 82)
+        self.assertEqual(context['defense_observed_through'], '2026-04-12')
+        self.assertEqual(context['defense_age_days'], 172)
+
+    @patch('app.routes.nba_analysis._latest_defense_snapshots', return_value={})
+    @patch('app.routes.nba_analysis._recent_logs_by_player')
+    def test_prior_opponent_context_carries_sample(self, load_logs, _snapshots):
+        from app.routes.nba_analysis import _enrich_stat_scores
+
+        load_logs.return_value = {'Test Player': [
+            SimpleNamespace(pts=20, matchup='LAL @ BOS', team_abbr='LAL',
+                            game_date=date(2026, 3, 1)),
+            SimpleNamespace(pts=30, matchup='LAL @ BOS', team_abbr='LAL',
+                            game_date=date(2026, 3, 2)),
+            SimpleNamespace(pts=40, matchup='LAL vs. NYK', team_abbr='LAL',
+                            game_date=date(2026, 3, 3)),
+        ]}
+        score = {'player': 'Test Player', 'prop_type': 'player_points',
+                 'player_team_abbr': 'LAL', 'game_id': 'g1', 'line': 25}
+        game = {'home': {'abbr': 'BOS'}, 'away': {'abbr': 'LAL'}}
+        with self.app.app_context():
+            enriched = _enrich_stat_scores([score], {'g1': game})[0]
+
+        self.assertEqual(enriched['game_ctx']['prior_opponent_games'], 2)
+        self.assertEqual(enriched['game_ctx']['prior_opponent_average'], 25)
+        self.assertEqual(enriched['game_ctx']['player_history_window'], 3)
 
 
 class TestStatAnalysisRoute(BaseTestCase):

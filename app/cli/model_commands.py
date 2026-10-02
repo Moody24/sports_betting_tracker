@@ -305,22 +305,14 @@ def cli_model_accuracy(days, stat_type):
         key = pm.stat_type or 'unknown'
         by_stat_ot.setdefault(key, []).append(abs((pm.actual_stat or 0.0) - (pm.projected_stat or 0.0)))
 
-    # Expected MAE thresholds per stat type (healthy ranges)
-    thresholds = {
-        'player_points': 3.5,
-        'player_rebounds': 2.0,
-        'player_assists': 2.0,
-        'player_threes': 1.5,
-        'player_steals': 1.0,
-        'player_blocks': 1.0,
-    }
+    from app.services.ml_model import MAX_PROJECTION_MAE
 
     click.echo(f'\n--- Regulation games only (n={len(non_ot_rows)}) ---')
     click.echo(f'{"Stat Type":<30} {"N":>5} {"MAE":>7} {"Threshold":>10} {"Status":>8}')
     click.echo('-' * 65)
     for stype, errors in sorted(by_stat.items()):
         mae = sum(errors) / len(errors)
-        threshold = thresholds.get(stype, 3.5)
+        threshold = MAX_PROJECTION_MAE.get(stype, 3.5)
         status = 'OK' if mae <= threshold else 'WARN'
         click.echo(f'{stype:<30} {len(errors):>5} {mae:>7.3f} {threshold:>10.1f} {status:>8}')
 
@@ -734,15 +726,8 @@ def _echo_recent_job_status() -> None:
 
 
 def _check_model1_projection() -> list:
-    """Check val_mae for all active projection models. Returns list[CheckResult]."""
-    stat_thresholds = {
-        'player_points': 3.5,
-        'player_rebounds': 2.0,
-        'player_assists': 2.0,
-        'player_threes': 1.5,
-        'player_steals': 1.0,
-        'player_blocks': 1.0,
-    }
+    """Report whether active projection artifacts pass the inference gate."""
+    from app.services.ml_model import _projection_qualifies
     active_proj = (
         ModelMetadata.query
         .filter(ModelMetadata.model_name.like('projection_%'))
@@ -754,15 +739,16 @@ def _check_model1_projection() -> list:
     results = []
     for m in active_proj:
         stype = m.model_name.replace('projection_', '')
-        threshold = stat_thresholds.get(stype, 3.5)
-        if m.val_mae is None:
-            results.append(CheckResult(f'Model1:{stype}', False, f'{m.model_name}: val_mae=None'))
-        elif m.val_mae <= threshold:
-            results.append(CheckResult(f'Model1:{stype}', True,
-                                       f'{m.model_name}: val_mae={m.val_mae:.3f} <= {threshold}'))
-        else:
-            results.append(CheckResult(f'Model1:{stype}', False,
-                                       f'{m.model_name}: val_mae={m.val_mae:.3f} > threshold {threshold}'))
+        try:
+            metadata = json.loads(m.metadata_json or '{}')
+        except (TypeError, ValueError):
+            metadata = {}
+        qualified = isinstance(metadata, dict) and _projection_qualifies(
+            stype, m.val_mae, metadata,
+        )
+        mae = f'{m.val_mae:.3f}' if m.val_mae is not None else 'n/a'
+        detail = f'{m.model_name}: val_mae={mae}, inference gate {"passed" if qualified else "held"}'
+        results.append(CheckResult(f'Model1:{stype}', qualified, detail))
     return results
 
 

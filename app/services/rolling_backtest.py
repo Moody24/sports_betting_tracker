@@ -30,7 +30,6 @@ from app.utils.odds import american_to_decimal, implied_prob
 
 
 EDGE_THRESHOLDS = (0.0, 0.02, 0.03, 0.05, 0.075, 0.10, 0.15)
-NON_POINT_IN_TIME_FEATURES = ('opp_def_rating', 'opp_pace', 'opp_stat_allowed')
 
 
 def _aware(value: datetime | None) -> datetime | None:
@@ -206,17 +205,6 @@ def _fit_fold_model(stat_type: str, rows: list):
     return model, calibrator, feature_names, kind, {
         'fit': len(fit_rows), 'early': len(early_rows), 'calibration': len(calibration_rows),
     }
-
-
-def _point_in_time_rows(rows: list) -> list:
-    """Remove current-only defense snapshots from historical evaluation."""
-    cleaned = []
-    for game_date, player_id, features, target in rows:
-        point_in_time = dict(features)
-        for key in NON_POINT_IN_TIME_FEATURES:
-            point_in_time[key] = 0.0
-        cleaned.append((game_date, player_id, point_in_time, target))
-    return cleaned
 
 
 def _model_probability(model_bundle, features: dict, line: float) -> float | None:
@@ -486,7 +474,7 @@ def _rolling_training_rows(stat_type: str):
         from app.services.ml_model import _build_training_rows
 
         rows = _build_training_rows(stat_type, min_train_samples=0)
-    return _point_in_time_rows(rows) if rows else []
+    return rows or []
 
 
 def _score_fold_quote(
@@ -649,7 +637,7 @@ def run_rolling_backtest(
         'close_time': 'T-10',
         'fold_method': 'expanding_monthly',
         'minimum_history_days': 365,
-        'non_point_in_time_features_zeroed': NON_POINT_IN_TIME_FEATURES,
+        'defense_context': 'prior_completed_games',
         'xgboost': {
             'n_estimators': 300, 'max_depth': 5, 'learning_rate': 0.05,
             'subsample': 0.8, 'colsample_bytree': 0.8,

@@ -20,6 +20,7 @@ from app.services.projection_engine import ProjectionEngine
 from app.services.player_identity_service import get_verified_history
 from app.services.stats_service import find_player_id, get_cached_logs, get_player_stats_summary
 from app.services.analysis_context import POSITION_ORDER, build_stat_context
+from app.services.ml_feature_builder import extract_opp_abbr
 from app.utils.odds import american_from_decimal
 from app.utils.time_helpers import et_today
 
@@ -268,6 +269,21 @@ def _enrich_stat_scores(scores: list[dict], game_lookup: dict) -> list[dict]:
         )
         score['game_ctx'] = build_stat_context(
             score, game_lookup, defense_snapshots
+        )
+        opponent = score['game_ctx']['opp_abbr']
+        prior_matchups = [
+            float(getattr(log, stat_column))
+            for log in logs_by_player.get(score.get('player', ''), [])
+            if opponent and stat_column
+            and extract_opp_abbr(log.matchup or '') == opponent
+            and getattr(log, stat_column, None) is not None
+        ]
+        score['game_ctx']['prior_opponent_games'] = len(prior_matchups)
+        score['game_ctx']['prior_opponent_average'] = (
+            sum(prior_matchups) / len(prior_matchups) if prior_matchups else None
+        )
+        score['game_ctx']['player_history_window'] = len(
+            logs_by_player.get(score.get('player', ''), [])
         )
         score['indicator'] = _stat_indicator(score)
     return enriched_scores

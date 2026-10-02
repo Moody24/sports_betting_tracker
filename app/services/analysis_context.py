@@ -2,6 +2,7 @@
 
 from app.config_display import PROP_TO_OPP_ALLOWED
 from app.models import TeamDefenseSnapshot
+from app.utils.time_helpers import et_today
 
 POSITION_ORDER = {'PG': 0, 'SG': 1, 'SF': 2, 'PF': 3, 'C': 4}
 
@@ -64,6 +65,15 @@ def build_stat_context(
         }
         ctx['opp_pos_allowed'] = position_allowed.get(position)
         ctx['player_position'] = position
+        ctx['defense_source'] = defense.source
+        ctx['defense_sample_games'] = defense.sample_games
+        ctx['defense_observed_through'] = (
+            defense.observed_through.isoformat() if defense.observed_through else None
+        )
+        ctx['defense_age_days'] = (
+            (et_today() - defense.observed_through).days
+            if defense.observed_through else None
+        )
     else:
         ctx.update(
             opp_def_rating=None,
@@ -71,5 +81,9 @@ def build_stat_context(
             opp_stat_allowed=None,
             opp_pos_allowed=None,
             player_position='',
+            defense_source=None,
+            defense_sample_games=None,
+            defense_observed_through=None,
+            defense_age_days=None,
         )
     return ctx

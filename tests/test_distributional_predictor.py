@@ -31,6 +31,23 @@ class TestPredictDistribution(BaseTestCase):
             result = predict_distribution("player_points", {"avg_stat_last_5": 20.0})
         self.assertIsNone(result)
 
+    def test_legacy_quantile_head_is_not_loaded(self):
+        from app.services.distributional_predictor import load_quantile_model
+
+        with self.app.app_context():
+            db.session.add(ModelMetadata(
+                model_name='dist_player_points',
+                model_type='xgboost_quantile_regressor',
+                version='legacy', file_path='/tmp/unused-legacy-dist.json',
+                training_date=datetime.now(timezone.utc),
+                val_mae=2.0, is_active=True,
+                metadata_json='{"feature_names":["avg_stat_last_5"]}',
+            ))
+            db.session.commit()
+            with patch('app.services.distributional_predictor.materialize_model_artifact') as materialize:
+                self.assertEqual(load_quantile_model('player_points'), (None, None))
+                materialize.assert_not_called()
+
     def test_unsupported_stat_type_returns_none(self):
         from app.services.distributional_predictor import predict_distribution
 
@@ -58,24 +75,18 @@ class TestPredictDistribution(BaseTestCase):
             median_from_quantiles(dist["alphas"], dist["quantile_values"]),
         )
 
-    def test_poisson_head_uses_existing_point_model(self):
-        from app.services import ml_model
+    @patch('app.services.ml_model.predict_stat', return_value=1.2)
+    def test_poisson_head_uses_existing_point_model(self, predict_stat):
         from app.services.distributional_predictor import predict_distribution
 
         with self.app.app_context():
-            for pid in ("801", "802", "803"):
-                _seed_dist_logs(player_id=pid, count=40, seed_offset=int(pid))
-            with patch.object(ml_model, "MIN_TRAIN_SAMPLES", 50):
-                ml_model.train_model("player_steals")
-            with patch.object(ml_model, "MIN_TRAIN_SAMPLES", 50):
-                rows = ml_model._build_training_rows("player_steals")
-            _, _, features, _ = rows[-1]
-            dist = predict_distribution("player_steals", features)
+            dist = predict_distribution("player_steals", {"avg_stat_last_5": 1.0})
 
         self.assertIsNotNone(dist)
         self.assertEqual(dist["kind"], "poisson")
-        self.assertGreater(dist["lam"], 0)
+        self.assertEqual(dist["lam"], 1.2)
         self.assertEqual(dist["point"], dist["lam"])
+        predict_stat.assert_called_once_with('player_steals', {'avg_stat_last_5': 1.0})
 
 
 class TestPredictProbOver(BaseTestCase):
@@ -135,6 +146,7 @@ class TestPredictProbOver(BaseTestCase):
                     file_path=artifact_path,
                     training_date=datetime.now(timezone.utc),
                     is_active=True,
+                    metadata_json='{"training_context":"prior_games_no_closing_total_v2"}',
                 )
             )
             db.session.commit()
@@ -206,6 +218,7 @@ class TestPredictProbOver(BaseTestCase):
                         file_path=artifact_path,
                         training_date=datetime.now(timezone.utc),
                         is_active=True,
+                        metadata_json='{"training_context":"prior_games_no_closing_total_v2"}',
                     )
                 )
                 db.session.commit()

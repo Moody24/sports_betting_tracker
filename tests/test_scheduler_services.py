@@ -3,6 +3,7 @@
 import json
 import os
 from datetime import date, datetime, timedelta, timezone
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from app import db
 from app.models import (
@@ -308,9 +309,12 @@ class TestScheduler(BaseTestCase):
             ]
             with patch('app.services.value_detector.ValueDetector', return_value=fake_detector):
                 with patch('app.services.projection_engine.ProjectionEngine', return_value=MagicMock()):
-                    with patch('app.services.stats_service.find_player_id', return_value='123'):
-                        with patch('app.services.auto_pick_service.auto_pick_data_issues', return_value=[]):
-                            scheduler_module.generate_daily_auto_picks()
+                    with patch('app.services.player_identity_service.get_verified_history',
+                               return_value=[SimpleNamespace(player_id='123')]):
+                        with patch('app.services.feature_engine.build_pick_context_features',
+                                   return_value={'player_id': '123'}):
+                            with patch('app.services.auto_pick_service.auto_pick_data_issues', return_value=[]):
+                                scheduler_module.generate_daily_auto_picks()
 
         with self.app.app_context():
             auto_bets = Bet.query.filter_by(source='auto_generated').all()

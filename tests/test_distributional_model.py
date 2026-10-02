@@ -266,8 +266,9 @@ class TestPoissonOofCalibration(BaseTestCase):
             for pid in ('631', '632', '633'):
                 _seed_dist_logs(player_id=pid, count=40, seed_offset=int(pid))
             with patch.object(ml_model, 'MIN_TRAIN_SAMPLES', 50):
-                ml_model.train_model('player_steals')
-            oof_rows = _collect_poisson_oof_rows('player_steals')
+                with patch.object(ml_model, '_projection_qualifies', return_value=True):
+                    ml_model.train_model('player_steals')
+                    oof_rows = _collect_poisson_oof_rows('player_steals')
 
         self.assertTrue(oof_rows)
         for lam, realized in oof_rows:
@@ -287,8 +288,9 @@ class TestPoissonOofCalibration(BaseTestCase):
             for pid in ('641', '642', '643'):
                 _seed_dist_logs(player_id=pid, count=40, seed_offset=int(pid))
             with patch.object(ml_model, 'MIN_TRAIN_SAMPLES', 50):
-                ml_model.train_model('player_blocks')
-            result = train_distributional_calibrator_for_poisson_stat('player_blocks')
+                with patch.object(ml_model, '_projection_qualifies', return_value=True):
+                    ml_model.train_model('player_blocks')
+                    result = train_distributional_calibrator_for_poisson_stat('player_blocks')
 
             self.assertNotIn('error', result)
             self.assertGreater(result['calibration_pairs'], 0)

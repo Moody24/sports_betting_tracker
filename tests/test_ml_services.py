@@ -1,5 +1,6 @@
 """Focused ml services tests split from the legacy service suite."""
 
+import json
 import os
 import sys
 from datetime import date, datetime, timedelta, timezone
@@ -197,15 +198,34 @@ class TestMLModel(BaseTestCase):
             with patch.object(ml_model, '_build_training_rows', return_value=mock_rows):
                 with patch.object(ml_model, '_ensure_model_dir'):
                     with patch('xgboost.XGBRegressor', return_value=fake_model):
-                        with patch('sklearn.metrics.mean_absolute_error', return_value=1.234):
-                            with patch.object(db.engine, 'dispose'):
-                                result = ml_model.train_model('player_points')
+                        with patch('sklearn.metrics.mean_absolute_error', side_effect=[1.234] * 4 + [2.0]):
+                            with patch.object(ml_model, 'MIN_VALIDATION_SAMPLES', 1):
+                                with patch.object(db.engine, 'dispose'):
+                                    result = ml_model.train_model('player_points')
 
             self.assertEqual(result['stat_type'], 'player_points')
+            self.assertTrue(result['promoted'])
             active = ModelMetadata.query.filter_by(model_name='projection_player_points', is_active=True).all()
             self.assertEqual(len(active), 1)
+            metadata = json.loads(active[0].metadata_json)
+            self.assertEqual(metadata['training_context'], ml_model.TRAINING_CONTEXT_VERSION)
+            self.assertIn('baseline_mae', metadata)
             inactive = ModelMetadata.query.filter_by(model_name='projection_player_points', is_active=False).all()
             self.assertGreaterEqual(len(inactive), 1)
+
+            first_version = active[0].version
+            with patch.object(ml_model, '_build_training_rows', return_value=mock_rows):
+                with patch.object(ml_model, '_ensure_model_dir'):
+                    with patch('xgboost.XGBRegressor', return_value=fake_model):
+                        with patch('sklearn.metrics.mean_absolute_error', side_effect=[1.234] * 3 + [4.6, 4.8]):
+                            with patch.object(ml_model, 'MIN_VALIDATION_SAMPLES', 1):
+                                with patch.object(db.engine, 'dispose'):
+                                    failed = ml_model.train_model('player_points')
+
+            self.assertFalse(failed['promoted'])
+            active = ModelMetadata.query.filter_by(model_name='projection_player_points', is_active=True).one()
+            self.assertEqual(active.version, first_version)
+            self.assertNotEqual(active.file_path, failed['model_path'])
 
     def test_load_and_predict_paths(self):
         from app.services import ml_model
@@ -229,7 +249,12 @@ class TestMLModel(BaseTestCase):
                 training_samples=10,
                 val_mae=1.0,
                 is_active=True,
-                metadata_json='{"feature_names":["f1","f2"]}',
+                metadata_json=(
+                    '{"feature_names":["f1","f2"],'
+                    '"training_context":"prior_games_no_closing_total_v2",'
+                    '"split_method":"date_cutoff",'
+                    '"val_samples":100,"baseline_mae":2.0}'
+                ),
             ))
             db.session.commit()
 
@@ -243,6 +268,85 @@ class TestMLModel(BaseTestCase):
                 with patch.object(ml_model, 'load_active_model', return_value=(fake_loaded_model, ['f1'])):
                     fake_loaded_model.predict.side_effect = RuntimeError('boom')
                     self.assertEqual(ml_model.predict_stat('player_points', {'f1': 1.0}), 0.0)
+
+    def test_points_model_above_accuracy_gate_is_not_loaded(self):
+        from app.services import ml_model
+
+        with self.app.app_context():
+            db.session.add(ModelMetadata(
+                model_name='projection_player_points',
+                model_type='xgboost_regressor', version='above-gate',
+                file_path='/tmp/unused-points-model.json',
+                training_date=datetime.now(timezone.utc),
+                training_samples=100, val_mae=4.603, is_active=True,
+            ))
+            db.session.commit()
+            with patch.object(ml_model, 'materialize_model_artifact') as materialize:
+                self.assertEqual(ml_model.load_active_model('player_points'), (None, None))
+                materialize.assert_not_called()
+
+    def test_legacy_projection_is_not_loaded_despite_low_mae(self):
+        from app.services import ml_model
+
+        with self.app.app_context():
+            db.session.add(ModelMetadata(
+                model_name='projection_player_points',
+                model_type='xgboost_regressor', version='leaky-context',
+                file_path='/tmp/unused-legacy-model.json',
+                training_date=datetime.now(timezone.utc),
+                training_samples=1000, val_mae=2.9, is_active=True,
+                metadata_json='{"feature_names":["f1"],"val_samples":200}',
+            ))
+            db.session.commit()
+            with patch.object(ml_model, 'materialize_model_artifact') as materialize:
+                self.assertEqual(ml_model.load_active_model('player_points'), (None, None))
+                materialize.assert_not_called()
+
+    def test_projection_must_beat_recent_five_baseline(self):
+        from app.services import ml_model
+
+        with self.app.app_context():
+            db.session.add(ModelMetadata(
+                model_name='projection_player_points',
+                model_type='xgboost_regressor', version='weak-model',
+                file_path='/tmp/unused-weak-model.json',
+                training_date=datetime.now(timezone.utc),
+                training_samples=1000, val_mae=3.0, is_active=True,
+                metadata_json=(
+                    '{"feature_names":["f1"],'
+                    '"training_context":"prior_games_no_closing_total_v2",'
+                    '"split_method":"date_cutoff",'
+                    '"val_samples":200,"baseline_mae":2.8}'
+                ),
+            ))
+            db.session.commit()
+            with patch.object(ml_model, 'materialize_model_artifact') as materialize:
+                self.assertEqual(ml_model.load_active_model('player_points'), (None, None))
+                materialize.assert_not_called()
+
+    def test_index_split_cannot_pass_projection_gate(self):
+        from app.services.ml_model import _projection_qualifies, TRAINING_CONTEXT_VERSION
+
+        metadata = {
+            'training_context': TRAINING_CONTEXT_VERSION,
+            'split_method': 'index_fallback',
+            'val_samples': 200,
+            'baseline_mae': 4.0,
+        }
+        self.assertFalse(_projection_qualifies('player_points', 3.0, metadata))
+
+    def test_projection_early_stopping_uses_training_dates_only(self):
+        from app.services.ml_model import _projection_early_stopping_indices
+
+        rows = [(date(2026, 1, 1) + timedelta(days=i), 'p', {}, 0.0)
+                for i in range(30)]
+        fit, early = _projection_early_stopping_indices(rows, list(range(25)))
+
+        self.assertTrue(fit)
+        self.assertTrue(early)
+        self.assertEqual(set(fit) & set(early), set())
+        self.assertLess(max(fit), min(early))
+        self.assertLess(max(early), 25)
 
     def test_retrain_all_models_and_performance(self):
         from app.services import ml_model

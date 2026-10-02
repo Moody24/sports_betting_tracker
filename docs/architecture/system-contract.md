@@ -1,7 +1,7 @@
 # Edge Tracker System Contract
 
 Status: **canonical architecture SSOT**  
-Contract version: **1.5**
+Contract version: **1.6**
 Last verified: **2026-10-01**
 
 Verified inventory at this version: **18 SQLAlchemy models**, **22 registered
@@ -17,6 +17,7 @@ Executable definitions remain authoritative for field-level implementation:
 - database columns and relationships: `app/models.py` plus Alembic migrations;
 - enum values: `app/enums.py`;
 - Model 1 inputs: `app/services/ml_feature_builder.py::FEATURE_KEYS`;
+- Model 1 load-time MAE limits: `app/services/ml_model.py::MAX_PROJECTION_MAE`;
 - Model 2 inputs: `app/services/pick_quality_model.py::PICK_FEATURES`;
 - per-sport historical stat keys: `app/services/sport_config.py`.
 
@@ -205,6 +206,7 @@ Rules:
 |---|---|
 | Bet outcome, type, source, postmortem reasons | `app/enums.py` |
 | Model 1 feature order | `ml_feature_builder.FEATURE_KEYS` (30 keys) |
+| Model 1 load-time accuracy limits | `ml_model.MAX_PROJECTION_MAE` |
 | Model 2 numerical feature order | `pick_quality_model.PICK_FEATURES` (17 keys plus encoded categorical values) |
 | Per-sport historical stats | `sport_config.SPORT_STAT_CONFIG` |
 | Supported NBA prop markets | `nba_service.SUPPORTED_PROP_MARKETS` |
@@ -289,6 +291,25 @@ breakdown: mapping
 
 Training and inference MUST construct inputs through the canonical feature
 builder. A caller MUST NOT manually assemble a Model 1 vector.
+Historical point and distributional training MUST derive opponent-defense
+features from completed games preceding the predicted game. A current
+`TeamDefenseSnapshot` cannot be applied to historical training rows. Live
+inference continues to use the most recent verified snapshot, with its
+`observed_through` date exposed to analysis.
+Historical closing game totals lack a verified decision-time capture and MUST
+be zero in training rows until timestamped pre-decision totals are available.
+Distributional heads trained before this context version MUST also be held
+from inference.
+Model 1's early-stopping rows MUST be inside the training period, leaving the
+later validation period untouched by fitting. Inference MUST fall back unless
+an active artifact declares the current historical-context version, has at
+least 100 later validation rows split by game date, beats the recent-five-game
+baseline on those rows, and meets its stat-specific MAE limit.
+Retraining stores a failed candidate as inactive and preserves the prior
+active artifact with a distinct per-run file; loading still applies this gate
+to any older active artifact.
+The production-readiness command reports the same inference gate, even when
+an old database row still has `is_active=true`.
 
 ### 3.7 `ScoredPropV1`
 
@@ -327,6 +348,11 @@ The no-data path SHOULD converge on the same shape. It currently omits
 `win_probability` and `pick_quality_recommendation`; consumers MUST treat those
 missing keys as `null` and `"no_model"` respectively until that legacy path is
 migrated. A missing classifier result is not a negative recommendation.
+The stat-analysis page may add view-only matchup context to a copy of this
+mapping. Team allowances must be labeled as team-wide, with sample size,
+source, and observation date; prior player-opponent results must include their
+sample size. These additions do not enter `ScoredPropV1`, the shared cache,
+or automatic-pick scoring.
 
 ### 3.8 `BetPlacementV1`
 

@@ -20,6 +20,7 @@ from app.services.distributional_model import (
     POISSON_DIST_STAT_TYPES,
     QUANTILE_ALPHAS,
 )
+from app.services.ml_model import TRAINING_CONTEXT_VERSION
 from app.services.model_storage import materialize_model_artifact
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,13 @@ def load_quantile_model(stat_type: str):
     ).first()
     if not meta:
         return None, None
+    try:
+        metadata = json.loads(meta.metadata_json or '{}')
+    except (ValueError, TypeError):
+        metadata = {}
+    if not isinstance(metadata, dict) or metadata.get('training_context') != TRAINING_CONTEXT_VERSION:
+        logger.warning('Holding dist_%s projection: historical context is unverified', stat_type)
+        return None, None
     local_path = materialize_model_artifact(meta.file_path)
     if not local_path:
         return None, None
@@ -41,13 +49,7 @@ def load_quantile_model(stat_type: str):
     model = XGBRegressor()
     model.load_model(local_path)
 
-    feature_names = None
-    if meta.metadata_json:
-        try:
-            feature_names = json.loads(meta.metadata_json).get("feature_names")
-        except (ValueError, TypeError):
-            pass
-    return model, feature_names
+    return model, metadata.get('feature_names')
 
 
 @lru_cache(maxsize=None)
@@ -57,6 +59,12 @@ def _load_calibrator(_app_identity: int, stat_type: str):
         model_name=f"dist_calibrator_{stat_type}", is_active=True
     ).first()
     if not meta:
+        return None
+    try:
+        metadata = json.loads(meta.metadata_json or '{}')
+    except (ValueError, TypeError):
+        metadata = {}
+    if not isinstance(metadata, dict) or metadata.get('training_context') != TRAINING_CONTEXT_VERSION:
         return None
     local_path = materialize_model_artifact(meta.file_path)
     if not local_path:
