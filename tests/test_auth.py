@@ -110,7 +110,17 @@ class TestAuthRoutes(BaseTestCase):
         self.register_and_login()
         resp = self.client.get("/dashboard", follow_redirects=True)
         self.assertEqual(resp.status_code, 200)
-        self.assertIn(b"Dashboard", resp.data)
+        self.assertIn(b"Results", resp.data)
+
+    def test_login_lands_on_nba_today(self):
+        with self.app.app_context():
+            db.session.add(make_user())
+            db.session.commit()
+        response = self.client.post('/auth/login', data={
+            'username': 'testuser', 'password': 'password123',
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.headers['Location'].endswith('/nba/today'))
 
     def test_login_wrong_password(self):
         with self.app.app_context():

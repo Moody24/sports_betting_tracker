@@ -1,25 +1,16 @@
-{# ───────────────────────────────────────────────────────────────
-   Shared Jinja macros for the Edge Tracker.
-
-   Display mappings come from config_display.py. Macros that consume them
-   must be imported "with context" so they see context-processor globals.
-   ─────────────────────────────────────────────────────────────── #}
-
 {% from "_icons.html" import ICON_MARKUP %}
+{% from "_function_icons.html" import FUNCTION_ICONS %}
 
-{# Decorative icon. Interactive controls keep their accessible name in text/aria-label. #}
 {% macro icon(name, size=16, classes='') -%}
-  {%- if name in ICON_MARKUP -%}
-    <svg class="icon{{ ' ' ~ classes if classes else '' }}"
-         width="{{ size }}" height="{{ size }}" viewBox="0 0 16 16"
-         fill="currentColor" aria-hidden="true" focusable="false"
-         xmlns="http://www.w3.org/2000/svg">{{ ICON_MARKUP[name] | safe }}</svg>
+  {%- if name in FUNCTION_ICONS -%}
+    <svg class="icon function-icon{{ ' ' ~ classes if classes else '' }}" width="{{ size }}" height="{{ size }}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg">{{ FUNCTION_ICONS[name] | safe }}</svg>
+  {%- elif name in ICON_MARKUP -%}
+    <svg class="icon{{ ' ' ~ classes if classes else '' }}" width="{{ size }}" height="{{ size }}" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg">{{ ICON_MARKUP[name] | safe }}</svg>
   {%- else -%}
     <!-- icon:missing {{ name }} -->
   {%- endif -%}
 {%- endmacro %}
 
-{# ── Outcome badge ─────────────────────────────────────────── #}
 {% macro outcome_badge(outcome) -%}
   {% if outcome == 'win' %}
     <span class="badge text-bg-success badge-status">Win</span>
@@ -32,17 +23,14 @@
   {% endif %}
 {%- endmacro %}
 
-{# ── Prop label badge (short form) ──────────────────────── #}
 {% macro prop_badge(prop_type) -%}
   <span class="badge text-bg-dark">{{ PROP_LABELS_SHORT.get(prop_type, prop_type|replace('player_','')|upper) }}</span>
 {%- endmacro %}
 
-{# ── Prop label text (short, no badge) ──────────────────── #}
 {% macro prop_label_short(prop_type) -%}
   {{- PROP_LABELS_SHORT.get(prop_type, prop_type|replace('player_','')|upper) -}}
 {%- endmacro %}
 
-{# ── Edge badge (Bootstrap badge style for dashboard) ────── #}
 {% macro edge_badge_bootstrap(edge, tier) -%}
   {% set _badges = {
     'strong': 'text-bg-success', 'moderate': 'text-bg-warning text-dark',
@@ -51,7 +39,6 @@
   <span class="badge {{ _badges.get(tier, 'text-bg-secondary') }}">{{ '%.1f'|format(edge * 100) }}%</span>
 {%- endmacro %}
 
-{# ── Side text (no badge) ────────────────────────────────── #}
 {% macro side_text(side) -%}
   {% if side == 'over' %}
     <span class="text-success">{{ icon('arrow-up') }} Over</span>
@@ -60,13 +47,11 @@
   {% endif %}
 {%- endmacro %}
 
-{# ── Indicator badge (stat analysis tiers) ───────────────── #}
 {% macro indicator_badge(indicator) -%}
   {% set _tier = INDICATOR_TIERS.get(indicator, {}) %}
   <span class="sa-ind-badge {{ _tier.get('badge_class', '') }}">{{ _tier.get('label', indicator) }}</span>
 {%- endmacro %}
 
-{# ── Projection value (colored by line comparison) ──────── #}
 {% macro projection_value(projection, line) -%}
   <span class="fw-semibold {% if projection > line %}text-success{% elif projection < line %}text-danger{% endif %}">
     {{ projection }}

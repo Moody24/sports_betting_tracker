@@ -6,13 +6,9 @@
 {% block page_subtitle %}Today's props by matchup — click any player for the full breakdown.{% endblock %}
 
 {% block content %}
-{% set flow_active = 'stat' %}
-{% set flow_builder_tab = 'prop' %}
-{% include 'bets/_workflow_nav.html' %}
-
 <section class="slip stat-register">
   <div class="slip-head">
-    <span>Today's prop register</span>
+    <span>Player prop overview</span>
     <span class="row-meta">Model projections against posted lines</span>
   </div>
   <div class="slip-grid">
@@ -23,7 +19,6 @@
   </div>
 </section>
 
-{# ── Featured Strong Picks ────────────────────────────────────── #}
 {% set strong_picks = [] %}
 {% for m in matchups %}
   {% for s in m.home + m.away %}
@@ -65,7 +60,6 @@
 </section>
 {% endif %}
 
-{# ── Filters ─────────────────────────────────────────────────── #}
 <div class="control-bar sa-filter-toolbar">
     {% set stat_options = [
       ('all', 'All'), ('player_points', 'PTS'), ('player_rebounds', 'REB'),
@@ -96,7 +90,6 @@
     <button class="act" type="button" id="stat-analysis-refresh">Refresh</button>
 </div>
 
-{# ── Matchup Cards ────────────────────────────────────────────── #}
 <div id="stat-analysis-results-shell" class="stat-analysis-results-shell" data-testid="stat-results">
 <div id="stat-analysis-loading" class="state-loading" hidden>Refreshing stat analysis…</div>
 <div id="stat-analysis-error" class="state-error" hidden>
@@ -165,10 +158,8 @@
 </div>
 </div>
 
-{# ── Side Panel ───────────────────────────────────────────────── #}
 <div id="stat-panel" class="stat-panel" role="dialog" aria-modal="true" aria-labelledby="sp-player-name" hidden>
 
-  {# Header #}
   <div class="stat-panel-header">
     <div class="flex-fill">
       <div id="sp-player-name" class="sp-name"></div>
@@ -182,7 +173,6 @@
 
   <div class="stat-panel-body">
 
-    {# ── The Case (top-line numbers) ─── #}
     <div class="sp-case-box mb-3">
       <div class="sp-case-row">
         <div class="sp-case-cell">
@@ -222,7 +212,6 @@
       </div>
     </div>
 
-    {# ── Stat Toggle ─── #}
     <div class="sp-stat-toggle mb-3" id="sp-stat-toggle" role="group" aria-label="Stat view toggle">
       <button class="sp-tog-btn active" type="button" data-stat="pts" aria-pressed="true">PTS</button>
       <button class="sp-tog-btn" type="button" data-stat="reb" aria-pressed="false">REB</button>
@@ -232,11 +221,9 @@
       <button class="sp-tog-btn" type="button" data-stat="blk" aria-pressed="false">BLK</button>
     </div>
 
-    {# ── Bar chart (last 10 games for selected stat) ─── #}
     <div class="stat-section-label">Last 10 Games vs Line</div>
     <div id="sp-barchart" class="sp-barchart"></div>
 
-    {# ── Last 10 games table ─── #}
     <div class="stat-section-label mt-3">Game Log</div>
     <div id="sp-gamelog-wrap" class="sp-gamelog-wrap">
       <table class="sp-gamelog-table" id="sp-gamelog-table">
@@ -254,7 +241,6 @@
       </table>
     </div>
 
-    {# ── L5 / L10 / Season avgs ─── #}
     <div class="stat-section-label mt-3">Averages</div>
     <div class="sp-avgs-row" id="sp-avgs-row">
       <div class="sp-avg-cell"><div class="sp-avg-label">L5 Avg</div><div class="sp-avg-val" id="sp-l5">—</div></div>
@@ -262,7 +248,6 @@
       <div class="sp-avg-cell"><div class="sp-avg-label">Season</div><div class="sp-avg-val" id="sp-season">—</div></div>
     </div>
 
-    {# ── Hit rate ─── #}
     <div class="stat-section-label mt-3">Hit Rate (L20)</div>
     <div class="d-flex gap-2 align-items-center mb-1">
       <span class="small text-success sp-hit-label">Over</span>
@@ -283,32 +268,27 @@
       <span id="sp-under-pct" class="small fw-bold text-danger sp-hit-pct">—</span>
     </div>
 
-    {# ── Defensive context ─── #}
     <div class="stat-section-label">Matchup Defense</div>
     <div class="small mb-1 fw-semibold" id="sp-opp-stat">—</div>
     <div class="small text-secondary mb-1" id="sp-def-rating">—</div>
     <div class="small text-secondary mb-3" id="sp-h2h">—</div>
 
-    {# ── Game Script ─── #}
     <div class="stat-section-label">Game Script</div>
     <div class="small mb-3" id="sp-game-script">—</div>
 
-    {# ── Context tags ─── #}
     <div class="stat-section-label">Context Flags</div>
     <div id="sp-context-tags" class="mb-4"></div>
 
-    {# ── Loading state for AJAX ─── #}
     <div id="sp-loading" class="text-center text-secondary small py-2" role="status" aria-live="polite" aria-atomic="true" hidden>
       <span class="spinner-border spinner-border-sm me-1"></span>Loading game log…
     </div>
 
-    {# ── Parlay buttons ─── #}
     <div class="d-flex gap-2 mt-2">
       <button class="btn btn-sm btn-outline-success flex-fill" id="sp-add-over" type="button">
-        {{ icon('arrow-up', classes='me-1') }}Add Over
+        {{ icon('arrow-up', classes='me-1') }}Review Over
       </button>
       <button class="btn btn-sm btn-outline-danger flex-fill" id="sp-add-under" type="button">
-        {{ icon('arrow-down', classes='me-1') }}Add Under
+        {{ icon('arrow-down', classes='me-1') }}Review Under
       </button>
     </div>
   </div>
@@ -684,22 +664,8 @@ const SA_PROP_TO_COL = PROP_TO_STAT_COL;
   // Parlay buttons
   function parlayClick(betType) {
     if (!currentProp) return;
-    if (typeof addParlayLeg === 'function') {
-      addParlayLeg({
-        player_name: currentProp.player || '',
-        prop_type: currentProp.prop_type || 'player_points',
-        prop_line: currentProp.line,
-        bet_type: betType,
-        team_a: currentProp.away_team || currentProp.team_a || '',
-        team_b: currentProp.home_team || currentProp.team_b || '',
-        match_date: currentProp.match_date || '',
-        game_id: currentProp.game_id || '',
-      });
-    }
-
     const qp = new URLSearchParams({
       current_tab: 'parlay',
-      add_to_parlay: '1',
       player_name: currentProp.player || '',
       prop_type: currentProp.prop_type || 'player_points',
       prop_line: String(currentProp.line || ''),
@@ -710,7 +676,7 @@ const SA_PROP_TO_COL = PROP_TO_STAT_COL;
       game_id: currentProp.game_id || '',
     });
     if (typeof trackUxEvent === 'function') trackUxEvent('stat_analysis_add_to_parlay', { side: betType });
-    window.location.href = '{{ url_for("bet.place_bet") }}?' + qp.toString();
+    window.location.href = '{{ url_for("bet.new_bet") }}?' + qp.toString() + '#parlay';
   }
   document.getElementById('sp-add-over').addEventListener('click',  () => parlayClick('over'));
   document.getElementById('sp-add-under').addEventListener('click', () => parlayClick('under'));

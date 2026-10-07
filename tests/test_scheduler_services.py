@@ -331,8 +331,10 @@ class TestScheduler(BaseTestCase):
                 self.jobs = []
                 self.started = False
 
-            def add_job(self, func, trigger, id=None, replace_existing=None):
+            def add_job(self, func, trigger, id=None, replace_existing=None, **kwargs):
                 self.jobs.append((id, trigger))
+                if id == 'basketball_feed':
+                    self.feed_options = kwargs
 
             def start(self):
                 self.started = True
@@ -346,7 +348,10 @@ class TestScheduler(BaseTestCase):
                 with patch.object(scheduler_module, '_acquire_scheduler_lock', return_value=True):
                     scheduler_module.init_scheduler(self.app)
         self.assertTrue(fake.started)
-        self.assertEqual(len(fake.jobs), 22)  # + event-relative prop close capture
+        self.assertEqual(len(fake.jobs), 23)  # + shared basketball feed collector
+        self.assertEqual(fake.feed_options['seconds'], 30)
+        self.assertEqual(fake.feed_options['max_instances'], 1)
+        self.assertTrue(fake.feed_options['coalesce'])
 
 
 class TestSchedulerDriftJob(BaseTestCase):
@@ -508,7 +513,7 @@ class TestSchedulerDriftJob(BaseTestCase):
                 self.jobs = []
                 self.started = False
 
-            def add_job(self, func, trigger, id=None, replace_existing=None):
+            def add_job(self, func, trigger, id=None, replace_existing=None, **kwargs):
                 self.jobs.append(id)
 
             def start(self):

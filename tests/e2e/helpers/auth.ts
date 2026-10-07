@@ -20,7 +20,7 @@ export async function registerAndLogin(page: Page): Promise<{ username: string; 
   await page.locator('#username').fill(username);
   await page.locator('#password').fill(password);
   await page.locator('form [type="submit"]').click();
-  await expect(page).toHaveURL(/\/$/);
+  await expect(page).toHaveURL(/\/nba\/today$/);
   await expect(page.locator('text=Login successful')).toBeVisible();
 
   return { username, password };

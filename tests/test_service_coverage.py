@@ -835,6 +835,8 @@ class TestValueDetectorScoreProp(BaseTestCase):
             {'edge': 0.10, 'confidence_tier': 'moderate', 'games_played': 5},
             {'edge': 0.05, 'confidence_tier': 'slight', 'games_played': 30},
         ]
+        for play in plays:
+            play.update(quote_source='odds_api', quote_observed_at=datetime.now(timezone.utc).isoformat())
         filtered = ValueDetector.filter_plays(plays)
         self.assertEqual(len(filtered), 2)  # strong + slight (games >= 10)
 

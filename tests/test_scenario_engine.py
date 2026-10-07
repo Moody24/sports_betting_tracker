@@ -355,7 +355,7 @@ class TestWiring(BaseTestCase):
                 self.jobs = {}
                 self.started = False
 
-            def add_job(self, func, trigger, id=None, replace_existing=None):
+            def add_job(self, func, trigger, id=None, replace_existing=None, **kwargs):
                 self.jobs[id] = (trigger, replace_existing)
 
             def start(self):

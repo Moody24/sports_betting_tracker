@@ -91,6 +91,9 @@ def _load_player_box_df(year: int, from_dir: str | None = None):
         frame = pd.read_parquet(Path(from_dir) / f'player_box_{year}.parquet')
         frame.attrs['source_version'] = f'local:player_box_{year}.parquet'
         return frame
+    from app.services.provider_access import provider_access_status
+    if not provider_access_status()['espn']['enabled']:
+        raise requests.RequestException('ESPN source permission required before downloading releases')
     resp = requests.get(_HOOPR_URL.format(year=year), timeout=120)
     resp.raise_for_status()
     frame = pd.read_parquet(BytesIO(resp.content))

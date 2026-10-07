@@ -662,18 +662,19 @@ class TestPickQualityModel(BaseTestCase):
                 'numpy': fake_np,
                 'sklearn.metrics': fake_metrics,
                 'sklearn.calibration': SimpleNamespace(CalibratedClassifierCV=_FakeCalibrated),
+                'joblib': SimpleNamespace(dump=lambda *_args: None),
             }):
                 with patch.object(pick_quality_model, '_build_training_data', return_value=(features, targets, [None] * len(targets))):
                     with patch.object(pick_quality_model, '_prepare_training_data', return_value=split):
-                        with patch('app.services.pick_quality_model.persist_model_artifact', return_value='s3://bucket/model.json'):
+                        with patch('app.services.pick_quality_model.persist_model_artifact', return_value='s3://bucket/model.pkl'):
                             with patch.object(db.engine, 'dispose'):
                                 result = pick_quality_model.train_pick_quality_model()
 
             self.assertIn('accuracy', result)
-            self.assertEqual(result['model_path'], 's3://bucket/model.json')
+            self.assertEqual(result['model_path'], 's3://bucket/model.pkl')
             active = ModelMetadata.query.filter_by(model_name='pick_quality_nba', is_active=True).all()
             self.assertEqual(len(active), 1)
-            self.assertEqual(active[0].file_path, 's3://bucket/model.json')
+            self.assertEqual(active[0].file_path, 's3://bucket/model.pkl')
 
     def test_predict_pick_quality_success(self):
         from app.services import pick_quality_model
@@ -833,7 +834,8 @@ class TestPickQualityModel(BaseTestCase):
                 is_active=True,
                 metadata_json=(
                     '{"feature_names":["projected_edge","player_trend","minutes_trend","confidence_tier_num","injury_returning"],'
-                    '"probability_shrink":1.0,"calibration_bias":0.05,"take_it_threshold":0.62,"caution_threshold":0.54}'
+                    '"probability_shrink":1.0,"calibration_bias":0.05,"take_it_threshold":0.62,"caution_threshold":0.54,'
+                    '"postprocessing_version":"calibration_only_v1","calibration_bias_source":"calibration_partition"}'
                 ),
             ))
             db.session.commit()

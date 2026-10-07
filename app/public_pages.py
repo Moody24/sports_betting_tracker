@@ -153,12 +153,16 @@ PUBLIC_PAGES = (
         ),
         sections=(
             ('Sports data', (
-                'NBA schedules, scores, box scores, and player logs are collected from configured basketball data providers, including ESPN endpoints where enabled.',
+                'Schedules and scores can come from the optional BALLDONTLIE Games feed. Player box scores, odds, and legacy ESPN-linked grading are separate integrations.',
+                'The shared score feed reports our last successful fetch. Upstream delay is not guaranteed; browser updates do not make the provider data newer.',
+                'ESPN and ESPN-derived remote downloads are disabled until the operator records a permitted-use basis. Public access does not establish collection or redistribution rights.',
                 'Provider availability and field formats can change. Cached snapshots record when data was fetched so stale inputs can be identified.',
+                'A page refresh is not a source update. Unavailable or stale data must not be treated as a current score or a confirmed empty slate.',
             )),
             ('Market data', (
                 'Current and historical odds can be supplied by The Odds API when an operator configures a valid API key and compatible subscription.',
                 'Book prices move. A displayed line is not guaranteed to remain available, and missing credentials cause the related views to degrade rather than fabricate data.',
+                'A configured API key is not a live-data guarantee. Archived quotes retain their capture context; manual records remain available when a feed is disconnected.',
             )),
             ('Derived and user data', (
                 'Projections, edges, confidence labels, and trend summaries are Edge Tracker calculations derived from available inputs.',

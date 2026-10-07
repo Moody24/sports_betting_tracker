@@ -4,13 +4,10 @@ This module owns request construction, retries, timeouts, and JSON decoding.
 Callers remain responsible for translating provider payloads into domain data.
 """
 
-import logging
-
 import requests
 
 from app.config_display import PROP_ESPN_COLUMN
-
-logger = logging.getLogger(__name__)
+from app.services.provider_access import provider_access_status, request_with_retry
 
 ESPN_BASE_URL = (
     "https://site.api.espn.com/apis/site/v2/sports/basketball/nba"
@@ -66,40 +63,32 @@ def fetch_json(
     *,
     params: dict | None = None,
     timeout: int = 10,
-    attempts: int = 1,
+    attempts: int = 3,
 ) -> dict:
     """Fetch an ESPN JSON object, retrying transient request failures."""
-    last_error: Exception | None = None
-    for attempt in range(1, max(attempts, 1) + 1):
-        try:
-            response = requests.get(
-                url,
-                params=params,
-                timeout=timeout,
-                headers=_HEADERS,
-            )
-            response.raise_for_status()
-            payload = response.json()
-            if not isinstance(payload, dict):
-                raise ValueError("ESPN response was not a JSON object")
-            return payload
-        except (requests.RequestException, ValueError) as exc:
-            last_error = exc
-            if attempt < max(attempts, 1):
-                logger.warning(
-                    "ESPN request retry %d/%d for %s",
-                    attempt,
-                    attempts,
-                    url,
-                )
-    raise EspnClientError(f"ESPN request failed for {url}: {last_error}") from last_error
+    if not provider_access_status()['espn']['enabled']:
+        raise EspnClientError('ESPN source permission required before fetching data')
+    try:
+        response = request_with_retry(
+            requests.get, url, provider='ESPN', params=params,
+            timeout=timeout, attempts=attempts, headers=_HEADERS,
+        )
+    except requests.RequestException as error:
+        raise EspnClientError(str(error)) from None
+    try:
+        payload = response.json()
+    except ValueError:
+        raise EspnClientError('ESPN returned invalid JSON') from None
+    if not isinstance(payload, dict):
+        raise EspnClientError('ESPN response was not a JSON object')
+    return payload
 
 
 def fetch_scoreboard_payload(
     date_str: str | None = None,
     *,
     timeout: int = 10,
-    attempts: int = 1,
+    attempts: int = 3,
 ) -> dict:
     params = {'dates': date_str} if date_str else {}
     return fetch_json(
@@ -114,7 +103,7 @@ def fetch_summary_payload(
     espn_id: str,
     *,
     timeout: int = 10,
-    attempts: int = 1,
+    attempts: int = 3,
 ) -> dict:
     return fetch_json(
         ESPN_SUMMARY_URL,

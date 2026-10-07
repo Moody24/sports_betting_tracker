@@ -33,10 +33,11 @@ source .venv/bin/activate && bandit -q -r app -x tests -ll
 - Architecture SSOT: `docs/architecture/system-contract.md` — read before changing modules, schemas, APIs, caches, jobs, or cross-module state
 - All dates/times use **ET** (`ZoneInfo("America/New_York")`) — critical for freshness checks and snapshot reads/writes
 - `_is_non_server_invocation()` in `app/__init__.py` guards scheduler startup — never start APScheduler in pytest/alembic/CLI contexts
-- Scheduler has 22 registered jobs as of 2026-08-09 (event-relative prop decision/close capture added)
+- Scheduler has 23 registered jobs as of 2026-10-07 (shared basketball Games collector added)
 - ML model artifacts (`app/ml_models/*.json`) are gitignored — regenerate with `flask retrain --force`
 
 ## Skills (load on demand)
+- **[`taste`](.agents/skills/taste/SKILL.md)** — pinned, reviewed Taste compatibility guide for Flask/Jinja; dashboard work stays governed by frontend-design and definition-of-done
 - **`ml-models`** — XGBoost architecture, calibration constants, auto-pick thresholds, retrain, odds API
 - **`database`** — DB config, migrations, key model fields (Bet/BetPostmortem/PlayerGameLog), local DB scripts
 - **`deployment-ci`** — GitHub Actions CI, Railway deployment, git workflow, gunicorn

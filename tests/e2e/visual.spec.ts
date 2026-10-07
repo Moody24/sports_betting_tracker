@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { registerAndLogin } from './helpers/auth';
 import { seedBets } from './helpers/seed';
+import { labelFixture } from './helpers/fixture-label';
 
 const pages = [
   { path: '/dashboard', selector: '[data-testid="dashboard-summary"]', name: 'dashboard' },
@@ -58,6 +59,9 @@ test.describe('Visual Regression', () => {
         animations: 'disabled',
         mask: dynamicMasks(page),
       });
+      if (['nba-today', 'bet-builder'].includes(item.name)) {
+        await page.screenshot({ path: test.info().outputPath(`${item.name}-unconfigured.png`), fullPage: true, animations: 'disabled' });
+      }
     }
   });
 
@@ -74,6 +78,7 @@ test.describe('Visual Regression', () => {
     await expect(page.locator('[data-live-trend]').first()).not.toHaveText('Checking…');
     await expect(page.locator('[data-live-trend]').nth(1)).not.toHaveText('Checking…');
 
+    await labelFixture(page);
     await expect(page).toHaveScreenshot('bets-populated.png', {
       fullPage: true,
       animations: 'disabled',
@@ -92,6 +97,7 @@ test.describe('Visual Regression', () => {
     await expect(liveCards.nth(0).locator('[data-live-trend]')).not.toHaveText('Checking…');
     await expect(liveCards.nth(1).locator('[data-live-trend]')).not.toHaveText('Checking…');
 
+    await labelFixture(page, '[data-live-prop-card]');
     await expect(liveCards.first()).toHaveScreenshot('live-progress-cards.png', {
       animations: 'disabled',
     });
@@ -140,6 +146,7 @@ test.describe('Visual Regression', () => {
     await expect(modal).toBeVisible();
     await expect(modal.locator('[data-testid="player-detail-table"]')).toBeVisible();
 
+    await labelFixture(page, '#playerDetailModal .modal-content');
     await expect(modal).toHaveScreenshot('player-detail-modal.png', {
       animations: 'disabled',
     });

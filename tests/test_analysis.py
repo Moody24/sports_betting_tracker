@@ -481,6 +481,8 @@ class TestAnalysisRoute(BaseTestCase):
             'match_date': '2026-02-27', 'model_prob_over': 0.684,
             'model_prob_under': 0.316, 'std_dev': 4.2,
             'games_played': 20,
+            'quote_source': 'odds_api',
+            'quote_observed_at': datetime.now(timezone.utc).isoformat(),
         }
         with patch('app.services.score_cache.get_todays_scores', return_value=[score]):
             resp = self.client.get('/nba/analysis')

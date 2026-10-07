@@ -25,6 +25,12 @@ from tests.service_test_support import (
 class TestStatsService(BaseTestCase):
     """Tests for stats_service functions that interact with DB and NBA API."""
 
+    def setUp(self):
+        super().setUp()
+        context = self.app.app_context()
+        context.push()
+        self.addCleanup(context.pop)
+
     # -- _parse_minutes --
 
     def test_parse_minutes_colon_format(self):
@@ -528,6 +534,9 @@ class TestContextService(BaseTestCase):
 
     def setUp(self):
         super().setUp()
+        context = self.app.app_context()
+        context.push()
+        self.addCleanup(context.pop)
         from app.services.context_service import clear_schedule_caches
         clear_schedule_caches()
 
@@ -794,6 +803,9 @@ class TestMatchupService(BaseTestCase):
 
     def setUp(self):
         super().setUp()
+        context = self.app.app_context()
+        context.push()
+        self.addCleanup(context.pop)
         from app.services.matchup_service import invalidate_team_defense_cache
         invalidate_team_defense_cache()
 

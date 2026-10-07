@@ -62,7 +62,7 @@ class TestTiers(CoordinatorBase):
         # today's scoreboard has the final game; lookback dates have nothing
         # (a single game cannot legitimately be "final" on 3 different past
         # calendar dates -- only today's fetch should surface it).
-        mock_sb.side_effect = lambda date_str=None: (
+        mock_sb.side_effect = lambda date_str=None, **_kwargs: (
             [_game(status='STATUS_FINAL')] if date_str is None else [])
         mock_app.return_value = 25
         with self.app.app_context():
@@ -77,7 +77,7 @@ class TestTiers(CoordinatorBase):
         from app.services.game_day_coordinator import run_tick
         stale_final = _game(status='STATUS_FINAL', game_date=(2026, 6, 13))
         now = datetime(2026, 7, 10, 12, 0, tzinfo=ET)
-        mock_sb.side_effect = lambda date_str=None: (
+        mock_sb.side_effect = lambda date_str=None, **_kwargs: (
             [stale_final] if date_str is None else [])
         with self.app.app_context():
             self.assertEqual(run_tick(now=now), 'dormant')
@@ -95,7 +95,7 @@ class TestTiers(CoordinatorBase):
         from app.services import game_day_coordinator as gdc
         live_game = _game(status='STATUS_SCHEDULED', tip_et_hour=22,
                            game_date=(2026, 11, 6))
-        mock_sb.side_effect = lambda date_str=None: (
+        mock_sb.side_effect = lambda date_str=None, **_kwargs: (
             [live_game] if date_str is None else [])
         with self.app.app_context():
             tier = gdc.run_tick(now=datetime(2026, 11, 6, 23, 58, tzinfo=ET))
@@ -112,7 +112,7 @@ class TestTiers(CoordinatorBase):
 
     def test_post_when_all_final_and_nothing_needed(self, mock_sb, mock_app, mock_rag):
         from app.services import game_day_coordinator as gdc
-        mock_sb.side_effect = lambda date_str=None: (
+        mock_sb.side_effect = lambda date_str=None, **_kwargs: (
             [_game(status='STATUS_FINAL')] if date_str is None else [])
         mock_app.return_value = 0
         with self.app.app_context():
@@ -139,7 +139,7 @@ class TestChainAndCatchUp(CoordinatorBase):
         from app import db
         from app.models import GameSnapshot
         from app.services.game_day_coordinator import run_tick
-        mock_sb.side_effect = lambda date_str=None: (
+        mock_sb.side_effect = lambda date_str=None, **_kwargs: (
             [_game()] if date_str is None else [])
         mock_app.return_value = 25
         with self.app.app_context():
@@ -189,7 +189,7 @@ class TestChainAndCatchUp(CoordinatorBase):
         # day-cache init scans LOOKBACK_DAYS past dates via date_str param
         from app.services.game_day_coordinator import run_tick, LOOKBACK_DAYS
         past_final = _game(espn_id='401800000')
-        mock_sb.side_effect = lambda date_str=None: (
+        mock_sb.side_effect = lambda date_str=None, **_kwargs: (
             [] if date_str is None else [past_final])
         mock_app.return_value = 20
         with self.app.app_context():
@@ -205,7 +205,7 @@ class TestChainAndCatchUp(CoordinatorBase):
         # (regular-season-only), but pending bets on it still need grading.
         from app import db
         from app.services.game_day_coordinator import run_tick
-        mock_sb.side_effect = lambda date_str=None: (
+        mock_sb.side_effect = lambda date_str=None, **_kwargs: (
             [_game(season_type=3)] if date_str is None else [])
         with self.app.app_context():
             user = make_user()
@@ -223,7 +223,7 @@ class TestChainAndCatchUp(CoordinatorBase):
         from app.services.game_day_coordinator import run_tick, LOOKBACK_DAYS
         playoff_final = _game(espn_id='401800001', season_type=3)
         regular_final = _game(espn_id='401800002', season_type=2)
-        mock_sb.side_effect = lambda date_str=None: (
+        mock_sb.side_effect = lambda date_str=None, **_kwargs: (
             [] if date_str is None else [playoff_final, regular_final])
         mock_app.return_value = 20
         with self.app.app_context():
@@ -235,7 +235,7 @@ class TestChainAndCatchUp(CoordinatorBase):
     def test_joblog_written_for_chain(self, mock_sb, mock_app, mock_rag):
         from app.models import JobLog
         from app.services.game_day_coordinator import run_tick
-        mock_sb.side_effect = lambda date_str=None: (
+        mock_sb.side_effect = lambda date_str=None, **_kwargs: (
             [_game()] if date_str is None else [])
         mock_app.return_value = 25
         with self.app.app_context():

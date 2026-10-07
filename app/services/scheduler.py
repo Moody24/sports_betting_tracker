@@ -808,6 +808,17 @@ def _run_refresh_scenario_splits():
         logger.info("scenario splits refresh: %s", result)
 
 
+def refresh_basketball_feed():
+    """Collect once for every browser; the durable feed owns fetch diagnostics."""
+    from app.services.basketball_feed import collect_basketball_feed
+
+    with _get_app().app_context():
+        try:
+            collect_basketball_feed()
+        except Exception as exc:
+            logger.error('Basketball feed collection failed (%s)', type(exc).__name__)
+
+
 def init_scheduler(app):
     """Register all scheduled jobs.  Called once from create_app()."""
     global _scheduler_app
@@ -823,6 +834,11 @@ def init_scheduler(app):
     if not _acquire_scheduler_lock():
         logger.info("Skipping APScheduler startup in this process (lock already held)")
         return
+
+    scheduler.add_job(
+        refresh_basketball_feed, trigger='interval', seconds=30,
+        id='basketball_feed', replace_existing=True, max_instances=1, coalesce=True,
+    )
 
     # Midnight cache reset — clear stale schedule/rest context for the new day
     scheduler.add_job(

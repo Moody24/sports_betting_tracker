@@ -5,7 +5,7 @@ A Flask web application for recording bets, tracking outcomes, projecting player
 ## Project Status
 
 The NBA application and local database path are implemented. The current
-[launch audit](docs/audits/2026-10-01-local-launch-audit.md) separates verified
+[launch audit](docs/audits/2026-10-07-launch-baseline.md) separates verified
 local behavior from the remaining season-opening and invited-beta gates. The
 September release baseline was 1,326 unit tests at 85% application coverage
 and 58 Playwright browser tests; current results belong in the dated audit.
@@ -23,7 +23,8 @@ are separate future product scopes, not partially implemented features.
 - Dashboard with betting history and key performance totals
 - NBA prop projections via XGBoost models (points, rebounds, assists, threes, steals, blocks)
 - Live player props and market odds via [The Odds API](https://the-odds-api.com)
-- Live NBA scores via ESPN (no auth required)
+- Shared BALLDONTLIE score feed with visible freshness and reconnecting browser updates
+- Legacy ESPN adapter with explicit source approval
 - Automated bet grading and postmortem diagnostics
 - ML model health monitoring and calibration drift detection
 - Database migrations with Flask-Migrate (Alembic)
@@ -39,7 +40,7 @@ are separate future product scopes, not partially implemented features.
 - **Database:** PostgreSQL 16 for local and hosted operation; SQLite remains a supported import source
 - **ML:** XGBoost, scikit-learn (model artifacts stored locally in `app/ml_models/`)
 - **Odds:** The Odds API (player props, moneyline, totals)
-- **Scores:** ESPN API (free, no auth)
+- **Scores:** optional BALLDONTLIE Games; separate ESPN adapter disabled until permission is documented
 
 ## Quick Start (Local)
 
@@ -109,6 +110,56 @@ web and scheduler processes never race schema changes at startup.
 ## Odds API Setup
 
 Live player props and market lines require an API key from [the-odds-api.com](https://the-odds-api.com) (free tier available). Set `ODDS_API_KEY` in your `.env`. Without it, the app still works — live odds pages will degrade gracefully.
+
+## Source availability
+
+Manual bet recording and performance review work without a sports-data feed.
+ESPN and ESPN-derived remote release downloads are disabled by default. Enable
+them only after establishing permission for your use and audience, then record
+`ESPN_ACCESS_APPROVED=true` and `ESPN_RIGHTS_BASIS` in your local environment.
+An unauthenticated URL is not permission to collect or redistribute its data.
+See the [October 7 source review](docs/audits/2026-10-07-data-source-review.md)
+and [launch baseline](docs/audits/2026-10-07-launch-baseline.md).
+
+Source status distinguishes a recent successful fetch, stale data, and no
+verified current data. Refreshing a page does not make its data fresh. Existing
+APScheduler jobs poll and reconcile internal state; no external provider
+webhook is configured or claimed. Do not enable multiple scheduler owners.
+
+### Shared basketball score feed
+
+After approving a free BALLDONTLIE account and securely configuring
+`BALLDONTLIE_API_KEY`, run migrations and one scheduler owner. NBA Today reads
+the shared Games snapshot. A blank key disables collection; no account or key
+is created automatically. The adapter uses one request every 30 seconds
+(2/minute against the documented free 5/minute limit), with persisted backoff
+and `Retry-After`. It does not include odds or player box scores.
+
+Authenticated browsers share a database reader and receive changed snapshots
+through server-sent events. There is no provider websocket or webhook in this
+path. Fetches within 75 seconds show as current; errors or older fetches show
+stale for at most 15 minutes on the same ET day, then unavailable. The timestamp
+is our successful fetch time; provider delay is not guaranteed.
+
+The web baseline is one Gunicorn `gthread` worker with 16 threads and at most
+8 concurrent streams. Streams heartbeat every 15 seconds and reconnect after
+5 minutes to recheck authentication. A 100-event durable journal supports replay
+and reset; hidden tabs close their streams. More web workers require a shared
+rate limiter and capacity review. Proxies must allow unbuffered SSE; verify
+that behavior in the target hosting environment before launch. Use one scheduler
+owner regardless of the number of web processes.
+
+BALLDONTLIE event IDs remain namespaced; this separate score board does not
+silently grade legacy ESPN-linked bets. A verified crosswalk and independent
+result verification are required before that integration. Odds quotas and market
+coverage remain separate decisions. Manual tracking needs no new account.
+
+## Expansion backlog
+
+The [NFL/NHL roadmap](docs/audits/2026-10-07-sport-expansion-roadmap.md) starts only
+after the basketball baseline is verified. UFC remains exploratory. Source
+permissions, sport-specific schemas and evaluation gates precede any training;
+these sports are not exposed as working product tabs.
 
 ## ML Models
 
@@ -198,7 +249,7 @@ app/
 ├── routes/       Flask blueprints (auth, bets, NBA analysis)
 ├── services/     Business logic (NBA, ML, scheduler, odds, postmortems)
 ├── cli/          Flask CLI commands (retrain, health-report, market-recommend)
-├── models.py     SQLAlchemy models (16 tables)
+├── models.py     SQLAlchemy models (22 tables)
 ├── ml_models/    Local model artifact JSON files (gitignored)
 └── templates/    Jinja2 HTML templates
 docs/
@@ -215,3 +266,6 @@ ARCHITECTURE.md             Descriptive system overview and expansion guide
 2. Create a feature branch (`git checkout -b feature/your-change`)
 3. Commit your changes
 4. Push your branch and open a pull request
+
+Direct NBA Stats network collection also requires separate `NBA_ACCESS_APPROVED=true`
+and `NBA_RIGHTS_BASIS`. ESPN permission does not authorize NBA Stats collection.

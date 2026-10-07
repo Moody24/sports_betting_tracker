@@ -14,6 +14,8 @@ from typing import Mapping, Optional
 
 import requests
 
+from app.services.provider_access import request_with_retry
+
 logger = logging.getLogger(__name__)
 
 
@@ -68,14 +70,18 @@ class APIBudgetManager:
 
     def budgeted_get(self, url, params=None, timeout=10, critical=False):
         """``requests.get`` wrapper that enforces and records the budget."""
-        if not self.can_spend(critical):
-            raise BudgetExhaustedError(
-                f"Odds API budget below floor ({self._remaining} < {self._floor}); "
-                "non-critical call refused"
-            )
-        resp = requests.get(url, params=params, timeout=timeout)
-        self.record_headers(resp.headers)
-        return resp
+        def check_budget():
+            if not self.can_spend(critical):
+                raise BudgetExhaustedError(
+                    f"Odds API budget below floor ({self._remaining} < {self._floor}); "
+                    "non-critical call refused"
+                )
+
+        return request_with_retry(
+            requests.get, url, provider='The Odds API', params=params, timeout=timeout,
+            before_attempt=check_budget,
+            on_response=lambda response: self.record_headers(response.headers),
+        )
 
 
 ODDS_BUDGET = APIBudgetManager()

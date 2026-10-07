@@ -33,6 +33,24 @@ logger = logging.getLogger(__name__)
 _SCORE_CACHE: dict = {}
 _SCORE_CACHE_TTL = 600  # 10 minutes — pre-game props rarely change faster than this
 
+class CurrentQuotesUnavailable(RuntimeError):
+    """The current slate has no verified, fresh offered quotes to score."""
+
+
+def is_current_quote(source: str, observed_at, *, now: datetime | None = None) -> bool:
+    """Whether an offered provider quote is eligible for current analysis."""
+    from app.services.nba_service import is_fresh_prop_observation
+    return source == 'odds_api' and is_fresh_prop_observation(observed_at, now=now)
+
+
+def current_scored_quotes(scores: list) -> list:
+    """Recheck provider observation age when a cached score becomes actionable."""
+    now = datetime.now(timezone.utc)
+    return [score for score in scores if is_current_quote(
+        score.get('quote_source'), score.get('quote_observed_at'), now=now,
+    )]
+
+
 # Confidence tier thresholds (edge %)
 TIER_STRONG = 0.15
 TIER_MODERATE = 0.08
@@ -702,7 +720,7 @@ class ValueDetector:
     def _cached_daily_scores() -> Optional[list]:
         cached = _SCORE_CACHE.get(et_date_str())
         if cached and _time.monotonic() < cached["expires_at"]:
-            return list(cached["scores"])
+            return current_scored_quotes(cached["scores"])
         return None
 
     @staticmethod
@@ -804,6 +822,15 @@ class ValueDetector:
         payloads = []
         player_names = set()
         for game, props in raw_results:
+            if not props or game.get('props_source') != 'odds_api':
+                continue
+            props = {
+                market: [prop for prop in quotes if is_current_quote(
+                    'odds_api', prop.get('source_last_update'),
+                )]
+                for market, quotes in props.items()
+            }
+            props = {market: quotes for market, quotes in props.items() if quotes}
             if not props:
                 continue
             payloads.append((game, props))
@@ -905,8 +932,10 @@ class ValueDetector:
 
         prop_fetch_started = _time.perf_counter()
         raw_results = self._fetch_all_game_props(games)
-        self._fill_snapshot_prop_fallbacks(raw_results)
+        # GameSnapshot.props_json is an archive, never a current offered line.
         payloads, player_names = self._collect_prop_payloads(raw_results)
+        if games and not payloads:
+            raise CurrentQuotesUnavailable('No verified current prop quotes are available')
         logger.info(
             "PERF props_fetch_parallel: games=%d wall_elapsed=%.2fs",
             len(payloads), _time.perf_counter() - prop_fetch_started,
@@ -998,7 +1027,7 @@ class ValueDetector:
     def filter_plays(scores: list, min_edge: float = TIER_SLIGHT) -> list:
         """Filter scores down to actionable value plays."""
         return [
-            s for s in scores
+            s for s in current_scored_quotes(scores)
             if abs(s.get('edge', 0)) >= min_edge
             and s.get('confidence_tier') != 'no_edge'
             and s.get('games_played', 0) >= 10

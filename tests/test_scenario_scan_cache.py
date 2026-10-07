@@ -138,7 +138,8 @@ class TestScanScopedScenarioCache(BaseTestCase):
             'home': {'name': 'Lakers'},
             'away': {'name': 'Celtics'},
         }]
-        line = {'over_odds': -110, 'under_odds': -110}
+        line = {'over_odds': -110, 'under_odds': -110,
+                'source_last_update': datetime.now(timezone.utc).isoformat()}
         props = {'player_points': [
             {'player': 'Cache Player One', 'line': 25.5, **line},
             {'player': 'Cache Player One', 'line': 26.5, **line},

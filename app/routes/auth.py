@@ -72,7 +72,7 @@ def _maybe_trigger_auto_picks_on_login() -> None:
 def register():
     if current_user.is_authenticated:
         flash('You are already logged in!', 'info')
-        return redirect(url_for('main.home'))
+        return redirect(url_for('bet.nba_today'))
 
     form = RegisterForm()
     if form.validate_on_submit():
@@ -115,7 +115,7 @@ def login():
             session[SESSION_STARTED_AT_KEY] = int(time.time())
             _maybe_trigger_auto_picks_on_login()
             flash('Login successful.', 'success')
-            return redirect(url_for('main.home'))
+            return redirect(url_for('bet.nba_today'))
 
         flash('Login failed. Check your username and password.', 'danger')
 

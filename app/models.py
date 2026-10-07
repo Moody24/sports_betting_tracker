@@ -13,6 +13,31 @@ from .enums import BetType, Outcome, PostmortemReason
 from .utils.odds import american_to_decimal
 
 
+class BasketballFeedState(db.Model):
+    """Durable latest shared game feed and its collector retry state."""
+
+    key = db.Column(db.String(40), primary_key=True)
+    revision = db.Column(db.Integer, nullable=False, default=0)
+    payload_json = db.Column(db.Text, nullable=False, default='{}')
+    source = db.Column(db.String(40), nullable=False, default='balldontlie')
+    observed_at = db.Column(db.DateTime(timezone=True))
+    last_success_at = db.Column(db.DateTime(timezone=True))
+    last_attempt_at = db.Column(db.DateTime(timezone=True))
+    error_code = db.Column(db.String(40))
+    retry_at = db.Column(db.DateTime(timezone=True))
+    failure_count = db.Column(db.Integer, nullable=False, default=0)
+
+
+class BasketballFeedEvent(db.Model):
+    """Bounded durable replay journal; IDs never recycle on SQLite."""
+
+    __table_args__ = {'sqlite_autoincrement': True}
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    key = db.Column(db.String(40), nullable=False, index=True)
+    payload_json = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False)
+
+
 def compute_bets_wagered(bets: list) -> float:
     """Parlay-aware wagered total across a list of Bet objects.
 
@@ -992,3 +1017,27 @@ class BetPostmortem(db.Model):
         if conf >= 0.55:
             return 'Medium'
         return 'Low'
+
+
+class GuidedQuote(db.Model):
+    """Latest served sportsbook observation; no user identity is stored here."""
+
+    __tablename__ = 'guided_quote'
+    key = db.Column(db.String(64), primary_key=True)
+    event_id = db.Column(db.String(100), nullable=False, index=True)
+    payload_json = db.Column(db.Text, nullable=False)
+    observed_at = db.Column(db.DateTime(timezone=True), nullable=False, index=True)
+    available = db.Column(db.Boolean, nullable=False, default=True)
+
+
+class BetRecordingRequest(db.Model):
+    """User-scoped retry receipt committed atomically with its saved bets."""
+
+    __tablename__ = 'bet_recording_request'
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='CASCADE'), primary_key=True)
+    request_id = db.Column(db.String(36), primary_key=True)
+    payload_hash = db.Column(db.String(64), nullable=False)
+    request_json = db.Column(db.Text, nullable=False)
+    response_json = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False,
+                           default=lambda: datetime.now(timezone.utc))

@@ -14,6 +14,7 @@ from difflib import SequenceMatcher
 from functools import lru_cache
 from typing import Optional
 
+from requests import RequestException
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -22,6 +23,7 @@ from app.models import PlayerGameLog
 from app.utils import safe_float
 from app.services.espn_client import EspnClientError, fetch_summary_payload
 from app.services.nba_service import fetch_espn_scoreboard
+from app.services.provider_access import require_nba_stats_access
 from app.utils.time_helpers import ET
 
 logger = logging.getLogger(__name__)
@@ -154,6 +156,14 @@ def fetch_player_game_logs(
     Returns a list of dicts with normalised stat keys, or an empty list
     on failure.
     """
+    try:
+        require_nba_stats_access()
+    except RequestException as exc:
+        logger.warning('%s', exc)
+        if raise_on_error:
+            raise
+        return []
+
     try:
         from nba_api.stats.endpoints import playergamelog
     except ImportError:

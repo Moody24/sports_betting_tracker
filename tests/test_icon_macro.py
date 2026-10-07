@@ -30,6 +30,14 @@ class TestIconMacro(BaseTestCase):
         self.assertIn('aria-hidden="true"', rendered)
         self.assertIn('focusable="false"', rendered)
 
+    def test_functional_icons_use_the_accessible_stroke_system(self):
+        for name in ("scoreboard", "player-market", "bet-slip", "market-points"):
+            rendered = self._render(name)
+            self.assertIn('viewBox="0 0 24 24"', rendered)
+            self.assertIn('stroke="currentColor"', rendered)
+            self.assertIn('aria-hidden="true"', rendered)
+            self.assertIn('focusable="false"', rendered)
+
     def test_unknown_icon_renders_greppable_comment(self):
         rendered = self._render("definitely-not-an-icon")
         self.assertIn("icon:missing", rendered)

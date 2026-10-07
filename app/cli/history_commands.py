@@ -9,6 +9,7 @@ import click
 from app import db
 from app.models import HistoricalGameLog, JobLog
 from app.services.ml_feature_builder import extract_opp_abbr
+from app.services.provider_access import require_nba_stats_access
 from app.utils.data_coercion import normalize_player_id, safe_float, safe_str
 from app.utils.seasons import recent_nba_seasons
 
@@ -24,6 +25,7 @@ _NBA_STAT_COLUMNS = {
 
 def _fetch_league_log_df(season: str, season_type: str):
     """One nba_api call for a full season of player game logs."""
+    require_nba_stats_access()
     from nba_api.stats.endpoints import leaguegamelog
     log = leaguegamelog.LeagueGameLog(
         season=season,
@@ -137,6 +139,7 @@ def cli_backfill_logs(sport, seasons, season_type, sleep_seconds):
 
 def _fetch_advanced_boxscore_df(game_id: str):
     """One nba_api call: advanced box score (USG_PCT, START_POSITION)."""
+    require_nba_stats_access()
     from nba_api.stats.endpoints import boxscoreadvancedv2
     box = boxscoreadvancedv2.BoxScoreAdvancedV2(game_id=game_id, timeout=60)
     return box.get_data_frames()[0]   # player-level frame

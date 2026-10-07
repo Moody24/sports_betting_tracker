@@ -26,6 +26,9 @@ def load_release(kind: str, year: int, *, from_dir: str | None = None):
     name = filename.format(year=year)
     if from_dir:
         return pd.read_parquet(Path(from_dir) / name), f'local:{name}'
+    from app.services.provider_access import provider_access_status
+    if not provider_access_status()['espn']['enabled']:
+        raise requests.RequestException('ESPN source permission required before downloading releases')
     url = (f'https://github.com/sportsdataverse/sportsdataverse-data/'
            f'releases/download/{tag}/{name}')
     response = requests.get(url, timeout=60)

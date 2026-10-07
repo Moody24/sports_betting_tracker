@@ -199,8 +199,9 @@ def _lenient_float(value) -> float | None:
 
 def _lenient_int(value) -> int | None:
     try:
-        return int(value) if value is not None else None
-    except (TypeError, ValueError):
+        number = float(value) if value is not None else None
+        return int(number) if number is not None and number.is_integer() else None
+    except (TypeError, ValueError, OverflowError):
         return None
 
 
@@ -244,7 +245,8 @@ def _nba_bet(
         prop_line=prop_line if is_player_prop else None,
         is_parlay=is_parlay,
         parlay_id=parlay_id,
-        source=BetSource.NBA_PROPS.value,
+        source=(BetSource.NBA_PROPS.value if leg.get('quote_token')
+                and leg.get('manual_entry') is not True else BetSource.MANUAL.value),
         bonus_multiplier=bonus_multiplier,
         round_robin_size=round_robin_size,
     )
@@ -284,7 +286,10 @@ def build_nba_bets(
     return created
 
 
-def persist_new_bets(bets: list[Bet], round_robin_size: int | None = None) -> None:
+def persist_new_bets(
+    bets: list[Bet], round_robin_size: int | None = None, *,
+    commit: bool = True, capture_context: bool = True,
+) -> None:
     """Save new bets and their learning context in one transaction."""
     if not bets:
         return
@@ -299,11 +304,16 @@ def persist_new_bets(bets: list[Bet], round_robin_size: int | None = None) -> No
 
     db.session.add_all(bets)
     db.session.flush()
-    detector = ValueDetector(ProjectionEngine())
-    for bet in bets:
-        create_pick_context_for_bet(
-            bet_obj=bet,
-            detector=detector,
-            selected_odds=bet.american_odds,
-        )
-    db.session.commit()
+    # A recorded historical price is not evidence of present-day model features.
+    # New recording requests retain quote facts in their durable receipt instead.
+    context_bets = [bet for bet in bets if bet.american_odds is not None] if capture_context else []
+    if context_bets:
+        detector = ValueDetector(ProjectionEngine())
+        for bet in context_bets:
+            create_pick_context_for_bet(
+                bet_obj=bet,
+                detector=detector,
+                selected_odds=bet.american_odds,
+            )
+    if commit:
+        db.session.commit()

@@ -68,5 +68,5 @@ class TestHttpErrors(BaseTestCase):
     def test_authenticated_error_offers_private_recovery(self):
         self.register_and_login()
         response = self.client.get('/missing-private-page')
-        self.assertIn(b'Dashboard', response.data)
+        self.assertIn(b'Results', response.data)
         self.assertIn(b'Position log', response.data)

@@ -2,18 +2,19 @@
 
 {% block title %}{{ page.title }} · Edge Tracker{% endblock %}
 {% block page_title %}Edge Tracker{% endblock %}
-{% block page_subtitle %}Track the record. Inspect the model. Keep the claims honest.{% endblock %}
+{% block page_subtitle %}NBA research. A record you can review.{% endblock %}
 
 {% block content %}
 <section class="home-sheet" aria-labelledby="home-heading">
   <div class="home-sheet-lead">
     <span class="eyebrow">{{ page.kicker }}</span>
-    <h2 id="home-heading">A betting ledger built for review, not hype.</h2>
+    <h2 id="home-heading">Start with the game.
+      Know your numbers.</h2>
     <p>{{ page.intro }}</p>
     <div class="home-sheet-actions">
       {% if current_user.is_authenticated %}
-        <a href="{{ url_for('main.dashboard') }}" class="act act-primary">Open dashboard</a>
-        <a href="{{ url_for('bet.nba_today') }}" class="act">Review NBA today</a>
+        <a href="{{ url_for('bet.nba_today') }}" class="act act-primary">Browse NBA games</a>
+        <a href="{{ url_for('bet.place_bet') }}" class="act">Review my bets</a>
       {% else %}
         <a href="{{ url_for('auth.register') }}" class="act act-primary">Create account</a>
         <a href="{{ url_for('auth.login') }}" class="act">Sign in</a>
@@ -48,7 +49,7 @@
   </div>
   <div class="row-line home-capability-row">
     <div>
-      <div class="row-lead">Live game context</div>
+      <div class="row-lead">Scores and game context</div>
       <div class="row-sub">Follow available scores and prop progress when configured providers respond.</div>
     </div>
     <span class="tag">Provider-led</span>
@@ -57,7 +58,7 @@
 
 <section class="home-disclosure" aria-labelledby="disclosure-heading">
   <div>
-    <span class="eyebrow">Evidence boundary</span>
+    <span class="eyebrow">Know the limits</span>
     <h2 id="disclosure-heading">A projection is not a guaranteed edge.</h2>
   </div>
   <p>Profitability is unproven until enough real, time-stamped market quotes and graded outcomes pass the validation gates. Betting involves financial risk.</p>

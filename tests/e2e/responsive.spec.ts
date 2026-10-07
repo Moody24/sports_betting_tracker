@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { registerAndLogin } from './helpers/auth';
 
-const widths = [1200, 992, 768, 576, 375, 320];
+const widths = [1440, 1200, 992, 768, 576, 375, 320];
 const pages = [
   { path: '/dashboard', ready: '[data-testid="dashboard-summary"]' },
   { path: '/bets', ready: '[data-testid="bets-list"]' },
@@ -71,30 +71,29 @@ test.describe('Responsive layout contract', () => {
     }
   });
 
-  test('dashboard ledger remains usable and primary navigation remains reachable', async ({ page }) => {
+  test('performance summary remains readable and primary navigation remains reachable', async ({ page }) => {
     await registerAndLogin(page);
 
     for (const width of widths) {
       await page.setViewportSize({ width, height: 900 });
       await page.goto('/dashboard');
 
-      const ledger = page.locator('[data-testid="dashboard-summary"]');
-      await expect(ledger.locator('.band')).toBeVisible();
-      await expect(ledger.locator('.row-line')).toHaveCount(1);
-      await expect(ledger.locator('.row-figure.is-lead')).toBeVisible();
+      const summary = page.locator('[data-testid="dashboard-summary"]');
+      for (const label of ['Net profit / loss', 'Return on investment', 'Win rate', 'Total wagered']) {
+        await expect(summary.getByText(label, { exact: true })).toBeVisible();
+      }
+      await expect(summary.getByText('0 total bets', { exact: true })).toBeVisible();
 
-      // The masthead replaced the sidebar drawer, so navigation is the same
-      // component at every width — no toggle, no overlay, no focus trap.
-      // What still has to hold is that every section stays reachable and the
-      // current one is marked by more than colour alone.
       const nav = page.locator('nav[aria-label="Primary"]');
       await expect(nav).toBeVisible();
+      expect(await page.locator('.app-shell').evaluate(el => getComputedStyle(el).paddingLeft)).toBe('0px');
+      expect(await page.locator('.masthead').evaluate(el => getComputedStyle(el).position)).not.toBe('fixed');
 
-      for (const section of ['Dashboard', 'Prop Analysis', 'My Bets']) {
+      for (const section of ['NBA Today', 'Player Props', 'My Bets', 'Results']) {
         await expect(nav.getByRole('link', { name: section, exact: true })).toBeVisible();
       }
 
-      await expect(nav.getByRole('link', { name: 'Dashboard', exact: true })).toHaveAttribute(
+      await expect(nav.getByRole('link', { name: 'Results', exact: true })).toHaveAttribute(
         'aria-current',
         'page',
       );

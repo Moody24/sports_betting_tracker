@@ -1,10 +1,12 @@
 """Tests that cover previously untested code paths to reach >=80% coverage."""
 
 import json
+from datetime import datetime, timedelta
 from unittest.mock import patch
 
 from app import db
 from app.models import Bet
+from app.utils.time_helpers import ET
 
 from tests.helpers import BaseTestCase, make_bet
 
@@ -30,11 +32,13 @@ class TestCoverageGap(BaseTestCase):
     @patch("app.routes.nba_live.fetch_upcoming_games")
     def test_nba_upcoming_games_returns_json(self, mock_upcoming, mock_today):
         self.register_and_login()
+        today = datetime.now(ET).replace(hour=19, minute=0, second=0, microsecond=0)
         mock_today.return_value = [{
             "espn_id": "espn1",
             "home": {"name": "Lakers"},
             "away": {"name": "Celtics"},
-            "start_time": "2026-02-25T00:00:00Z",
+            "start_time": today.isoformat(),
+            "status": "STATUS_SCHEDULED",
             "over_under_line": 215.5,
             "moneyline_home": -135,
             "moneyline_away": 115,
@@ -43,7 +47,8 @@ class TestCoverageGap(BaseTestCase):
             "espn_id": "espn2",
             "home": {"name": "Warriors"},
             "away": {"name": "Heat"},
-            "match_date": "2026-02-26",
+            "start_time": (today + timedelta(days=1)).isoformat(),
+            "status": "STATUS_SCHEDULED",
             "over_under_line": 220.0,
         }]
         resp = self.client.get("/nba/upcoming-games")

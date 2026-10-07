@@ -40,7 +40,7 @@ class TestMainRoutes(BaseTestCase):
         self.register_and_login()
         resp = self.client.get("/dashboard")
         self.assertEqual(resp.status_code, 200)
-        self.assertIn(b"Dashboard", resp.data)
+        self.assertIn(b"Results", resp.data)
 
     def test_dashboard_with_bets_shows_stats(self):
         user_id = self.register_and_login()
@@ -52,7 +52,7 @@ class TestMainRoutes(BaseTestCase):
             db.session.commit()
         resp = self.client.get("/dashboard")
         self.assertEqual(resp.status_code, 200)
-        self.assertIn(b"Total Bets", resp.data)
+        self.assertIn(b"2 total bets", resp.data)
 
     def test_dashboard_streak_all_wins(self):
         user_id = self.register_and_login()
@@ -79,7 +79,7 @@ class TestMainRoutes(BaseTestCase):
             db.session.commit()
         resp = self.client.get("/dashboard")
         self.assertIn("—".encode(), resp.data)
-        self.assertIn(b"No active streak", resp.data)
+        self.assertIn("Current streak <strong>—</strong>".encode(), resp.data)
 
     def test_dashboard_streak_breaks_on_mixed(self):
         user_id = self.register_and_login()

@@ -3,17 +3,12 @@
 
 {% block title %}Prop Analysis · Edge Tracker{% endblock %}
 {% block page_title %}Prop Analysis{% endblock %}
-{% block page_subtitle %}Model-driven value detection for today's player props.{% endblock %}
+{% block page_subtitle %}Compare player projections, market lines, and recent form.{% endblock %}
 
 {% block content %}
-{% set flow_active = 'analysis' %}
-{% set flow_builder_tab = 'prop' %}
-{% include 'bets/_workflow_nav.html' %}
-
-{# ── Summary register ─────────────────────────────────────── #}
 <div class="slip fade-up fade-up-1" id="analysis-kpis" data-testid="analysis-summary">
   <div class="slip-head">
-    <span>Board read</span>
+    <span>Analysis overview</span>
     <span class="row-meta">Model and market, side by side</span>
   </div>
   <div class="slip-grid">
@@ -24,7 +19,6 @@
   </div>
 </div>
 
-{# ── Filters ─────────────────────────────────────────────── #}
 <div class="control-bar">
     <label class="band-cell" for="filter-stat">Stat
       <select class="form-select form-select-sm analysis-filter-select" id="filter-stat">
@@ -56,7 +50,7 @@
     </label>
     <div class="analysis-toolbar-actions">
       <a href="{{ url_for('bet.new_bet', current_tab='parlay') }}#parlay" class="act" id="parlay-queue-btn">
-        Parlay <span id="parlay-queue-count">0</span>
+        Build a parlay
       </a>
       <span id="analysis-last-updated" class="row-meta">Updated --:--</span>
       <button class="act" type="button" id="btn-refresh">
@@ -65,7 +59,6 @@
     </div>
 </div>
 
-{# ── Probability-first board ──────────────────────────────── #}
 <div class="analysis-table-shell fade-up fade-up-2" id="analysis-table-shell">
   <div class="sheet-head">
     <span class="sheet-dateline">{{ value_plays|length }} shown · sorted by edge · top 50 shown</span>
@@ -152,7 +145,7 @@
                 data-game-id="{{ play.game_id }}"
                 data-home="{{ play.home_team }}"
                 data-away="{{ play.away_team }}"
-                data-date="{{ play.match_date }}">Bet</button>
+                data-date="{{ play.match_date }}">Review prop</button>
         <button class="act quick-add-parlay-btn" type="button"
                 data-player="{{ play.player }}"
                 data-prop-type="{{ play.prop_type }}"
@@ -162,7 +155,7 @@
                 data-game-id="{{ play.game_id }}"
                 data-home="{{ play.home_team }}"
                 data-away="{{ play.away_team }}"
-                data-date="{{ play.match_date }}">Parlay</button>
+                data-date="{{ play.match_date }}">Build parlay</button>
       </span>
     </article>
     {% endfor %}
@@ -179,7 +172,6 @@
   </div>
 </div>
 
-{# ── Player Detail Modal ──────────────────────────────────── #}
 <div class="modal fade" id="playerDetailModal" tabindex="-1" aria-hidden="true" aria-labelledby="playerDetailTitle">
   <div class="modal-dialog modal-lg modal-dialog-scrollable">
     <div class="modal-content bg-dark border-secondary-subtle">
@@ -193,7 +185,6 @@
     </div>
   </div>
 </div>
-
 
 <div class="toast-container position-fixed bottom-0 end-0 p-3 analysis-toast-container">
   <div id="parlayQueueToast" class="toast text-bg-dark border border-secondary-subtle" role="status" aria-live="polite" aria-atomic="true">
@@ -223,9 +214,6 @@ document.addEventListener('DOMContentLoaded', function() {
   const filterConf = document.getElementById('filter-confidence');
   const lastUpdatedEl = document.getElementById('analysis-last-updated');
   const btnRefresh = document.getElementById('btn-refresh');
-  const parlayQueueCount = document.getElementById('parlay-queue-count');
-  const parlayQueueToastEl = document.getElementById('parlayQueueToast');
-  const parlayToastMsg = document.getElementById('parlay-toast-message');
 
   function applyFilters() {
     const rows = document.querySelectorAll('.analysis-row');
@@ -375,17 +363,6 @@ document.addEventListener('DOMContentLoaded', function() {
       });
   }
 
-  function updateParlayQueueCount() {
-    if (!parlayQueueCount || typeof getParlayQueue !== 'function') return;
-    parlayQueueCount.textContent = getParlayQueue().length;
-  }
-
-  function showParlayToast(message) {
-    if (!parlayQueueToastEl || !parlayToastMsg || !window.EdgeUI) return;
-    parlayToastMsg.textContent = message;
-    window.EdgeUI.showToast(parlayQueueToastEl, { delay: 2200 });
-  }
-
   document.addEventListener('click', function(e) {
     const detailBtn = e.target.closest('.player-detail-btn');
     if (detailBtn) {
@@ -416,29 +393,19 @@ document.addEventListener('DOMContentLoaded', function() {
     const parlayBtn = e.target.closest('.quick-add-parlay-btn');
     if (parlayBtn) {
       e.preventDefault();
-      if (typeof addParlayLeg !== 'function' || typeof getParlayQueue !== 'function') {
-        showParlayToast('Parlay queue unavailable. Refresh the page and try again.');
-        return;
-      }
-      const leg = {
+      const params = new URLSearchParams({
+        current_tab: 'parlay',
         team_a: parlayBtn.dataset.away || '',
         team_b: parlayBtn.dataset.home || '',
         match_date: parlayBtn.dataset.date || '',
-        bet_type: (parlayBtn.dataset.side || 'over').toLowerCase() === 'under' ? 'under' : 'over',
         game_id: parlayBtn.dataset.gameId || '',
         player_name: parlayBtn.dataset.player || '',
-        prop_type: parlayBtn.dataset.propType || 'player_points',
-        prop_line: parlayBtn.dataset.line || '',
-        american_odds: parlayBtn.dataset.odds || '',
-      };
-      const queue = addParlayLeg(leg);
-      updateParlayQueueCount();
-      showParlayToast(`Added to parlay (${queue.length} leg${queue.length === 1 ? '' : 's'})`);
-      if (typeof trackUxEvent === 'function') trackUxEvent('prop_analysis_quick_add_parlay', { legs: queue.length });
+        prop_type: parlayBtn.dataset.propType || '',
+      });
+      window.location.href = '/bets/new?' + params.toString() + '#parlay';
     }
   });
 
-  updateParlayQueueCount();
   if (btnRefresh) btnRefresh.addEventListener('click', refreshAnalysisTable);
   const retryRefresh = document.getElementById('analysis-refresh-retry');
   if (retryRefresh) retryRefresh.addEventListener('click', refreshAnalysisTable);

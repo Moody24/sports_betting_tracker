@@ -1,0 +1,15 @@
+<details class="data-status" id="data-availability">
+  <summary class="data-status-summary">
+    <span class="data-status-title">{{ icon('source-status', size=16) }} Data availability</span>
+    <span class="data-status-overview">
+      <span class="data-status-item state-{{ data_status.scoreboard.state }}"><span>{{ data_status.scoreboard.label }}</span><span class="data-status-state">{{ {'fresh': 'Current', 'stale': 'Stale', 'unavailable': 'Unavailable'}.get(data_status.scoreboard.state, 'Unavailable') }}</span></span>
+      <span class="data-status-item state-{{ data_status.odds.state }}"><span>{{ data_status.odds.label }}</span><span class="data-status-state">{{ 'Configured' if data_status.odds.state == 'configured' else 'Unavailable' }}</span></span>
+    </span>
+    <span class="data-status-toggle" aria-hidden="true">Details</span>
+  </summary>
+  <div class="data-status-detail">
+    <p><strong>{{ data_status.scoreboard.label }}</strong> · {{ data_status.scoreboard.age_label }}{% if data_status.scoreboard.last_success_display %} · Last success {{ data_status.scoreboard.last_success_display }}{% endif %}</p>
+    <p><strong>{{ data_status.odds.label }}</strong> · {{ data_status.odds.age_label }}</p>
+    <a href="{{ url_for('main.data_sources') }}">View data sources and limitations</a>
+  </div>
+</details>

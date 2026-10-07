@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 LOOKBACK_DAYS = 3
 PREGAME_LEAD_MINUTES = 30
+DAY_STATE_TTL = timedelta(minutes=15)
 
 # {et_date: {'has_games': bool, 'first_tip': datetime|None, 'done': bool,
 #            'seen_final': set[str]}}
@@ -163,18 +164,30 @@ def _run_chain(final_games, unresolved_ids: set, needs_resolve: bool) -> None:
 def run_tick(now: datetime | None = None) -> str:
     """One coordinator pass; returns the tier it acted in."""
     now = now or datetime.now(ET)
+    if now.tzinfo is None:
+        raise ValueError('Coordinator time must be timezone-aware')
+    now = now.astimezone(ET)
     today = now.date()
 
     state = _DAY_CACHE.get(today)
-    if state is None:
-        games = fetch_espn_scoreboard()
+    refresh_state = state is None or (
+        (not state['has_games'] or state['done'])
+        and now.astimezone(timezone.utc) - state['checked_at'].astimezone(timezone.utc)
+        >= DAY_STATE_TTL
+    )
+    if refresh_state:
+        # Never memoize a provider failure as an empty day. Let the job wrapper
+        # record the failure, then retry on the next scheduled tick.
+        games = fetch_espn_scoreboard(raise_on_error=True)
         games = [g for g in games if _game_et_date(g) == today]
+        first_check = state is None
         state = {'has_games': bool(games),
                  'first_tip': _first_tip(games), 'done': False,
-                 'seen_final': set()}
+                 'seen_final': state['seen_final'] if state else set(),
+                 'checked_at': now}
         _DAY_CACHE.clear()
         _DAY_CACHE[today] = state
-        appended = _catch_up_lookback(today)
+        appended = _catch_up_lookback(today) if first_check else 0
         if appended:
             logger.info("coordinator: lookback appended %d games", appended)
 
@@ -185,7 +198,7 @@ def run_tick(now: datetime | None = None) -> str:
             minutes=PREGAME_LEAD_MINUTES):
         return 'pre-game'
 
-    games = fetch_espn_scoreboard()          # fresh LIVE read (uncached)
+    games = fetch_espn_scoreboard(raise_on_error=True)  # fresh LIVE read
     games = [g for g in games if _game_et_date(g) == today]
     final_games = [g for g in games if g.get('status') == _STATUS_FINAL]
     final_ids = {str(g.get('espn_id')) for g in final_games}
@@ -206,5 +219,6 @@ def run_tick(now: datetime | None = None) -> str:
 
     if games and len(final_games) == len(games):
         state['done'] = True
+        state['checked_at'] = now
         return 'post'
     return 'live'

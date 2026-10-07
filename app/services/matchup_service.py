@@ -8,6 +8,8 @@ import logging
 import time
 from datetime import datetime, timezone, date as date_type
 
+from requests import RequestException
+
 from app.config_display import STAT_KEY_TO_OPP_ALLOWED, PROP_TO_OPP_ALLOWED
 from app.utils.time_helpers import et_today, ET
 
@@ -15,6 +17,7 @@ from app import db
 from app.models import TeamDefenseSnapshot
 from app.services.data_receipts import record_fetch
 from app.services.historical_defense import observed_team_defense
+from app.services.provider_access import require_nba_stats_access
 
 logger = logging.getLogger(__name__)
 APP_TIMEZONE = ET
@@ -57,6 +60,12 @@ def fetch_team_defense_stats() -> list:
 
     Returns a list of dicts with defensive metrics per team.
     """
+    try:
+        require_nba_stats_access()
+    except RequestException as exc:
+        logger.warning('%s', exc)
+        return []
+
     try:
         from nba_api.stats.endpoints import leaguedashteamstats
     except ImportError:

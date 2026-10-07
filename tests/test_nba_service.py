@@ -1,6 +1,7 @@
 """Focused tests for NBA service odds parsing."""
 
 import unittest
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 
@@ -12,10 +13,10 @@ class TestNBAService(unittest.TestCase):
             'home_team': 'Denver Nuggets',
             'away_team': 'Los Angeles Lakers',
             'bookmakers': [
-                {'markets': [{'key': 'h2h', 'outcomes': [
+                {'last_update': datetime.now(timezone.utc).isoformat(), 'markets': [{'key': 'h2h', 'outcomes': [
                     {'name': 'Los Angeles Lakers', 'price': 260},
                 ]}]},
-                {'markets': [{'key': 'h2h', 'outcomes': [
+                {'last_update': datetime.now(timezone.utc).isoformat(), 'markets': [{'key': 'h2h', 'outcomes': [
                     {'name': 'Denver Nuggets', 'price': -320},
                 ]}]},
             ],
@@ -33,10 +34,10 @@ class TestNBAService(unittest.TestCase):
             'home_team': 'Denver Nuggets',
             'away_team': 'Los Angeles Lakers',
             'bookmakers': [
-                {'markets': [{'key': 'h2h', 'outcomes': [
+                {'last_update': datetime.now(timezone.utc).isoformat(), 'markets': [{'key': 'h2h', 'outcomes': [
                     {'name': 'Denver Nuggets', 'price': -320},
                 ]}]},
-                {'markets': [{'key': 'h2h', 'outcomes': [
+                {'last_update': datetime.now(timezone.utc).isoformat(), 'markets': [{'key': 'h2h', 'outcomes': [
                     {'name': 'Los Angeles Lakers', 'price': 260},
                 ]}]},
             ],
@@ -54,6 +55,7 @@ class TestNBAService(unittest.TestCase):
             "away_team": "Los Angeles Lakers",
             "bookmakers": [{
                 "key": "fanduel",
+                "last_update": datetime.now(timezone.utc).isoformat(),
                 "markets": [
                     {"key": "totals", "outcomes": [
                         {"name": "Over", "point": 228.5},

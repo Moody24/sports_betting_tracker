@@ -8,96 +8,63 @@
   {% include "_head.html" %}
   <link rel="stylesheet" href="{{ url_for('static', filename='css/theme.css') }}">
 </head>
-<body>
+<body class="{{ 'workspace-page' if current_user.is_authenticated else 'public-page' }} page-{{ request.endpoint|replace('.', '-') if request.endpoint else 'error' }}">
   <a class="skip-link" href="#main-content">Skip to main content</a>
   <div class="app-shell">
 
-    {# ── Masthead ───────────────────────────────────────────────── #}
     <header class="masthead">
       <div class="masthead-inner">
-
-        <div class="nameplate">
-          <div class="brand-mark">
-            <div class="brand-icon">
-              <svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                <path d="M2 12 L6 4 L10 9 L12 6 L14 8" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-            </div>
-            <div class="brand-name">Edge Tracker</div>
-          </div>
-          <span class="brand-sub">NBA Analytics</span>
-        </div>
-
-        <div class="mast-rule"></div>
-
-        <div class="mast-row">
-          <nav aria-label="Primary">
-            <ul class="sections">
-              <li><a class="nav-link {% if request.endpoint == 'main.home' %}active{% endif %}"
-                     href="{{ url_for('main.home') }}"
-                     {% if request.endpoint == 'main.home' %}aria-current="page"{% endif %}>Home</a></li>
-              {% if current_user.is_authenticated %}
-              <li><a class="nav-link {% if request.endpoint == 'main.dashboard' %}active{% endif %}"
-                     href="{{ url_for('main.dashboard') }}"
-                     {% if request.endpoint == 'main.dashboard' %}aria-current="page"{% endif %}>Dashboard</a></li>
-              <li><a class="nav-link {% if request.endpoint == 'bet.nba_today' %}active{% endif %}"
-                     href="{{ url_for('bet.nba_today') }}"
-                     {% if request.endpoint == 'bet.nba_today' %}aria-current="page"{% endif %}>NBA Today</a></li>
-              <li><a class="nav-link {% if request.endpoint == 'bet.nba_analysis' %}active{% endif %}"
-                     href="{{ url_for('bet.nba_analysis') }}"
-                     {% if request.endpoint == 'bet.nba_analysis' %}aria-current="page"{% endif %}>Prop Analysis</a></li>
-              <li><a class="nav-link {% if request.endpoint == 'bet.nba_stat_analysis' %}active{% endif %}"
-                     href="{{ url_for('bet.nba_stat_analysis') }}"
-                     {% if request.endpoint == 'bet.nba_stat_analysis' %}aria-current="page"{% endif %}>Stat Analysis</a></li>
-              <li><a class="nav-link {% if request.endpoint == 'bet.place_bet' %}active{% endif %}"
-                     href="{{ url_for('bet.place_bet') }}"
-                     {% if request.endpoint == 'bet.place_bet' %}aria-current="page"{% endif %}>My Bets</a></li>
-              <li><a class="nav-link {% if request.endpoint == 'bet.new_bet' %}active{% endif %}"
-                     href="{{ url_for('bet.new_bet') }}"
-                     {% if request.endpoint == 'bet.new_bet' %}aria-current="page"{% endif %}>Add Bet</a></li>
-              {% else %}
-              <li><a class="nav-link {% if request.endpoint == 'auth.login' %}active{% endif %}"
-                     href="{{ url_for('auth.login') }}"
-                     {% if request.endpoint == 'auth.login' %}aria-current="page"{% endif %}>Login</a></li>
-              <li><a class="nav-link {% if request.endpoint == 'auth.register' %}active{% endif %}"
-                     href="{{ url_for('auth.register') }}"
-                     {% if request.endpoint == 'auth.register' %}aria-current="page"{% endif %}>Register</a></li>
-              {% endif %}
-            </ul>
-          </nav>
-          {% if current_user.is_authenticated %}
-        <div class="dropdown">
-          <button class="user-btn dropdown-toggle" data-ui-toggle="dropdown" aria-expanded="false" aria-label="Account menu for {{ current_user.username }}">
-            {{ icon('person-circle') }}
-            <span class="d-none d-sm-inline" aria-hidden="true">{{ current_user.username }}</span>
-          </button>
-          <ul class="dropdown-menu dropdown-menu-end">
-            <li class="px-3 py-2 border-bottom user-menu-header">
-              <div class="user-menu-label">Signed in as</div>
-              <div class="fw-semibold user-menu-name">{{ current_user.username }}</div>
-            </li>
-            <li><a class="dropdown-item" href="{{ url_for('main.dashboard') }}">{{ icon('grid-1x2', classes='me-2 opacity-50') }}Dashboard</a></li>
-            <li><a class="dropdown-item" href="{{ url_for('bet.place_bet') }}">{{ icon('journal-text', classes='me-2 opacity-50') }}My Bets</a></li>
-            <li><a class="dropdown-item" href="{{ url_for('bet.new_bet') }}">{{ icon('plus-circle', classes='me-2 opacity-50') }}Add Bet</a></li>
-            <li><hr class="dropdown-divider"></li>
-            <li>
-              <form action="{{ url_for('auth.logout') }}" method="POST">
-                {{ logout_form.hidden_tag() }}
-                <button type="submit" class="dropdown-item text-danger">{{ icon('box-arrow-right', classes='me-2') }}Sign Out</button>
-              </form>
-            </li>
+        <a class="nameplate" href="{{ url_for('bet.nba_today') if current_user.is_authenticated else url_for('main.home') }}" aria-label="Edge Tracker {{ 'NBA Today' if current_user.is_authenticated else 'home' }}">
+          <span class="brand-icon">{{ icon('edge-mark', size=24) }}</span>
+          <span class="brand-name">Edge<span>Tracker</span></span>
+        </a>
+        <nav class="primary-navigation" aria-label="Primary">
+          <ul class="sections">
+            {% if current_user.is_authenticated %}
+            {% set navigation = [
+              ('bet.nba_today', 'NBA Today', 'scoreboard'),
+              ('bet.nba_analysis', 'Player Props', 'player-market'),
+              ('bet.nba_stat_analysis', 'Stats', 'stat-bars'),
+              ('bet.place_bet', 'My Bets', 'bet-slip'),
+              ('main.dashboard', 'Results', 'results-chart')
+            ] %}
+            {% else %}
+            {% set navigation = [('main.home', 'Overview', 'scoreboard'), ('main.methodology', 'Methodology', 'stat-bars'), ('main.data_sources', 'Data sources', 'source-status')] %}
+            {% endif %}
+            {% for endpoint, label, symbol in navigation %}
+            <li><a class="nav-link{% if request.endpoint == endpoint %} active{% endif %}" href="{{ url_for(endpoint) }}" {% if request.endpoint == endpoint %}aria-current="page"{% endif %}>{{ icon(symbol, size=18) }}<span>{{ label }}</span></a></li>
+            {% endfor %}
           </ul>
-        </div>
+        </nav>
+        <div class="header-utilities">
+          {% if current_user.is_authenticated %}
+          <a class="act act-primary header-add-bet{% if request.endpoint == 'bet.new_bet' %} active{% endif %}" href="{{ url_for('bet.new_bet', current_tab='prop') }}#prop" {% if request.endpoint == 'bet.new_bet' %}aria-current="page"{% endif %}>{{ icon('add-selection', size=18) }}<span>Add Bet</span></a>
+          <div class="dropdown account-menu">
+            <button class="user-btn dropdown-toggle" data-ui-toggle="dropdown" aria-expanded="false" aria-label="Account menu for {{ current_user.username }}">
+              <span class="user-avatar" aria-hidden="true">{{ current_user.username[:1]|upper }}</span>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li class="px-3 py-2 border-bottom user-menu-header"><div class="user-menu-label">Signed in as</div><div class="fw-semibold user-menu-name">{{ current_user.username }}</div></li>
+              <li><a class="dropdown-item" href="{{ url_for('main.dashboard') }}">{{ icon('results-chart', classes='me-2') }}Results</a></li>
+              <li><a class="dropdown-item" href="{{ url_for('bet.place_bet') }}">{{ icon('bet-slip', classes='me-2') }}My Bets</a></li>
+              <li><a class="dropdown-item" href="{{ url_for('main.home') }}">{{ icon('scoreboard', classes='me-2') }}About Edge Tracker</a></li>
+              <li><hr class="dropdown-divider"></li>
+              <li><form action="{{ url_for('auth.logout') }}" method="POST">{{ logout_form.hidden_tag() }}<button type="submit" class="dropdown-item text-danger">{{ icon('box-arrow-right', classes='me-2') }}Sign Out</button></form></li>
+            </ul>
+          </div>
+          {% else %}
+          <a class="act header-login" href="{{ url_for('auth.login') }}">Sign in</a>
+          <a class="act act-primary" href="{{ url_for('auth.register') }}">Get started</a>
           {% endif %}
-        </div>{# /.mast-row #}
-      </div>{# /.masthead-inner #}
+        </div>
+      </div>
     </header>
 
-    {# ── Main content ───────────────────────────────────────────── #}
     <main class="main-content" id="main-content" tabindex="-1">
       <div class="sheet">
 
       <header class="topbar">
+        <div class="topbar-copy">
         {% block topbar_breadcrumb %}
           {% if breadcrumbs %}
             <nav class="breadcrumbs" aria-label="Breadcrumb">
@@ -117,7 +84,11 @@
         {% endblock %}
         <h1 class="h4 mb-0">{% block page_title %}Overview{% endblock %}</h1>
         <p class="mb-0 topbar-subtitle">{% block page_subtitle %}Track your edge.{% endblock %}</p>
+        </div>
+        <div class="topbar-actions">{% block page_actions %}{% endblock %}</div>
       </header>
+
+      {% if current_user.is_authenticated and data_status %}{% include '_data_status.html' %}{% endif %}
 
       {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
@@ -143,7 +114,7 @@
       {% endwith %}
 
       {% block content %}{% endblock %}
-      </div>{# /.sheet #}
+      </div>
     </main>
 
     <footer class="colophon">
@@ -174,7 +145,6 @@
   <script src="{{ url_for('static', filename='js/script.js') }}"></script>
   {% block scripts %}{% endblock %}
   <script nonce="{{ csp_nonce }}">
-    // Toast auto-dismiss
     document.querySelectorAll('.toast-item').forEach(function(toast) {
       var DURATION = 4000;
       var timer = null;

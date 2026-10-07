@@ -1,12 +1,17 @@
 import logging
+from copy import deepcopy
+import hashlib
+import json
 import os
 import re
 import time as _time
 from datetime import datetime, timezone, timedelta, date as date_type
 from difflib import SequenceMatcher
 from typing import Optional
+from threading import RLock
 
 import requests
+from sqlalchemy.exc import IntegrityError
 
 from app.config_display import SUPPORTED_PROP_MARKETS
 from app.enums import BetType, Outcome
@@ -36,6 +41,74 @@ _GAMES_CACHE: dict = {}
 _GAMES_CACHE_TTL = 60
 _UPCOMING_CACHE: dict = {}
 _UPCOMING_CACHE_TTL = 300
+_PLAYER_PROPS_CACHE: dict = {}
+_PLAYER_PROPS_CACHE_TTL = 60
+_SCOREBOARD_STATUS: dict = {}
+_SCOREBOARD_STATUS_LOCK = RLock()
+
+
+def _reset_scoreboard_status_for_day(now: datetime) -> None:
+    if _SCOREBOARD_STATUS.get('day') != now.date().isoformat():
+        _SCOREBOARD_STATUS.clear()
+        _SCOREBOARD_STATUS.update(
+            day=now.date().isoformat(), last_success_at=None,
+            last_attempt_at=None, error_code=None,
+        )
+
+
+def _record_scoreboard_status(*, success: bool, now: datetime) -> None:
+    with _SCOREBOARD_STATUS_LOCK:
+        _reset_scoreboard_status_for_day(now)
+        _SCOREBOARD_STATUS['last_attempt_at'] = now
+        _SCOREBOARD_STATUS['error_code'] = None if success else 'scoreboard_unavailable'
+        if success:
+            _SCOREBOARD_STATUS['last_success_at'] = now
+
+
+def get_scoreboard_status() -> dict:
+    """Read advisory freshness for today's scoreboard without fetching data."""
+    now = datetime.now(APP_TIMEZONE)
+    with _SCOREBOARD_STATUS_LOCK:
+        _reset_scoreboard_status_for_day(now)
+        success_at = _SCOREBOARD_STATUS['last_success_at']
+        attempt_at = _SCOREBOARD_STATUS['last_attempt_at']
+        age = max(0.0, (
+            now.astimezone(timezone.utc) - success_at.astimezone(timezone.utc)
+        ).total_seconds()) if success_at else None
+        state = 'unavailable'
+        if success_at:
+            state = ('fresh' if not _SCOREBOARD_STATUS['error_code']
+                     and age <= _GAMES_CACHE_TTL else 'stale')
+        return {
+            'source': 'espn', 'state': state,
+            'last_success_at': success_at.isoformat() if success_at else None,
+            'last_attempt_at': attempt_at.isoformat() if attempt_at else None,
+            'age_seconds': age, 'day': _SCOREBOARD_STATUS['day'],
+            'error_code': _SCOREBOARD_STATUS['error_code'],
+        }
+
+def is_fresh_prop_observation(observed_at, *, now: datetime | None = None) -> bool:
+    """Provider observations must be aware and no more than ten minutes old."""
+    try:
+        observed = datetime.fromisoformat(str(observed_at).replace('Z', '+00:00'))
+        now = now or datetime.now(timezone.utc)
+        if observed.tzinfo is None or now.tzinfo is None:
+            return False
+        age = now.astimezone(timezone.utc) - observed.astimezone(timezone.utc)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    return timedelta(0) <= age <= timedelta(minutes=10)
+
+
+def _current_prop_payload(props: dict) -> dict:
+    current = {
+        market: [prop for prop in quotes if is_fresh_prop_observation(
+            prop.get('source_last_update'),
+        )]
+        for market, quotes in props.items()
+    }
+    return {market: quotes for market, quotes in current.items() if quotes}
+
 
 def _get_odds_api_key() -> str:
     return os.getenv("ODDS_API_KEY", "")
@@ -53,17 +126,41 @@ def _sanitize_api_error(exc: Exception) -> str:
 # ── ESPN: live scores ────────────────────────────────────────────────
 
 
-def fetch_espn_scoreboard(date_str: Optional[str] = None) -> list[dict]:
+def fetch_espn_scoreboard(
+    date_str: Optional[str] = None, *, raise_on_error: bool = False,
+) -> list[dict]:
     """Return NBA games from the ESPN scoreboard endpoint.
 
     Pass date_str as 'YYYYMMDD' to fetch a specific date; omit for today.
+    Reconciliation callers use ``raise_on_error`` to distinguish an unavailable
+    provider from a successfully observed empty slate.
     """
+    today_str = datetime.now(APP_TIMEZONE).strftime('%Y%m%d')
+    target_date = date_str or today_str
     try:
-        data = fetch_scoreboard_payload(date_str)
-    except EspnClientError as exc:
-        logger.error("ESPN scoreboard fetch failed: %s", exc)
+        data = fetch_scoreboard_payload(target_date)
+        if not isinstance(data.get('events'), list):
+            raise EspnClientError('ESPN scoreboard response has no events array')
+        games = _normalize_scoreboard_games(data)
+        if data['events'] and not games:
+            raise EspnClientError('ESPN scoreboard has no usable game records')
+    except (EspnClientError, TypeError, ValueError, AttributeError, IndexError) as exc:
+        now = datetime.now(APP_TIMEZONE)
+        if target_date == now.strftime('%Y%m%d'):
+            _record_scoreboard_status(success=False, now=now)
+        logger.error("ESPN scoreboard fetch failed (%s)", type(exc).__name__)
+        if raise_on_error:
+            if isinstance(exc, EspnClientError):
+                raise
+            raise EspnClientError('ESPN scoreboard response is malformed') from exc
         return []
+    now = datetime.now(APP_TIMEZONE)
+    if target_date == now.strftime('%Y%m%d'):
+        _record_scoreboard_status(success=True, now=now)
+    return games
 
+
+def _normalize_scoreboard_games(data: dict) -> list[dict]:
     games = []
     for event in data.get("events", []):
         comp = event.get("competitions", [{}])[0]
@@ -148,6 +245,10 @@ def _extract_current_game_markets(game: dict):
     home_spread = None
     for bookmaker in game.get('bookmakers', []):
         for market in bookmaker.get('markets', []):
+            if not is_fresh_prop_observation(
+                market.get('last_update') or bookmaker.get('last_update'),
+            ):
+                continue
             market_key = market.get('key', '')
             if market_key == 'totals' and ou_line is None:
                 ou_line = _total_line(market)
@@ -883,34 +984,56 @@ def _upcoming_total_line(game: dict) -> float | None:
         for market in bookmaker.get('markets', []):
             if market.get('key') != 'totals':
                 continue
+            if not is_fresh_prop_observation(
+                market.get('last_update') or bookmaker.get('last_update'),
+            ):
+                continue
             line = _total_line(market)
             if line is not None:
                 return line
     return None
 
 
-def _upcoming_match_date(commence: str, tomorrow) -> str:
-    if not commence:
-        return tomorrow.isoformat()
+def game_start_date_et(commence: str) -> str:
+    """Derive a domain game date only from a valid, timezone-aware timestamp."""
     try:
-        return datetime.fromisoformat(
-            commence.replace('Z', '+00:00'),
-        ).date().isoformat()
-    except ValueError:
-        return tomorrow.isoformat()
+        start = datetime.fromisoformat(commence.replace('Z', '+00:00'))
+        if start.tzinfo is None:
+            return ''
+        return start.astimezone(APP_TIMEZONE).date().isoformat()
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        return ''
 
 
-def _normalize_upcoming_odds_game(game: dict, tomorrow) -> dict:
+def game_selection_key(game: dict) -> str:
+    """UI identity preserves the namespace; an Odds ID is never an ESPN ID."""
+    if game.get('espn_id'):
+        return f"espn:{game['espn_id']}"
+    if game.get('odds_event_id'):
+        return f"odds_api:{game['odds_event_id']}"
+    return ''
+
+
+def _upcoming_match_date(commence: str, tomorrow) -> str:
+    match_date = game_start_date_et(commence)
+    return match_date if match_date == tomorrow.isoformat() else ''
+
+
+def _normalize_upcoming_odds_game(game: dict, tomorrow) -> dict | None:
     home = game.get('home_team', '')
     away = game.get('away_team', '')
     commence = game.get('commence_time', '')
     event_id = game.get('id', '')
+    match_date = _upcoming_match_date(commence, tomorrow)
+    if not event_id or not match_date:
+        return None
     return {
-        'espn_id': event_id,
+        'espn_id': '',
+        'selection_key': f'odds_api:{event_id}',
         'home': {'name': home, 'score': 0, 'logo': '', 'abbr': ''},
         'away': {'name': away, 'score': 0, 'logo': '', 'abbr': ''},
         'start_time': commence,
-        'match_date': _upcoming_match_date(commence, tomorrow),
+        'match_date': match_date,
         'status': 'STATUS_SCHEDULED',
         'status_detail': 'Tomorrow',
         'clock': '',
@@ -948,7 +1071,8 @@ def _fetch_upcoming_games_odds(tomorrow) -> list[dict]:
     except (requests.RequestException, ValueError) as exc:
         logger.error("Odds API (upcoming games) fetch failed: %s", _sanitize_api_error(exc))
         return []
-    return [_normalize_upcoming_odds_game(game, tomorrow) for game in data]
+    return [normalized for game in data
+            if (normalized := _normalize_upcoming_odds_game(game, tomorrow)) is not None]
 
 
 def _fetch_upcoming_games_espn(tomorrow) -> list[dict]:
@@ -965,6 +1089,7 @@ def _fetch_upcoming_games_espn(tomorrow) -> list[dict]:
         commence = game.get("start_time", "")
         games.append({
             "espn_id": game["espn_id"],
+            "selection_key": game_selection_key(game),
             "home": {
                 "name": game["home"]["name"],
                 "abbr": game["home"].get("abbr", ""),
@@ -1106,15 +1231,17 @@ def _consensus_prop(player: str, book_data: dict) -> dict | None:
     best_over_odds, best_over_book = _best_odds(books, 'over', line)
     best_under_odds, best_under_book = _best_odds(books, 'under', line)
     updates = []
-    for book in (best_over_book, best_under_book):
+    verified_updates = True
+    for book in {best_over_book, best_under_book} - {''}:
         raw = books.get(book, {}).get('last_update')
-        if raw:
-            try:
-                updated_at = datetime.fromisoformat(raw.replace('Z', '+00:00'))
-                if updated_at.tzinfo:
-                    updates.append(updated_at.astimezone(timezone.utc))
-            except (TypeError, ValueError):
-                pass
+        try:
+            updated_at = datetime.fromisoformat(str(raw).replace('Z', '+00:00'))
+            if updated_at.tzinfo is None or updated_at > datetime.now(timezone.utc):
+                verified_updates = False
+                continue
+            updates.append(updated_at.astimezone(timezone.utc))
+        except (TypeError, ValueError):
+            verified_updates = False
     return {
         'player': player,
         'line': float(line),
@@ -1123,7 +1250,7 @@ def _consensus_prop(player: str, book_data: dict) -> dict | None:
         'books': books,
         'best_over_book': best_over_book,
         'best_under_book': best_under_book,
-        'source_last_update': min(updates).isoformat() if updates else None,
+        'source_last_update': min(updates).isoformat() if updates and verified_updates else None,
     }
 
 
@@ -1228,6 +1355,7 @@ def _snapshot_prop_book_rows(
     today,
     snapshot_kind: str,
     recent_snapped: set,
+    observed_at: datetime | None = None,
 ) -> int:
     from app import db
     from app.models import OddsSnapshot
@@ -1252,8 +1380,19 @@ def _snapshot_prop_book_rows(
         player_id = resolve_espn_id(prop['player'])
     except RuntimeError:
         player_id = None
+    observed_at = observed_at or datetime.now(timezone.utc)
+    inserted = 0
     for book_name, book_data in eligible_books:
-        db.session.add(OddsSnapshot(
+        source_key = _live_prop_snapshot_key(
+            event_id, player_key, market_key, book_name, snapshot_kind,
+            {**book_data, 'line': book_data.get('line', prop.get('line'))}, observed_at,
+        )
+        if source_key is None:
+            logger.warning('Prop snapshot skipped: unverified observation time for %s', event_id)
+            continue
+        if OddsSnapshot.query.filter_by(source_snapshot_key=source_key).first():
+            continue
+        snapshot = OddsSnapshot(
             game_id=game_id,
             source_event_id=event_id,
             game_date=today,
@@ -1268,8 +1407,43 @@ def _snapshot_prop_book_rows(
             under_odds=book_data.get('under_odds'),
             source='odds_api',
             snapshot_kind=snapshot_kind,
-        ))
-    return len(eligible_books)
+            source_snapshot_key=source_key,
+            snapped_at=observed_at,
+        )
+        try:
+            # The unique source key, not the preceding advisory query, handles
+            # simultaneous captures safely without rolling back other rows.
+            with db.session.begin_nested():
+                db.session.add(snapshot)
+                db.session.flush()
+        except IntegrityError:
+            if not OddsSnapshot.query.filter_by(source_snapshot_key=source_key).first():
+                raise
+            continue
+        inserted += 1
+    return inserted
+
+
+def _live_prop_snapshot_key(
+    event_id: str, player_key: str, market: str, bookmaker: str,
+    snapshot_kind: str, quote: dict, observed_at: datetime,
+) -> str | None:
+    """Stable provider observation identity shared by replayed live captures."""
+    try:
+        source_time = datetime.fromisoformat(
+            str(quote.get('last_update') or '').replace('Z', '+00:00'),
+        )
+        if not is_fresh_prop_observation(source_time.isoformat(), now=observed_at):
+            return None
+    except (TypeError, ValueError):
+        return None
+    identity = [
+        'odds_api', event_id, player_key, market, bookmaker, snapshot_kind,
+        source_time.astimezone(timezone.utc).isoformat(),
+        quote.get('line'), quote.get('over_odds'), quote.get('under_odds'),
+    ]
+    digest = hashlib.sha256(json.dumps(identity, separators=(',', ':')).encode()).hexdigest()
+    return f'odds_api:{digest}'
 
 
 def _snapshot_game_props(
@@ -1290,6 +1464,7 @@ def _snapshot_game_props(
         event_id,
         critical=snapshot_kind == 'close',
     )
+    observed_at = datetime.now(timezone.utc)
     game_id = game.get('espn_id', '')
     return sum(
         _snapshot_prop_book_rows(
@@ -1301,6 +1476,7 @@ def _snapshot_game_props(
             today=today,
             snapshot_kind=snapshot_kind,
             recent_snapped=recent_snapped,
+            observed_at=observed_at,
         )
         for market_key, market_props in props.items()
         for prop in market_props
@@ -1345,7 +1521,7 @@ def snapshot_todays_props(snapshot_kind: str = 'scheduled') -> int:
     return inserted
 
 
-def get_todays_games() -> list[dict]:
+def get_todays_games(*, raise_on_error: bool = False) -> list[dict]:
     """Combined view: ESPN live scores merged with Odds API lines + moneylines.
 
     Cached for _GAMES_CACHE_TTL seconds per ET date to avoid repeated API
@@ -1361,8 +1537,21 @@ def get_todays_games() -> list[dict]:
     today_et = datetime.now(APP_TIMEZONE).strftime("%Y%m%d")
 
     _t = _time.perf_counter()
-    games = fetch_espn_scoreboard(date_str=today_et)
+    try:
+        games = fetch_espn_scoreboard(date_str=today_et, raise_on_error=True)
+    except EspnClientError:
+        if raise_on_error:
+            raise
+        return []
     logger.info("PERF espn_scoreboard: games=%d elapsed=%.2fs", len(games), _time.perf_counter() - _t)
+
+    if not games:
+        # A verified empty slate needs no paid market lookup.
+        _GAMES_CACHE.clear()
+        _GAMES_CACHE[cache_date] = {
+            'games': [], 'expires_at': _time.monotonic() + _GAMES_CACHE_TTL,
+        }
+        return []
 
     _t = _time.perf_counter()
     totals, h2h, spreads = fetch_odds_combined()
@@ -1389,17 +1578,42 @@ def get_todays_games() -> list[dict]:
     return games
 
 
-def get_player_props(espn_id: str, games: Optional[list[dict]] = None) -> dict:
+def get_player_props(
+    espn_id: str, games: Optional[list[dict]] = None, *, use_cache: bool = False,
+) -> dict:
     """Get player props for a game identified by ESPN ID.
 
     Looks up the Odds API event ID via team-name matching, then fetches props.
+    Browser callers can reuse a same-day quote for at most 60 seconds. Empty
+    results are never cached or replaced by older quotes.
     """
     if games is None:
         games = get_todays_games()
 
     for game in games:
         if game["espn_id"] == espn_id:
-            return fetch_player_props_for_event(game.get("odds_event_id", ""))
+            event_id = game.get('odds_event_id', '')
+            cache_key = (et_date_str(), espn_id, event_id)
+            now = _time.monotonic()
+            if use_cache:
+                for key, entry in list(_PLAYER_PROPS_CACHE.items()):
+                    if key[0] != cache_key[0] or now >= entry['expires_at']:
+                        _PLAYER_PROPS_CACHE.pop(key, None)
+                cached = _PLAYER_PROPS_CACHE.get(cache_key)
+                if cached:
+                    current = _current_prop_payload(cached['props'])
+                    if current:
+                        return deepcopy(current)
+                    _PLAYER_PROPS_CACHE.pop(cache_key, None)
+            props = fetch_player_props_for_event(event_id)
+            if use_cache:
+                props = _current_prop_payload(props)
+            if use_cache and props:
+                _PLAYER_PROPS_CACHE[cache_key] = {
+                    'props': deepcopy(props),
+                    'expires_at': _time.monotonic() + _PLAYER_PROPS_CACHE_TTL,
+                }
+            return props
 
     return {}
 

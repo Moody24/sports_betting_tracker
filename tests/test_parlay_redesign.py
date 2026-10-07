@@ -168,7 +168,7 @@ class TestMovementCalc(BaseTestCase):
             'odds_event_id': 'ev123',
             'away': {'name': 'Lakers', 'abbr': 'LAL'},
             'home': {'name': 'Celtics', 'abbr': 'BOS'},
-            'start_time': '2026-03-08T20:00:00Z',
+            'status': 'STATUS_SCHEDULED', 'start_time': datetime.now(timezone.utc).isoformat(),
         }
         mock_prop = {
             'player_points': [{
@@ -179,6 +179,7 @@ class TestMovementCalc(BaseTestCase):
                 'books': {'fanduel': {'over_odds': -108, 'under_odds': -112}},
                 'best_over_book': 'fanduel',
                 'best_under_book': 'fanduel',
+                'source_last_update': datetime.now(timezone.utc).isoformat(),
             }]
         }
 
@@ -204,7 +205,7 @@ class TestMovementCalc(BaseTestCase):
             'odds_event_id': 'ev999',
             'away': {'name': 'Warriors', 'abbr': 'GSW'},
             'home': {'name': 'Nuggets', 'abbr': 'DEN'},
-            'start_time': '2026-03-08T22:00:00Z',
+            'status': 'STATUS_SCHEDULED', 'start_time': datetime.now(timezone.utc).isoformat(),
         }
         mock_prop = {
             'player_points': [{
@@ -215,6 +216,7 @@ class TestMovementCalc(BaseTestCase):
                 'books': {},
                 'best_over_book': '',
                 'best_under_book': '',
+                'source_last_update': datetime.now(timezone.utc).isoformat(),
             }]
         }
 
@@ -279,11 +281,18 @@ class TestSnapshotJob(BaseTestCase):
                 'over_odds': -108,
                 'under_odds': -112,
                 'books': {
-                    'fanduel': {'over_odds': -108, 'under_odds': -112},
-                    'draftkings': {'over_odds': -110, 'under_odds': -110},
+                    'fanduel': {
+                        'over_odds': -108, 'under_odds': -112,
+                        'last_update': datetime.now(timezone.utc).isoformat(),
+                    },
+                    'draftkings': {
+                        'over_odds': -110, 'under_odds': -110,
+                        'last_update': datetime.now(timezone.utc).isoformat(),
+                    },
                 },
                 'best_over_book': 'fanduel',
                 'best_under_book': 'draftkings',
+                'source_last_update': datetime.now(timezone.utc).isoformat(),
             }]
         }
 
@@ -339,6 +348,7 @@ class TestSnapshotJob(BaseTestCase):
                 },
                 'best_over_book': 'fanduel',
                 'best_under_book': 'fanduel',
+                'source_last_update': datetime.now(timezone.utc).isoformat(),
             }]
         }
 
@@ -428,7 +438,7 @@ class TestNewBetFormParlayTab(BaseTestCase):
             'odds_event_id': 'ev_test',
             'away': {'name': 'Lakers', 'abbr': 'LAL'},
             'home': {'name': 'Celtics', 'abbr': 'BOS'},
-            'start_time': '2026-03-08T20:00:00Z',
+            'status': 'STATUS_SCHEDULED', 'start_time': datetime.now(timezone.utc).isoformat(),
         }
         mock_prop = {
             'player_points': [{
@@ -442,6 +452,7 @@ class TestNewBetFormParlayTab(BaseTestCase):
                 },
                 'best_over_book': 'fanduel',
                 'best_under_book': 'draftkings',
+                'source_last_update': datetime.now(timezone.utc).isoformat(),
             }]
         }
         with patch('app.routes.nba_analysis.get_todays_games', return_value=[mock_game]), \
@@ -461,13 +472,16 @@ class TestNewBetFormParlayTab(BaseTestCase):
 
     def test_all_props_falls_back_to_upcoming_games_when_today_empty(self):
         self.register_and_login()
+        from app.utils.time_helpers import ET
+        start = datetime.now(ET) + timedelta(days=1)
         upcoming_game = {
             'espn_id': 'g_upcoming',
             'odds_event_id': 'ev_upcoming',
             'away': {'name': 'Knicks', 'abbr': 'NYK'},
             'home': {'name': 'Bulls', 'abbr': 'CHI'},
-            'match_date': '2026-03-09',
-            'start_time': '',
+            'status': 'STATUS_SCHEDULED',
+            'match_date': start.date().isoformat(),
+            'start_time': start.isoformat(),
         }
         upcoming_props = {
             'player_points': [{
@@ -480,6 +494,7 @@ class TestNewBetFormParlayTab(BaseTestCase):
                 },
                 'best_over_book': 'fanduel',
                 'best_under_book': 'fanduel',
+                'source_last_update': datetime.now(timezone.utc).isoformat(),
             }]
         }
         with patch('app.routes.nba_analysis.get_todays_games', return_value=[]), \
@@ -494,4 +509,4 @@ class TestNewBetFormParlayTab(BaseTestCase):
         self.assertEqual(data[0]['player'], 'Jalen Brunson')
         self.assertEqual(data[0]['team_a'], 'Knicks')
         self.assertEqual(data[0]['team_b'], 'Bulls')
-        self.assertEqual(data[0]['match_date'], '2026-03-09')
+        self.assertEqual(data[0]['match_date'], start.date().isoformat())

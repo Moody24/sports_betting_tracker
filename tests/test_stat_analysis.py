@@ -252,15 +252,18 @@ class TestStatAnalysisRoute(BaseTestCase):
 
     @patch('app.services.nba_service.get_todays_games')
     @patch('app.services.score_cache.get_todays_scores')
-    def test_parlay_cta_queues_and_redirects_to_parlay_tab(self, mock_scores, mock_games):
+    def test_parlay_cta_opens_verified_builder_without_queuing_research_quote(self, mock_scores, mock_games):
         mock_scores.return_value = self._mock_scores()
         mock_games.return_value = self._mock_games()
         self._login()
         resp = self.client.get('/nba/stat-analysis')
         self.assertEqual(resp.status_code, 200)
         body = resp.data.decode()
-        self.assertIn('addParlayLeg({', body)
+        self.assertNotIn('addParlayLeg({', body)
         self.assertIn("current_tab: 'parlay'", body)
+        self.assertIn("game_id: currentProp.game_id || ''", body)
+        self.assertIn("player_name: currentProp.player || ''", body)
+        self.assertIn("window.location.href = '/bets/new?' + qp.toString() + '#parlay'", body)
 
     def test_requires_login(self):
         resp = self.client.get('/nba/stat-analysis')
