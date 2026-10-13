@@ -162,7 +162,7 @@ test.describe('Visual Regression', () => {
   });
 
   test('registration validation errors remain visually stable', async ({ page }) => {
-    const username = `e2e_invalid_${Date.now().toString().slice(-8)}`;
+    const username = 'e2e_invalid_visual';
     await page.goto('/auth/register');
     await page.locator('#username').fill(username);
     await page.locator('#email').fill('not-an-email');
