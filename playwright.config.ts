@@ -53,6 +53,10 @@ export default defineConfig({
     },
     {
       name: 'chromium-mobile',
+      // Linux uses different font rasterization and occasional 1px page heights.
+      snapshotPathTemplate: process.platform === 'linux'
+        ? '{testDir}/{testFilePath}-snapshots/{arg}-{projectName}-linux{ext}'
+        : undefined,
       use: { ...devices['Pixel 7'], viewport: { width: 412, height: 915 } },
     },
   ],

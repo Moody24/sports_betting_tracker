@@ -65,7 +65,14 @@ jobs:
 
       - name: Run Playwright E2E and accessibility checks
         timeout-minutes: 30
-        run: npx playwright test
+        run: npx playwright test --update-snapshots
+
+      - name: Upload Linux visual baselines
+        if: always()
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4
+        with:
+          name: linux-visual-baselines
+          path: tests/e2e/visual.spec.ts-snapshots/*-linux.png
 
       - name: Upload Playwright report
         if: always()
