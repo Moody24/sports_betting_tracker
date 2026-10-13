@@ -139,6 +139,7 @@ class TestNBAService(BaseTestCase):
             "home_team": "Los Angeles Lakers",
             "away_team": "Boston Celtics",
             "bookmakers": [{
+                "last_update": datetime.now(timezone.utc).isoformat(),
                 "markets": [{
                     "key": "totals",
                     "outcomes": [
@@ -255,7 +256,7 @@ class TestNBALiveHelpers(BaseTestCase):
             'home': {'name': 'Lakers', 'abbr': 'LAL', 'score': 0, 'logo': ''},
             'away': {'name': 'Celtics', 'abbr': 'BOS', 'score': 0, 'logo': ''},
             'status': 'STATUS_SCHEDULED',
-            'start_time': '2026-06-25T19:30:00Z',
+            'start_time': datetime.now(timezone.utc).isoformat(),
             'over_under_line': 225.5,
             'moneyline_home': -150,
             'moneyline_away': 130,
@@ -337,7 +338,7 @@ class TestNBALiveHelpers(BaseTestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(set(response.get_json()), {'card-1', 'card-2'})
-        fetch_summary.assert_called_once_with('game-1', timeout=8)
+        fetch_summary.assert_called_once_with('game-1', timeout=3, attempts=1)
         self.assertEqual(resolve_progress.call_count, 2)
 
 
@@ -633,6 +634,7 @@ class TestNBAAnalysisRoutes(BaseTestCase):
                 'books': {},
                 'best_over_book': 'fanduel',
                 'best_under_book': 'draftkings',
+                'source_last_update': datetime.now(timezone.utc).isoformat(),
             }]
         }
         self.register_and_login()

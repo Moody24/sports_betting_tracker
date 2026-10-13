@@ -5,6 +5,7 @@ import logging
 import re
 import time
 from datetime import datetime, timedelta
+from threading import RLock
 
 from flask import render_template, redirect, url_for, flash, request, jsonify, current_app
 from flask_login import login_required, current_user
@@ -12,7 +13,12 @@ from flask_login import login_required, current_user
 from app import db
 from app.enums import Outcome
 from app.models import Bet, GameSnapshot
-from app.utils import safe_float
+from app.utils.request_validation import (
+    RequestValidationError,
+    validate_placement_request,
+    validate_progress_batch,
+    validate_progress_item,
+)
 from app.services.nba_service import (
     get_todays_games,
     fetch_upcoming_games,
@@ -45,6 +51,10 @@ _PROP_PROGRESS_CACHE_MAX = 2000
 # Raw ESPN summary cache: espn_id → {data, expires_at}
 _GAME_SUMMARY_CACHE: dict[str, dict] = {}
 _GAME_SUMMARY_TTL = 30
+_GAME_SUMMARY_CACHE_MAX = 512
+_GAME_SUMMARY_CACHE_LOCK = RLock()
+_PROGRESS_SUMMARY_TIMEOUT = 3
+_PROGRESS_BATCH_BUDGET = 12
 
 # Snapshot live-score write debounce: only commit live score updates once per
 # _SNAPSHOT_WRITE_TTL seconds per game.
@@ -130,17 +140,33 @@ def _prune_prop_progress_cache(now_monotonic: float) -> None:
     _PROP_PROGRESS_CACHE.update(dict(keep))
 
 
-def _get_game_summary(espn_id: str, now_monotonic: float) -> dict:
+def _prune_game_summary_cache(now_monotonic: float) -> None:
+    for key, cached in list(_GAME_SUMMARY_CACHE.items()):
+        if cached.get('expires_at', 0) <= now_monotonic:
+            _GAME_SUMMARY_CACHE.pop(key, None)
+
+
+def _get_game_summary(
+    espn_id: str, now_monotonic: float, *, timeout: float = _PROGRESS_SUMMARY_TIMEOUT,
+) -> dict:
     """Return cached ESPN summary JSON for *espn_id*, fetching if expired/absent."""
-    cached = _GAME_SUMMARY_CACHE.get(espn_id)
-    if cached and cached.get('expires_at', 0) > now_monotonic:
-        return cached['data']
+    with _GAME_SUMMARY_CACHE_LOCK:
+        _prune_game_summary_cache(now_monotonic)
+        cached = _GAME_SUMMARY_CACHE.get(espn_id)
+        if cached:
+            return cached['data']
     try:
-        data = fetch_summary_payload(espn_id, timeout=8)
+        data = fetch_summary_payload(espn_id, timeout=timeout, attempts=1)
     except EspnClientError:
         logger.warning("Live data fetch failed — returning empty result", exc_info=True)
         data = {}
-    _GAME_SUMMARY_CACHE[espn_id] = {'data': data, 'expires_at': now_monotonic + _GAME_SUMMARY_TTL}
+    with _GAME_SUMMARY_CACHE_LOCK:
+        _prune_game_summary_cache(now_monotonic)
+        if espn_id not in _GAME_SUMMARY_CACHE:
+            while len(_GAME_SUMMARY_CACHE) >= _GAME_SUMMARY_CACHE_MAX:
+                oldest = min(_GAME_SUMMARY_CACHE, key=lambda key: _GAME_SUMMARY_CACHE[key]['expires_at'])
+                _GAME_SUMMARY_CACHE.pop(oldest, None)
+        _GAME_SUMMARY_CACHE[espn_id] = {'data': data, 'expires_at': now_monotonic + _GAME_SUMMARY_TTL}
     return data
 
 
@@ -280,70 +306,59 @@ def nba_update_results():
 
 @login_required
 def nba_upcoming_games():
-    """Return today's + tomorrow's games as JSON for the bet builder picker."""
-    today_games = get_todays_games()
-    tomorrow_games = fetch_upcoming_games()
-
-    results = []
-    for g in today_games:
-        results.append({
-            'label': f"{g['away']['name']} @ {g['home']['name']}",
-            'team_a': g['away']['name'],
-            'team_b': g['home']['name'],
-            'match_date': g['start_time'][:10] if g.get('start_time') else '',
-            'game_id': g['espn_id'],
-            'over_under_line': g.get('over_under_line'),
-            'moneyline_away': g.get('moneyline_away'),
-            'moneyline_home': g.get('moneyline_home'),
-        })
-    for g in tomorrow_games:
-        results.append({
-            'label': f"{g['away']['name']} @ {g['home']['name']} (Tomorrow)",
-            'team_a': g['away']['name'],
-            'team_b': g['home']['name'],
-            'match_date': g.get('match_date', ''),
-            'game_id': g['espn_id'],
-            'over_under_line': g.get('over_under_line'),
-            'moneyline_away': g.get('moneyline_away'),
-            'moneyline_home': g.get('moneyline_home'),
-        })
-
-    return jsonify(results)
+    """Return verified active events; free score-only games have no market link."""
+    from app.services.basketball_feed import get_feed_snapshot
+    from app.services.game_picker import game_picker_options
+    try:
+        feed = get_feed_snapshot()
+    except Exception as exc:
+        logger.warning('Game picker feed unavailable (%s)', type(exc).__name__)
+        feed = {'state': 'unavailable'}
+    results = game_picker_options(get_todays_games(), fetch_upcoming_games(), feed)
+    response = jsonify(results)
+    response.headers['X-Game-Data-State'] = 'current' if results else feed.get('state', 'unavailable')
+    return response
 
 
 @login_required
 def nba_props(espn_id):
-    """Return player props for a game as JSON and persist them to snapshot."""
+    """Return current props for active games, or the archive for a final game."""
     if not re.match(r'^[A-Za-z0-9_-]+$', str(espn_id)):
         return jsonify({"success": False, "message": "Invalid espn_id format"}), 400
     today = datetime.now(NBA_APP_TIMEZONE).date()
     snap = GameSnapshot.query.filter_by(espn_id=espn_id, game_date=today).first()
-    if snap and snap.props_json:
+    if snap and snap.is_final and snap.props_json:
         try:
-            return jsonify(json.loads(snap.props_json))
+            response = jsonify(json.loads(snap.props_json))
+            response.headers['X-Prop-Data-State'] = 'archived'
+            return response
         except (TypeError, ValueError):
             pass
 
-    props = get_player_props(espn_id)
+    props = get_player_props(espn_id, use_cache=True)
 
     if snap and snap.props_json is None and props:
         snap.props_json = json.dumps(props)
         db.session.commit()
 
-    return jsonify(props)
+    response = jsonify(props)
+    response.headers['X-Prop-Data-State'] = 'current' if props else 'unavailable'
+    return response
 
 
 @login_required
 def nba_prop_progress(espn_id):
-    if not re.match(r'^[A-Za-z0-9_-]+$', str(espn_id)):
-        return jsonify({"success": False, "message": "Invalid espn_id format"}), 400
-    player_name = (request.args.get('player') or '').strip()
-    prop_type = (request.args.get('prop_type') or '').strip()
-    if not player_name or not prop_type:
-        return jsonify({'ok': False, 'error': 'player and prop_type are required'}), 400
-
-    line = safe_float(request.args.get('line'), 0.0)
-    bet_type = (request.args.get('bet_type') or '').strip().lower()
+    try:
+        item = validate_progress_item({
+            'card_id': 'single', 'espn_id': espn_id,
+            'player': request.args.get('player'),
+            'prop_type': request.args.get('prop_type'),
+            'line': request.args.get('line'),
+            'bet_type': request.args.get('bet_type'),
+        })
+    except RequestValidationError as exc:
+        return jsonify({'ok': False, 'error': str(exc)}), 400
+    _, player_name, prop_type, line, bet_type = _progress_item_fields(item)
 
     use_cache = not current_app.testing
     cache_key = _progress_cache_key(
@@ -362,13 +377,7 @@ def nba_prop_progress(espn_id):
 
     summary_data = _fetch_progress_summary(espn_id, now_monotonic, use_cache)
 
-    if not summary_data:
-        payload = {'ok': False, 'status': 'game_not_started', 'error': 'No boxscore data available yet'}
-        if use_cache:
-            _store_progress_payload(cache_key, payload, now_monotonic)
-        return jsonify(payload), 200
-
-    payload = _resolve_card_progress(espn_id, player_name, prop_type, line, bet_type, summary_data)
+    payload = _card_progress_payload(espn_id, player_name, prop_type, line, bet_type, summary_data)
     if use_cache:
         _store_progress_payload(cache_key, payload, now_monotonic)
 
@@ -380,11 +389,7 @@ def nba_prop_progress(espn_id):
 
 def _progress_item_fields(item: dict) -> tuple[str, str, str, float, str]:
     return (
-        str(item.get('card_id') or ''),
-        (item.get('player') or '').strip(),
-        (item.get('prop_type') or '').strip(),
-        safe_float(item.get('line'), 0.0),
-        (item.get('bet_type') or '').strip().lower(),
+        item['card_id'], item['player'], item['prop_type'], item['line'], item['bet_type'],
     )
 
 
@@ -423,14 +428,29 @@ def _fetch_progress_summary(
     espn_id: str,
     now_monotonic: float,
     use_cache: bool,
+    *,
+    timeout: float = _PROGRESS_SUMMARY_TIMEOUT,
 ) -> dict:
     if use_cache:
-        return _get_game_summary(espn_id, now_monotonic)
+        return _get_game_summary(espn_id, now_monotonic, timeout=timeout)
     try:
-        return fetch_summary_payload(espn_id, timeout=8)
+        return fetch_summary_payload(espn_id, timeout=timeout, attempts=1)
     except EspnClientError:
         logger.warning('Summary fetch failed — returning empty', exc_info=True)
         return {}
+
+
+def _card_progress_payload(espn_id, player_name, prop_type, line, bet_type, summary_data):
+    payload = (
+        _resolve_card_progress(espn_id, player_name, prop_type, line, bet_type, summary_data)
+        if summary_data else {
+            'ok': False, 'status': 'game_not_started',
+            'error': 'No boxscore data available yet',
+        }
+    )
+    if payload.get('status') == 'game_not_started':
+        return {**payload, 'retryable': True}
+    return payload
 
 
 def _batch_progress_for_game(
@@ -439,6 +459,7 @@ def _batch_progress_for_game(
     *,
     use_cache: bool,
     now_monotonic: float,
+    deadline: float,
 ) -> dict[str, dict]:
     results = {}
     summary_data = None
@@ -460,26 +481,21 @@ def _batch_progress_for_game(
             results[card_id] = cached
             continue
         if summary_data is None:
+            remaining = deadline - time.monotonic()
+            if remaining < 0.1:
+                results[card_id] = {
+                    'ok': False, 'status': 'progress_deferred', 'retryable': True,
+                    'error': 'Live update deferred until the next refresh',
+                }
+                continue
             summary_data = _fetch_progress_summary(
                 espn_id,
                 now_monotonic,
                 use_cache,
+                timeout=min(_PROGRESS_SUMMARY_TIMEOUT, remaining),
             )
-        payload = (
-            _resolve_card_progress(
-                espn_id,
-                player_name,
-                prop_type,
-                line,
-                bet_type,
-                summary_data,
-            )
-            if summary_data
-            else {
-                'ok': False,
-                'status': 'game_not_started',
-                'error': 'No boxscore data available yet',
-            }
+        payload = _card_progress_payload(
+            espn_id, player_name, prop_type, line, bet_type, summary_data,
         )
         results[card_id] = payload
         if use_cache:
@@ -490,20 +506,20 @@ def _batch_progress_for_game(
 @login_required
 def nba_prop_progress_batch():
     """Batch live-progress endpoint — resolves N cards with one ESPN call per unique game."""
-    body = request.get_json(silent=True) or []
-    if not isinstance(body, list) or not body:
-        return jsonify({'ok': False, 'error': 'Expected non-empty JSON array'}), 400
+    try:
+        body = validate_progress_batch(request.get_json(silent=True))
+    except RequestValidationError as exc:
+        return jsonify({'ok': False, 'error': str(exc)}), 400
 
     use_cache = not current_app.testing
     now_monotonic = time.monotonic()
+    deadline = now_monotonic + _PROGRESS_BATCH_BUDGET
     if use_cache:
         _prune_prop_progress_cache(now_monotonic)
 
     by_game: dict[str, list] = {}
     for item in body:
-        eid = str(item.get('espn_id') or '')
-        if eid:
-            by_game.setdefault(eid, []).append(item)
+        by_game.setdefault(item['espn_id'], []).append(item)
 
     results = {}
     for espn_id, items in by_game.items():
@@ -512,6 +528,7 @@ def nba_prop_progress_batch():
             items,
             use_cache=use_cache,
             now_monotonic=now_monotonic,
+            deadline=deadline,
         ))
 
     return jsonify(results)
@@ -519,38 +536,51 @@ def nba_prop_progress_batch():
 
 @login_required
 def nba_place_bets():
-    """Place one or more prop bets from the bet slip."""
+    """Record verified guided selections or explicit manual entries atomically."""
+    from app.services.guided_quote import GuidedQuoteError, validate_guided_legs
+    from app.services.recording_idempotency import (
+        RecordingConflict, begin_recording, finish_recording,
+    )
+
     data = request.get_json(silent=True)
-    if not data:
-        return jsonify({"success": False, "message": "Invalid request"}), 400
-
-    legs = data.get("legs", [])
-    is_parlay = bool(data.get("is_parlay", False))
-
-    if not legs:
-        return jsonify({"success": False, "message": "No selections provided"}), 400
+    try:
+        validate_placement_request(data)
+    except RequestValidationError as exc:
+        return jsonify(success=False, message=str(exc), error=str(exc)), 400
 
     try:
+        receipt, replay = begin_recording(current_user.id, data.get('request_id'), data)
+        if replay is not None:
+            return jsonify(replay)
+        legs = data['legs']
+        validate_guided_legs(legs, current_user.id, require_evidence=bool(data.get('request_id')))
+        is_parlay = bool(data.get('is_parlay', False))
         stake = parse_stake(data.get('stake'))
         rr_size = parse_round_robin_size(data.get('round_robin'))
         created = build_nba_bets(
-            user_id=current_user.id,
-            legs=legs,
-            stake=stake,
-            units=parse_optional_units(data.get('units')),
-            is_parlay=is_parlay,
+            user_id=current_user.id, legs=legs, stake=stake,
+            units=parse_optional_units(data.get('units')), is_parlay=is_parlay,
             bonus_multiplier=parse_bonus_multiplier(data.get('bonus_multiplier')),
             round_robin_size=rr_size,
         )
+        persist_new_bets(
+            created, round_robin_size=rr_size, commit=False,
+            capture_context=not data.get('request_id') and not any(leg.get('manual_entry') for leg in legs),
+        )
+        if is_parlay:
+            msg = f"Parlay with {len(created)} leg(s) recorded — ${stake:.2f} wagered!"
+        else:
+            msg = f"{len(created)} bet(s) recorded — ${stake * len(created):.2f} total wagered!"
+        response = {'success': True, 'message': msg, 'count': len(created)}
+        finish_recording(receipt, response)
+        db.session.commit()
+        return jsonify(response)
+    except (GuidedQuoteError, RecordingConflict) as exc:
+        db.session.rollback()
+        return jsonify(success=False, code=exc.code, error=str(exc), message=str(exc)), 409
     except BetPlacementError as exc:
         db.session.rollback()
-        return jsonify({"success": False, "message": str(exc)}), 400
-
-    persist_new_bets(created, round_robin_size=rr_size)
-
-    if is_parlay:
-        msg = f"Parlay with {len(created)} leg(s) placed — ${stake:.2f} wagered!"
-    else:
-        msg = f"{len(created)} bet(s) placed — ${stake * len(created):.2f} total wagered!"
-
-    return jsonify({"success": True, "message": msg, "count": len(created)})
+        return jsonify(success=False, error=str(exc), message=str(exc)), 400
+    except Exception:
+        db.session.rollback()
+        raise

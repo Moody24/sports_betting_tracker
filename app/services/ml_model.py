@@ -11,13 +11,15 @@ model is available or when data is insufficient.
 import json
 import logging
 import os
-from datetime import datetime, timezone, date as date_type
+from datetime import datetime, timezone
 
 from app import db
 from app.config_display import PROP_STAT_KEY
-from app.models import ModelMetadata, PlayerGameLog, TeamDefenseSnapshot
+from app.models import HistoricalGameLog, ModelMetadata, PlayerGameLog, TeamDefenseSnapshot
 from app.services.model_storage import materialize_model_artifact, persist_model_artifact
-from app.services.ml_feature_builder import build_ml_features_from_history, build_team_game_aggregates
+from app.services.ml_feature_builder import (
+    build_ml_features_from_history, build_team_game_aggregates, extract_opp_abbr,
+)
 from app.utils.time_helpers import ET
 
 logger = logging.getLogger(__name__)
@@ -27,6 +29,16 @@ MODEL_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'ml_models'
 
 # Stat types we build models for
 STAT_TYPES = list(PROP_STAT_KEY.keys())
+MAX_PROJECTION_MAE = {
+    'player_points': 3.5,
+    'player_rebounds': 2.0,
+    'player_assists': 2.0,
+    'player_threes': 1.5,
+    'player_steals': 1.0,
+    'player_blocks': 1.0,
+}
+TRAINING_CONTEXT_VERSION = 'prior_games_no_closing_total_v2'
+MIN_VALIDATION_SAMPLES = 100
 
 # Re-export from centralized config
 STAT_KEY_MAP = PROP_STAT_KEY
@@ -51,12 +63,7 @@ def _ensure_model_dir():
 
 
 def build_defense_lookup() -> dict:
-    """Pre-fetch all team defense snapshots into a lookup dict keyed by ABBR.
-
-    Uses the most recent snapshot per team so training rows reference current
-    season defensive ratings rather than stale ones.
-    Returns {TEAM_ABBR_UPPER: {def_rating, pace, opp_pts_pg, …}}.
-    """
+    """Return the latest team snapshots for live inference."""
     from app.models import TeamDefenseSnapshot
 
     lookup: dict = {}
@@ -188,10 +195,7 @@ def _build_game_total_lookup() -> dict:
 
 def _build_training_rows(stat_type: str, min_train_samples: int | None = None):
     """Build dated training rows for walk-forward validation."""
-    from app.services.historical_training_source import (
-        load_historical_game_total_lookup,
-        load_historical_training_logs,
-    )
+    from app.services.historical_training_source import load_historical_training_logs
 
     stat_key = STAT_KEY_MAP.get(stat_type, 'pts')
 
@@ -226,13 +230,9 @@ def _build_training_rows(stat_type: str, min_train_samples: int | None = None):
 
     team_totals, team_counts = build_team_game_aggregates(all_logs)
 
-    # Phase 1: pre-fetch context lookups once (not per row)
-    defense_lookup = build_defense_lookup()
-    game_total_lookup = (
-        load_historical_game_total_lookup()
-        if using_historical_source
-        else _build_game_total_lookup()
-    )
+    from app.services.historical_defense import rolling_defense_by_game
+
+    defense_by_game = rolling_defense_by_game(all_logs)
 
     rows = []
 
@@ -246,13 +246,9 @@ def _build_training_rows(stat_type: str, min_train_samples: int | None = None):
             current = logs[i]
             target = float(getattr(current, stat_key, 0.0) or 0.0)
 
-            # Phase 1: resolve per-row context
-            if using_historical_source:
-                game_total_key = str(getattr(current, '_historical_game_id', '') or '')
-            else:
-                team_abbr = (getattr(current, 'team_abbr', '') or '').strip().upper()
-                game_total_key = (current.game_date, team_abbr)
-            game_total = game_total_lookup.get(game_total_key, 0.0)
+            opponent = extract_opp_abbr(current.matchup or '')
+            defense = defense_by_game.get((current.game_date, opponent))
+            defense_lookup = {opponent: defense} if defense else None
 
             features = build_ml_features_from_history(
                 prior_logs=prior,
@@ -262,7 +258,7 @@ def _build_training_rows(stat_type: str, min_train_samples: int | None = None):
                 team_counts=team_counts,
                 current_game_date=current.game_date,
                 current_matchup=current.matchup or '',
-                game_total_line=game_total,
+                game_total_line=0.0,
                 defense_lookup=defense_lookup,
             )
             rows.append((current.game_date, str(pid), features, target))
@@ -311,14 +307,19 @@ def _projection_cv_metrics(X, y, params: dict, weights, model_type,
     for train_indices, validation_indices in splitter_type(
         n_splits=3,
     ).split(X):
-        model = model_type(**params)
-        fit_kwargs = {
-            'eval_set': [(X[validation_indices], y[validation_indices])],
-            'verbose': False,
-        }
+        early_count = max(1, int(len(train_indices) * 0.1)) if len(train_indices) >= 20 else 0
+        fit_indices = train_indices[:-early_count] if early_count else train_indices
+        early_indices = train_indices[-early_count:] if early_count else []
+        config = dict(params)
+        if not early_count:
+            config.pop('early_stopping_rounds', None)
+        model = model_type(**config)
+        fit_kwargs = {'verbose': False}
+        if early_count:
+            fit_kwargs['eval_set'] = [(X[early_indices], y[early_indices])]
         if weights is not None:
-            fit_kwargs['sample_weight'] = weights[train_indices]
-        model.fit(X[train_indices], y[train_indices], **fit_kwargs)
+            fit_kwargs['sample_weight'] = weights[fit_indices]
+        model.fit(X[fit_indices], y[fit_indices], **fit_kwargs)
         predictions = model.predict(X[validation_indices])
         maes.append(mae_metric(y[validation_indices], predictions))
     return float(np_module.mean(maes)), float(np_module.std(maes))
@@ -352,6 +353,35 @@ def _projection_validation_indices(training_rows: list) -> tuple:
             'index_fallback', None)
 
 
+def _projection_early_stopping_indices(training_rows: list, train_indices: list) -> tuple:
+    if len(train_indices) < 20:
+        return train_indices, []
+    dates = sorted({training_rows[index][0] for index in train_indices
+                    if training_rows[index][0] is not None})
+    if len(dates) < 3:
+        return train_indices, []
+    cutoff = dates[max(0, int(len(dates) * 0.9) - 1)]
+    fit = [index for index in train_indices if training_rows[index][0] <= cutoff]
+    early = [index for index in train_indices if training_rows[index][0] > cutoff]
+    return (fit, early) if fit and early else (train_indices, [])
+
+
+def _projection_qualifies(stat_type: str, val_mae: float | None,
+                         metadata: dict) -> bool:
+    baseline_mae = metadata.get('baseline_mae')
+    val_samples = metadata.get('val_samples')
+    limit = MAX_PROJECTION_MAE.get(stat_type)
+    return (
+        metadata.get('training_context') == TRAINING_CONTEXT_VERSION
+        and metadata.get('split_method') == 'date_cutoff'
+        and isinstance(val_samples, int) and val_samples >= MIN_VALIDATION_SAMPLES
+        and isinstance(baseline_mae, (int, float))
+        and val_mae is not None
+        and (limit is None or val_mae <= limit)
+        and val_mae < baseline_mae
+    )
+
+
 def train_model(stat_type: str) -> dict:
     """Train an XGBoost model for a specific stat type.
 
@@ -367,6 +397,7 @@ def train_model(stat_type: str) -> dict:
         return {'error': 'Missing ML dependencies'}
 
     player_game_log_rows = PlayerGameLog.query.count()
+    historical_game_log_rows = HistoricalGameLog.query.filter_by(sport='nba').count()
     training_rows = _build_training_rows(stat_type)
     if not training_rows:
         return {'error': 'Insufficient training data', 'stat_type': stat_type}
@@ -406,52 +437,81 @@ def train_model(stat_type: str) -> dict:
     if not train_idx or not val_idx:
         return {'error': 'Insufficient validation data', 'stat_type': stat_type}
 
-    X_train, X_val = X[train_idx], X[val_idx]
-    y_train, y_val = y[train_idx], y[val_idx]
+    X_val, y_val = X[val_idx], y[val_idx]
 
-    model = XGBRegressor(**xgb_params)
+    fit_idx, early_idx = _projection_early_stopping_indices(training_rows, train_idx)
+    config = dict(xgb_params)
+    if not early_idx:
+        config.pop('early_stopping_rounds', None)
+    model = XGBRegressor(**config)
 
-    fit_kwargs = dict(
-        eval_set=[(X_val, y_val)],
-        verbose=False,
-    )
+    fit_kwargs = {'verbose': False}
+    if early_idx:
+        fit_kwargs['eval_set'] = [(X[early_idx], y[early_idx])]
     if weights_np is not None:
-        fit_kwargs['sample_weight'] = weights_np[train_idx]
+        fit_kwargs['sample_weight'] = weights_np[fit_idx]
 
     model.fit(
-        X_train, y_train,
+        X[fit_idx], y[fit_idx],
         **fit_kwargs,
     )
 
     # Evaluate
     y_pred = model.predict(X_val)
     mae = mean_absolute_error(y_val, y_pred)
+    baseline_mae = mean_absolute_error(
+        y_val,
+        X_val[:, feature_names.index('avg_stat_last_5')],
+    )
     from app.services.model_diagnostics import regression_summary
     diagnostic_metrics = regression_summary(
-        y_train, model.predict(X_train), y_val, y_pred,
+        y[fit_idx], model.predict(X[fit_idx]), y_val, y_pred,
     )
 
     # Save model
     _ensure_model_dir()
-    today = date_type.today().isoformat()
-    filename = f"projection_{stat_type}_{today}.json"
+    run_stamp = datetime.now(ET).strftime('%Y%m%dT%H%M%S%f')
+    filename = f"projection_{stat_type}_{run_stamp}.json"
     filepath = os.path.join(MODEL_DIR, filename)
     model.save_model(filepath)
     artifact_path = persist_model_artifact(filepath, filename)
 
     # Store metadata
-    version = f"{stat_type}_{today}"
-    # Reconnect before DB writes — training can take 5-10 min and Neon/serverless
-    # Postgres drops idle SSL connections; remove the stale connection from the pool.
+    version = f"{stat_type}_{run_stamp}"
     try:
+        engine = db.engine
+        is_memory_sqlite = (
+            engine.dialect.name == 'sqlite'
+            and engine.url.query.get('mode') == 'memory'
+        )
         db.session.remove()
-        db.engine.dispose()
+        if not is_memory_sqlite:
+            engine.dispose()
     except Exception:
         logger.warning("DB pool dispose failed before post-training write", exc_info=True)
-    # Deactivate previous models for this stat type
-    ModelMetadata.query.filter_by(
-        model_name=f"projection_{stat_type}", is_active=True
-    ).update({'is_active': False})
+    metadata = {
+        'feature_names': feature_names,
+        'val_samples': len(X_val),
+        'baseline_mae': round(baseline_mae, 3),
+        'training_context': TRAINING_CONTEXT_VERSION,
+        'train_samples': len(fit_idx),
+        'early_stopping_samples': len(early_idx),
+        'player_game_log_rows': player_game_log_rows,
+        'historical_game_log_rows': historical_game_log_rows,
+        'split_method': split_method,
+        'cutoff_date': cutoff_date.isoformat() if cutoff_date else None,
+        'cv_mean_mae': round(cv_mean_mae, 3),
+        'cv_std_mae': round(cv_std_mae, 3),
+        'diagnostics': diagnostic_metrics,
+        'training_objective': xgb_params.get('objective', 'reg:squarederror'),
+        'recency_weighted': bool(weights_np is not None),
+        'recency_boost': recency_boost,
+    }
+    promoted = _projection_qualifies(stat_type, mae, metadata)
+    if promoted:
+        ModelMetadata.query.filter_by(
+            model_name=f"projection_{stat_type}", is_active=True
+        ).update({'is_active': False})
 
     meta = ModelMetadata(
         model_name=f"projection_{stat_type}",
@@ -459,40 +519,28 @@ def train_model(stat_type: str) -> dict:
         version=version,
         file_path=artifact_path,
         training_date=datetime.now(timezone.utc),
-        training_samples=len(X_train),
+        training_samples=len(fit_idx),
         val_mae=round(mae, 3),
-        is_active=True,
-        metadata_json=json.dumps({
-            'feature_names': feature_names,
-            'val_samples': len(X_val),
-            'train_samples': len(X_train),
-            'player_game_log_rows': player_game_log_rows,
-            'split_method': split_method,
-            'cutoff_date': cutoff_date.isoformat() if cutoff_date else None,
-            'cv_mean_mae': round(cv_mean_mae, 3),
-            'cv_std_mae': round(cv_std_mae, 3),
-            'diagnostics': diagnostic_metrics,
-            'training_objective': xgb_params.get('objective', 'reg:squarederror'),
-            'recency_weighted': bool(weights_np is not None),
-            'recency_boost': recency_boost,
-        }),
+        is_active=promoted,
+        metadata_json=json.dumps(metadata),
     )
     db.session.add(meta)
     db.session.commit()
 
     logger.info(
         "Trained %s model: MAE=%.3f, %d train / %d val samples",
-        stat_type, mae, len(X_train), len(X_val),
+        stat_type, mae, len(fit_idx), len(X_val),
     )
 
     return {
         'stat_type': stat_type,
         'mae': round(mae, 3),
-        'train_samples': len(X_train),
+        'train_samples': len(fit_idx),
         'val_samples': len(X_val),
         'train_mae': diagnostic_metrics['train_mae'],
         'likely_underfit': diagnostic_metrics['likely_underfit'],
         'model_path': artifact_path,
+        'promoted': promoted,
     }
 
 
@@ -513,6 +561,15 @@ def load_active_model(stat_type: str):
 
     if not meta:
         return None, None
+    try:
+        metadata = json.loads(meta.metadata_json or '{}')
+    except (ValueError, TypeError):
+        metadata = {}
+    if not isinstance(metadata, dict):
+        metadata = {}
+    if not _projection_qualifies(stat_type, meta.val_mae, metadata):
+        logger.warning('Holding %s projection: validation gate not met', stat_type)
+        return None, None
     local_model_path = materialize_model_artifact(meta.file_path)
     if not local_model_path:
         return None, None
@@ -520,15 +577,7 @@ def load_active_model(stat_type: str):
     model = XGBRegressor()
     model.load_model(local_model_path)
 
-    feature_names = None
-    if meta.metadata_json:
-        try:
-            md = json.loads(meta.metadata_json)
-            feature_names = md.get('feature_names')
-        except (ValueError, TypeError):
-            pass
-
-    return model, feature_names
+    return model, metadata.get('feature_names')
 
 
 def predict_stat(stat_type: str, features: dict) -> float:

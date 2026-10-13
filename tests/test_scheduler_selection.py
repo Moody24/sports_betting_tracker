@@ -24,9 +24,9 @@ class SchedulerSelectionTests(unittest.TestCase):
             {'player': f'Player {index}', 'game_id': f'game-{index}', 'edge': 0.12}
             for index in range(1, 7)
         ]
-        with patch('app.services.scheduler.AUTO_PICK_MIN_EDGE_2LEG', 0.05), \
-                patch('app.services.scheduler.AUTO_PICK_MIN_EDGE_3LEG', 0.08), \
-                patch('app.services.scheduler.AUTO_PICK_MAX_TOTAL', 6):
+        with patch('app.services.auto_pick_service.AUTO_PICK_MIN_EDGE_2LEG', 0.05), \
+                patch('app.services.auto_pick_service.AUTO_PICK_MIN_EDGE_3LEG', 0.08), \
+                patch('app.services.auto_pick_service.AUTO_PICK_MAX_TOTAL', 6):
             groups = _build_parlay_groups(plays, [], _FakeBet)
 
         flattened = [play for _, group in groups for play in group]

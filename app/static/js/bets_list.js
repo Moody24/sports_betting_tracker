@@ -48,22 +48,26 @@
     const stateEl = card.querySelector('[data-live-state]');
 
     if (!data.ok) {
+      const retryable = data.retryable === true || data.status === 'game_not_started';
       if (trendEl) {
         // The tag is a closed vocabulary of short labels, so it gets a fixed
         // one. The server's reason can be a whole sentence ("Player not found
         // in boxscore for ...") and putting that inside a nowrap pill pushed
         // the document sideways at 320px. It goes to its own wrapping line.
         trendEl.className = `tag ${TONE.neutral.tag}`;
-        trendEl.textContent = 'Unavailable';
+        trendEl.textContent = retryable ? 'Retrying' : 'Unavailable';
       }
+      if (retryable && statusEl) statusEl.textContent = 'Live update delayed; retrying';
       const errEl = card.querySelector('[data-live-error]');
       if (errEl && data.error) {
         errEl.textContent = data.error;
         errEl.removeAttribute('hidden');
       }
-      return false;
+      return retryable;
     }
 
+    const errEl = card.querySelector('[data-live-error]');
+    if (errEl) errEl.setAttribute('hidden', '');
     // Reveal detail sections once real data arrives
     card.querySelectorAll('[data-live-details],[data-live-details-bar],[data-live-details-meta]').forEach(function (el) { el.removeAttribute('hidden'); });
 
@@ -144,6 +148,7 @@
   function buildBatchDescriptors(cards) {
     return cards
       .filter((c) => c.dataset.pollingStopped !== '1')
+      .sort((a, b) => Number(b.dataset.progressDeferred === '1') - Number(a.dataset.progressDeferred === '1'))
       .map((c) => {
         const url = c.dataset.url || '';
         const match = url.match(/\/nba\/prop-progress\/([^?]+)/);
@@ -161,34 +166,70 @@
       .filter((d) => d.espn_id && d.player && d.prop_type);
   }
 
-  function pollBatch(cards) {
-    const descriptors = buildBatchDescriptors(cards);
-    if (!descriptors.length) return;
+  function progressBatches(descriptors) {
+    // Keep aligned with app/utils/request_validation.py.
+    const maxItems = 100;
+    const maxGames = 15;
+    const batches = [];
+    let batch = [];
+    let games = new Set();
+    descriptors.forEach((descriptor) => {
+      if (batch.length >= maxItems || (!games.has(descriptor.espn_id) && games.size >= maxGames)) {
+        batches.push(batch);
+        batch = [];
+        games = new Set();
+      }
+      batch.push(descriptor);
+      games.add(descriptor.espn_id);
+    });
+    if (batch.length) batches.push(batch);
+    return batches;
+  }
 
-    fetch('/nba/prop-progress/batch', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF_TOKEN },
-      body: JSON.stringify(descriptors),
-    })
-      .then((r) => r.json())
-      .then((results) => {
-        cards.forEach((card) => {
-          if (card.dataset.pollingStopped === '1') return;
-          const key = card.dataset.cardId || card.dataset.url || '';
-          const data = results[key];
-          if (!data) return;
-          const shouldContinue = applyProgressCard(card, data);
-          if (!shouldContinue) {
-            card.dataset.pollingStopped = '1';
-          }
+  async function pollBatch(cards) {
+    const descriptors = buildBatchDescriptors(cards);
+    if (!descriptors.length) return true;
+    const results = Object.create(null);
+    let failed = false;
+
+    try {
+      // Finish one request before starting the next, including retries.
+      for (const batch of progressBatches(descriptors)) {
+        const response = await fetch('/nba/prop-progress/batch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF_TOKEN },
+          body: JSON.stringify(batch),
         });
-      })
-      .catch(() => {
-        cards.forEach((card) => {
-          const statusEl = card.querySelector('[data-live-status]');
-          if (statusEl) statusEl.textContent = 'Live update failed';
-        });
-      });
+        if (!response.ok) throw new Error('Live update request failed');
+        const payload = await response.json();
+        if (!payload || Array.isArray(payload) || typeof payload !== 'object' || payload.ok === false) {
+          throw new Error('Invalid live update response');
+        }
+        Object.assign(results, payload);
+        if (Object.values(payload).some((data) => data.retryable === true || data.status === 'game_not_started')) {
+          failed = true;
+          break;
+        }
+      }
+    } catch (_) {
+      failed = true;
+    }
+
+    // Apply one logical refresh; successful earlier chunks remain useful if
+    // a later request failed, while unresolved cards show a retryable error.
+    cards.forEach((card) => {
+      if (card.dataset.pollingStopped === '1') return;
+      const data = results[card.dataset.cardId];
+      if (data) {
+        card.dataset.progressDeferred = data.status === 'progress_deferred' ? '1' : '0';
+        if (!applyProgressCard(card, data)) card.dataset.pollingStopped = '1';
+      } else if (failed) {
+        card.dataset.progressDeferred = '1';
+        const statusEl = card.querySelector('[data-live-status]');
+        if (statusEl) statusEl.textContent = 'Live update failed';
+      }
+    });
+    return !failed;
   }
 
   function initLiveProgress() {
@@ -196,25 +237,22 @@
     if (!cards.length) return;
 
     // Assign stable card IDs so the batch response can be matched back
+    const cardIds = new Set();
     cards.forEach((card, i) => {
-      if (!card.dataset.cardId) {
-        card.dataset.cardId = card.dataset.url || String(i);
-      }
+      let cardId = card.dataset.cardId || `live-card-${i}`;
+      while (cardIds.has(cardId)) cardId += `-${i}`;
+      card.dataset.cardId = cardId;
+      cardIds.add(cardId);
     });
 
-    pollBatch(cards);
-    const _pollInterval = setInterval(() => pollBatch(cards), 30000);
-    // Stop polling once all tracked cards report a final game state
-    function _checkAllFinal() {
-      const allFinal = cards.every(
-        (card) => card.dataset.gameState === 'final' || card.dataset.gameState === 'STATUS_FINAL'
-      );
-      if (allFinal) {
-        clearInterval(_pollInterval);
-      }
+    let failures = 0;
+    async function refresh() {
+      const succeeded = await pollBatch(cards);
+      failures = succeeded ? 0 : Math.min(failures + 1, 4);
+      const hasActiveCards = cards.some((card) => card.dataset.pollingStopped !== '1');
+      if (hasActiveCards) setTimeout(refresh, Math.min(30000 * (2 ** failures), 300000));
     }
-    const _finalCheckInterval = setInterval(_checkAllFinal, 30000);
-    void _finalCheckInterval; // retained for GC clarity
+    refresh();
   }
 
   document.querySelectorAll('.parlay-toggle-btn').forEach(function (btn) {

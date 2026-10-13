@@ -121,6 +121,17 @@ class TestSecurity(BaseTestCase):
             )
         )
 
+    def test_production_rejects_insecure_cookie_override(self):
+        for setting in ('SESSION_COOKIE_SECURE', 'REMEMBER_COOKIE_SECURE'):
+            with self.subTest(setting=setting), patch.dict(os.environ, {
+                'SECRET_KEY': 'production-test-secret',
+                'FLASK_ENV': 'production',
+                'PUBLIC_BASE_URL': 'https://edge.example',
+                setting: 'false',
+            }):
+                with self.assertRaisesRegex(RuntimeError, setting):
+                    create_app(testing=True)
+
     def test_user_data_isolation(self):
         """User A's bets are not visible to user B."""
         user1_id = self.register_and_login("user1", "u1@example.com")
@@ -138,6 +149,15 @@ class TestSecurity(BaseTestCase):
         )
         resp = self.client.get("/bets")
         self.assertNotIn(b"SecretTeamX", resp.data)
+
+    def test_private_ledger_and_auth_pages_are_not_cached(self):
+        self.assertIn('no-store', self.client.get('/auth/login').headers['Cache-Control'])
+        self.register_and_login()
+        for path in ('/dashboard', '/bets', '/nba/upcoming-games'):
+            with self.subTest(path=path):
+                self.assertEqual(
+                    self.client.get(path).headers['Cache-Control'], 'private, no-store'
+                )
 
     def test_cannot_delete_another_users_bet(self):
         user1_id = self.register_and_login("owner", "owner@example.com")

@@ -1,7 +1,7 @@
 """Focused value services tests split from the legacy service suite."""
 
 import unittest
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 from app import db
 from app.models import PlayerGameLog
@@ -16,8 +16,11 @@ class TestValueDetector(BaseTestCase):
 
     def test_dist_features_receive_real_game_total_line(self):
         from app.services.value_detector import ValueDetector
+        from app.utils.time_helpers import et_today
         detector = ValueDetector()
-        detector.engine._player_state_cache['test player'] = ('1', [MagicMock()] * 10, {})
+        detector.engine._player_state_cache[('test player', et_today())] = (
+            '1', [MagicMock()] * 10, {},
+        )
         detector.engine._build_ml_features = MagicMock(return_value={'game_total_line': 228.5})
         detector.engine._context_cache['__dist_defense_lookup__'] = {}
 
@@ -42,6 +45,8 @@ class TestValueDetector(BaseTestCase):
                 )
             self.assertEqual(result['confidence_tier'], 'no_edge')
             self.assertEqual(result['projection'], 0)
+            self.assertTrue(any('five required' in note
+                                for note in result['context_notes']))
 
     def test_score_prop_full_with_edge(self):
         from app.services.value_detector import ValueDetector
@@ -179,9 +184,11 @@ class TestValueDetector(BaseTestCase):
             mock_props = {
                 'player_points': [
                     {'player': 'LeBron James', 'line': 25.5,
-                     'over_odds': -110, 'under_odds': -110},
+                     'over_odds': -110, 'under_odds': -110,
+                     'source_last_update': datetime.now(timezone.utc).isoformat()},
                     {'player': 'Hurt Player', 'line': 10.5,
-                     'over_odds': -110, 'under_odds': -110},
+                     'over_odds': -110, 'under_odds': -110,
+                     'source_last_update': datetime.now(timezone.utc).isoformat()},
                     {'player': '', 'line': 0, 'over_odds': 0, 'under_odds': 0},
                 ],
             }
@@ -209,8 +216,9 @@ class TestValueDetector(BaseTestCase):
             detector = ValueDetector()
             with patch('app.services.nba_service.fetch_player_props_for_event',
                        side_effect=Exception("fail")):
-                scores = detector.score_all_todays_props(games=mock_games)
-            self.assertEqual(scores, [])
+                from app.services.value_detector import CurrentQuotesUnavailable
+                with self.assertRaises(CurrentQuotesUnavailable):
+                    detector.score_all_todays_props(games=mock_games)
 
     def test_score_all_todays_props_no_event_id(self):
         from app.services.value_detector import ValueDetector
@@ -219,8 +227,9 @@ class TestValueDetector(BaseTestCase):
                           'start_time': '', 'home': {'name': 'A'},
                           'away': {'name': 'B'}}]
             detector = ValueDetector()
-            scores = detector.score_all_todays_props(games=mock_games)
-            self.assertEqual(scores, [])
+            from app.services.value_detector import CurrentQuotesUnavailable
+            with self.assertRaises(CurrentQuotesUnavailable):
+                detector.score_all_todays_props(games=mock_games)
 
     def test_score_all_todays_props_resolves_player_side_from_team_abbr(self):
         from app.services.value_detector import ValueDetector
@@ -247,6 +256,7 @@ class TestValueDetector(BaseTestCase):
                     'line': 15.5,
                     'over_odds': -110,
                     'under_odds': -110,
+                    'source_last_update': datetime.now(timezone.utc).isoformat(),
                 }],
             }
             detector = ValueDetector()
@@ -273,6 +283,8 @@ class TestValueDetector(BaseTestCase):
                 {'edge': 0.01, 'confidence_tier': 'no_edge', 'games_played': 30},
                 {'edge': 0.10, 'confidence_tier': 'moderate', 'games_played': 5},
             ]
+            for score in mock_scores:
+                score.update(quote_source='odds_api', quote_observed_at=datetime.now(timezone.utc).isoformat())
             with patch.object(detector, 'score_all_todays_props', return_value=mock_scores):
                 top = detector.get_top_plays(min_edge=0.03)
             self.assertEqual(len(top), 1)
@@ -301,6 +313,8 @@ class TestValueDetector(BaseTestCase):
                     'game_id': 'g3',
                 },
             ]
+            for score in mock_scores:
+                score.update(quote_source='odds_api', quote_observed_at=datetime.now(timezone.utc).isoformat())
             parlay = detector.recommend_best_parlay(
                 scores=mock_scores,
                 min_edge=0.08,
@@ -713,7 +727,7 @@ class TestValueDetectorModel2Integration(BaseTestCase):
 
         with self.app.app_context():
             # Force fallback path (no player_id) so B2B is read from context_notes.
-            with patch('app.services.value_detector.find_player_id', return_value=''), \
+            with patch('app.services.value_detector.get_verified_history', return_value=[]), \
                  patch('app.services.value_detector.predict_pick_quality',
                        side_effect=capture_ctx):
                 detector.score_prop('LeBron James', 'player_points', 22.5, -110, -110)

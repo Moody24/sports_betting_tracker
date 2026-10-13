@@ -1,6 +1,7 @@
 """Focused tests for NBA service odds parsing."""
 
 import unittest
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 
@@ -12,11 +13,32 @@ class TestNBAService(unittest.TestCase):
             'home_team': 'Denver Nuggets',
             'away_team': 'Los Angeles Lakers',
             'bookmakers': [
-                {'markets': [{'key': 'h2h', 'outcomes': [
+                {'last_update': datetime.now(timezone.utc).isoformat(), 'markets': [{'key': 'h2h', 'outcomes': [
                     {'name': 'Los Angeles Lakers', 'price': 260},
                 ]}]},
-                {'markets': [{'key': 'h2h', 'outcomes': [
+                {'last_update': datetime.now(timezone.utc).isoformat(), 'markets': [{'key': 'h2h', 'outcomes': [
                     {'name': 'Denver Nuggets', 'price': -320},
+                ]}]},
+            ],
+        }
+
+        self.assertEqual(
+            _extract_current_game_markets(game),
+            (None, -320, 260, None),
+        )
+
+    def test_extract_current_markets_keeps_home_price_until_away_arrives(self):
+        from app.services.nba_service import _extract_current_game_markets
+
+        game = {
+            'home_team': 'Denver Nuggets',
+            'away_team': 'Los Angeles Lakers',
+            'bookmakers': [
+                {'last_update': datetime.now(timezone.utc).isoformat(), 'markets': [{'key': 'h2h', 'outcomes': [
+                    {'name': 'Denver Nuggets', 'price': -320},
+                ]}]},
+                {'last_update': datetime.now(timezone.utc).isoformat(), 'markets': [{'key': 'h2h', 'outcomes': [
+                    {'name': 'Los Angeles Lakers', 'price': 260},
                 ]}]},
             ],
         }
@@ -33,6 +55,7 @@ class TestNBAService(unittest.TestCase):
             "away_team": "Los Angeles Lakers",
             "bookmakers": [{
                 "key": "fanduel",
+                "last_update": datetime.now(timezone.utc).isoformat(),
                 "markets": [
                     {"key": "totals", "outcomes": [
                         {"name": "Over", "point": 228.5},

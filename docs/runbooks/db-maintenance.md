@@ -1,19 +1,32 @@
 # Database Maintenance Runbook — Edge Tracker
-**Stack:** SQLite (local dev) · Flask-Migrate (Alembic) · SQLAlchemy
-**Last verified:** 2026-06-24
+**Stack:** PostgreSQL 16 (active local) · SQLite (retained source) · Flask-Migrate (Alembic) · SQLAlchemy
+**Last verified:** 2026-10-01
 **Source configs:** `migrations/`, `app/models.py`
 **Schedule:** Migrations: on schema change · Manual review: monthly
 
-> **Note:** This runbook covers local SQLite development. When reconnecting to PostgreSQL
-> (e.g. Neon), update `DATABASE_URL` in `.env` — all migration commands remain identical.
-> For PostgreSQL-specific maintenance (vacuums, pg_stat queries), see the archived Neon
-> runbook at the bottom of this file.
+> **Current local state:** `.env` points to the private PostgreSQL socket
+> started by `scripts/local_postgres.sh start`. `instance/app.db` is the
+> backed-up SQLite source, not the active app database. The copy/restore
+> evidence is in `docs/audits/2026-10-01-local-launch-audit.md`.
 
 ---
 
 ## Connection
 
-### SQLite (local dev)
+### PostgreSQL (active local)
+```bash
+scripts/local_postgres.sh start
+db_url="$(scripts/local_postgres.sh url)"
+"$(brew --prefix postgresql@16)/bin/psql" "$db_url" -c 'SELECT current_database()'
+.venv/bin/flask db current
+.venv/bin/flask db check
+```
+
+The cluster accepts only local Unix-socket connections, has checksums enabled,
+and is not a public database server. Keep the app on a single worker when
+running scheduled jobs.
+
+### SQLite (retained source or isolated tests)
 ```bash
 # Open the database directly
 sqlite3 instance/app.db
@@ -75,7 +88,7 @@ flask --app run.py db downgrade -1
 
 ---
 
-## Table Health Check (SQLite)
+## Table Health Check (retained SQLite source)
 
 Row counts across all tables:
 ```bash
@@ -99,7 +112,26 @@ UNION ALL SELECT 'model_metadata', count(*) FROM model_metadata;
 
 ---
 
-## Backup (SQLite)
+## Backup and restore (active PostgreSQL)
+
+Back up the active local database into the ignored, access-restricted backup
+directory. Test a restore into a disposable database before relying on it:
+
+```bash
+scripts/local_postgres.sh backup
+pg_bin="$(brew --prefix postgresql@16)/bin"
+"$pg_bin/createdb" -h "$PWD/instance" -p 5433 edge_tracker_restore_check
+"$pg_bin/pg_restore" -h "$PWD/instance" -p 5433 \
+  -d edge_tracker_restore_check --exit-on-error \
+  instance/backups/<chosen-backup>.dump
+"$pg_bin/dropdb" -h "$PWD/instance" -p 5433 edge_tracker_restore_check
+```
+
+Replace `<chosen-backup>` with the dump just created. Validate table counts
+and important aggregates in the restored database before dropping it. The
+October 1 drill performed that independent comparison.
+
+## Backup (retained SQLite source)
 
 ### Quick text dump
 ```bash
@@ -107,7 +139,7 @@ sqlite3 instance/app.db .dump > "backup-edge-tracker-$(date +%Y%m%d-%H%M%S).sql"
 ```
 ✅ Expected: File created, size > 0.
 
-### Binary copy (faster for large DBs)
+### Binary copy (only while the SQLite database is quiescent)
 ```bash
 cp instance/app.db "instance/app.db.bak-$(date +%Y%m%d)"
 ```
@@ -131,6 +163,8 @@ Tables that may require care at scale:
 | `odds_snapshots` | Multiple snapshots per game | Monitor for unexpected growth |
 
 ### Prune old job_log rows (run quarterly)
+The SQLite command below applies only to a retained SQLite database. For the
+active PostgreSQL database, use a reviewed equivalent in a transaction.
 ```bash
 sqlite3 instance/app.db "
 DELETE FROM job_log
@@ -151,14 +185,16 @@ flask pollution-report --fix     # fix issues in place
 
 ---
 
-## Switching to PostgreSQL
+## Switching to hosted PostgreSQL
 
 When reconnecting to a hosted PostgreSQL instance (e.g. Neon), update `.env`:
 ```env
 DATABASE_URL=postgresql://user:password@host/dbname?sslmode=require
 ```
 
-Then run migrations (same command as SQLite):
+Provision an empty target first, run migrations, then use the guarded
+`flask migrate-sqlite-to-postgres` command and its validation report for a fresh cutover.
+For an already-hosted database, run pending migrations as part of deploy:
 ```bash
 flask --app run.py db upgrade heads
 ```
@@ -177,14 +213,14 @@ Note: `pool_size` and `max_overflow` env vars only take effect for PostgreSQL co
 
 ---
 
-## Archived: PostgreSQL / Neon Operations
+## PostgreSQL maintenance
 
 > The following commands apply only when `DATABASE_URL` points to a PostgreSQL instance.
 
 ### Direct psql access
 ```bash
-source .venv/bin/activate && export $(grep -v '^#' .env | xargs)
-psql $DATABASE_URL
+db_url="$(scripts/local_postgres.sh url)"
+"$(brew --prefix postgresql@16)/bin/psql" "$db_url"
 ```
 
 ### Table health (PostgreSQL)
@@ -200,6 +236,6 @@ ORDER BY seq_scan DESC LIMIT 15;
 
 ### PostgreSQL backup
 ```bash
-pg_dump $DATABASE_URL --format=custom --compress=9 \
+pg_dump --dbname="$DATABASE_URL" --format=custom --compress=9 \
     --file="backup-edge-tracker-$(date +%Y%m%d-%H%M%S).dump"
 ```

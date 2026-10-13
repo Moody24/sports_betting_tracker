@@ -1,7 +1,9 @@
 """Tests for app initialization helpers."""
 
 import unittest
+import runpy
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from flask import Flask
@@ -63,6 +65,27 @@ class TestRateLimitTopology(unittest.TestCase):
             namespace = {'__file__': str(config_path)}
             exec(config_path.read_text(encoding='utf-8'), namespace)
         self.assertEqual(namespace['workers'], 1)
+
+    def test_effective_gunicorn_overrides_cannot_bypass_capacity_or_limiter(self):
+        from gunicorn.config import Config
+        config = Config()
+        config.set('worker_class', 'gthread')
+        config.set('threads', 16)
+        hook = runpy.run_path(str(Path(__file__).resolve().parents[1] / 'gunicorn.conf.py'))['on_starting']
+        with patch.dict('os.environ', {'FLASK_ENV': 'production'}, clear=True):
+            hook(SimpleNamespace(cfg=config))
+            config.set('workers', 2)
+            with self.assertRaisesRegex(RuntimeError, 'shared limiter'):
+                hook(SimpleNamespace(cfg=config))
+            with patch.dict('os.environ', {'RATELIMIT_STORAGE_URI': 'redis://localhost/0'}):
+                hook(SimpleNamespace(cfg=config))
+            config.set('threads', 8)
+            with self.assertRaisesRegex(RuntimeError, 'at least 16'):
+                hook(SimpleNamespace(cfg=config))
+            config.set('worker_class', 'sync')
+            config.set('threads', 1)
+            with self.assertRaisesRegex(RuntimeError, 'gthread'):
+                hook(SimpleNamespace(cfg=config))
 
 if __name__ == '__main__':
     unittest.main()

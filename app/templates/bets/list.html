@@ -1,25 +1,8 @@
 {% extends "base.html" %}
 
 {% block title %}My Bets · Edge Tracker{% endblock %}
-{% block page_title %}Position Log{% endblock %}
-{% block page_subtitle %}Every wager, what it is doing now, and what it settled at.{% endblock %}
-
-{#
-  The Position Log. Sheet grammar: notice -> control bar -> slip -> band ->
-  rows -> pager. Rows are hairline-separated and never boxed; the old
-  .bet-row-card containers are gone.
-
-  Two deliberate departures from the design mock, both forced by the data:
-
-  1. The mock splits IN PLAY and SETTLED into two sections. This list is a
-     single date-ordered, paginated query, so splitting it would either break
-     pagination or reorder rows across pages. Instead every row carries its
-     own register — live rows get the pace axis, settled rows get the result
-     figure — under one column band.
-  2. The mock shows a CLV column. There is no closing-line or CLV field
-     anywhere on the Bet model, so there is nothing to render. It is omitted
-     rather than faked; see the ledger's data-gap note.
-#}
+{% block page_title %}My Bets{% endblock %}
+{% block page_subtitle %}Your wagers, results, and the details behind them.{% endblock %}
 
 {% set has_filters = filters.status or filters.type or filters.q or filters.start_date or filters.end_date %}
 {% set active_filters = [] %}
@@ -35,13 +18,18 @@
   <span class="tag tag-{{ kind }}">{{ label }}</span>
 {%- endmacro %}
 
+{% block page_actions %}
+<a class="act" href="{{ url_for('bet.export_bets', **filters) }}">{{ icon('download') }} Export CSV</a>
+<a class="act act-primary" href="{{ url_for('bet.new_bet') }}">{{ icon('plus-circle') }} Add bet</a>
+{% endblock %}
+
 {% block content %}
 {% set pending_bets = bets | selectattr('outcome', 'equalto', 'pending') | list %}
 {% if pending_bets %}
 <div class="notice">
   <span>
     <strong>{{ pending_bets|length }} pending bet{{ 's' if pending_bets|length != 1 else '' }}</strong>
-    — auto-grades run at 1 AM ET
+    — check results when a source is available, or grade manually
   </span>
   <form action="{{ url_for('bet.nba_update_results') }}" method="POST">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -50,10 +38,7 @@
 </div>
 {% endif %}
 
-{# ── Control bar ─────────────────────────────────────────────────────
-   The form sets filters; the chips show which are currently applied and
-   remove themselves. Clear-N appears only when something is active. #}
-<form method="GET" class="control-bar">
+<form method="GET" class="control-bar ledger-filters">
     <label class="band-cell" for="filter-status">Status
       <select id="filter-status" name="status" class="form-select form-select-sm">
       <option value="" {% if not filters.status %}selected{% endif %}>All</option>
@@ -85,11 +70,8 @@
       <input id="filter-q" type="search" name="q" class="form-control form-control-sm" value="{{ filters.q }}" placeholder="Player, team…">
     </label>
 
-    <button class="act" type="submit">Apply</button>
+    <button class="act act-secondary" type="submit">Apply filters</button>
 
-    {# Active filters live in the same bar as the controls that set them,
-       each removing only itself; Clear-N appears only while one is active.
-       Links inside the form are valid and keep this to one control bar. #}
     {% for key, label in active_filters %}
       {% set stripped = dict(filters, **{key: ''}) %}
       <a class="chip is-active" href="{{ url_for('bet.place_bet', **stripped) }}"
@@ -100,9 +82,8 @@
     {% endif %}
 </form>
 
-{# ── The slip: what the current filter adds up to ─────────────────── #}
 {% if filter_stats.count > 0 %}
-<div class="slip">
+<div class="slip ledger-summary">
   <div class="slip-head">
     <span>{{ 'Filtered' if has_filters else 'All positions' }}</span>
     <span class="row-meta">{{ filter_stats.count }} bet{{ 's' if filter_stats.count != 1 else '' }}</span>
@@ -122,20 +103,15 @@
 </div>
 {% endif %}
 
-<div class="bets-list-wrap" data-testid="bets-list" style="--cols: minmax(0, 1fr) 5rem 5rem 5.5rem auto">
-  {# No second title here. base.html already sets the page title; repeating
-     it as "All bets" directly beneath "Position Log" was one heading saying
-     the same thing twice. This row is the dateline — state on the left,
-     actions on the right. #}
+<div class="bets-list-wrap" data-testid="bets-list" style="--cols: minmax(0, 1fr) 5rem 5rem 5.5rem 9.5rem">
+
   <div class="sheet-head">
+    <h2 class="sheet-title">Bet history</h2>
     <span class="sheet-dateline">
       {{ 'Filtered results' if has_filters else 'All bets' }} · {{ bets|length }} shown
       {%- if pagination and pagination.pages > 1 %} · page {{ pagination.page }} of {{ pagination.pages }}{% endif %}
     </span>
-    <span class="sheet-dateline">
-      <a class="act" href="{{ url_for('bet.export_bets', **filters) }}">CSV</a>
-      <a class="act" href="{{ url_for('bet.new_bet') }}">Add bet</a>
-    </span>
+
   </div>
 
   {% if bets %}
@@ -185,12 +161,9 @@
           {{ tag(b.outcome) }}
           {% if b.source == 'auto_generated' %}<span class="tag tag-push">Auto</span>{% endif %}
           {% if is_overdue %}<span class="tag tag-loss">Past due</span>{% endif %}
-          {# Below 48rem the stake and odds columns are dropped, so they
-             reappear here rather than becoming unreachable. #}
+
           <span class="is-compact-only">${{ '%.2f'|format(b.bet_amount) }} · {{ b.odds_display }}</span>
-          {# CLV renders only when a close was actually captured. Nothing
-             populates closing_odds yet, so today this is silent on every row
-             — which is correct. An unknown close is not a CLV of zero. #}
+
           {% if b.clv_pct is not none %}
             <span class="{{ 'is-up' if b.clv_pct >= 0 else 'is-down' }}">CLV {{ '+' if b.clv_pct >= 0 else '' }}{{ '%.1f'|format(b.clv_pct) }}%</span>
           {% endif %}
@@ -235,10 +208,6 @@
         </form>
       </span>
 
-      {# ── Live: the pace axis. All seven definition-of-done fields live
-           here — current stat, line, period, clock, game state, projection,
-           trend — and the fill colour is driven by the same verdict as the
-           trend label, never computed twice. ── #}
       {% if b.outcome == 'pending' and b.live_trackable and b.match_date.date() <= now_date %}
         <div class="row-full" data-live-prop-card data-game-state="unknown"
              data-url="{{ url_for('bet.nba_prop_progress', espn_id=b.external_game_id, player=b.player_name, prop_type=b.prop_type, line=b.prop_line, bet_type=b.bet_type) }}">
@@ -249,8 +218,7 @@
               · <span data-live-status></span>
             </span>
           </span>
-          {# Reasons are sentences, not labels, so they get a line that wraps
-             rather than being crammed into the status tag. #}
+
           <p class="row-sub" data-live-error hidden></p>
           <div class="pace" role="progressbar" aria-label="Prop progress"
                aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"
@@ -268,7 +236,6 @@
         </div>
       {% endif %}
 
-      {# ── Disclosure: level 2 of 2. The label carries scent. ── #}
       {% if b.is_player_prop and b.outcome in ('win', 'lose') and b.postmortem %}
         {% set pm = b.postmortem %}
         <details class="row-full">
@@ -319,9 +286,7 @@
       </section>
     {% endif %}
   {% else %}
-    {# "No data yet" and "filtered to zero" are genuinely different states
-       and must not look alike: one is a starting point, the other is a
-       dead end you can back out of. #}
+
     {% if has_filters %}
       <div class="state-empty">
         <p><strong>No bets match these filters.</strong></p>
@@ -331,8 +296,8 @@
     {% else %}
       <div class="state-empty">
         <p><strong>No bets yet.</strong></p>
-        <p>Track a wager and this log fills with what it did, not just what it cost.</p>
-        <a class="act" href="{{ url_for('bet.new_bet') }}">Add first bet</a>
+        <p>Add your first wager to track stakes, outcomes, and performance in one place.</p>
+        <a class="act act-primary" href="{{ url_for('bet.new_bet') }}">Add first bet</a>
       </div>
     {% endif %}
   {% endfor %}

@@ -6,11 +6,15 @@ that holds only active-slate player data.
 """
 
 import logging
+import re
 import time
+import unicodedata
 from datetime import datetime, timezone, timedelta, date as date_type
 from difflib import SequenceMatcher
+from functools import lru_cache
 from typing import Optional
 
+from requests import RequestException
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -19,6 +23,7 @@ from app.models import PlayerGameLog
 from app.utils import safe_float
 from app.services.espn_client import EspnClientError, fetch_summary_payload
 from app.services.nba_service import fetch_espn_scoreboard
+from app.services.provider_access import require_nba_stats_access
 from app.utils.time_helpers import ET
 
 logger = logging.getLogger(__name__)
@@ -88,6 +93,40 @@ class PlayerNameResolver:
 # Module-level resolver instance
 name_resolver = PlayerNameResolver()
 
+# nba_api's bundled static player list can lag the live NBA roster. Keep
+# verified NBA.com IDs here as a fallback for recent players; ESPN athlete
+# IDs are a different namespace and must never be used as substitutes.
+_NBA_PLAYER_ID_OVERRIDES = {
+    'cooper flagg': ('Cooper Flagg', '1642843'),
+    'dylan harper': ('Dylan Harper', '1642844'),
+    'vj edgecombe': ('VJ Edgecombe', '1642845'),
+    'kon knueppel': ('Kon Knueppel', '1642851'),
+    'jahmai mashack': ('Jahmai Mashack', '1642942'),
+    'lj cryer': ('LJ Cryer', '1643018'),
+    'chaney johnson': ('Chaney Johnson', '1643052'),
+    'bez mbeng': ('Bez Mbeng', '1643016'),
+    'blake hinson': ('Blake Hinson', '1642396'),
+    'nate williams': ('Nate Williams', '1631466'),
+}
+
+
+def _player_name_key(name: str) -> str:
+    ascii_name = unicodedata.normalize('NFKD', name or '').encode(
+        'ascii', 'ignore'
+    ).decode('ascii')
+    return ' '.join(re.findall(r'[a-z0-9]+', ascii_name.lower()))
+
+
+@lru_cache(maxsize=8)
+def _static_player_ids(get_players) -> dict[str, dict[str, bool]]:
+    """Index the package's immutable player list once per imported provider."""
+    ids: dict[str, dict[str, bool]] = {}
+    for player in get_players():
+        ids.setdefault(_player_name_key(player['full_name']), {})[
+            str(player['id'])
+        ] = bool(player.get('is_active'))
+    return ids
+
 
 def _parse_minutes(min_str) -> float:
     """Parse minutes string (e.g. '34:12' or '34.5') into float minutes."""
@@ -117,6 +156,14 @@ def fetch_player_game_logs(
     Returns a list of dicts with normalised stat keys, or an empty list
     on failure.
     """
+    try:
+        require_nba_stats_access()
+    except RequestException as exc:
+        logger.warning('%s', exc)
+        if raise_on_error:
+            raise
+        return []
+
     try:
         from nba_api.stats.endpoints import playergamelog
     except ImportError:
@@ -150,8 +197,14 @@ def fetch_player_game_logs(
     try:
         from nba_api.stats.static import players as nba_players
         _pid_int = int(player_id)
-        _pid_map = {p['id']: p['full_name'] for p in nba_players.get_active_players()}
+        _pid_map = {p['id']: p['full_name'] for p in nba_players.get_players()}
         _resolved_name = _pid_map.get(_pid_int, '')
+        if not _resolved_name:
+            _resolved_name = next(
+                (name for name, nba_id in _NBA_PLAYER_ID_OVERRIDES.values()
+                 if nba_id == str(_pid_int)),
+                '',
+            )
     except Exception:
         logger.warning("Name resolution failed — using empty string fallback", exc_info=True)
         _resolved_name = ''
@@ -309,19 +362,35 @@ def find_player_id(player_name: str) -> Optional[str]:
 
     Uses nba_api's static player list for fast lookup with fuzzy matching.
     """
+    normalized_name = (player_name or '').strip().lower()
+    if not normalized_name:
+        return None
+    if normalized_name in _NBA_PLAYER_ID_OVERRIDES:
+        return _NBA_PLAYER_ID_OVERRIDES[normalized_name][1]
+
     try:
         from nba_api.stats.static import players as nba_players
     except ImportError:
         logger.error("nba_api package not installed")
         return None
 
-    all_players = nba_players.get_active_players()
-    # Try exact match first
-    for p in all_players:
-        if p['full_name'].lower() == player_name.lower().strip():
-            return str(p['id'])
+    # Check the full static list: players can be marked inactive between
+    # seasons while their historical logs are still needed for projections.
+    key = _player_name_key(normalized_name)
+    if not key:
+        return None
+    exact_ids = _static_player_ids(nba_players.get_players).get(key, {})
+    if len(exact_ids) == 1:
+        return next(iter(exact_ids))
+    if len(exact_ids) > 1:
+        active_ids = [player_id for player_id, active in exact_ids.items() if active]
+        if len(active_ids) == 1:
+            return active_ids[0]
+        logger.warning('Ambiguous NBA player name: %s', player_name)
+        return None
 
     # Fuzzy match
+    all_players = nba_players.get_active_players()
     names = [p['full_name'] for p in all_players]
     match = name_resolver.best_match(player_name, names, threshold=0.80)
     if match:
@@ -652,7 +721,7 @@ def _extract_logs_from_espn_summary(summary_data: dict, game: dict, game_date: d
 
                 resolved_player_id = find_player_id(player_name)
                 if not resolved_player_id:
-                    logger.debug("Skipping unresolved player: %s", player_name)
+                    logger.warning("Skipping unresolved completed-game player: %s", player_name)
                     continue
 
                 logs.append({
@@ -735,6 +804,9 @@ def _refresh_completed_game(game: dict, target_date) -> dict:
         logger.error("ESPN summary fetch failed for completed game %s: %s",
                      espn_id, exc)
         return counts
+    if game.get('season_type') == 2:
+        from app.services.espn_history_append import append_final_game
+        append_final_game(game, summary=summary)
     rows = _extract_logs_from_espn_summary(summary, game, target_date)
     grouped: dict[str, list] = {}
     for row in rows:

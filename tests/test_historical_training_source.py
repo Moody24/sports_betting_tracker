@@ -169,7 +169,7 @@ class TestTrainingSourceSelection(BaseTestCase):
 
             self.assertEqual(rows, [])
 
-    def test_historical_point_rows_carry_espn_game_joined_total(self):
+    def test_historical_point_rows_omit_unverified_closing_total(self):
         from app.services.ml_model import _build_training_rows
 
         with self.app.app_context():
@@ -178,9 +178,9 @@ class TestTrainingSourceSelection(BaseTestCase):
             rows = _build_training_rows("player_points", min_train_samples=1)
 
             self.assertTrue(rows)
-            self.assertEqual({row[2]["game_total_line"] for row in rows}, {231.5})
+            self.assertEqual({row[2]["game_total_line"] for row in rows}, {0.0})
 
-    def test_historical_distributional_away_rows_carry_joined_total(self):
+    def test_historical_distributional_rows_omit_unverified_closing_total(self):
         from app.services import distributional_model as dm
         from unittest.mock import patch
 
@@ -197,7 +197,7 @@ class TestTrainingSourceSelection(BaseTestCase):
                 rows = dm._build_dist_training_rows("player_points")
 
             self.assertTrue(rows)
-            self.assertEqual({row[2]["game_total_line"] for row in rows}, {219.5})
+            self.assertEqual({row[2]["game_total_line"] for row in rows}, {0.0})
             self.assertEqual(PlayerGameLog.query.count(), 0)
 
     def test_point_rows_fall_back_to_cache_when_historical_store_is_empty(self):

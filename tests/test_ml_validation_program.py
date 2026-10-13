@@ -270,13 +270,15 @@ class TestRealQuoteSelection(BaseTestCase):
             self.assertTrue(all(row['close_line'] == 26.5 for row in quotes))
             self.assertEqual(coverage['decision_opportunities'], 1)
 
-    def test_removes_current_only_defense_features(self):
-        from app.services.rolling_backtest import _point_in_time_rows
+    def test_rolling_backtest_preserves_dated_defense_features(self):
+        from app.services.rolling_backtest import _rolling_training_rows
 
         rows = [(date(2026, 1, 1), '1', {
             'opp_def_rating': 110.0, 'opp_pace': 99.0,
             'opp_stat_allowed': 25.0, 'games_played': 10.0,
         }, 20.0)]
-        cleaned = _point_in_time_rows(rows)
-        self.assertEqual(cleaned[0][2]['opp_def_rating'], 0.0)
-        self.assertEqual(cleaned[0][2]['games_played'], 10.0)
+        with patch('app.services.rolling_backtest._build_dist_training_rows',
+                   return_value=rows):
+            selected = _rolling_training_rows('player_points')
+        self.assertEqual(selected[0][2]['opp_def_rating'], 110.0)
+        self.assertEqual(selected[0][2]['games_played'], 10.0)

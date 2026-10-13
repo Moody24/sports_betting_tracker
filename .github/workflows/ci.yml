@@ -124,3 +124,11 @@ jobs:
           DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/edge_tracker_migrations
           RATELIMIT_ENABLED: "false"
           SCHEDULER_ENABLED: "false"
+
+      - name: Verify PostgreSQL bulk copy
+        run: python -m unittest tests.test_database_copy_postgres -v
+        env:
+          SECRET_KEY: ci-migration-secret-not-for-production
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/edge_tracker_migrations
+          RATELIMIT_ENABLED: "false"
+          SCHEDULER_ENABLED: "false"

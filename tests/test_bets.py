@@ -375,7 +375,7 @@ class TestBetRoutes(BaseTestCase):
         self.assertEqual(resp.content_type, "application/json")
 
     @patch("app.routes.nba_live.get_player_props", return_value={})
-    def test_nba_props_returns_cached_snapshot_when_live_empty(self, _mock):
+    def test_nba_props_does_not_present_active_archive_as_current(self, _mock):
         self.register_and_login()
         with self.app.app_context():
             db.session.add(GameSnapshot(
@@ -401,9 +401,17 @@ class TestBetRoutes(BaseTestCase):
 
         resp = self.client.get("/nba/props/espn123")
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
-        self.assertIn("player_points", data)
-        self.assertEqual(data["player_points"][0]["player"], "Jimmy Butler")
+        self.assertEqual(resp.get_json(), {})
+        self.assertEqual(resp.headers['X-Prop-Data-State'], 'unavailable')
+
+        with self.app.app_context():
+            snapshot = GameSnapshot.query.filter_by(espn_id='espn123').one()
+            snapshot.is_final = True
+            snapshot.status = 'STATUS_FINAL'
+            db.session.commit()
+        archived = self.client.get('/nba/props/espn123')
+        self.assertEqual(archived.get_json()['player_points'][0]['player'], 'Jimmy Butler')
+        self.assertEqual(archived.headers['X-Prop-Data-State'], 'archived')
 
     @patch("app.routes.nba_live.fetch_upcoming_games", return_value=[])
     @patch("app.routes.nba_live.fetch_player_props_for_event")
@@ -484,6 +492,8 @@ class TestBetRoutes(BaseTestCase):
     @patch("app.services.espn_client.requests.get")
     def test_nba_prop_progress_success(self, mock_get):
         self.register_and_login()
+        # Login renders NBA Today; count only this endpoint's provider reads.
+        mock_get.reset_mock()
         mock_resp = mock_get.return_value
         mock_resp.raise_for_status.return_value = None
         mock_resp.json.return_value = {
@@ -592,6 +602,8 @@ class TestBetRoutes(BaseTestCase):
     @patch("app.services.espn_client.requests.get")
     def test_nba_prop_progress_cache_key_includes_line_and_bet_type(self, mock_get):
         self.register_and_login()
+        # Login renders NBA Today; count only the three progress requests.
+        mock_get.reset_mock()
         mock_resp = mock_get.return_value
         mock_resp.raise_for_status.return_value = None
         mock_resp.json.return_value = {
@@ -613,9 +625,11 @@ class TestBetRoutes(BaseTestCase):
             }
         }
 
-        previous_testing = self.app.testing
-        self.app.testing = False
-        try:
+        with patch.dict(self.app.config, {
+            'TESTING': False,
+            'ESPN_ACCESS_APPROVED': True,
+            'ESPN_RIGHTS_BASIS': 'fixture-only permission for mocked HTTP',
+        }):
             self.client.get(
                 "/nba/prop-progress/game123?player=LeBron%20James&prop_type=player_points&line=25.5&bet_type=over"
             )
@@ -625,9 +639,6 @@ class TestBetRoutes(BaseTestCase):
             self.client.get(
                 "/nba/prop-progress/game123?player=LeBron%20James&prop_type=player_points&line=29.5&bet_type=under"
             )
-        finally:
-            self.app.testing = previous_testing
-
         # All 3 requests share the same espn_id; _GAME_SUMMARY_CACHE deduplicates
         # ESPN API calls to 1 per game per TTL window.
         self.assertEqual(mock_get.call_count, 1)

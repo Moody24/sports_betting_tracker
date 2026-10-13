@@ -72,6 +72,8 @@ ROUTE_POLICIES = {
     'bet.quick_add_bet': _policy('POST', '/quick-add', 'required', 'protected', 'redirect', 'betting'),
     'bet.quick_add_parlay': _policy('POST', '/quick-add-parlay', 'required', 'protected', 'redirect', 'betting'),
     'bet.nba_today': _policy('GET', '/nba/today', 'required', 'not-applicable', 'html', 'nba'),
+    'bet.nba_live_feed': _policy('GET', '/nba/live-feed', 'required', 'not-applicable', 'json', 'nba'),
+    'bet.nba_live_events': _policy('GET', '/nba/live-events', 'required', 'not-applicable', 'event-stream', 'nba'),
     'bet.nba_update_results': _policy('POST', '/nba/update-results', 'required', 'protected', 'redirect', 'nba'),
     'bet.nba_upcoming_games': _policy('GET', '/nba/upcoming-games', 'required', 'not-applicable', 'json', 'nba'),
     'bet.nba_props': _policy('GET', '/nba/props/<espn_id>', 'required', 'not-applicable', 'json', 'nba'),

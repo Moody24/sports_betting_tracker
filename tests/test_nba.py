@@ -2,8 +2,10 @@
 
 import os
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
+
+from flask import Flask
 
 from app.services import nba_service
 
@@ -47,6 +49,14 @@ class TestNBAService(unittest.TestCase):
     """Unit tests for nba_service with mocked HTTP calls."""
 
     def setUp(self):
+        fixture_app = Flask(__name__)
+        fixture_app.config['TESTING'] = True
+        context = fixture_app.app_context()
+        context.push()
+        self.addCleanup(context.pop)
+        http_guard = patch('requests.get', side_effect=AssertionError('Live HTTP is forbidden in fixtures'))
+        http_guard.start()
+        self.addCleanup(http_guard.stop)
         # Clear module-level caches so each test starts from a clean slate.
         nba_service._GAMES_CACHE.clear()
         nba_service._UPCOMING_CACHE.clear()
@@ -110,6 +120,7 @@ class TestNBAService(unittest.TestCase):
             "home_team": "Los Angeles Lakers",
             "away_team": "Boston Celtics",
             "bookmakers": [{
+                "last_update": datetime.now(timezone.utc).isoformat(),
                 "markets": [{
                     "key": "totals",
                     "outcomes": [
@@ -608,14 +619,16 @@ class TestNBAService(unittest.TestCase):
     @patch.dict(os.environ, {"ODDS_API_KEY": "test-key"})
     @patch("app.services.nba_service.requests.get")
     def test_fetch_upcoming_games_success(self, mock_get):
+        tomorrow = datetime.now(nba_service.APP_TIMEZONE).date() + timedelta(days=1)
         mock_resp = MagicMock()
         mock_resp.raise_for_status.return_value = None
         mock_resp.json.return_value = [{
             "id": "odds_event_1",
             "home_team": "Los Angeles Lakers",
             "away_team": "Boston Celtics",
-            "commence_time": "2026-02-26T19:00:00Z",
+            "commence_time": f"{tomorrow.isoformat()}T19:00:00Z",
             "bookmakers": [{
+                "last_update": datetime.now(timezone.utc).isoformat(),
                 "markets": [{
                     "key": "totals",
                     "outcomes": [
@@ -629,6 +642,10 @@ class TestNBAService(unittest.TestCase):
 
         games = nba_service.fetch_upcoming_games()
         self.assertEqual(len(games), 1)
+        self.assertEqual(games[0]["espn_id"], "")
+        self.assertEqual(games[0]["odds_event_id"], "odds_event_1")
+        self.assertEqual(games[0]["selection_key"], "odds_api:odds_event_1")
+        self.assertEqual(games[0]["match_date"], tomorrow.isoformat())
         self.assertEqual(games[0]["home"]["name"], "Los Angeles Lakers")
         self.assertAlmostEqual(games[0]["over_under_line"], 215.5)
 

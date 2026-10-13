@@ -8,11 +8,16 @@ import logging
 import time
 from datetime import datetime, timezone, date as date_type
 
+from requests import RequestException
+
 from app.config_display import STAT_KEY_TO_OPP_ALLOWED, PROP_TO_OPP_ALLOWED
 from app.utils.time_helpers import et_today, ET
 
 from app import db
 from app.models import TeamDefenseSnapshot
+from app.services.data_receipts import record_fetch
+from app.services.historical_defense import observed_team_defense
+from app.services.provider_access import require_nba_stats_access
 
 logger = logging.getLogger(__name__)
 APP_TIMEZONE = ET
@@ -50,65 +55,17 @@ POSITION_POINT_BASELINES = {
     'c': 18.0,
 }
 
-POSITION_POINT_SHARE = {
-    'pg': 0.237,
-    'sg': 0.219,
-    'sf': 0.202,
-    'pf': 0.184,
-    'c': 0.158,
-}
-
-
-def _estimate_positional_points(opp_pts_pg: float) -> dict:
-    base = float(opp_pts_pg or 0.0)
-    if base <= 0:
-        base = LEAGUE_AVG['pts']
-    return {
-        'opp_pts_allowed_pg': round(base * POSITION_POINT_SHARE['pg'], 1),
-        'opp_pts_allowed_sg': round(base * POSITION_POINT_SHARE['sg'], 1),
-        'opp_pts_allowed_sf': round(base * POSITION_POINT_SHARE['sf'], 1),
-        'opp_pts_allowed_pf': round(base * POSITION_POINT_SHARE['pf'], 1),
-        'opp_pts_allowed_c': round(base * POSITION_POINT_SHARE['c'], 1),
-    }
-
-
-def _build_baseline_team_stats() -> list:
-    """Fallback baseline when live NBA defensive endpoint is unavailable."""
-    try:
-        from nba_api.stats.static import teams as nba_static_teams
-        teams = nba_static_teams.get_teams()
-    except Exception:
-        teams = []
-
-    baseline = []
-    for team in teams:
-        baseline.append({
-            'team_id': str(team.get('id', '')),
-            'team_name': str(team.get('full_name', '')),
-            'team_abbr': str(team.get('abbreviation', '')),
-            'opp_pts_pg': LEAGUE_AVG['pts'],
-            'opp_reb_pg': LEAGUE_AVG['reb'],
-            'opp_ast_pg': LEAGUE_AVG['ast'],
-            'opp_3pm_pg': LEAGUE_AVG['fg3m'],
-            'opp_stl_pg': LEAGUE_AVG['stl'],
-            'opp_blk_pg': LEAGUE_AVG['blk'],
-            'opp_tov_pg': LEAGUE_AVG['tov'],
-            'pace': LEAGUE_AVG['pace'],
-            'def_rating': 114.0,
-            'opp_pts_allowed_pg': round(LEAGUE_AVG['pts'] * POSITION_POINT_SHARE['pg'], 1),
-            'opp_pts_allowed_sg': round(LEAGUE_AVG['pts'] * POSITION_POINT_SHARE['sg'], 1),
-            'opp_pts_allowed_sf': round(LEAGUE_AVG['pts'] * POSITION_POINT_SHARE['sf'], 1),
-            'opp_pts_allowed_pf': round(LEAGUE_AVG['pts'] * POSITION_POINT_SHARE['pf'], 1),
-            'opp_pts_allowed_c': round(LEAGUE_AVG['pts'] * POSITION_POINT_SHARE['c'], 1),
-        })
-    return baseline
-
-
 def fetch_team_defense_stats() -> list:
     """Fetch opponent (defensive) stats for all NBA teams from the NBA API.
 
     Returns a list of dicts with defensive metrics per team.
     """
+    try:
+        require_nba_stats_access()
+    except RequestException as exc:
+        logger.warning('%s', exc)
+        return []
+
     try:
         from nba_api.stats.endpoints import leaguedashteamstats
     except ImportError:
@@ -133,14 +90,7 @@ def fetch_team_defense_stats() -> list:
     results = []
     for _, row in df.iterrows():
         pace_val = float(row.get('PACE', 0) or row.get('OPP_PACE', 0) or 0)
-        if pace_val <= 0:
-            pace_val = LEAGUE_AVG['pace']
-
         def_rating_val = float(row.get('DEF_RATING', 0) or 0)
-        if def_rating_val <= 0:
-            def_rating_val = 114.0
-
-        positional_defaults = _estimate_positional_points(float(row.get('OPP_PTS', 0) or 0))
 
         results.append({
             'team_id': str(row.get('TEAM_ID', '')),
@@ -153,13 +103,14 @@ def fetch_team_defense_stats() -> list:
             'opp_stl_pg': float(row.get('OPP_STL', 0) or 0),
             'opp_blk_pg': float(row.get('OPP_BLK', 0) or 0),
             'opp_tov_pg': float(row.get('OPP_TOV', 0) or 0),
-            'pace': pace_val,
-            'def_rating': def_rating_val,
-            'opp_pts_allowed_pg': float(row.get('OPP_PTS_ALLOWED_PG', 0) or 0) or positional_defaults['opp_pts_allowed_pg'],
-            'opp_pts_allowed_sg': float(row.get('OPP_PTS_ALLOWED_SG', 0) or 0) or positional_defaults['opp_pts_allowed_sg'],
-            'opp_pts_allowed_sf': float(row.get('OPP_PTS_ALLOWED_SF', 0) or 0) or positional_defaults['opp_pts_allowed_sf'],
-            'opp_pts_allowed_pf': float(row.get('OPP_PTS_ALLOWED_PF', 0) or 0) or positional_defaults['opp_pts_allowed_pf'],
-            'opp_pts_allowed_c': float(row.get('OPP_PTS_ALLOWED_C', 0) or 0) or positional_defaults['opp_pts_allowed_c'],
+            'pace': pace_val or None,
+            'def_rating': def_rating_val or None,
+            'sample_games': int(row.get('GP', 0) or 0),
+            'opp_pts_allowed_pg': row.get('OPP_PTS_ALLOWED_PG'),
+            'opp_pts_allowed_sg': row.get('OPP_PTS_ALLOWED_SG'),
+            'opp_pts_allowed_sf': row.get('OPP_PTS_ALLOWED_SF'),
+            'opp_pts_allowed_pf': row.get('OPP_PTS_ALLOWED_PF'),
+            'opp_pts_allowed_c': row.get('OPP_PTS_ALLOWED_C'),
         })
 
     return results
@@ -167,57 +118,69 @@ def fetch_team_defense_stats() -> list:
 
 
 def refresh_all_team_defense() -> int:
-    """Refresh defensive snapshots for all 30 NBA teams.
-
-    Fetches from NBA API and upserts into ``TeamDefenseSnapshot``.
-    Returns the number of teams updated.
-    """
+    """Refresh team defense from completed games or the NBA endpoint."""
     today = et_today()
-    team_stats = fetch_team_defense_stats()
+    team_stats = observed_team_defense(today) or fetch_team_defense_stats()
     if not team_stats:
-        team_stats = _build_baseline_team_stats()
-        if not team_stats:
-            logger.warning("No team defense data fetched")
-            return 0
-        logger.warning("Using baseline defensive snapshot fallback (%d teams)", len(team_stats))
+        record_fetch('nba_team_defense', 'failed', detail='No observed team data returned')
+        db.session.commit()
+        logger.warning("No observed team defense data fetched")
+        return 0
+    return save_team_defense(team_stats, today)
+
+
+_DEFENSE_FIELDS = (
+    'team_name', 'team_abbr', 'source', 'observed_through', 'sample_games',
+    'opp_pts_pg', 'opp_reb_pg', 'opp_ast_pg', 'opp_3pm_pg', 'opp_stl_pg',
+    'opp_blk_pg', 'opp_tov_pg', 'pace', 'def_rating',
+    'opp_pts_allowed_pg', 'opp_pts_allowed_sg', 'opp_pts_allowed_sf',
+    'opp_pts_allowed_pf', 'opp_pts_allowed_c',
+)
+
+
+def save_team_defense(team_stats: list[dict], snapshot_date: date_type,
+                      *, source_version: str | None = None) -> int:
+    """Upsert observed team profiles and retain their actual as-of dates."""
+    if not team_stats:
+        return 0
 
     count = 0
+    retained_release = False
+    observed_dates = []
     for ts in team_stats:
         existing = TeamDefenseSnapshot.query.filter_by(
             team_id=ts['team_id'],
-            snapshot_date=today,
+            snapshot_date=snapshot_date,
         ).first()
-
-        if existing:
-            for key, val in ts.items():
-                if key not in ('team_id',) and hasattr(existing, key):
-                    setattr(existing, key, val)
-            existing.fetched_at = datetime.now(timezone.utc)
-        else:
-            snap = TeamDefenseSnapshot(
-                team_id=ts['team_id'],
-                team_name=ts['team_name'],
-                team_abbr=ts.get('team_abbr', ''),
-                snapshot_date=today,
-                opp_pts_pg=ts.get('opp_pts_pg', 0),
-                opp_reb_pg=ts.get('opp_reb_pg', 0),
-                opp_ast_pg=ts.get('opp_ast_pg', 0),
-                opp_3pm_pg=ts.get('opp_3pm_pg', 0),
-                opp_stl_pg=ts.get('opp_stl_pg', 0),
-                opp_blk_pg=ts.get('opp_blk_pg', 0),
-                opp_tov_pg=ts.get('opp_tov_pg', 0),
-                pace=ts.get('pace', 0),
-                def_rating=ts.get('def_rating', 0),
-                opp_pts_allowed_pg=ts.get('opp_pts_allowed_pg', 0),
-                opp_pts_allowed_sg=ts.get('opp_pts_allowed_sg', 0),
-                opp_pts_allowed_sf=ts.get('opp_pts_allowed_sf', 0),
-                opp_pts_allowed_pf=ts.get('opp_pts_allowed_pf', 0),
-                opp_pts_allowed_c=ts.get('opp_pts_allowed_c', 0),
+        if (existing is not None
+                and (existing.source or '').startswith('sportsdataverse_team_')
+                and (ts.get('source') or '').startswith('espn_boxscore_')
+                and existing.observed_through
+                and existing.observed_through >= (ts.get('observed_through') or date_type.min)):
+            retained_release = True
+            observed_dates.append(existing.observed_through)
+            count += 1
+            continue
+        if existing is None:
+            existing = TeamDefenseSnapshot(
+                team_id=ts['team_id'], snapshot_date=snapshot_date,
             )
-            db.session.add(snap)
+            db.session.add(existing)
+        for field in _DEFENSE_FIELDS:
+            setattr(existing, field, ts.get(field))
+        existing.source = ts.get('source', 'nba_api')
+        existing.fetched_at = datetime.now(timezone.utc)
+        if existing.observed_through:
+            observed_dates.append(existing.observed_through)
         count += 1
 
+    record_fetch('nba_team_defense', 'success', count,
+                 data_through=max(observed_dates) if observed_dates else None,
+                 source_version=(source_version or
+                                 ('retained_sportsdataverse_release' if retained_release
+                                  else team_stats[0].get('source', 'nba_api'))))
     db.session.commit()
+    invalidate_team_defense_cache()
     logger.info("Refreshed defense data for %d teams", count)
     return count
 
@@ -279,6 +242,9 @@ def get_team_defense(team_name: str, date: date_type = None) -> dict:
                 'team_id': snap.team_id,
                 'team_name': snap.team_name,
                 'team_abbr': snap.team_abbr,
+                'source': snap.source,
+                'observed_through': snap.observed_through,
+                'sample_games': snap.sample_games,
                 'opp_pts_pg': snap.opp_pts_pg or 0,
                 'opp_reb_pg': snap.opp_reb_pg or 0,
                 'opp_ast_pg': snap.opp_ast_pg or 0,

@@ -2,54 +2,62 @@
 
 {% block title %}Bet Builder · Edge Tracker{% endblock %}
 {% block page_title %}Bet Builder{% endblock %}
-{% block page_subtitle %}Build one position from game markets and player props, then submit it once.{% endblock %}
+{% block page_subtitle %}Choose your selections, set a stake, and save the bet to your record.{% endblock %}
 
 {% block content %}
-{% set flow_active = 'builder' %}
-{% set flow_builder_tab = current_tab %}
-{% include 'bets/_workflow_nav.html' %}
-
 <datalist id="game-datalist"></datalist>
 <noscript><div class="notice" style="--notice-ink: var(--amber)">The live builder requires JavaScript.</div></noscript>
 
 <div class="builder-layout" id="ub-root" data-testid="bet-builder">
   <section class="builder-board">
+
     <div class="sheet-head">
-      <h2 class="sheet-title">Market board</h2>
+      <h2 class="sheet-title">Choose a game, then a player prop</h2>
       <p class="sheet-dateline" id="ub-last-updated">Not refreshed</p>
     </div>
 
+    <ol class="builder-steps" aria-label="Add bet steps"><li class="builder-step">1. Choose game</li><li class="builder-step">2. Add selection</li><li class="builder-step">3. Set stake &amp; save</li></ol>
     <div class="control-bar">
-      <label class="band-cell" for="ub-game-picker">Game
+      <label class="band-cell" for="ub-game-picker">Scheduled or live game
         <select id="ub-game-picker" class="form-select form-select-sm" aria-label="Select game for unified slip">
           <option value="">Select a game…</option>
         </select>
       </label>
-      <button type="button" id="ub-refresh-btn" class="act">Refresh odds</button>
+      <button type="button" id="ub-refresh-btn" class="act">Refresh markets</button>
       <span id="ub-game-meta" class="row-meta">Choose a game to unlock its markets.</span>
     </div>
 
-    <div class="control-bar ub-market-row" aria-label="Game markets">
-      <button type="button" id="ub-home-ml-btn" class="chip" disabled>Home ML</button>
-      <button type="button" id="ub-away-ml-btn" class="chip" disabled>Away ML</button>
-      <button type="button" id="ub-over-btn" class="chip" disabled>Over</button>
-      <button type="button" id="ub-under-btn" class="chip" disabled>Under</button>
-    </div>
-
+    <label class="field-row" for="ub-player-search">Find a player<input type="search" id="ub-player-search" class="form-control" placeholder="Search available players" autocomplete="off"></label>
     <div class="control-bar" role="group" aria-label="Prop filters">
       <button type="button" id="ub-filter-all" class="chip is-active">All</button>
-      <button type="button" id="ub-filter-pts" class="chip">PTS</button>
-      <button type="button" id="ub-filter-reb" class="chip">REB</button>
-      <button type="button" id="ub-filter-ast" class="chip">AST</button>
-      <button type="button" id="ub-filter-3pm" class="chip">3PM</button>
+      <button type="button" id="ub-filter-pts" class="chip">{{ icon('market-points') }} Points</button>
+      <button type="button" id="ub-filter-reb" class="chip">{{ icon('market-rebounds') }} Rebounds</button>
+      <button type="button" id="ub-filter-ast" class="chip">{{ icon('market-assists') }} Assists</button>
+      <button type="button" id="ub-filter-3pm" class="chip">{{ icon('market-threes') }} Threes</button>
       <span id="ub-props-status" class="row-meta" role="status" aria-live="polite" aria-atomic="true">Props load after a game is selected.</span>
     </div>
     <div id="ub-props-list" class="bb-prop-list"></div>
+    <details class="manual-record" id="ub-manual-entry">
+      <summary class="manual-record-summary"><span>Record a bet manually</span></summary>
+      <p class="manual-record-intro">Enter the price you recorded. No wager is placed.</p>
+      <form id="ub-manual-form" class="manual-record-form">
+        <div class="field-row"><label for="ub-manual-away">Away team</label><input id="ub-manual-away" name="manual_away" class="form-control" maxlength="80" required autocomplete="off"></div>
+        <div class="field-row"><label for="ub-manual-home">Home team</label><input id="ub-manual-home" name="manual_home" class="form-control" maxlength="80" required autocomplete="off"></div>
+        <div class="field-row"><label for="ub-manual-date">Game date (ET)</label><input id="ub-manual-date" name="manual_date" type="date" class="form-control" required></div>
+        <div class="field-row"><label for="ub-manual-market">Market</label><select id="ub-manual-market" name="manual_market" class="form-select"><option value="moneyline">Game winner</option><option value="total">Game total</option><option value="player_points">Player points</option><option value="player_rebounds">Player rebounds</option><option value="player_assists">Player assists</option><option value="player_threes">Player 3-pointers</option></select></div>
+        <div class="field-row"><label for="ub-manual-side">Selection</label><select id="ub-manual-side" name="manual_side" class="form-select"><option value="home">Home team</option><option value="away">Away team</option><option value="over" hidden>Over</option><option value="under" hidden>Under</option></select></div>
+        <div class="field-row"><label for="ub-manual-odds">American odds</label><input id="ub-manual-odds" name="manual_odds" class="form-control" type="number" step="1" required placeholder="Enter recorded odds"></div>
+        <div class="field-row" id="ub-manual-player-wrap" hidden><label for="ub-manual-player">Player name</label><input id="ub-manual-player" name="manual_player" class="form-control" maxlength="100" autocomplete="off"></div>
+        <div class="field-row" id="ub-manual-line-wrap" hidden><label for="ub-manual-line">Line</label><input id="ub-manual-line" name="manual_line" class="form-control" type="number" step="0.5" min="0"></div>
+        <p id="ub-manual-feedback" class="field-errors manual-record-feedback" role="status" hidden></p>
+        <button class="act act-primary manual-record-submit" type="submit">{{ icon('plus-circle') }} Add selection</button>
+      </form>
+    </details>
   </section>
 
   <aside class="slip builder-slip" aria-label="Current bet slip">
     <div class="slip-head">
-      <span>Current position</span>
+      <span>Review your selections</span>
       <span id="ub-mode-badge" class="tag tag-pending">No picks</span>
     </div>
     <div id="ub-slip-list" class="bb-legs-list">
@@ -61,10 +69,10 @@
     <div id="ub-feedback" class="notice d-none" role="alert" aria-live="assertive" aria-atomic="true"></div>
     <div class="slip-grid builder-stake-grid">
       <label class="slip-fact" for="ub-stake"><span>Stake</span>
-        <input type="number" id="ub-stake" class="form-control form-control-sm" min="1" step="0.01" placeholder="25.00">
+        <input type="number" id="ub-stake" class="form-control form-control-sm" min="0.01" step="0.01" inputmode="decimal" placeholder="25.00">
       </label>
       <label class="slip-fact" for="ub-units"><span>Units</span>
-        <input type="number" id="ub-units" class="form-control form-control-sm" min="0.1" step="0.1" placeholder="1.0">
+        <input type="number" id="ub-units" class="form-control form-control-sm" min="0.1" step="0.1" inputmode="decimal" placeholder="Optional">
       </label>
     </div>
     <p id="ub-payout-preview" class="row-meta">Payout appears once stake and odds are set.</p>
@@ -78,10 +86,21 @@
     </div>
     <div class="row-actions builder-slip-actions">
       <button type="button" id="ub-clear-slip-btn" class="act">Clear slip</button>
-      <button type="button" id="ub-submit-btn" class="act">Submit position</button>
+      <button type="button" id="ub-submit-btn" class="act act-primary">Save bet</button>
     </div>
   </aside>
 </div>
+<dialog id="ub-quote-review" class="builder-review-dialog" aria-labelledby="ub-review-title" aria-describedby="ub-review-description">
+  <h2 id="ub-review-title">Review changed selections</h2>
+  <p id="ub-review-description">The available quote has changed or expired. Your original line and recorded price have been kept.</p>
+  <ul id="ub-review-list" class="builder-review-list"></ul>
+  <p>Keeping the original saves a manual historical record. It does not claim a current provider price. No wager is placed.</p>
+  <div class="builder-review-actions">
+    <button type="button" id="ub-review-cancel" class="act" autofocus>Cancel</button>
+    <button type="button" id="ub-review-original" class="act">Keep original as manual record</button>
+    <button type="button" id="ub-review-update" class="act act-primary">Use current quotes</button>
+  </div>
+</dialog>
 {% endblock %}
 
 {% block scripts %}

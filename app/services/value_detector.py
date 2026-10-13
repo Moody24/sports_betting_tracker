@@ -10,7 +10,7 @@ import math
 import os
 import time as _time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import date as _date, datetime
+from datetime import date as _date, datetime, timedelta, timezone
 from itertools import combinations
 from typing import Optional
 
@@ -18,10 +18,10 @@ from app.config_display import PROP_STAT_KEY
 from app.models import PlayerGameLog
 from app.services.pick_quality_model import predict_pick_quality
 from app.services.projection_engine import ProjectionEngine
+from app.services.player_identity_service import get_verified_history
 from app.services.feature_engine import build_pick_context_features
-from app.utils.time_helpers import ET
-from app.services.context_service import is_player_available
-from app.services.stats_service import find_player_id, get_cached_logs
+from app.utils.time_helpers import ET, et_today
+from app.services.context_service import player_availability
 from app.utils.odds import american_from_decimal, decimal_odds, implied_prob
 from app.utils.time_helpers import et_date_str
 
@@ -32,6 +32,24 @@ logger = logging.getLogger(__name__)
 # Multiple web-request threads share this cache within the same worker process.
 _SCORE_CACHE: dict = {}
 _SCORE_CACHE_TTL = 600  # 10 minutes — pre-game props rarely change faster than this
+
+class CurrentQuotesUnavailable(RuntimeError):
+    """The current slate has no verified, fresh offered quotes to score."""
+
+
+def is_current_quote(source: str, observed_at, *, now: datetime | None = None) -> bool:
+    """Whether an offered provider quote is eligible for current analysis."""
+    from app.services.nba_service import is_fresh_prop_observation
+    return source == 'odds_api' and is_fresh_prop_observation(observed_at, now=now)
+
+
+def current_scored_quotes(scores: list) -> list:
+    """Recheck provider observation age when a cached score becomes actionable."""
+    now = datetime.now(timezone.utc)
+    return [score for score in scores if is_current_quote(
+        score.get('quote_source'), score.get('quote_observed_at'), now=now,
+    )]
+
 
 # Confidence tier thresholds (edge %)
 TIER_STRONG = 0.15
@@ -152,7 +170,8 @@ def _pick_quality_adjustment(
     win_probability = None
     recommendation = 'no_model'
     try:
-        player_id = find_player_id(player_name) or ''
+        history = get_verified_history(player_name, as_of=et_today(), limit=1)
+        player_id = history[0].player_id if history else ''
         quality_context = (
             build_pick_context_features(
                 player_name=player_name,
@@ -265,13 +284,29 @@ class ValueDetector:
 
     @staticmethod
     def _build_player_team_map(player_names: set[str]) -> dict[str, str]:
+        from app.services.player_identity_service import get_verified_history
+        from app.utils.time_helpers import et_today
+
         if not player_names:
             return {}
 
         resolved: dict[str, str] = {}
+        for player_name in player_names:
+            try:
+                logs = get_verified_history(
+                    player_name, as_of=et_today() + timedelta(days=1), limit=1,
+                )
+                if logs and logs[0].team_abbr:
+                    resolved[player_name] = logs[0].team_abbr.upper()
+            except Exception as exc:
+                logger.debug("Could not resolve team for %s: %s", player_name, exc)
+
+        unresolved = player_names - resolved.keys()
+        if not unresolved:
+            return resolved
         rows = (
             PlayerGameLog.query
-            .filter(PlayerGameLog.player_name.in_(list(player_names)))
+            .filter(PlayerGameLog.player_name.in_(list(unresolved)))
             .order_by(PlayerGameLog.player_name, PlayerGameLog.game_date.desc())
             .all()
         )
@@ -279,19 +314,6 @@ class ValueDetector:
             if row.player_name not in resolved and row.team_abbr:
                 resolved[row.player_name] = (row.team_abbr or '').upper()
 
-        for player_name in player_names:
-            if player_name in resolved:
-                continue
-            try:
-                player_id = find_player_id(player_name)
-                if not player_id:
-                    continue
-                logs = get_cached_logs(player_id, last_n=1)
-                if logs and logs[0].team_abbr:
-                    resolved[player_name] = (logs[0].team_abbr or '').upper()
-            except Exception as exc:
-                logger.debug("Could not resolve team for %s: %s", player_name, exc)
-                continue
         return resolved
 
     @staticmethod
@@ -308,8 +330,7 @@ class ValueDetector:
             return home_team, away_team, True
         if player_team_abbr and player_team_abbr == away_abbr:
             return away_team, home_team, False
-        # Fallback if unknown team: preserve previous behavior.
-        return home_team, away_team, True
+        return '', '', True
 
     def score_prop(
         self,
@@ -353,7 +374,10 @@ class ValueDetector:
         games_played = proj['games_played']
 
         if projection == 0 or games_played < 5:
-            return self._empty_score(player_name, prop_type, line, over_odds, under_odds, game_id)
+            return self._empty_score(
+                player_name, prop_type, line, over_odds, under_odds, game_id,
+                projection=proj,
+            )
 
         # Model probability of exceeding the line (calibrated distributional
         # model when USE_DISTRIBUTIONAL_MODEL=true; normal CDF approximation
@@ -454,10 +478,14 @@ class ValueDetector:
             'games_played': games_played,
             'confidence': projection_confidence,
             'projection_source': projection_source,
+            'history_source': proj.get('history_source'),
+            'history_observed_through': proj.get('history_observed_through'),
+            'opponent_team': opponent_name,
             'scenario_agreement': scenario_agreement,
             'scenario_matches': scenario_matches,
             'breakdown': proj.get('breakdown', {}),
             'game_id': game_id,
+            'quote_observed_at': datetime.now(timezone.utc).isoformat(),
             'win_probability': win_probability,
             'pick_quality_recommendation': pick_quality_recommendation,
         }
@@ -611,7 +639,7 @@ class ValueDetector:
         from app.services.distributional_model import DIST_STAT_KEY_MAP, wrap_pra_logs
         from app.services.ml_model import build_defense_lookup
 
-        player_cache_key = str(player_name).strip().lower()
+        player_cache_key = (str(player_name).strip().lower(), game_date or et_today())
         state = self.engine._player_state_cache.get(player_cache_key)
         if not state:
             return None, None
@@ -652,7 +680,13 @@ class ValueDetector:
         )
         return prop_type, features
 
-    def _empty_score(self, player, prop_type, line, over_odds, under_odds, game_id=''):
+    def _empty_score(self, player, prop_type, line, over_odds, under_odds,
+                     game_id='', projection=None):
+        projection = projection or {}
+        notes = list(projection.get('context_notes') or [])
+        games = projection.get('games_played') or 0
+        if 0 < games < 5:
+            notes.append(f'only {games} played games; five required for a scored prop')
         return {
             'player': player,
             'prop_type': prop_type,
@@ -668,12 +702,14 @@ class ValueDetector:
             'model_prob_under': 0.5,
             'book_prob_over': devig_probs(over_odds, under_odds)[0],
             'book_prob_under': devig_probs(over_odds, under_odds)[1],
-            'context_notes': [],
+            'context_notes': _sanitize_context_notes(notes),
             'std_dev': 0,
             'z_score': 0,
             'games_played': 0,
             'confidence': 'low',
             'projection_source': 'heuristic',
+            'history_source': projection.get('history_source'),
+            'history_observed_through': projection.get('history_observed_through'),
             'scenario_agreement': None,
             'scenario_matches': None,
             'breakdown': {},
@@ -684,7 +720,7 @@ class ValueDetector:
     def _cached_daily_scores() -> Optional[list]:
         cached = _SCORE_CACHE.get(et_date_str())
         if cached and _time.monotonic() < cached["expires_at"]:
-            return list(cached["scores"])
+            return current_scored_quotes(cached["scores"])
         return None
 
     @staticmethod
@@ -713,6 +749,12 @@ class ValueDetector:
             "PERF props_fetch event=%s props=%d elapsed=%.2fs",
             event_id[:8], prop_count, elapsed,
         )
+        if props:
+            game = {
+                **game,
+                'props_source': 'odds_api',
+                'props_fetched_at': datetime.now(timezone.utc).isoformat(),
+            }
         return game, props
 
     def _fetch_all_game_props(self, games: list) -> list[tuple]:
@@ -757,7 +799,14 @@ class ValueDetector:
             if props or not snapshot or not snapshot.props_json:
                 continue
             try:
-                raw_results[index] = (game, json.loads(snapshot.props_json))
+                snapshot_time = snapshot.snapshot_time
+                if snapshot_time and snapshot_time.tzinfo is None:
+                    snapshot_time = snapshot_time.replace(tzinfo=timezone.utc)
+                raw_results[index] = ({
+                    **game,
+                    'props_source': 'snapshot_fallback',
+                    'props_fetched_at': snapshot_time.isoformat() if snapshot_time else None,
+                }, json.loads(snapshot.props_json))
             except (ValueError, TypeError):
                 continue
             filled += 1
@@ -773,6 +822,15 @@ class ValueDetector:
         payloads = []
         player_names = set()
         for game, props in raw_results:
+            if not props or game.get('props_source') != 'odds_api':
+                continue
+            props = {
+                market: [prop for prop in quotes if is_current_quote(
+                    'odds_api', prop.get('source_last_update'),
+                )]
+                for market, quotes in props.items()
+            }
+            props = {market: quotes for market, quotes in props.items() if quotes}
             if not props:
                 continue
             payloads.append((game, props))
@@ -805,7 +863,7 @@ class ValueDetector:
         for market_key, market_props in props.items():
             for prop in market_props:
                 player = prop.get('player', '')
-                if not player or not is_player_available(player):
+                if not player or player_availability(player) == 'unavailable':
                     continue
                 team_name, opponent_name, is_home = (
                     self._resolve_game_context_for_player(
@@ -836,6 +894,15 @@ class ValueDetector:
                     'home_team': home_team,
                     'away_team': away_team,
                     'match_date': start_date,
+                    'opponent_team': opponent_name,
+                    'player_team': team_name,
+                    'odds_event_id': game.get('odds_event_id'),
+                    'quote_source': game.get('props_source', 'unverified'),
+                    'quote_observed_at': (
+                        prop.get('source_last_update')
+                        if game.get('props_source') == 'odds_api'
+                        else game.get('props_fetched_at')
+                    ),
                 })
                 scores.append(score)
         return scores
@@ -865,8 +932,10 @@ class ValueDetector:
 
         prop_fetch_started = _time.perf_counter()
         raw_results = self._fetch_all_game_props(games)
-        self._fill_snapshot_prop_fallbacks(raw_results)
+        # GameSnapshot.props_json is an archive, never a current offered line.
         payloads, player_names = self._collect_prop_payloads(raw_results)
+        if games and not payloads:
+            raise CurrentQuotesUnavailable('No verified current prop quotes are available')
         logger.info(
             "PERF props_fetch_parallel: games=%d wall_elapsed=%.2fs",
             len(payloads), _time.perf_counter() - prop_fetch_started,
@@ -958,7 +1027,7 @@ class ValueDetector:
     def filter_plays(scores: list, min_edge: float = TIER_SLIGHT) -> list:
         """Filter scores down to actionable value plays."""
         return [
-            s for s in scores
+            s for s in current_scored_quotes(scores)
             if abs(s.get('edge', 0)) >= min_edge
             and s.get('confidence_tier') != 'no_edge'
             and s.get('games_played', 0) >= 10

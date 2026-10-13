@@ -34,21 +34,28 @@ def upgrade():
         )
 
     if connection.dialect.name == 'sqlite':
-        naming_convention = {
-            'uq': 'uq_%(table_name)s_%(column_0_name)s',
-        }
-        with op.batch_alter_table(
-            'bet_postmortem',
-            naming_convention=naming_convention,
-        ) as batch_op:
-            batch_op.drop_constraint(
-                'uq_bet_postmortem_bet_id',
-                type_='unique',
+        inspector = sa.inspect(connection)
+        constraints = inspector.get_unique_constraints('bet_postmortem')
+        if not any(c['name'] == 'bet_postmortem_bet_id_key' for c in constraints):
+            indexes = inspector.get_indexes('bet_postmortem')
+            unique_index = next(
+                (index for index in indexes
+                 if index['unique'] and index['column_names'] == ['bet_id']),
+                None,
             )
-            batch_op.create_unique_constraint(
-                'bet_postmortem_bet_id_key',
-                ['bet_id'],
-            )
+            with op.batch_alter_table('bet_postmortem') as batch_op:
+                if unique_index:
+                    batch_op.drop_index(unique_index['name'])
+                else:
+                    old_constraint = next(
+                        (c for c in constraints if c['column_names'] == ['bet_id']),
+                        None,
+                    )
+                    if old_constraint and old_constraint['name']:
+                        batch_op.drop_constraint(old_constraint['name'], type_='unique')
+                batch_op.create_unique_constraint(
+                    'bet_postmortem_bet_id_key', ['bet_id']
+                )
 
 
 def downgrade():

@@ -1,18 +1,24 @@
-"""Background job scheduler using APScheduler.
-
-Jobs run inside the Flask app process on Railway.  Each job function
-creates its own app context since they execute on background threads.
-"""
+"""APScheduler jobs and their application-context boundary."""
 
 import fcntl
 import json
 import logging
 import os
-import random
-import secrets
 import tempfile
-from datetime import datetime, timezone, timedelta, time as dt_time
+from datetime import datetime, timezone, timedelta
 
+from app.services.auto_pick_service import (
+    _build_candidates as _build_candidates,
+    _build_parlay_groups as _build_parlay_groups,
+    _build_straight_plays as _build_straight_plays,
+    _ensure_autopicks_user as _ensure_autopicks_user,
+    _filter_qualifying as _filter_qualifying,
+    _paper_play_qualifies as _paper_play_qualifies,
+    generate_daily_auto_picks as _generate_daily_auto_picks,
+)
+from app.services.pick_quality_bootstrap import (
+    bootstrap_pick_quality_examples as _bootstrap_pick_quality_examples,
+)
 from app.utils.time_helpers import ET
 
 try:
@@ -25,24 +31,8 @@ except ModuleNotFoundError:  # pragma: no cover - handled in environments withou
 logger = logging.getLogger(__name__)
 
 APP_TIMEZONE = "America/New_York"
-AUTO_PICK_MAX_TOTAL = int(os.getenv('AUTO_PICK_MAX_TOTAL', '50'))
-AUTO_PICK_MIN_EDGE_STRAIGHT = float(os.getenv('AUTO_PICK_MIN_EDGE_STRAIGHT', '0.15'))
-AUTO_PICK_MIN_EDGE_2LEG = float(os.getenv('AUTO_PICK_MIN_EDGE_2LEG', '0.15'))
-AUTO_PICK_MIN_EDGE_3LEG = float(os.getenv('AUTO_PICK_MIN_EDGE_3LEG', '0.15'))
-AUTO_PICK_MIN_GAMES = int(os.getenv('AUTO_PICK_MIN_GAMES', '15'))
-AUTO_PICK_CONFIDENCE_TIER = os.getenv('AUTO_PICK_CONFIDENCE_TIER', 'strong')
-AUTO_PAPER_ENABLED = os.getenv('AUTO_PAPER_ENABLED', 'true').strip().lower() in ('1', 'true', 'yes', 'on')
-AUTO_PAPER_MAX_PER_COHORT = int(os.getenv('AUTO_PAPER_MAX_PER_COHORT', '24'))
-AUTO_PAPER_MIN_GAMES = int(os.getenv('AUTO_PAPER_MIN_GAMES', '10'))
-AUTO_PAPER_COHORTS = (
-    # Mid-edge cohort: likely to contain some edge but lower confidence than production.
-    {'name': 'mid_edge', 'min_edge': 0.08, 'max_edge': 0.15, 'min_tier': 'moderate'},
-    # Low-edge cohort: mostly abstain-zone plays for label enrichment.
-    {'name': 'low_edge', 'min_edge': 0.03, 'max_edge': 0.08, 'min_tier': 'slight'},
-)
 
 scheduler = BackgroundScheduler(timezone=APP_TIMEZONE) if BackgroundScheduler else None
-
 
 _scheduler_lock_fd = None
 STALE_JOB_MINUTES = 180
@@ -79,7 +69,6 @@ def _acquire_scheduler_lock(lock_path=None):
 
     _scheduler_lock_fd = lock_fd
     return True
-
 
 
 def _log_job(job_name, func):
@@ -156,6 +145,9 @@ def refresh_player_stats():
         from app.services.stats_service import refresh_completed_game_logs, update_player_logs_for_games
 
         completed_summary = refresh_completed_game_logs(days_back=2)
+        if completed_summary.get('final_games_seen', 0):
+            from app.services.player_identity_service import sync_player_identities
+            sync_player_identities()
         logger.info(
             "Completed-game refresh: final_games=%d players=%d inserted=%d updated=%d",
             completed_summary.get('final_games_seen', 0),
@@ -299,613 +291,14 @@ def _capture_todays_snapshots(prefetch_props: bool = True):
     )
 
 
-def _build_auto_pick_context(bet_obj, score: dict) -> dict:
-    """Build context payload for auto-generated player prop bets.
-
-    Extracts opponent and team names from the scored prop dict so that
-    matchup features (defense rating, pace, back-to-back, etc.) are
-    populated instead of being zeroed out.
-    """
-    from app.services.stats_service import find_player_id
-    from app.services.feature_engine import build_pick_context_features
-
-    player_id = find_player_id(bet_obj.player_name or '')
-    if not player_id:
-        return {}
-
-    selected_odds = int(score.get('recommended_odds') or -110)
-    projected_edge = score.get('edge', 0.0)
-    if bet_obj.bet_type == 'over':
-        projected_edge = score.get('edge_over', projected_edge)
-    elif bet_obj.bet_type == 'under':
-        projected_edge = score.get('edge_under', projected_edge)
-
-    # Extract real opponent/team context from the scored prop so that
-    # matchup features are populated — previously these were always empty,
-    # producing zeroed-out defense/pace/B2B features that polluted Model 2.
-    home_team = str(score.get('home_team') or '')
-    away_team = str(score.get('away_team') or '')
-    player_team = str(score.get('player_team') or '')
-    is_home = bool(score.get('is_home', True))
-    opponent_name = away_team if is_home else home_team
-
-    return build_pick_context_features(
-        player_name=bet_obj.player_name or '',
-        player_id=str(player_id),
-        prop_type=bet_obj.prop_type or '',
-        prop_line=float(bet_obj.prop_line or 0.0),
-        american_odds=selected_odds,
-        projected_stat=float(score.get('projection', 0.0) or 0.0),
-        projected_edge=float(projected_edge or 0.0),
-        confidence_tier=score.get('confidence_tier', 'no_edge'),
-        opponent_name=opponent_name,
-        team_name=player_team,
-        is_home=is_home,
-    )
-
-
-def _ensure_autopicks_user(db, User):
-    system_user = User.query.filter_by(username='__autopicks__').first()
-    if system_user is None:
-        system_user = User(username='__autopicks__', email='autopicks@local.invalid')
-        system_user.set_password(secrets.token_hex(32))
-        db.session.add(system_user)
-        db.session.flush()
-    return system_user
-
-
-def _build_candidates(scores: list, min_games: int) -> list:
-    """Filter and deduplicate raw prop scores into the candidate pool.
-
-    Sorts by edge descending, drops rows below min_games, then deduplicates
-    by (player, prop_type, line, recommended_side, game_id).
-    Pure — no db, no app context, no side effects.
-    """
-    seen_keys: set = set()
-    candidates: list = []
-    for s in sorted(scores, key=lambda x: x.get('edge', 0), reverse=True):
-        if (s.get('games_played') or 0) < min_games:
-            continue
-        key = (s.get('player'), s.get('prop_type'), s.get('line'),
-               s.get('recommended_side'), s.get('game_id'))
-        if key in seen_keys:
-            continue
-        seen_keys.add(key)
-        candidates.append(s)
-    return candidates
-
-
-def _filter_qualifying(candidates: list, min_games: int, confidence_tier: str) -> list:
-    """Return candidates meeting the production min_games and confidence_tier thresholds.
-    Pure — no db, no app context, no side effects.
-    """
-    return [
-        s for s in candidates
-        if (s.get('games_played') or 0) >= min_games
-        and s.get('confidence_tier') == confidence_tier
-    ]
-
-
-def _build_straight_plays(qualifying: list, min_edge_straight: float) -> list:
-    """Select straight-bet plays: edge >= min_edge_straight, one per player.
-    Pure — no db, no app context, no side effects.
-    """
-    straight_plays: list = []
-    seen_players: set = set()
-    for s in qualifying:
-        if (s.get('edge') or 0) < min_edge_straight:
-            continue
-        player = s.get('player') or ''
-        if player in seen_players:
-            continue
-        seen_players.add(player)
-        straight_plays.append(s)
-    return straight_plays
-
-
-def _market_key(play: dict) -> tuple:
-    return (
-        play.get('player'),
-        play.get('prop_type'),
-        play.get('line'),
-        play.get('recommended_side'),
-        play.get('game_id'),
-    )
-
-
-def _pick_distinct_legs(
-    pool: list,
-    count: int,
-    min_edge: float,
-    used_players: set,
-) -> list:
-    """Pick legs with unique players and games, updating used_players."""
-    legs = []
-    used_games = set()
-    for play in pool:
-        if len(legs) >= count:
-            break
-        player = play.get('player') or ''
-        game_id = play.get('game_id') or ''
-        if (play.get('edge') or 0) < min_edge or player in used_players:
-            continue
-        if game_id and game_id in used_games:
-            continue
-        legs.append(play)
-        used_games.add(game_id)
-        used_players.add(player)
-    return legs
-
-
-def _build_parlay_groups(qualifying: list, straight_plays: list, Bet) -> list:
-    """Build three-leg groups first, then two-leg groups within the daily cap."""
-    used_players = {play.get('player') or '' for play in straight_plays}
-    remaining = [
-        play for play in qualifying
-        if (play.get('edge') or 0) >= AUTO_PICK_MIN_EDGE_2LEG
-        and play not in straight_plays
-    ]
-    groups = []
-    budget = AUTO_PICK_MAX_TOTAL - len(straight_plays)
-    for size, minimum_edge in (
-        (3, AUTO_PICK_MIN_EDGE_3LEG),
-        (2, AUTO_PICK_MIN_EDGE_2LEG),
-    ):
-        while budget >= size:
-            legs = _pick_distinct_legs(
-                remaining, size, minimum_edge, used_players
-            )
-            if len(legs) < size:
-                break
-            groups.append((Bet.generate_parlay_id(), legs))
-            remaining = [play for play in remaining if play not in legs]
-            budget -= size
-    return groups
-
-
-def _persist_auto_pick(
-    db,
-    Bet,
-    PickContext,
-    *,
-    user_id: int,
-    play: dict,
-    today,
-    day_start: datetime,
-    is_parlay: bool,
-    parlay_id: str | None,
-    notes_tag: str,
-):
-    """Persist one auto pick and its immutable scoring context."""
-    from app.enums import BetSource, Outcome
-
-    try:
-        match_date = datetime.strptime(
-            play.get('match_date') or today.isoformat(), '%Y-%m-%d'
-        )
-    except ValueError:
-        match_date = day_start
-    bet_obj = Bet(
-        user_id=user_id,
-        team_a=str(play.get('away_team') or '')[:80] or 'Away',
-        team_b=str(play.get('home_team') or '')[:80] or 'Home',
-        match_date=match_date,
-        bet_amount=10.0,
-        outcome=Outcome.PENDING.value,
-        american_odds=int(play.get('recommended_odds') or -110),
-        is_parlay=is_parlay,
-        parlay_id=parlay_id,
-        source=BetSource.AUTO_GENERATED.value,
-        bet_type=str(play.get('recommended_side') or 'over'),
-        over_under_line=None,
-        external_game_id=play.get('game_id') or None,
-        player_name=str(play.get('player') or '')[:100] or None,
-        prop_type=str(play.get('prop_type') or '')[:40] or None,
-        prop_line=float(play.get('line') or 0.0),
-        notes=notes_tag,
-    )
-    db.session.add(bet_obj)
-    db.session.flush()
-    context = _build_auto_pick_context(bet_obj, play)
-    if context:
-        db.session.add(PickContext(
-            bet_id=bet_obj.id,
-            context_json=json.dumps(context),
-            projected_stat=play.get('projection'),
-            projected_edge=play.get('edge'),
-            confidence_tier=play.get('confidence_tier'),
-        ))
-    return bet_obj
-
-
-def _persist_production_picks(
-    db,
-    Bet,
-    PickContext,
-    *,
-    user_id: int,
-    straight_plays: list,
-    parlay_groups: list,
-    today,
-    day_start: datetime,
-) -> tuple[list, set]:
-    created = []
-    market_keys = set()
-    for play in straight_plays:
-        created.append(_persist_auto_pick(
-            db, Bet, PickContext,
-            user_id=user_id,
-            play=play,
-            today=today,
-            day_start=day_start,
-            is_parlay=False,
-            parlay_id=None,
-            notes_tag='AUTO_PICK_BUCKET:straight',
-        ))
-        market_keys.add(_market_key(play))
-    for parlay_id, legs in parlay_groups:
-        bucket = '3leg_parlay' if len(legs) == 3 else '2leg_parlay'
-        for play in legs:
-            created.append(_persist_auto_pick(
-                db, Bet, PickContext,
-                user_id=user_id,
-                play=play,
-                today=today,
-                day_start=day_start,
-                is_parlay=True,
-                parlay_id=parlay_id,
-                notes_tag=f'AUTO_PICK_BUCKET:{bucket}',
-            ))
-            market_keys.add(_market_key(play))
-    return created, market_keys
-
-
-def _paper_play_qualifies(
-    play: dict,
-    *,
-    market_keys: set,
-    paper_players: set,
-    min_edge: float,
-    max_edge: float,
-    min_tier_rank: int,
-    tier_rank: dict,
-) -> bool:
-    player = str(play.get('player') or '')
-    edge = abs(float(play.get('edge') or 0.0))
-    confidence_rank = int(
-        tier_rank.get(str(play.get('confidence_tier') or 'no_edge'), 0)
-    )
-    return (
-        _market_key(play) not in market_keys
-        and bool(player)
-        and player not in paper_players
-        and min_edge <= edge < max_edge
-        and confidence_rank >= min_tier_rank
-    )
-
-
-def _persist_paper_picks(
-    db,
-    Bet,
-    PickContext,
-    *,
-    user_id: int,
-    candidates: list,
-    market_keys: set,
-    today,
-    day_start: datetime,
-) -> tuple[list, dict[str, int]]:
-    if not AUTO_PAPER_ENABLED or AUTO_PAPER_MAX_PER_COHORT <= 0:
-        return [], {}
-    tier_rank = {'no_edge': 0, 'slight': 1, 'moderate': 2, 'strong': 3}
-    created = []
-    counts = {}
-    paper_players = set()
-    for cohort in AUTO_PAPER_COHORTS:
-        cohort_name = str(cohort.get('name') or '').strip()
-        if not cohort_name:
-            continue
-        cohort_count = 0
-        for play in candidates:
-            if cohort_count >= AUTO_PAPER_MAX_PER_COHORT:
-                break
-            qualifies = _paper_play_qualifies(
-                play,
-                market_keys=market_keys,
-                paper_players=paper_players,
-                min_edge=float(cohort.get('min_edge', 0.0) or 0.0),
-                max_edge=float(cohort.get('max_edge', 1.0) or 1.0),
-                min_tier_rank=tier_rank.get(
-                    str(cohort.get('min_tier') or 'slight'), 1
-                ),
-                tier_rank=tier_rank,
-            )
-            if not qualifies:
-                continue
-            created.append(_persist_auto_pick(
-                db, Bet, PickContext,
-                user_id=user_id,
-                play=play,
-                today=today,
-                day_start=day_start,
-                is_parlay=False,
-                parlay_id=None,
-                notes_tag=f'AUTO_PAPER_COHORT:{cohort_name}',
-            ))
-            market_keys.add(_market_key(play))
-            paper_players.add(str(play.get('player') or ''))
-            cohort_count += 1
-        counts[cohort_name] = cohort_count
-    return created, counts
-
-
 def generate_daily_auto_picks():
-    """Generate a separated daily basket of auto picks for faster model learning."""
-    from app import db
-    from app.enums import BetSource
-    from app.models import Bet, PickContext, User
-    from app.services.projection_engine import ProjectionEngine
-    from app.services.value_detector import ValueDetector
-
-    app = _get_app()
-    with app.app_context():
-        today = datetime.now(ET).date()
-        day_start = datetime.combine(today, dt_time.min)
-        day_end = day_start + timedelta(days=1)
-
-        system_user = _ensure_autopicks_user(db, User)
-
-        existing_today = (
-            Bet.query
-            .filter(Bet.user_id == system_user.id)
-            .filter(Bet.source == BetSource.AUTO_GENERATED.value)
-            .filter(Bet.match_date >= day_start, Bet.match_date < day_end)
-            .count()
-        )
-        if existing_today > 0:
-            logger.info("Auto picks already generated for %s (%d bets).", today.isoformat(), existing_today)
-            db.session.commit()
-            return
-
-        detector = ValueDetector(ProjectionEngine())
-        scores = detector.score_all_todays_props()
-
-        all_candidates = _build_candidates(scores, AUTO_PAPER_MIN_GAMES)
-        all_qualifying = _filter_qualifying(
-            all_candidates, AUTO_PICK_MIN_GAMES, AUTO_PICK_CONFIDENCE_TIER,
-        )
-
-        if not all_candidates:
-            logger.info("Auto pick generation skipped: no qualifying plays today.")
-            db.session.commit()
-            return
-
-        straight_plays = _build_straight_plays(
-            all_qualifying, AUTO_PICK_MIN_EDGE_STRAIGHT
-        )[:AUTO_PICK_MAX_TOTAL]
-        parlay_groups = _build_parlay_groups(all_qualifying, straight_plays, Bet)
-
-        if not straight_plays and not parlay_groups:
-            logger.info(
-                "Auto pick generation skipped: %d plays scored but none met edge/history thresholds.",
-                len(all_qualifying),
-            )
-            db.session.commit()
-            return
-
-        created_bets, persisted_market_keys = _persist_production_picks(
-            db,
-            Bet,
-            PickContext,
-            user_id=system_user.id,
-            straight_plays=straight_plays,
-            parlay_groups=parlay_groups,
-            today=today,
-            day_start=day_start,
-        )
-        paper_bets, paper_counts = _persist_paper_picks(
-            db,
-            Bet,
-            PickContext,
-            user_id=system_user.id,
-            candidates=all_candidates,
-            market_keys=persisted_market_keys,
-            today=today,
-            day_start=day_start,
-        )
-        created_bets.extend(paper_bets)
-
-        db.session.commit()
-        logger.info(
-            "Generated %d auto picks for %s — %d straight | %d parlays (%d 3-leg, %d 2-leg) | paper=%s",
-            len(created_bets),
-            today.isoformat(),
-            len(straight_plays),
-            len(parlay_groups),
-            sum(1 for _, legs in parlay_groups if len(legs) == 3),
-            sum(1 for _, legs in parlay_groups if len(legs) == 2),
-            paper_counts or {},
-        )
-
-
-def _bootstrap_tier(edge: float) -> str:
-    if edge >= 0.15:
-        return 'strong'
-    if edge >= 0.08:
-        return 'moderate'
-    return 'slight'
-
-
-def _bootstrap_opponent(log) -> str:
-    matchup = log.matchup or ''
-    if ' vs. ' in matchup:
-        return matchup.split(' vs. ', 1)[1].strip()
-    if ' @ ' in matchup:
-        return matchup.split(' @ ', 1)[1].strip()
-    return ''
-
-
-def _bootstrap_market_values(log, rng, stat_map, Outcome) -> dict | None:
-    prop_type, stat_key, spread = rng.choice(stat_map)
-    actual = float(getattr(log, stat_key, 0) or 0)
-    if actual < 0:
-        return None
-    line = max(0.5, round(actual + rng.uniform(-spread, spread)) + 0.5)
-    bet_type = 'over' if rng.random() >= 0.5 else 'under'
-    is_win = actual > line if bet_type == 'over' else actual < line
-    return {
-        'prop_type': prop_type,
-        'stat_key': stat_key,
-        'actual': actual,
-        'line': line,
-        'bet_type': bet_type,
-        'outcome': Outcome.WIN.value if is_win else Outcome.LOSE.value,
-        'odds': (-110 if rng.random() >= 0.3
-                 else int(rng.choice([100, 105, 110, 115, 120]))),
-    }
-
-
-def _create_bootstrap_example(log, user_id: int, rng, stat_map, *, db,
-                              Bet, PickContext, BetSource, Outcome,
-                              build_features, get_summary) -> bool:
-    if not log.game_date or log.game_date >= datetime.now(timezone.utc).date():
-        return False
-    market = _bootstrap_market_values(log, rng, stat_map, Outcome)
-    if market is None:
-        return False
-    summary = get_summary(str(log.player_id), logs=None)
-    season_avg = float(
-        summary.get('season', {}).get(
-            market['stat_key'], market['actual'],
-        ) or market['actual']
-    )
-    projected_stat = season_avg + rng.uniform(-1.5, 1.5)
-    projected_edge = (
-        (projected_stat - market['line']) / max(market['line'], 1.0)
-    )
-    if market['bet_type'] == 'under':
-        projected_edge = (
-            (market['line'] - projected_stat) / max(market['line'], 1.0)
-        )
-    tier = _bootstrap_tier(abs(projected_edge))
-    context = build_features(
-        player_name=log.player_name,
-        player_id=str(log.player_id),
-        prop_type=market['prop_type'],
-        prop_line=float(market['line']),
-        american_odds=int(market['odds']),
-        projected_stat=float(round(projected_stat, 2)),
-        projected_edge=float(round(projected_edge, 4)),
-        confidence_tier=tier,
-        opponent_name=_bootstrap_opponent(log),
-        team_name=str(log.team_abbr or ''),
-        is_home=(log.home_away or '').lower() == 'home',
-    )
-    bet_obj = Bet(
-        user_id=user_id,
-        team_a=str(log.team_abbr or 'TEAM'),
-        team_b='OPP',
-        match_date=datetime.combine(log.game_date, dt_time.min),
-        bet_amount=10.0,
-        outcome=market['outcome'],
-        american_odds=int(market['odds']),
-        is_parlay=False,
-        source=BetSource.AUTO_GENERATED.value,
-        bet_type=market['bet_type'],
-        over_under_line=None,
-        external_game_id=None,
-        player_name=log.player_name,
-        prop_type=market['prop_type'],
-        prop_line=float(market['line']),
-        actual_total=float(market['actual']),
-        notes='AUTO_BOOTSTRAP_HIDDEN:model2',
-    )
-    db.session.add(bet_obj)
-    db.session.flush()
-    db.session.add(PickContext(
-        bet_id=bet_obj.id,
-        context_json=json.dumps(context),
-        projected_stat=float(round(projected_stat, 2)),
-        projected_edge=float(round(projected_edge, 4)),
-        confidence_tier=tier,
-    ))
-    return True
+    return _generate_daily_auto_picks(_get_app())
 
 
 def bootstrap_pick_quality_examples(target_resolved: int = 220, max_logs: int = 10000) -> dict:
-    """Backfill hidden resolved auto picks + PickContext for Model 2 bootstrap."""
-    from app import db
-    from app.enums import BetSource, Outcome
-    from app.models import Bet, PickContext, PlayerGameLog, User
-    from app.services.feature_engine import build_pick_context_features
-    from app.services.stats_service import get_player_stats_summary
-
-    app = _get_app()
-    with app.app_context():
-        system_user = _ensure_autopicks_user(db, User)
-
-        existing_resolved = (
-            db.session.query(Bet)
-            .join(PickContext, PickContext.bet_id == Bet.id)
-            .filter(Bet.user_id == system_user.id)
-            .filter(Bet.source == BetSource.AUTO_GENERATED.value)
-            .filter(Bet.notes.like('AUTO_BOOTSTRAP_HIDDEN%'))
-            .filter(Bet.outcome.in_([Outcome.WIN.value, Outcome.LOSE.value]))
-            .count()
-        )
-        if existing_resolved >= target_resolved:
-            return {
-                'created': 0,
-                'existing_resolved': existing_resolved,
-                'target_resolved': target_resolved,
-                'message': 'already at target',
-            }
-
-        needed = target_resolved - existing_resolved
-        rng = random.Random(42)
-        created = 0
-        created_ctx = 0
-        scan_count = 0
-
-        stat_map = [
-            ('player_points', 'pts', 4.5),
-            ('player_rebounds', 'reb', 2.5),
-            ('player_assists', 'ast', 2.5),
-            ('player_threes', 'fg3m', 1.5),
-        ]
-
-        logs = (
-            PlayerGameLog.query
-            .filter(PlayerGameLog.game_date.isnot(None))
-            .order_by(PlayerGameLog.game_date.desc(), PlayerGameLog.id.desc())
-            .limit(max_logs)
-            .all()
-        )
-
-        for log in logs:
-            if created >= needed:
-                break
-            scan_count += 1
-            was_created = _create_bootstrap_example(
-                log, system_user.id, rng, stat_map, db=db, Bet=Bet,
-                PickContext=PickContext, BetSource=BetSource,
-                Outcome=Outcome, build_features=build_pick_context_features,
-                get_summary=get_player_stats_summary,
-            )
-            created += int(was_created)
-            created_ctx += int(was_created)
-
-            if created % 100 == 0:
-                db.session.commit()
-
-        db.session.commit()
-        return {
-            'created': created,
-            'created_context': created_ctx,
-            'existing_resolved': existing_resolved,
-            'target_resolved': target_resolved,
-            'logs_scanned': scan_count,
-        }
+    return _bootstrap_pick_quality_examples(
+        _get_app(), target_resolved=target_resolved, max_logs=max_logs,
+    )
 
 
 def resolve_and_grade():
@@ -968,7 +361,7 @@ def resolve_and_grade():
         db.session.commit()
 
 
-def _projection_retrain_allowed(ModelMetadata, PlayerGameLog) -> bool:
+def _projection_retrain_allowed(ModelMetadata, PlayerGameLog, HistoricalGameLog) -> bool:
     models = (
         ModelMetadata.query
         .filter(ModelMetadata.model_name.like('projection_%'))
@@ -988,11 +381,14 @@ def _projection_retrain_allowed(ModelMetadata, PlayerGameLog) -> bool:
         points_model.metadata_json if points_model
         else models[0].metadata_json if models else None
     )
+    historical_rows = HistoricalGameLog.query.filter_by(sport='nba').count()
+    source_key = ('historical_game_log_rows' if historical_rows
+                  else 'player_game_log_rows')
     last_logged_rows = None
     if metadata_source:
         try:
             last_logged_rows = json.loads(metadata_source).get(
-                'player_game_log_rows',
+                source_key,
             )
         except (TypeError, ValueError):
             pass
@@ -1012,12 +408,12 @@ def _projection_retrain_allowed(ModelMetadata, PlayerGameLog) -> bool:
                          if last_logged_rows is not None else None)
     except (TypeError, ValueError):
         previous_rows = None
-    current_rows = PlayerGameLog.query.count()
+    current_rows = historical_rows or PlayerGameLog.query.count()
     if previous_rows is not None and current_rows <= previous_rows:
         logger.info(
-            "Skipping projection retrain: no new PlayerGameLog rows since "
-            "last training (current=%d, last=%d).",
-            current_rows, previous_rows,
+            "Skipping projection retrain: no new %s rows since last "
+            "training (current=%d, last=%d).",
+            source_key, current_rows, previous_rows,
         )
         should_train = False
     return should_train
@@ -1027,11 +423,12 @@ def retrain_models():
     """Scheduled model retrain using accumulated game log data."""
     app = _get_app()
     with app.app_context():
-        from app.models import ModelMetadata, PlayerGameLog
+        from app.models import HistoricalGameLog, ModelMetadata, PlayerGameLog
         from app.services.ml_model import retrain_all_models
         from app.services.pick_quality_model import train_pick_quality_model
 
-        if _projection_retrain_allowed(ModelMetadata, PlayerGameLog):
+        if _projection_retrain_allowed(
+                ModelMetadata, PlayerGameLog, HistoricalGameLog):
             results = retrain_all_models()
             logger.info("Projection model retrain complete: %s", results)
         else:
@@ -1396,7 +793,10 @@ def _run_hoopr_reconcile():
     from app.services.hoopr_import_service import import_hoopr_seasons
     app = _get_app()
     with app.app_context():
-        result = import_hoopr_seasons(seasons=1)
+        result = import_hoopr_seasons(seasons=2, skip_missing_current=True)
+        if result.get('inserted') or result.get('updated'):
+            from app.services.player_identity_service import sync_player_identities
+            sync_player_identities()
         logger.info("hoopr reconcile: %s", result)
 
 
@@ -1406,6 +806,17 @@ def _run_refresh_scenario_splits():
     with app.app_context():
         result = refresh_splits()
         logger.info("scenario splits refresh: %s", result)
+
+
+def refresh_basketball_feed():
+    """Collect once for every browser; the durable feed owns fetch diagnostics."""
+    from app.services.basketball_feed import collect_basketball_feed
+
+    with _get_app().app_context():
+        try:
+            collect_basketball_feed()
+        except Exception as exc:
+            logger.error('Basketball feed collection failed (%s)', type(exc).__name__)
 
 
 def init_scheduler(app):
@@ -1423,6 +834,11 @@ def init_scheduler(app):
     if not _acquire_scheduler_lock():
         logger.info("Skipping APScheduler startup in this process (lock already held)")
         return
+
+    scheduler.add_job(
+        refresh_basketball_feed, trigger='interval', seconds=30,
+        id='basketball_feed', replace_existing=True, max_instances=1, coalesce=True,
+    )
 
     # Midnight cache reset — clear stale schedule/rest context for the new day
     scheduler.add_job(

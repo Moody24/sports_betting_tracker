@@ -21,9 +21,11 @@ import math
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
+import requests
 
 from app import db
 from app.models import HistoricalGameLog, JobLog
+from app.services.data_receipts import record_fetch
 from app.services.espn_mapping import (
     ESPN_TO_NBA_ABBR as _ESPN_TO_NBA_ABBR,
     NBA_TEAMS as _NBA_TEAMS,
@@ -34,8 +36,8 @@ from app.utils.seasons import recent_nba_seasons
 logger = logging.getLogger(__name__)
 
 _HOOPR_URL = (
-    'https://raw.githubusercontent.com/sportsdataverse/hoopR-nba-data/'
-    'main/nba/player_box/parquet/player_box_{year}.parquet'
+    'https://github.com/sportsdataverse/sportsdataverse-data/releases/'
+    'download/espn_nba_player_boxscores/player_box_{year}.parquet'
 )
 
 # hoopR/ESPN season_type codes
@@ -86,12 +88,20 @@ def _load_player_box_df(year: int, from_dir: str | None = None):
     """One season of hoopR player box scores, downloaded or read locally."""
     import pandas as pd
     if from_dir:
-        return pd.read_parquet(
-            Path(from_dir) / f'player_box_{year}.parquet')
-    import requests
+        frame = pd.read_parquet(Path(from_dir) / f'player_box_{year}.parquet')
+        frame.attrs['source_version'] = f'local:player_box_{year}.parquet'
+        return frame
+    from app.services.provider_access import provider_access_status
+    if not provider_access_status()['espn']['enabled']:
+        raise requests.RequestException('ESPN source permission required before downloading releases')
     resp = requests.get(_HOOPR_URL.format(year=year), timeout=120)
     resp.raise_for_status()
-    return pd.read_parquet(BytesIO(resp.content))
+    frame = pd.read_parquet(BytesIO(resp.content))
+    frame.attrs['source_version'] = (
+        resp.headers.get('ETag') or resp.headers.get('Last-Modified')
+        or f'espn_nba_player_boxscores/player_box_{year}.parquet'
+    )[:120]
+    return frame
 
 
 def _rows_from_player_box(df, season: str, season_type_code: int,
@@ -240,7 +250,8 @@ def _import_loaded_hoopr_season(df, season: str, sport: str,
 
 def import_hoopr_seasons(sport='nba', seasons=3,
                          season_type='Regular Season', from_dir=None,
-                         max_games=None, update_stats: bool = False) -> dict:
+                         max_games=None, update_stats: bool = False,
+                         skip_missing_current: bool = False) -> dict:
     """Callable core of import-hoopr-logs (scheduler + CLI entry points)."""
     season_type_code = SEASON_TYPE_CODES[season_type]
 
@@ -254,12 +265,33 @@ def import_hoopr_seasons(sport='nba', seasons=3,
     warnings: list[str] = []
 
     try:
-        for season in recent_nba_seasons(seasons):
+        season_names = recent_nba_seasons(seasons)
+        for season in season_names:
             try:
                 df = _load_player_box_df(
                     _season_to_hoopr_year(season), from_dir=from_dir)
+            except (requests.HTTPError, FileNotFoundError) as exc:
+                current_release_missing = (
+                    skip_missing_current and season == season_names[0]
+                    and (isinstance(exc, FileNotFoundError)
+                         or (exc.response is not None
+                             and exc.response.status_code == 404))
+                )
+                if current_release_missing:
+                    warnings.append(f'{season}: release not published yet')
+                    record_fetch('espn_player_box_release', 'not_published',
+                                 detail=f'{season}: release not published yet')
+                    continue
+                errors.append(f'{season}: {exc}')
+                record_fetch('espn_player_box_release', 'failed',
+                             detail=f'{season}: {exc}')
+                logger.error('import-hoopr-logs: season %s load failed: %s',
+                             season, exc)
+                continue
             except Exception as exc:
                 errors.append(f"{season}: {exc}")
+                record_fetch('espn_player_box_release', 'failed',
+                             detail=f'{season}: {exc}')
                 logger.error("import-hoopr-logs: season %s load failed: %s",
                              season, exc)
                 continue
@@ -273,6 +305,14 @@ def import_hoopr_seasons(sport='nba', seasons=3,
                 skipped += counts[1]
                 updated += counts[2]
                 warnings.extend(counts[3])
+                latest_date = (df['game_date'].dropna().max()
+                               if not df.empty else None)
+                record_fetch(
+                    'espn_player_box_release', 'success', len(df),
+                    data_through=_as_date(latest_date) if latest_date is not None else None,
+                    source_version=df.attrs.get('source_version'),
+                    detail=f'{season}: +{counts[0]} rows',
+                )
             except Exception as exc:   # malformed rows, DB errors, etc.
                 db.session.rollback()
                 errors.append(f"{season}: {exc}")

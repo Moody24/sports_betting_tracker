@@ -139,7 +139,9 @@ class TestBackfillCommand(BaseTestCase):
         df = _league_log_df()
         df.loc[0, 'GAME_DATE'] = 'not-a-date'
         mock_fetch.return_value = df
-        result = self._run(['--sport', 'nba', '--seasons', '1', '--sleep', '0'])
+        with patch('app.cli.history_commands.recent_nba_seasons',
+                   return_value=['2025-26']):
+            result = self._run(['--sport', 'nba', '--seasons', '1', '--sleep', '0'])
         self.assertEqual(result.exit_code, 0)  # command reports, doesn't crash
         with self.app.app_context():
             job = JobLog.query.filter_by(job_name='backfill-logs').one()

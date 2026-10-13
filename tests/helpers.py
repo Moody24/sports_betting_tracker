@@ -39,6 +39,17 @@ class BaseTestCase(unittest.TestCase):
         )
         self._http_guard.start()
         self.addCleanup(self._http_guard.stop)
+        # nba_api keeps a requests.Session and bypasses requests.get. Block the
+        # session transport as well; explicit provider fixtures still override
+        # requests.get or endpoint constructors normally.
+        self._session_http_guard = patch(
+            "requests.sessions.Session.request",
+            side_effect=requests.RequestException(
+                "External HTTP is disabled in BaseTestCase"
+            ),
+        )
+        self._session_http_mock = self._session_http_guard.start()
+        self.addCleanup(self._session_http_guard.stop)
         self.app = create_app(testing=True)
         self.app.config["WTF_CSRF_ENABLED"] = False
         self.client = self.app.test_client()
@@ -64,6 +75,8 @@ class BaseTestCase(unittest.TestCase):
         self.client.post(
             "/auth/login",
             data={"username": username, "password": password},
-            follow_redirects=True,
+            # Authentication setup must not run the NBA market page inside
+            # every unrelated unit test. Browser/auth tests follow the redirect.
+            follow_redirects=False,
         )
         return user_id

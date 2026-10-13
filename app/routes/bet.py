@@ -32,6 +32,7 @@ from app.routes.nba_analysis import (   # noqa: E402
 from app.routes.bet_import import (     # noqa: E402
     quick_add_bet, quick_add_parlay, manual_parlay, ocr_screenshot,
 )
+from app.routes.live_feed import nba_live_feed, nba_live_events  # noqa: E402
 
 # ── CRUD ──────────────────────────────────────────────────────────────────
 bet.add_url_rule('/bets',                      view_func=place_bet)
@@ -43,6 +44,8 @@ bet.add_url_rule('/bets/export',               view_func=export_bets)
 
 # ── NBA Live ───────────────────────────────────────────────────────────────
 bet.add_url_rule('/nba/today',                 view_func=nba_today)
+bet.add_url_rule('/nba/live-feed',             view_func=nba_live_feed)
+bet.add_url_rule('/nba/live-events',           view_func=nba_live_events)
 bet.add_url_rule('/nba/update-results',        view_func=nba_update_results,       methods=['POST'])
 bet.add_url_rule('/nba/upcoming-games',        view_func=nba_upcoming_games)
 bet.add_url_rule('/nba/props/<espn_id>',       view_func=nba_props)

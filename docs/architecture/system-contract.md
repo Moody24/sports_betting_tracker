@@ -1,10 +1,10 @@
 # Edge Tracker System Contract
 
 Status: **canonical architecture SSOT**  
-Contract version: **1.3**
-Last verified: **2026-09-03**
+Contract version: **1.8**
+Last verified: **2026-10-07**
 
-Verified inventory at this version: **16 SQLAlchemy models**, **22 registered
+Verified inventory at this version: **22 SQLAlchemy models**, **23 registered
 APScheduler jobs**, and **NBA as the only registered `SportService`**.
 
 This document is the single source of truth for module ownership, allowed
@@ -17,6 +17,7 @@ Executable definitions remain authoritative for field-level implementation:
 - database columns and relationships: `app/models.py` plus Alembic migrations;
 - enum values: `app/enums.py`;
 - Model 1 inputs: `app/services/ml_feature_builder.py::FEATURE_KEYS`;
+- Model 1 load-time MAE limits: `app/services/ml_model.py::MAX_PROJECTION_MAE`;
 - Model 2 inputs: `app/services/pick_quality_model.py::PICK_FEATURES`;
 - per-sport historical stat keys: `app/services/sport_config.py`.
 
@@ -66,8 +67,9 @@ flowchart TB
 
     ORM[SQLAlchemy models]
     Artifacts[Model artifact storage]
-    DB[(SQLite local / PostgreSQL-compatible)]
+    DB[(PostgreSQL 16 local / hosted)]
     ESPN[ESPN]
+    Releases[SportsDataverse ESPN releases]
     Odds[The Odds API]
 
     Browser -->|HTTP + Contract V1 JSON| HTTP
@@ -97,8 +99,14 @@ flowchart TB
     Data --> Cache
     Betting --> Cache
     Data --> ESPN
+    Data --> Releases
     Data --> Odds
 ```
+
+The local runtime uses a project-scoped PostgreSQL 16 cluster started by
+`scripts/local_postgres.sh`. SQLite remains a supported source for the guarded
+`migrate-sqlite-to-postgres` CLI and an offline rollback image. Hosted
+PostgreSQL uses the same Alembic model contract.
 
 ### 2.1 Dependency direction
 
@@ -135,6 +143,14 @@ module's private functions.
 | App construction and blueprint wiring | `app/__init__.py` | server and tests | configured Flask app |
 | Authentication | `app/routes/auth.py`, Flask-Login | all protected routes | authenticated `current_user` |
 | Bet CRUD and import | `app/routes/bet_crud.py`, `bet_import.py` | browser | `BetPlacementV1`, `ApiResultV1` |
+| Shared basketball collection | `app/services/basketball_feed.py` | singleton scheduler | durable Games snapshot and revision journal |
+| Basketball event delivery | `app/services/feed_stream.py`, `app/routes/live_feed.py` | `app/static/js/live_feed.js` | authenticated `ApiResultV1`, bounded SSE snapshot/reset/heartbeat |
+| Source authorization | `app/services/provider_access.py` | provider adapters, release importers | fail-closed access decision; no secrets in status |
+| Source availability presentation | `app/services/data_status.py` | authenticated templates | independent score-fetch and odds-configuration status |
+| Guided prop quote evidence | `app/services/guided_quote.py` | prop JSON and record submission | user-bound signed source quote, durable latest observation |
+| Recording retry receipts | `app/services/recording_idempotency.py` | record submission | per-user UUID + payload hash + atomic saved response |
+| Game selection | `app/services/game_picker.py` | builder schedule endpoint | active aware-dated provider-namespaced events; BDL score-only has no odds link |
+| Untrusted request normalization | `app/utils/request_validation.py` | placement and progress routes | validated finite, bounded payloads or explicit 400 |
 | ESPN HTTP transport | `app/services/espn_client.py` | sports-data services | raw provider JSON or `EspnClientError` |
 | NBA provider normalization | `app/services/nba_service.py` | routes, coordinator, grading | `GameV1`, `PropQuoteV1`, `LiveProgressV1` |
 | Multi-sport interface | `app/services/base.py` | sport adapters | `SportService` plus boundary contracts |
@@ -146,6 +162,8 @@ module's private functions.
 | Edge and pick scoring | `value_detector.py` | pages, recommender, pick context | `ScoredPropV1` |
 | Market governance | `market_recommender.py` | scheduler, CLI, dashboard | market recommendation mappings |
 | Pick-quality classifier | `pick_quality_model.py` | `value_detector`, CLI | Model 2 feature vector and probability |
+| Daily auto-pick selection and persistence | `auto_pick_service.py` | scheduler, login hook | auto-generated `Bet` and `PickContext` rows |
+| Pick-quality bootstrap examples | `pick_quality_bootstrap.py` | scheduler, CLI | synthetic resolved `Bet` and `PickContext` rows |
 | Grading/postmortem | `nba_service.py`, `postmortem_service.py` | coordinator, routes | outcome tuple and ORM rows |
 | Game-day orchestration | `game_day_coordinator.py` | scheduler | idempotent tier/result string |
 | ML diagnostics and validation | `model_diagnostics.py`, `rolling_backtest.py` | CLI | `ModelEvaluationRun` |
@@ -157,15 +175,17 @@ module's private functions.
 
 ### 3.1 Persistent schemas
 
-`app/models.py` and the migration chain are authoritative for the 16 current
+`app/models.py` and the migration chain are authoritative for the 22 current
 SQLAlchemy models:
 
 | Category | Models |
 |---|---|
-| Identity and betting | `User`, `Bet`, `PickContext`, `BetPostmortem` |
+| Identity and betting | `User`, `PlayerIdentity`, `Bet`, `PickContext`, `BetPostmortem` |
+| Guided recording evidence | `GuidedQuote`, `BetRecordingRequest` |
+| Shared basketball feed | `BasketballFeedState`, `BasketballFeedEvent` |
 | Live and historical sports data | `GameSnapshot`, `PlayerGameLog`, `HistoricalGameLog`, `HistoricalGameOdds`, `OddsSnapshot`, `TeamDefenseSnapshot`, `InjuryReport` |
 | Scenario data | `ScenarioSplit`, `ScenarioContextPack` |
-| ML and operations | `ModelMetadata`, `ModelEvaluationRun`, `JobLog` |
+| ML and operations | `ModelMetadata`, `ModelEvaluationRun`, `JobLog`, `DataFetchReceipt` |
 
 Rules:
 
@@ -176,7 +196,22 @@ Rules:
 - Consumers MUST use canonical field names. Examples: `Bet.outcome`,
   `Bet.prop_line`, `PlayerGameLog.win_loss`.
 - Identifiers from different providers MUST retain their namespace. Do not
-  silently treat an ESPN player/event ID as an Odds API ID.
+  silently treat an ESPN player/event ID as an Odds API ID. Odds-only upcoming
+  games keep `espn_id` empty and retain `odds_event_id`; the picker uses a
+  namespaced `selection_key`. Missing/naive/out-of-window upcoming start times
+  are omitted; valid start times are converted to ET before deriving the date.
+- `PlayerIdentity.espn_id` is the permanent-history namespace. `nba_id` is
+  nullable until an exact, reviewed crosswalk is available. Duplicate names
+  remain ambiguous; fuzzy name similarity is never evidence for an automatic
+  pick. Completed-game refresh and release reconciliation update the identity
+  index when new history arrives.
+- `TeamDefenseSnapshot.snapshot_date` is the calculation date, while
+  `observed_through` is the last completed game behind the values. A prior
+  season is labeled as such; synthetic estimates are not persisted as fresh
+  snapshots. Positional allowances remain null unless observed.
+- `InjuryReport.date_reported` retains the source report date. A successful
+  zero-row `DataFetchReceipt` verifies an empty report; a failed fetch never
+  carries old injury designations forward as current.
 
 ### 3.2 Enums and controlled vocabularies
 
@@ -184,6 +219,7 @@ Rules:
 |---|---|
 | Bet outcome, type, source, postmortem reasons | `app/enums.py` |
 | Model 1 feature order | `ml_feature_builder.FEATURE_KEYS` (30 keys) |
+| Model 1 load-time accuracy limits | `ml_model.MAX_PROJECTION_MAE` |
 | Model 2 numerical feature order | `pick_quality_model.PICK_FEATURES` (17 keys plus encoded categorical values) |
 | Per-sport historical stats | `sport_config.SPORT_STAT_CONFIG` |
 | Supported NBA prop markets | `nba_service.SUPPORTED_PROP_MARKETS` |
@@ -224,6 +260,7 @@ routes, scoring, and the coordinator.
 | `start_time` | ISO-8601 string | yes | provider event timestamp |
 | `season_type` | integer or null | yes | provider season type |
 | `odds_event_id` | string | yes | Odds API event identity, empty if unmatched |
+| `selection_key` | string | upcoming/picker payloads | namespaced advisory browser identity (`espn:` or `odds_api:`); never persisted as an ESPN ID |
 | `over_under_line` | float or null | yes | current total |
 | `moneyline_home` / `moneyline_away` | integer or null | yes | American price |
 | `spread` | float or null | yes | normalized spread |
@@ -244,10 +281,15 @@ Produced by `nba_service.fetch_player_props_for_event()`. The outer mapping is
 | `over_odds` / `under_odds` | integer | yes | best same-line American odds; `0` means unavailable in legacy payloads |
 | `books` | mapping | yes | bookmaker -> `{line, over_odds, under_odds}` |
 | `best_over_book` / `best_under_book` | string | yes | source of selected price |
+| `source_last_update` | aware ISO-8601 string or null | yes | oldest update among contributing bookmaker markets; null is unverifiable |
 
 Persisted historical or live quote identity is owned by `OddsSnapshot` and
 MUST include event, player, market, bookmaker, snapshot kind, observation time,
-event start time, line, price, and the idempotency/source key.
+event start time, line, price, and the idempotency/source key. Live capture uses
+a deterministic SHA-256 identity of the provider observation, event, player,
+market, bookmaker, kind and price. Retries use database uniqueness and nested
+savepoints. Missing, naive, future or expired provider timestamps cannot become
+current live snapshots; `snapped_at` remains actual capture time.
 
 ### 3.6 `ProjectionV1`
 
@@ -268,6 +310,25 @@ breakdown: mapping
 
 Training and inference MUST construct inputs through the canonical feature
 builder. A caller MUST NOT manually assemble a Model 1 vector.
+Historical point and distributional training MUST derive opponent-defense
+features from completed games preceding the predicted game. A current
+`TeamDefenseSnapshot` cannot be applied to historical training rows. Live
+inference continues to use the most recent verified snapshot, with its
+`observed_through` date exposed to analysis.
+Historical closing game totals lack a verified decision-time capture and MUST
+be zero in training rows until timestamped pre-decision totals are available.
+Distributional heads trained before this context version MUST also be held
+from inference.
+Model 1's early-stopping rows MUST be inside the training period, leaving the
+later validation period untouched by fitting. Inference MUST fall back unless
+an active artifact declares the current historical-context version, has at
+least 100 later validation rows split by game date, beats the recent-five-game
+baseline on those rows, and meets its stat-specific MAE limit.
+Retraining stores a failed candidate as inactive and preserves the prior
+active artifact with a distinct per-run file; loading still applies this gate
+to any older active artifact.
+The production-readiness command reports the same inference gate, even when
+an old database row still has `is_active=true`.
 
 ### 3.7 `ScoredPropV1`
 
@@ -302,10 +363,21 @@ win_probability: float | null
 pick_quality_recommendation: string
 ```
 
+Current daily scoring and actionable selections MUST carry an `odds_api`
+quote with an aware source timestamp aged 0–10 minutes. Every cache read and
+actionable filter rechecks that age. Historical `GameSnapshot` fallback MUST
+NOT populate the current scoring or bet-builder market board. Recorded manual
+prices are user observations and are not refreshed from provider data.
+
 The no-data path SHOULD converge on the same shape. It currently omits
 `win_probability` and `pick_quality_recommendation`; consumers MUST treat those
 missing keys as `null` and `"no_model"` respectively until that legacy path is
 migrated. A missing classifier result is not a negative recommendation.
+The stat-analysis page may add view-only matchup context to a copy of this
+mapping. Team allowances must be labeled as team-wide, with sample size,
+source, and observation date; prior player-opponent results must include their
+sample size. These additions do not enter `ScoredPropV1`, the shared cache,
+or automatic-pick scoring.
 
 ### 3.8 `BetPlacementV1`
 
@@ -370,6 +442,8 @@ delta_to_line: float              when ok
 on_track: boolean | null          when ok
 match_score: float                when ok
 error: string                     when not ok
+retryable: boolean                transient unavailable/deferred responses
+status: string                    distinguishes deferred from terminal failure
 ```
 
 UI implementations MUST preserve the definition-of-done fields: current stat,
@@ -414,17 +488,19 @@ only with their JavaScript consumers and tests in the same change.
 |---|---|---|---|---|
 | Users, bets, contexts, postmortems | SQLAlchemy DB | durable | authenticated routes and grading services | transaction rollback; migrations |
 | Game/player history and snapshots | SQLAlchemy DB | durable | provider ingestion and coordinator | freshness rules; idempotent upsert |
+| Player identity and source receipts | SQLAlchemy DB | durable | identity sync and provider adapters | exact IDs, source timestamps, unresolved states |
 | Odds decisions and closes | `OddsSnapshot` | durable | scheduled capture/import CLI | source key uniqueness and coverage checks |
 | Scenario splits/context pack | SQLAlchemy DB | rebuildable derived state | scenario engine | atomic rebuild, then crosswalk cache clear |
 | Model registry/evaluations | `ModelMetadata`, `ModelEvaluationRun` | durable | ML training/evaluation | new run/activation decision |
 | Model binaries | `model_storage.py` | durable local artifact in current runtime | ML trainers | metadata reference; retrain to regenerate |
 | Authentication | Flask-Login signed session | 30-minute sliding idle / 12-hour absolute; 14-day remember cookie | auth routes | logout/session expiry; see `docs/security/browser-persistence.md` |
 | Parlay composition | browser `sessionStorage` | tab/session | shared JS utilities | explicit clear or browser session end |
-| Today's scored props | `score_cache._cache` | process, 5-minute TTL | scoring service | scheduler/manual invalidation |
-| NBA games/provider payload | `nba_service` caches | process, short TTL | NBA adapter | TTL/date rollover |
+| Today's scored props | `score_cache._cache`, guarded by `RLock` | process, ET day, 5-minute TTL; failure retry 30s | scoring service | original success age retained; stale fallback <=10m and quote age rechecked; midnight invalidates |
+| NBA games/provider payload | `nba_service` caches | process, ET day, 60-second TTL | NBA adapter | failures never cache empty; date rollover; deep-copy props; expired entries pruned |
+| Scoreboard availability | `nba_service._SCOREBOARD_STATUS`, locked | process, ET day; current <=60s | scoreboard adapter | last attempt/success distinct; errors retain success timestamp; date rollover |
 | Live progress/summary | `nba_live` caches | process, 30-second TTL | live route | TTL and bounded pruning |
 | Team defense lookup | `matchup_service` cache | process, 1-hour TTL | matchup service | explicit invalidation after refresh |
-| Coordinator cheap-exit state | `_DAY_CACHE` | process/day | game-day coordinator | ET date rollover/restart; DB remains truth |
+| Coordinator cheap-exit state | `_DAY_CACHE` | process/ET day; empty or done rechecked after15m | game-day coordinator | failed reads retry next tick; ET rollover/restart; DB remains truth |
 | Projection scan/player state | `ProjectionEngine` instance | one engine/scan | projection engine | discard instance |
 | Player crosswalk | `lru_cache` | process | crosswalk resolver | clear after scenario-pack rebuild |
 | Job observability | `JobLog` | durable audit only | scheduled/CLI jobs | append/update; never use as an exclusive lock |
@@ -472,7 +548,113 @@ only with their JavaScript consumers and tests in the same change.
   Provisioning and cross-container singleton proof remain deployment gates while
   hosting is inactive.
 
-### 4.4 Time contract
+### 4.4 Provider and request failure policy
+
+- ESPN HTTP and remote ESPN-derived releases are disabled outside tests unless
+  both `ESPN_ACCESS_APPROVED=true` and `ESPN_RIGHTS_BASIS` are present. These
+  settings record operator authorization; they do not grant data rights. Direct
+  NBA Stats network entrypoints require distinct `NBA_ACCESS_APPROVED=true` and
+  `NBA_RIGHTS_BASIS`; one provider's approval never authorizes another. Local
+  file imports remain available. Provider status never exposes keys or basis text.
+- Shared HTTP retry policy allows at most 3 attempts, 15s per attempt and 10s
+  backoff. Retry only transport failures, 429 and 5xx; long Retry-After stops
+  the call rather than retrying before the source allows. Count each attempt
+  against the provider budget. Exceptions omit URLs and credentials.
+- Live progress batches validate before any provider traffic: max 100 cards and
+  15 unique games, unique bounded card IDs, bounded event/player/market fields,
+  finite numeric values. Browser batches run sequentially and failed refreshes
+  back off from 30s to 300s. Each progress read makes one attempt with a <=3s timeout. After a 12s batch
+  budget, no additional reads start; unfinished cards return retryable/deferred
+  and take priority on the next poll. Summary cache has at most 512 entries.
+- Production refuses insecure session/remember cookie overrides. Private and
+  authentication responses use `Cache-Control: private, no-store`.
+- Provider pushes are not configured. The polling coordinator reconciles final
+  games against durable state and runs internal grading/history workflows. A
+  webhook receiver requires an authorized source, signatures and replay rules.
+
+### 4.5 Shared basketball feed contract
+
+- `BasketballFeedState` owns the `nba_games` snapshot, revision, last attempt,
+  last success, retry deadline and failure count. `BasketballFeedEvent` owns
+  ascending durable revision IDs and the latest 100 change payloads. Migration
+  `ea7026bd109c` creates both; SQLite IDs are not recycled after journal pruning.
+- `basketball_feed.collect_basketball_feed` runs every 30 seconds under the
+  single scheduler owner. Absent `BALLDONTLIE_API_KEY` means disabled and no HTTP.
+  One request has a 5s timeout, no redirects and a 1MiB response cap. Incomplete
+  pagination is an error. Cooldowns persist before I/O; transient failure delays
+  grow from 30s to 300s and valid longer `Retry-After` values are respected.
+- Snapshot fields: `revision`, `source='balldontlie'`, `state`, `games`,
+  `match_date`, `last_success_at`, `last_attempt_at`, `error_code`,
+  `provider_delay`, `poll_interval_seconds`. Each game has a namespaced
+  `source_event_id`, `home`/`away` name, abbreviation and nullable score,
+  normalized `status`, nullable `period`/`clock`/`start_time`, and ET `match_date`.
+- States are disabled, current, stale and unavailable. Current requires a
+  successful fetch within 75s and no subsequent error. Same-day data lasts at
+  most 900 seconds; ET rollover clears it. Internal `_source_match_date` preserves the
+  fetched day even when a response arrives after midnight; a derived current-day
+  view must never relabel a previous-day fetch as a current empty slate. Fetch time MUST NOT imply source update time
+  or a provider latency SLA. A repeated identical result updates metadata without
+  producing a change event. Old-day or expired replay resets to the current view.
+- GET `/nba/live-feed` is authenticated, returns `ApiResultV1`, and never calls
+  a provider. GET `/nba/live-events` is authenticated SSE. `Last-Event-ID` overrides
+  `?last_event_id`; invalid, expired or ahead cursors reset. Snapshot/reset events
+  contain the full snapshot and durable numeric ID; heartbeat every 15s contains
+  freshness and stream metadata without inventing a source timestamp or ID.
+- One lazy hub per web app/process polls the DB once per second while viewers
+  exist, with at most eight viewers and queues capped at 100. Slow viewers reset
+  to latest. DB failure clears queued snapshots and reports unavailable; recovery
+  sends a full reset even without a new revision. Auth and polling DB sessions are released before waiting; streams
+  end after 300s to reauthenticate on reconnect. Capacity returns 429 with Retry-After: 15;
+  JSON DB failure returns 503 with Retry-After: 15. Responses are private/no-store and SSE
+  disables proxy buffering. Default Gunicorn gthread with 16 threads leaves request capacity;
+  effective override settings are validated before worker startup.
+- The browser closes hidden-tab streams, deduplicates revisions, accepts explicit
+  reset, backs off with jitter up to 30 seconds, and falls back to the shared JSON endpoint
+  every 30 seconds after transport failure. No client calls the provider. Same-revision
+  heartbeat freshness/date changes still clear expired or previous-day games.
+- This is internal delivery of polled data, not a provider webhook. BALLDONTLIE
+  IDs MUST NOT be used as legacy ESPN grading IDs. Source rights, live credential
+  validation, odds entitlement and hosting proxy behavior remain operational gates.
+
+### 4.6 Guided recording contract
+
+- Add Bet begins with a scheduled/live event from the verified picker and an
+  available player prop. A free BALLDONTLIE Games entry has no odds link; neither
+  names nor coincident IDs establish an ESPN/Odds API crosswalk. Manual entry
+  stays a secondary, explicitly labeled historical-record path.
+- `nba_all_props` supplies `quote_tokens` and `quote_books` keyed by over/under.
+  Tokens bind the account, provider event, player, market, side, book, offered
+  line/odds and source observation time. Only matching bookmaker observations
+  within 10 minutes can be signed; unavailable unsigned sides cannot be selected.
+- `GuidedQuote` stores the latest served observation, without user identity.
+  Atomic observed-time updates prevent older replies replacing newer quotes;
+  withdrawn rows retain a receipt-time ordering watermark in `observed_at`.
+  Reopening requires strictly newer source evidence; rejected delayed replies
+  receive no selectable token. Actual source time remains in the payload/token.
+  Expired rows are pruned on serving. This validates the latest admitted
+  observation, not an execution guarantee or a sportsbook transaction.
+- New recordings send a UUID `request_id`. `BetRecordingRequest` is keyed by
+  account and UUID and retains the payload hash, accepted request JSON (including
+  quote provenance), response JSON and UTC creation time. Reservation/replay is
+  before quote expiry checks. Receipt and Bet rows commit in one transaction;
+  exact retries return the original response, even after expiry. A reused key
+  with a different payload returns 409. Receipts follow private bet-record
+  retention and are not a shared raw market-data endpoint.
+- Guided evidence mismatch/change/expiry returns 409 with a safe code/message.
+  Explicit `manual_entry=true` requires removal of the live token and preserves
+  the user's original line and recorded odds. Legacy unsigned requests remain
+  compatible but are labeled manual, never certified provider quotes.
+- The browser does not silently reprice selections. Before a new save it reloads
+  the current game/quote view and asks for explicit review of changed/expired
+  entries; keeping the original converts that entry to a manual historical record.
+  Concurrent submit is disabled, duplicate market selections are blocked, and
+  uncertain network retries reuse the exact request body and UUID.
+- UUID recording does not invoke provider-capable model enrichment or create
+  `PickContext`; durable quote facts remain in its private receipt. Historical
+  manual entry cannot silently acquire today's model features as point-in-time
+  training evidence. Missing recorded odds never become invented -110 context.
+
+### 4.7 Time contract
 
 - Use `ZoneInfo("America/New_York")` for slate dates, event-relative capture,
   scheduler windows, freshness, and snapshot date selection.
@@ -497,7 +679,16 @@ route/dashboard
   -> cache (advisory) -> template/JSON
 ```
 
-### 5.2 Bet placement and learning record
+### 5.2 Shared score delivery
+
+```text
+single APScheduler owner -> BALLDONTLIE Games (30s polling)
+  -> BasketballFeedState + BasketballFeedEvent (changed content only)
+  -> shared per-process DB reader -> bounded SSE subscribers
+  -> NBA Today score board / local JSON fallback
+```
+
+### 5.3 Bet placement and learning record
 
 ```text
 BetPlacementV1 from browser
@@ -508,7 +699,7 @@ BetPlacementV1 from browser
   -> later grading -> Bet outcome + BetPostmortem
 ```
 
-### 5.3 Game-final chain
+### 5.4 Game-final chain
 
 ```text
 APScheduler
@@ -520,7 +711,7 @@ APScheduler
   -> JobLog audit
 ```
 
-### 5.4 Model lifecycle
+### 5.5 Model lifecycle
 
 ```text
 HistoricalGameLog / resolved PickContext
@@ -532,6 +723,37 @@ HistoricalGameLog / resolved PickContext
   -> separate explicit activation
 ```
 
+The weekly Model 1 retrain guard compares permanent NBA history row counts
+when that store supplies training data. It uses operational `PlayerGameLog`
+counts only when permanent history is empty.
+
+### 5.6 Model2 postprocessing and persistence
+
+All learned probability adjustment uses the calibration partition. Final test
+labels MUST NOT tune stored inference metadata. Final accuracy, logloss and
+calibration metrics evaluate the exact deployed shrink/bias transformation.
+`postprocessing_version=calibration_only_v1` and
+`calibration_bias_source=calibration_partition` identify the admitted adjustment;
+unversioned legacy bias is ignored. This does not requalify an older artifact.
+Calibrated artifact persistence must succeed before incumbent deactivation;
+serialization/storage failure cannot substitute the base uncalibrated estimator.
+New artifacts use unique filenames to protect incumbents from partial writes.
+
+### 5.7 Automated recommendation data gate
+
+Analysis may show a projection with dated warnings. Automatic pick creation
+requires unique ESPN player history with a game in the preceding 30 days, a
+same-day successful injury report, a current-season opponent defense profile
+from at least five games observed within 21 days, a
+verified team assignment, and an offered event quote seen within 10 minutes.
+Missing or ambiguous inputs cause abstention, including for paper cohorts.
+The release injury feed is ESPN-sourced and retains its own `as_of_date`;
+an empty direct report that conflicts with same-day rows, or a direct and
+release report that disagree on a same-day designation, remains unresolved
+until a later successful fetch;
+SportsDataverse software licensing does not establish rights to republish ESPN
+data to beta users.
+
 ## 6. Known architecture debt
 
 These are recorded exceptions, not approved patterns:
@@ -542,7 +764,7 @@ These are recorded exceptions, not approved patterns:
 - Some provider normalization and application logic still coexist in
   `nba_service.py`; HTTP transport itself is isolated in `espn_client.py`.
 - `app/models.py` is a single large model module.
-- Process caches are not shared across workers.
+- Legacy process caches are not shared across workers; the new Games feed uses durable shared state.
 - `ARCHITECTURE.md` has stale table/job counts and is descriptive only.
 
 Fix debt incrementally. A cleanup change must preserve behavior, add contract

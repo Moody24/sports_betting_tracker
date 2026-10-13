@@ -6,9 +6,11 @@ engine's situational adjustments.
 
 import logging
 import time as _time
-from datetime import date as date_type, timedelta
+from datetime import timedelta
+from flask import current_app
 from app import db
 from app.models import InjuryReport
+from app.services.data_receipts import latest_fetch, record_fetch
 from app.services.espn_client import (
     EspnClientError,
     fetch_injuries_payload,
@@ -78,17 +80,18 @@ def _parse_injury_payload(data: dict) -> list:
     return injuries
 
 
-def _fetch_team_injuries_fallback() -> list:
+def _fetch_team_injuries_fallback() -> tuple[list, bool]:
     try:
         teams_payload = fetch_teams_payload(timeout=10, attempts=2)
     except EspnClientError:
         teams_payload = {}
     teams = teams_payload.get('sports', [{}])[0].get('leagues', [{}])[0].get('teams', [])
     if not teams:
-        return []
+        return [], False
 
     injuries = []
     seen = set()
+    complete = True
     for team in teams:
         team_obj = team.get('team', {})
         team_id = team_obj.get('id')
@@ -99,6 +102,11 @@ def _fetch_team_injuries_fallback() -> list:
                 str(team_id), timeout=8, attempts=2)
         except EspnClientError:
             payload = {}
+            complete = False
+        if not isinstance(payload, dict) or not any(
+            key in payload for key in ('injuries', 'items', 'teams')
+        ):
+            complete = False
         parsed = _parse_injury_payload(payload)
         for item in parsed:
             key = (item['player_name'].lower().strip(), item['status'], item.get('team', '').lower().strip())
@@ -106,7 +114,26 @@ def _fetch_team_injuries_fallback() -> list:
                 continue
             seen.add(key)
             injuries.append(item)
-    return injuries
+    return injuries, complete
+
+
+def _fetch_injury_report() -> tuple[list, bool]:
+    try:
+        data = fetch_injuries_payload(timeout=10, attempts=2)
+    except EspnClientError:
+        data = {}
+    aggregate_complete = isinstance(data, dict) and any(
+        key in data for key in ('items', 'teams', 'injuries')
+    )
+    injuries = _parse_injury_payload(data) if data else []
+    if injuries:
+        return injuries, aggregate_complete
+
+    fallback, fallback_complete = _fetch_team_injuries_fallback()
+    if fallback:
+        logger.info("Injury fallback endpoint returned %d rows", len(fallback))
+        return fallback, fallback_complete
+    return [], aggregate_complete or fallback_complete
 
 
 def fetch_espn_injuries() -> list:
@@ -114,21 +141,7 @@ def fetch_espn_injuries() -> list:
 
     Returns a list of dicts: {player_name, team, status, detail}.
     """
-    try:
-        data = fetch_injuries_payload(timeout=10, attempts=2)
-    except EspnClientError:
-        data = {}
-    injuries = _parse_injury_payload(data) if data else []
-    if injuries:
-        return injuries
-
-    # Fallback path: fetch per-team injury feeds if the aggregate endpoint is empty.
-    fallback = _fetch_team_injuries_fallback()
-    if fallback:
-        logger.info("Injury fallback endpoint returned %d rows", len(fallback))
-        return fallback
-
-    return injuries
+    return _fetch_injury_report()[0]
 
 
 def _normalize_injury_status(raw: str) -> str:
@@ -198,16 +211,21 @@ def refresh_injuries() -> int:
     Clears today's entries and replaces them.  Returns count of injuries stored.
     """
     today = et_today()
-    injuries = fetch_espn_injuries()
-    if not injuries:
-        cloned = _clone_latest_injuries_for_today(today)
-        if cloned:
-            logger.info("No fresh injuries fetched; copied %d latest rows forward", cloned)
-            return cloned
-        logger.info("No injuries fetched (or empty list)")
+    injuries, complete = _fetch_injury_report()
+    if not complete:
+        record_fetch('espn_injuries', 'failed', detail='No complete injury response')
+        db.session.commit()
+        logger.warning("Injury refresh failed; existing reports retain their original dates")
         return 0
 
-    # Delete today's existing entries and replace
+    if not injuries and InjuryReport.query.filter_by(date_reported=today).first():
+        record_fetch('espn_injuries', 'conflict', data_through=today,
+                     source_version='espn_site',
+                     detail='Empty direct report conflicts with dated injury rows')
+        db.session.commit()
+        logger.warning('Empty ESPN injury report conflicts with existing reports for today')
+        return 0
+
     InjuryReport.query.filter_by(date_reported=today).delete()
 
     count = 0
@@ -218,36 +236,17 @@ def refresh_injuries() -> int:
             status=inj['status'],
             detail=inj.get('detail', ''),
             date_reported=today,
+            source='espn',
         )
         db.session.add(report)
         count += 1
 
+    record_fetch('espn_injuries', 'success', count, data_through=today,
+                 source_version='espn_site')
     db.session.commit()
+    _INJURY_CACHE.clear()
     logger.info("Refreshed %d injury reports", count)
     return count
-
-
-def _clone_latest_injuries_for_today(today: date_type) -> int:
-    """Carry forward the latest available injury snapshot when upstream is empty."""
-    latest_date = db.session.query(db.func.max(InjuryReport.date_reported)).scalar()
-    if not latest_date or latest_date == today:
-        return 0
-
-    latest_rows = InjuryReport.query.filter_by(date_reported=latest_date).all()
-    if not latest_rows:
-        return 0
-
-    InjuryReport.query.filter_by(date_reported=today).delete()
-    for row in latest_rows:
-        db.session.add(InjuryReport(
-            player_name=row.player_name,
-            team=row.team,
-            status=row.status,
-            detail=row.detail,
-            date_reported=today,
-        ))
-    db.session.commit()
-    return len(latest_rows)
 
 
 def get_player_injury_status(player_name: str) -> dict:
@@ -261,7 +260,7 @@ def get_player_injury_status(player_name: str) -> dict:
     name_lower = player_name.lower().strip()
     now = _time.monotonic()
     cached = _INJURY_CACHE.get(name_lower)
-    if cached is not None:
+    if cached is not None and not current_app.config.get('TESTING', False):
         result, expires = cached
         if now < expires:
             return result
@@ -285,6 +284,31 @@ def get_player_injury_status(player_name: str) -> dict:
 
     _INJURY_CACHE[name_lower] = (result, now + _INJURY_CACHE_TTL)
     return result
+
+
+def player_availability(player_name: str) -> str:
+    """Return available, unavailable, or unknown for automatic decisions."""
+    receipt = latest_fetch('espn_injuries')
+    if (receipt is None or receipt.status != 'success'
+            or receipt.data_through != et_today()):
+        return 'unknown'
+    report = (InjuryReport.query
+              .filter(InjuryReport.date_reported == et_today())
+              .filter(db.func.lower(InjuryReport.player_name) == player_name.strip().lower())
+              .order_by(InjuryReport.fetched_at.desc(), InjuryReport.id.desc())
+              .first())
+    status = report.status if report else ''
+    if status in ('out', 'doubtful'):
+        return 'unavailable'
+    if report and status not in ('healthy', 'active', 'available'):
+        return 'unknown'
+    return 'available'
+
+
+def _current_injury_status(player_name: str, injury: dict) -> str:
+    if injury.get('date_reported') == et_today():
+        return injury['status']
+    return 'healthy' if player_availability(player_name) == 'available' else 'unknown'
 
 
 def is_player_available(player_name: str) -> bool:
@@ -341,7 +365,7 @@ def get_game_context(player_name: str, team_name: str) -> dict:
         # Injury status is player-specific — update it from DB without re-fetching ESPN.
         injury = get_player_injury_status(player_name)
         result = dict(cached)
-        result['injury_status'] = injury.get('status', 'healthy')
+        result['injury_status'] = _current_injury_status(player_name, injury)
         result['injury_detail'] = injury.get('detail', '')
         result['is_available'] = is_player_available(player_name)
         result.pop('_expires', None)
@@ -364,7 +388,7 @@ def get_game_context(player_name: str, team_name: str) -> dict:
 
     injury = get_player_injury_status(player_name)
     return {
-        'injury_status': injury.get('status', 'healthy'),
+        'injury_status': _current_injury_status(player_name, injury),
         'injury_detail': injury.get('detail', ''),
         'back_to_back': b2b,
         'days_rest': days_rest,

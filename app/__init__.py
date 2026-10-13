@@ -169,6 +169,10 @@ def _configure_app(app: Flask, testing: bool) -> None:
     app.config['REMEMBER_COOKIE_SECURE'] = (
         os.getenv('REMEMBER_COOKIE_SECURE', secure_default).lower() == 'true'
     )
+    if is_production:
+        for setting in ('SESSION_COOKIE_SECURE', 'REMEMBER_COOKIE_SECURE'):
+            if not app.config[setting]:
+                raise RuntimeError(f'{setting} must be true in production.')
     if testing:
         app.config['TESTING'] = True
         app.config['RATELIMIT_ENABLED'] = False
@@ -274,6 +278,8 @@ def _register_template_context(app: Flask) -> None:
                     'url': canonical_url,
                     'description': public_page.description,
                 })
+        from app.services.data_status import data_status_context
+
         return {
             'current_user': current_user,
             'current_year': datetime.now(timezone.utc).year,
@@ -284,6 +290,7 @@ def _register_template_context(app: Flask) -> None:
             'canonical_url': canonical_url,
             'breadcrumbs': breadcrumbs,
             'structured_data': structured_data,
+            'data_status': data_status_context() if current_user.is_authenticated else None,
             **display_config,
         }
 
@@ -291,6 +298,10 @@ def _register_template_context(app: Flask) -> None:
 def _register_security_hooks(app: Flask) -> None:
     @app.after_request
     def add_security_headers(response):
+        if request.endpoint != 'static' and (
+            current_user.is_authenticated or (request.endpoint or '').startswith('auth.')
+        ):
+            response.headers['Cache-Control'] = 'private, no-store'
         started = getattr(g, '_request_started_at', None)
         if started is not None:
             duration_ms = (perf_counter() - started) * 1000.0

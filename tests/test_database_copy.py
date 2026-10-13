@@ -101,6 +101,22 @@ class TestDatabaseCopy(unittest.TestCase):
                 validate_only=False,
             )
 
+    def test_dry_run_catches_sqlite_text_too_long_for_postgres(self):
+        with self.source.begin() as connection:
+            connection.execute(
+                User.__table__.update().values(username='x' * 21)
+            )
+        with self.assertRaisesRegex(
+            click.ClickException, r'user\.username.*VARCHAR\(20\)'
+        ):
+            migrate_database(
+                self.source,
+                self.target,
+                batch_size=50,
+                dry_run=True,
+                validate_only=False,
+            )
+
     def test_validate_only_reports_mismatch(self):
         report = migrate_database(
             self.source,

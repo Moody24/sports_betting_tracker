@@ -366,6 +366,7 @@ class TestProdReadinessCLI(BaseTestCase):
         self.assertEqual(result.exit_code, 0)
         self.assertIn('projection_player_points', result.output)
         self.assertIn('2.1', result.output)
+        self.assertIn('inference gate held', result.output)
 
     def test_prod_readiness_model2_resolved_count(self):
         with self.app.app_context():

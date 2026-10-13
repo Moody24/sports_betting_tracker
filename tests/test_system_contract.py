@@ -29,8 +29,8 @@ class SystemContractTests(unittest.TestCase):
             flags=re.MULTILINE,
         )
 
-        self.assertEqual(16, len(model_names))
-        self.assertIn("16 SQLAlchemy models", self.contract)
+        self.assertEqual(22, len(model_names))
+        self.assertIn("22 SQLAlchemy models", self.contract)
         for model_name in model_names:
             with self.subTest(model=model_name):
                 self.assertIn(f"`{model_name}`", self.contract)
@@ -41,8 +41,8 @@ class SystemContractTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         job_count = scheduler_source.count("scheduler.add_job(")
 
-        self.assertEqual(22, job_count)
-        self.assertIn("22 registered\nAPScheduler jobs", self.contract)
+        self.assertEqual(23, job_count)
+        self.assertIn("23 registered\nAPScheduler jobs", self.contract)
 
     def test_registered_sports_are_declared(self):
         service_sources = "\n".join(

@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+import os
+from datetime import date, datetime
+from io import StringIO
 from pathlib import Path
 
 import click
-from sqlalchemy import create_engine, func, inspect, select, text
+from sqlalchemy import String, create_engine, func, inspect, select, text
 from sqlalchemy.engine import Engine, make_url
 
 from app import db
@@ -68,6 +71,26 @@ def _row_counts(connection) -> dict[str, int]:
         )
         for table in _app_tables()
     }
+
+
+def _assert_source_lengths(connection) -> None:
+    """Catch SQLite values that a PostgreSQL VARCHAR column would reject."""
+    for table in _app_tables():
+        bounded = [
+            column for column in table.columns
+            if isinstance(column.type, String) and column.type.length
+        ]
+        if not bounded:
+            continue
+        lengths = connection.execute(
+            select(*(func.max(func.length(column)) for column in bounded))
+        ).one()
+        for column, maximum in zip(bounded, lengths):
+            if maximum is not None and maximum > column.type.length:
+                raise click.ClickException(
+                    f'{table.name}.{column.name} contains values longer than '
+                    f'VARCHAR({column.type.length}); widen the schema before copying.'
+                )
 
 
 def _group_metric(connection, table, columns: tuple[str, ...]) -> dict[str, int]:
@@ -150,6 +173,44 @@ def _reset_postgres_sequences(connection) -> None:
         )
 
 
+def _copy_text_value(value) -> str:
+    """Encode one value for PostgreSQL's tab-delimited text COPY format."""
+    if value is None:
+        return r'\N'
+    if isinstance(value, bool):
+        value = 't' if value else 'f'
+    elif isinstance(value, (date, datetime)):
+        value = value.isoformat()
+    elif isinstance(value, (dict, list)):
+        value = json.dumps(value, ensure_ascii=False)
+    else:
+        value = str(value)
+    return (value.replace('\\', '\\\\').replace('\t', r'\t')
+            .replace('\n', r'\n').replace('\r', r'\r'))
+
+
+def _insert_batch(connection, table, rows) -> None:
+    if connection.dialect.name != 'postgresql':
+        connection.execute(table.insert(), list(rows))
+        return
+
+    preparer = connection.dialect.identifier_preparer
+    columns = tuple(table.columns)
+    column_names = ', '.join(preparer.quote(column.name) for column in columns)
+    copy_sql = (
+        f'COPY {preparer.format_table(table)} ({column_names}) '
+        'FROM STDIN WITH (FORMAT text)'
+    )
+    stream = StringIO()
+    for row in rows:
+        stream.write('\t'.join(_copy_text_value(row[column.name])
+                               for column in columns))
+        stream.write('\n')
+    stream.seek(0)
+    with connection.connection.driver_connection.cursor() as cursor:
+        cursor.copy_expert(copy_sql, stream)
+
+
 def _validate_connections(source_connection, target_connection) -> dict:
     source_counts = _row_counts(source_connection)
     target_counts = _row_counts(target_connection)
@@ -210,6 +271,7 @@ def migrate_database(
                     'Target app tables must be empty before copy: '
                     + ', '.join(sorted(nonempty))
                 )
+            _assert_source_lengths(source_connection)
             if dry_run:
                 source_counts = _row_counts(source_connection)
                 return {
@@ -225,7 +287,7 @@ def migrate_database(
             for table in _app_tables():
                 result = source_connection.execute(select(table))
                 while rows := result.mappings().fetchmany(batch_size):
-                    target_connection.execute(table.insert(), list(rows))
+                    _insert_batch(target_connection, table, rows)
             _reset_postgres_sequences(target_connection)
             report = _validate_connections(
                 source_connection, target_connection
@@ -264,7 +326,9 @@ def register_database_commands(app) -> None:
         )
         output = json.dumps(result, indent=2, sort_keys=True)
         if report:
-            report.write_text(output + '\n', encoding='utf-8')
+            with report.open('w', encoding='utf-8') as report_file:
+                os.fchmod(report_file.fileno(), 0o600)
+                report_file.write(output + '\n')
             click.echo(f'Validation report written to {report.name}.')
         click.echo(output)
         if not result['valid']:

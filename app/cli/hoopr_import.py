@@ -22,8 +22,10 @@ from app.services.hoopr_import_service import (
 @click.option('--update-stats', is_flag=True, default=False,
               help='Merge missing stats-payload keys into existing rows '
                    '(never overwrites keys already present).')
+@click.option('--skip-missing-current/--require-current-release', default=True,
+              help='Continue when the current-season release is not published yet.')
 def cli_import_hoopr_logs(sport, seasons, season_type, from_dir, max_games,
-                          update_stats):
+                          update_stats, skip_missing_current):
     """Backfill HistoricalGameLog from hoopR (ESPN) data dumps on GitHub."""
     if sport != 'nba':
         raise click.BadParameter(
@@ -36,6 +38,7 @@ def cli_import_hoopr_logs(sport, seasons, season_type, from_dir, max_games,
         from_dir=from_dir,
         max_games=max_games,
         update_stats=update_stats,
+        skip_missing_current=skip_missing_current,
     )
     for warning in result['warnings']:
         click.echo(warning)

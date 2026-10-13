@@ -3,6 +3,8 @@
 ## Project
 Flask + SQLAlchemy NBA betting tracker with XGBoost ML projections and APScheduler background jobs. Running locally; Railway deployment inactive.
 
+Keep this repository focused on the tracker application and its engineering documentation. Store personal research, picks, chat transcripts, and live-result snapshots in the shared brain or external task artifact folders.
+
 ## Local Dev Startup
 ```bash
 source .venv/bin/activate && export $(grep -v '^#' .env | grep -v '^\s*$' | xargs) 2>/dev/null; flask run

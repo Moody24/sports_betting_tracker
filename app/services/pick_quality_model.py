@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import math
+import uuid
 from datetime import datetime, timezone, date as date_type
 from dataclasses import dataclass
 from typing import Optional
@@ -27,6 +28,7 @@ MODEL_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'ml_models'
 MIN_RESOLVED_PICKS = 400
 MIN_CALIBRATION_PICKS = 50
 MIN_TEST_PICKS = 50
+POSTPROCESSING_VERSION = 'calibration_only_v1'
 
 # Feature keys extracted from PickContext.context_json for training.
 # Entries added later (minutes_volatility, stat_attempts_volatility) will be
@@ -74,8 +76,12 @@ def _stabilize_probability(p_raw: float, metadata: dict) -> float:
     shrink = min(max(shrink, 0.5), 1.0)
     p = 0.5 + (p_raw - 0.5) * shrink
 
-    # Optional signed bias correction (positive means historically overconfident).
-    bias = metadata.get('calibration_bias', env_float('MODEL2_CALIBRATION_BIAS', 0.0))
+    # Older artifacts derived bias from held-out test labels. Never reuse that
+    # value (or an unversioned override) as a learned deployment adjustment.
+    bias = (metadata.get('calibration_bias', 0.0)
+            if metadata.get('postprocessing_version') == POSTPROCESSING_VERSION
+            and metadata.get('calibration_bias_source') == 'calibration_partition'
+            else 0.0)
     try:
         p -= float(bias)
     except (TypeError, ValueError):
@@ -401,9 +407,27 @@ def train_pick_quality_model(user_id: int | None = None) -> dict:
             'user_id': user_id,
         }
 
-    # Evaluate the final model
-    y_pred = final_model.predict(split.X_test)
-    y_prob = final_model.predict_proba(split.X_test)[:, 1]
+    # Freeze all deployment adjustments on calibration rows before examining
+    # test labels, then evaluate precisely the probabilities served at inference.
+    postprocessing = {
+        'postprocessing_version': POSTPROCESSING_VERSION,
+        'calibration_bias_source': 'calibration_partition',
+        'calibration_bias': 0.0,
+        'probability_shrink': round(env_float('MODEL2_PROBABILITY_SHRINK', 0.88), 3),
+    }
+    calibration_probabilities = [
+        _stabilize_probability(float(probability), postprocessing)
+        for probability in final_model.predict_proba(split.X_calibration)[:, 1]
+    ]
+    postprocessing['calibration_bias'] = round(
+        sum(calibration_probabilities) / len(calibration_probabilities)
+        - sum(float(target) for target in split.y_calibration) / len(split.y_calibration), 4,
+    )
+    y_prob = [
+        _stabilize_probability(float(probability), postprocessing)
+        for probability in final_model.predict_proba(split.X_test)[:, 1]
+    ]
+    y_pred = [int(probability >= 0.5) for probability in y_prob]
     accuracy = accuracy_score(split.y_test, y_pred)
     logloss = log_loss(split.y_test, y_prob)
     calibration_metrics = compute_calibration_metrics(
@@ -414,28 +438,29 @@ def train_pick_quality_model(user_id: int | None = None) -> dict:
         sum(float(v) for v in split.y_test) / len(split.y_test)
         if len(split.y_test) else 0.5
     )
-    calibration_bias = round(val_avg_pred - val_win_rate, 4)
 
     # Feature importance from base XGBoost model
     importance = dict(zip(feature_names, [float(v) for v in model.feature_importances_]))
     top_features = sorted(importance.items(), key=lambda x: x[1], reverse=True)[:10]
 
-    # Save model: calibrated → joblib .pkl; uncalibrated → XGBoost .json
-    os.makedirs(MODEL_DIR, exist_ok=True)
+    # Never replace a calibrated artifact with the uncalibrated base estimator.
+    # A unique file also leaves the incumbent intact after a partial write.
     today = date_type.today().isoformat()
     model_name = _model_name(user_id)
     file_tag = model_name.replace('pick_quality_', '')
     try:
         import joblib
-        filename = f"pick_quality_{file_tag}_{today}.pkl"
+        os.makedirs(MODEL_DIR, exist_ok=True)
+        filename = f"pick_quality_{file_tag}_{today}_{uuid.uuid4().hex}.pkl"
         filepath = os.path.join(MODEL_DIR, filename)
         joblib.dump(final_model, filepath)
+        artifact_path = persist_model_artifact(filepath, filename)
+        if not artifact_path:
+            raise ValueError('No persisted artifact reference')
     except Exception as exc:
-        logger.warning("joblib save failed; falling back to JSON: %s", exc)
-        filename = f"pick_quality_{file_tag}_{today}.json"
-        filepath = os.path.join(MODEL_DIR, filename)
-        model.save_model(filepath)
-    artifact_path = persist_model_artifact(filepath, filename)
+        logger.error('Calibrated Model 2 persistence failed (%s)', type(exc).__name__)
+        return {'error': 'Calibrated model persistence failed; incumbent retained',
+                'resolved_picks': len(features_list), 'user_id': user_id}
 
     # Store metadata — reconnect first; training can take minutes and Neon drops idle SSL connections.
     try:
@@ -464,10 +489,9 @@ def train_pick_quality_model(user_id: int | None = None) -> dict:
             'ece': calibration_metrics['ece'],
             'top_features': top_features,
             'calibration_method': calibration_method,
-            'calibration_bias': calibration_bias,
+            **postprocessing,
             'val_avg_pred': round(val_avg_pred, 4),
             'val_win_rate': round(val_win_rate, 4),
-            'probability_shrink': round(env_float('MODEL2_PROBABILITY_SHRINK', 0.88), 3),
             'take_it_threshold': round(env_float('MODEL2_TAKE_IT_THRESHOLD', 0.60), 3),
             'caution_threshold': round(env_float('MODEL2_CAUTION_THRESHOLD', 0.56), 3),
         }),

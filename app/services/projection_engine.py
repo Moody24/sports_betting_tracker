@@ -18,7 +18,10 @@ from app.services.stats_service import (
     get_player_stats_summary,
     find_player_id,
 )
+from app.services.player_identity_service import get_verified_history
+from app.utils.time_helpers import et_today
 from app.services.matchup_service import (
+    get_team_defense,
     get_matchup_adjustment,
     get_pace_factor,
     get_position_matchup_adjustment,
@@ -95,6 +98,7 @@ class ProjectionEngine:
         self._projection_cache = {}
         self._player_state_cache = {}
         self._context_cache = {}
+        self._history_source_cache = {}
 
     def project_stat(
         self,
@@ -146,9 +150,11 @@ class ProjectionEngine:
         if not stat_key:
             return self._empty_projection()
 
-        player_state = self._get_player_state(player_name)
+        player_state = self._get_player_state(player_name, game_date)
         if player_state is None:
-            return self._empty_projection()
+            result = self._empty_projection()
+            result['context_notes'] = ['verified player history unavailable']
+            return result
 
         _, logs, summary = player_state
         baseline = self._build_baseline(summary, stat_key, prop_type, opponent_name)
@@ -185,6 +191,14 @@ class ProjectionEngine:
             position_matchup_mult,
             pace_mult,
         )
+        if opponent_name:
+            defense = get_team_defense(opponent_name)
+            if not defense or not defense.get('observed_through'):
+                context_notes.append('opponent defense not verified')
+            elif defense.get('source') in ('espn_boxscore_prior', 'sportsdataverse_team_prior'):
+                context_notes.append(
+                    f"opponent defense from prior season through {defense['observed_through']}"
+                )
 
         final_projection, projection_source = self._select_projection(
             heuristic_projection=round(base_projection * modifier, 1),
@@ -200,6 +214,9 @@ class ProjectionEngine:
             game_date=game_date,
         )
         confidence = self._compute_confidence(games_played, std_dev, season_avg)
+        latest_game = logs[0].game_date
+        if (game_date or et_today()) - latest_game > timedelta(days=30):
+            context_notes.append(f'player history last observed {latest_game}')
 
         # Apply single-stat systematic bias correction (postmortem-derived).
         bias = SINGLE_STAT_BIAS_CORRECTION.get(prop_type, 0)
@@ -214,6 +231,11 @@ class ProjectionEngine:
             'z_score': round(z_score, 2),
             'games_played': games_played,
             'projection_source': projection_source,
+            'history_source': self._history_source_cache.get(
+                (str(player_name).strip().lower(), game_date or et_today()),
+                'player_game_log',
+            ),
+            'history_observed_through': latest_game.isoformat(),
             'breakdown': {
                 'last_5_avg': round(baseline['last_5_avg'], 1),
                 'last_10_avg': round(baseline['last_10_avg'], 1),
@@ -296,16 +318,26 @@ class ProjectionEngine:
             },
         }
 
-    def _get_player_state(self, player_name: str):
+    def _get_player_state(self, player_name: str, game_date: Optional[_date] = None):
         """Return cached ``(player_id, logs, summary)`` or None without data."""
-        cache_key = str(player_name).strip().lower()
+        as_of = game_date or et_today()
+        cache_key = (str(player_name).strip().lower(), as_of)
         cached = self._player_state_cache.get(cache_key)
         if cached is not None:
             return cached
+        history = get_verified_history(player_name, as_of=as_of)
+        if history:
+            player_id = history[0].player_id
+            state = (player_id, history, get_player_stats_summary(player_id, history))
+            self._player_state_cache[cache_key] = state
+            self._history_source_cache[cache_key] = 'espn_history'
+            return state
+
         player_id = find_player_id(player_name)
         if not player_id:
             return None
-        logs = get_cached_logs(player_id, last_n=82)
+        logs = [row for row in get_cached_logs(player_id, last_n=82)
+                if row.game_date < as_of]
         if not logs:
             return None
         state = (player_id, logs, get_player_stats_summary(player_id, logs))
@@ -371,7 +403,7 @@ class ProjectionEngine:
         modifier = 1.0
         notes = []
         context = self._cached_game_context(player_name, team_name) if team_name else {}
-        injury_status = context.get('injury_status', 'healthy')
+        injury_status = context.get('injury_status', 'unknown')
         if injury_status in ('out', 'doubtful'):
             unavailable = self._empty_projection()
             unavailable['context_notes'] = [
@@ -386,7 +418,11 @@ class ProjectionEngine:
             notes.append('day-to-day (-10%)')
         elif injury_status in ('questionable', 'probable'):
             notes.append(f'injury: {injury_status}')
-        if is_home:
+        elif injury_status == 'unknown':
+            notes.append('injury report not verified for today')
+        if not team_name:
+            notes.append('player team not verified')
+        elif is_home:
             modifier *= self.HOME_BOOST
             notes.append('home court (+3%)')
         else:

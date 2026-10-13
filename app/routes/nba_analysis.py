@@ -5,7 +5,7 @@ import re
 from collections import defaultdict
 
 from flask import request, jsonify, render_template
-from flask_login import login_required
+from flask_login import login_required, current_user
 
 from app import limiter
 
@@ -13,12 +13,19 @@ from app.config_display import PROP_STAT_KEY
 from app.models import GameSnapshot, OddsSnapshot, PlayerGameLog, TeamDefenseSnapshot
 from app.services.nba_service import (
     get_todays_games,
+    game_selection_key,
+    game_start_date_et,
     fetch_upcoming_games,
     fetch_player_props_for_event,
 )
 from app.services.projection_engine import ProjectionEngine
+from app.services.game_picker import game_picker_options
+from app.services.guided_quote import attach_quote_tokens
+from app.services.value_detector import is_current_quote
+from app.services.player_identity_service import get_verified_history
 from app.services.stats_service import find_player_id, get_cached_logs, get_player_stats_summary
 from app.services.analysis_context import POSITION_ORDER, build_stat_context
+from app.services.ml_feature_builder import extract_opp_abbr
 from app.utils.odds import american_from_decimal
 from app.utils.time_helpers import et_today
 
@@ -60,6 +67,9 @@ def _compute_hit_rates(player_name: str, prop_type: str, line: float, n: int = 2
     col_name = _STAT_COL.get(prop_type)
     if not col_name:
         return {'over_pct': None, 'under_pct': None, 'games': [], 'sample': 0}
+    history = get_verified_history(player_name, as_of=et_today(), limit=n)
+    if history:
+        return _hit_rates_from_logs(history, col_name, line)
     col = getattr(PlayerGameLog, col_name)
     logs = (PlayerGameLog.query.filter_by(player_name=player_name)
             .filter(col.isnot(None))
@@ -116,19 +126,7 @@ def _analysis_play_view_models(plays: list[dict]) -> list[dict]:
     presentation-only fields into other consumers of the shared cache.
     """
     view_models = [dict(play) for play in plays]
-    player_names = {play.get('player') for play in view_models if play.get('player')}
-
-    logs_by_player: dict[str, list[PlayerGameLog]] = defaultdict(list)
-    if player_names:
-        logs = (
-            PlayerGameLog.query
-            .filter(PlayerGameLog.player_name.in_(list(player_names)))
-            .order_by(PlayerGameLog.player_name, PlayerGameLog.game_date.desc())
-            .all()
-        )
-        for log in logs:
-            if len(logs_by_player[log.player_name]) < 7:
-                logs_by_player[log.player_name].append(log)
+    logs_by_player = _recent_logs_by_player(view_models, limit=7)
 
     for play in view_models:
         side = (play.get('recommended_side') or 'over').lower()
@@ -163,9 +161,13 @@ def _resolve_player_team_abbrs(player_names: set[str]) -> dict[str, str]:
             resolved[row.player_name] = (row.team_abbr or "").upper()
 
     for player_name in player_names:
-        if player_name in resolved:
-            continue
         try:
+            history = get_verified_history(player_name, as_of=et_today(), limit=1)
+            if history and history[0].team_abbr:
+                resolved[player_name] = history[0].team_abbr.upper()
+                continue
+            if player_name in resolved:
+                continue
             player_id = find_player_id(player_name)
             if not player_id:
                 continue
@@ -184,9 +186,16 @@ def _recent_logs_by_player(scores: list[dict], limit: int = 20) -> dict[str, lis
     logs_by_player: dict[str, list] = defaultdict(list)
     if not player_names:
         return logs_by_player
+    for player_name in player_names:
+        history = get_verified_history(player_name, as_of=et_today(), limit=limit)
+        if history:
+            logs_by_player[player_name] = history
+    missing = player_names - logs_by_player.keys()
+    if not missing:
+        return logs_by_player
     logs = (
         PlayerGameLog.query
-        .filter(PlayerGameLog.player_name.in_(list(player_names)))
+        .filter(PlayerGameLog.player_name.in_(list(missing)))
         .order_by(PlayerGameLog.game_date.desc())
         .all()
     )
@@ -266,6 +275,21 @@ def _enrich_stat_scores(scores: list[dict], game_lookup: dict) -> list[dict]:
         score['game_ctx'] = build_stat_context(
             score, game_lookup, defense_snapshots
         )
+        opponent = score['game_ctx']['opp_abbr']
+        prior_matchups = [
+            float(getattr(log, stat_column))
+            for log in logs_by_player.get(score.get('player', ''), [])
+            if opponent and stat_column
+            and extract_opp_abbr(log.matchup or '') == opponent
+            and getattr(log, stat_column, None) is not None
+        ]
+        score['game_ctx']['prior_opponent_games'] = len(prior_matchups)
+        score['game_ctx']['prior_opponent_average'] = (
+            sum(prior_matchups) / len(prior_matchups) if prior_matchups else None
+        )
+        score['game_ctx']['player_history_window'] = len(
+            logs_by_player.get(score.get('player', ''), [])
+        )
         score['indicator'] = _stat_indicator(score)
     return enriched_scores
 
@@ -327,6 +351,9 @@ def _live_props_for_games(games: list[dict]) -> tuple[list[dict], set[str]]:
     raw_props = []
     player_names = set()
     for game in games:
+        verified = game_picker_options([game], [], {})
+        if not verified:
+            continue
         event_id = game.get('odds_event_id', '')
         if not event_id:
             continue
@@ -337,12 +364,16 @@ def _live_props_for_games(games: list[dict]) -> tuple[list[dict], set[str]]:
         home = game.get('home', {}) or {}
         for market_key, market_props in props.items():
             for prop in market_props:
+                if not is_current_quote('odds_api', prop.get('source_last_update')):
+                    continue
                 player_name = prop.get('player')
                 if not player_name:
                     continue
                 player_names.add(player_name)
                 raw_props.append({
                     'player': player_name,
+                    'quote_source': 'odds_api',
+                    'quote_observed_at': prop.get('source_last_update'),
                     'market': market_key,
                     'line': prop.get('line'),
                     'over_odds': prop.get('over_odds'),
@@ -351,13 +382,18 @@ def _live_props_for_games(games: list[dict]) -> tuple[list[dict], set[str]]:
                     'best_over_book': prop.get('best_over_book', ''),
                     'best_under_book': prop.get('best_under_book', ''),
                     'game_id': game.get('espn_id', ''),
+                    'selection_key': game_selection_key(game),
+                    'game_status': verified[0]['status'],
+                    'start_time': verified[0]['start_time'],
+                    'odds_event_id': event_id,
                     'team_a': away.get('name', ''),
                     'team_b': home.get('name', ''),
                     'team_a_abbr': (away.get('abbr') or '').upper(),
                     'team_b_abbr': (home.get('abbr') or '').upper(),
                     'match_date': (
-                        game.get('start_time', '') or game.get('match_date', '')
-                    )[:10],
+                        game.get('match_date', '')
+                        or game_start_date_et(game.get('start_time', ''))
+                    ),
                 })
     return raw_props, player_names
 
@@ -498,16 +534,27 @@ def _enrich_all_props(
 def nba_all_props():
     """Return a flat list of all player props across today's games."""
     today = et_today()
-    raw_props, player_names = _live_props_for_games(get_todays_games())
-    if not raw_props:
-        raw_props, player_names = _live_props_for_games(fetch_upcoming_games())
-    if not raw_props:
-        raw_props, player_names = _snapshot_props_for_date(today)
-    return jsonify(_enrich_all_props(
+    # The picker exposes both days. Keep the first authoritative game per
+    # actual Odds event ID so duplicate slates cannot trigger duplicate calls.
+    games_by_event = {}
+    for game in [*get_todays_games(), *fetch_upcoming_games()]:
+        if game.get('odds_event_id'):
+            games_by_event.setdefault(game['odds_event_id'], game)
+    games = list(games_by_event.values())
+    raw_props, player_names = _live_props_for_games(games)
+    attach_quote_tokens(
+        raw_props, current_user.id,
+        unavailable_events={game['odds_event_id'] for game in games if game.get('odds_event_id')},
+    )
+    # Historical snapshots remain useful for archive views and movement, but
+    # cannot supply a currently offered bet-builder line during an outage.
+    response = jsonify(_enrich_all_props(
         raw_props,
         player_names,
         _first_snapshot_lines(today),
     ))
+    response.headers['X-Prop-Data-State'] = 'current' if raw_props else 'unavailable'
+    return response
 
 
 @login_required
@@ -545,11 +592,18 @@ def nba_player_analysis(player_name):
     """Return detailed analysis data for a player as JSON (used by modal)."""
     prop_type = request.args.get('prop_type', 'player_points')
 
-    player_id = find_player_id(player_name)
-    if not player_id:
-        return jsonify({'error': 'Player not found', 'game_log': [], 'breakdown': {}})
-
-    logs = get_cached_logs(player_id, last_n=10)
+    logs = get_verified_history(player_name, as_of=et_today(), limit=10)
+    history_source = 'espn_history' if logs else 'nba_cache'
+    if logs:
+        player_id = logs[0].player_id
+    else:
+        player_id = find_player_id(player_name)
+        if not player_id:
+            return jsonify({
+                'error': 'Player history unavailable', 'game_log': [],
+                'breakdown': {}, 'context_notes': ['player identity unresolved'],
+            })
+        logs = get_cached_logs(player_id, last_n=10)
     summary = get_player_stats_summary(player_id, logs)
 
     engine = ProjectionEngine()
@@ -579,6 +633,8 @@ def nba_player_analysis(player_name):
         'z_score': projection.get('z_score', 0),
         'games_played': projection.get('games_played', 0),
         'projection_source': projection.get('projection_source', 'heuristic'),
+        'history_source': history_source if logs else 'unavailable',
+        'history_observed_through': logs[0].game_date.isoformat() if logs else None,
     })
 
 

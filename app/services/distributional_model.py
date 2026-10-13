@@ -23,12 +23,13 @@ from app import db
 from app.models import ModelMetadata, PlayerGameLog
 from app.services.distribution import median_from_quantiles, rectify_quantiles
 from app.services.distribution_calibration import collect_oof_pairs_quantile, fit_isotonic_calibrator
-from app.services.ml_feature_builder import build_ml_features_from_history, build_team_game_aggregates
+from app.services.ml_feature_builder import (
+    build_ml_features_from_history, build_team_game_aggregates, extract_opp_abbr,
+)
 from app.services.ml_model import (
     MIN_TRAIN_SAMPLES,
     MODEL_DIR,
-    build_defense_lookup,
-    _build_game_total_lookup,
+    TRAINING_CONTEXT_VERSION,
     _check_training_data_quality,
     _ensure_model_dir,
 )
@@ -166,17 +167,9 @@ def _early_stopping_split(train_idx: list[int], eval_frac: float):
     return train_idx[:-eval_count], train_idx[-eval_count:]
 
 
-def _dist_game_total_key(log, using_historical_source: bool):
-    if using_historical_source:
-        return str(getattr(log, '_historical_game_id', '') or '')
-    team_abbr = (getattr(log, 'team_abbr', '') or '').strip().upper()
-    return log.game_date, team_abbr
-
-
 def _dist_player_rows(player_id, logs: list, stat_key: str,
-                      using_historical_source: bool, game_total_lookup: dict,
                       team_totals: dict, team_counts: dict,
-                      defense_lookup: dict) -> list:
+                      defense_by_game: dict) -> list:
     logs = sorted(logs, key=lambda log: ((log.game_date is None), log.game_date))
     if len(logs) < 10:
         return []
@@ -184,9 +177,9 @@ def _dist_player_rows(player_id, logs: list, stat_key: str,
     for index in range(10, len(logs)):
         current = logs[index]
         target = float(getattr(current, stat_key, 0.0) or 0.0)
-        game_total = game_total_lookup.get(
-            _dist_game_total_key(current, using_historical_source), 0.0,
-        )
+        opponent = extract_opp_abbr(current.matchup or '')
+        defense = defense_by_game.get((current.game_date, opponent))
+        defense_lookup = {opponent: defense} if defense else None
         features = build_ml_features_from_history(
             prior_logs=logs[:index],
             current_is_home=(current.home_away or '').lower() == 'home',
@@ -195,7 +188,7 @@ def _dist_player_rows(player_id, logs: list, stat_key: str,
             team_counts=team_counts,
             current_game_date=current.game_date,
             current_matchup=current.matchup or '',
-            game_total_line=game_total,
+            game_total_line=0.0,
             defense_lookup=defense_lookup,
         )
         rows.append((current.game_date, str(player_id), features, target))
@@ -215,10 +208,7 @@ def _build_dist_training_rows(stat_type: str) -> list:
     if not stat_key:
         return []
 
-    from app.services.historical_training_source import (
-        load_historical_game_total_lookup,
-        load_historical_training_logs,
-    )
+    from app.services.historical_training_source import load_historical_training_logs
 
     all_logs = load_historical_training_logs()
     using_historical_source = bool(all_logs)
@@ -250,19 +240,16 @@ def _build_dist_training_rows(stat_type: str) -> list:
     for log in all_logs:
         player_logs.setdefault(log.player_id, []).append(log)
 
+    from app.services.historical_defense import rolling_defense_by_game
+
     team_totals, team_counts = build_team_game_aggregates(all_logs)
-    defense_lookup = build_defense_lookup()
-    game_total_lookup = (
-        load_historical_game_total_lookup()
-        if using_historical_source
-        else _build_game_total_lookup()
-    )
+    defense_by_game = rolling_defense_by_game(all_logs)
 
     rows = []
     for player_id, logs in player_logs.items():
         rows.extend(_dist_player_rows(
-            player_id, logs, stat_key, using_historical_source,
-            game_total_lookup, team_totals, team_counts, defense_lookup,
+            player_id, logs, stat_key,
+            team_totals, team_counts, defense_by_game,
         ))
 
     rows.sort(key=lambda r: ((r[0] is None), r[0], r[1]))
@@ -432,6 +419,7 @@ def train_distributional_model(stat_type: str) -> dict:
         is_active=True,
         metadata_json=json.dumps({
             'feature_names': feature_names,
+            'training_context': TRAINING_CONTEXT_VERSION,
             'quantile_alphas': QUANTILE_ALPHAS,
             'val_samples': len(X_calib),
             'train_samples': len(X_train),
@@ -468,7 +456,10 @@ def train_distributional_model(stat_type: str) -> dict:
             training_date=datetime.now(timezone.utc),
             training_samples=len(calibration_pairs),
             is_active=True,
-            metadata_json=json.dumps({'oof_pairs': len(calibration_pairs)}),
+            metadata_json=json.dumps({
+                'oof_pairs': len(calibration_pairs),
+                'training_context': TRAINING_CONTEXT_VERSION,
+            }),
         ))
         db.session.commit()
         from app.services.distributional_predictor import load_calibrator
@@ -563,7 +554,10 @@ def train_distributional_calibrator_for_poisson_stat(stat_type: str) -> dict:
         training_date=datetime.now(timezone.utc),
         training_samples=len(pairs),
         is_active=True,
-        metadata_json=json.dumps({'oof_pairs': len(pairs), 'oof_rows': len(oof_rows)}),
+        metadata_json=json.dumps({
+            'oof_pairs': len(pairs), 'oof_rows': len(oof_rows),
+            'training_context': TRAINING_CONTEXT_VERSION,
+        }),
     ))
     db.session.commit()
     from app.services.distributional_predictor import load_calibrator

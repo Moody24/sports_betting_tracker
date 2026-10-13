@@ -3,9 +3,11 @@
 import json
 import os
 from datetime import date, datetime, timedelta, timezone
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from app import db
 from app.models import (
+    HistoricalGameLog,
     JobLog,
     ModelMetadata,
     PickContext,
@@ -190,6 +192,32 @@ class TestScheduler(BaseTestCase):
                     scheduler_module.retrain_models()
             retrain_mock.assert_called_once()
 
+    def test_retrain_guard_counts_permanent_history_when_available(self):
+        from app.services.scheduler import _projection_retrain_allowed
+
+        with self.app.app_context():
+            db.session.add(ModelMetadata(
+                model_name='projection_player_points',
+                model_type='xgboost_regressor', version='old',
+                file_path='/tmp/old.json',
+                training_date=datetime.now(timezone.utc) - timedelta(days=10),
+                training_samples=10, val_mae=4.6, is_active=True,
+                metadata_json='{"historical_game_log_rows": 1}',
+            ))
+            for game_id in ('401', '402'):
+                db.session.add(HistoricalGameLog(
+                    sport='nba', player_id='espn1', player_name='Example Player',
+                    game_id=game_id, game_date=date(2026, 1, int(game_id[-1])),
+                    season='2025-26', stats={'pts': 20, 'minutes': 30},
+                ))
+            db.session.commit()
+            self.assertTrue(_projection_retrain_allowed(
+                ModelMetadata, PlayerGameLog, HistoricalGameLog))
+            ModelMetadata.query.one().metadata_json = '{"historical_game_log_rows": 2}'
+            db.session.commit()
+            self.assertFalse(_projection_retrain_allowed(
+                ModelMetadata, PlayerGameLog, HistoricalGameLog))
+
     def test_bootstrap_pick_quality_creates_context_pair(self):
         from app.services import scheduler as scheduler_module
 
@@ -281,8 +309,12 @@ class TestScheduler(BaseTestCase):
             ]
             with patch('app.services.value_detector.ValueDetector', return_value=fake_detector):
                 with patch('app.services.projection_engine.ProjectionEngine', return_value=MagicMock()):
-                    with patch('app.services.stats_service.find_player_id', return_value='123'):
-                        scheduler_module.generate_daily_auto_picks()
+                    with patch('app.services.player_identity_service.get_verified_history',
+                               return_value=[SimpleNamespace(player_id='123')]):
+                        with patch('app.services.feature_engine.build_pick_context_features',
+                                   return_value={'player_id': '123'}):
+                            with patch('app.services.auto_pick_service.auto_pick_data_issues', return_value=[]):
+                                scheduler_module.generate_daily_auto_picks()
 
         with self.app.app_context():
             auto_bets = Bet.query.filter_by(source='auto_generated').all()
@@ -299,8 +331,10 @@ class TestScheduler(BaseTestCase):
                 self.jobs = []
                 self.started = False
 
-            def add_job(self, func, trigger, id=None, replace_existing=None):
+            def add_job(self, func, trigger, id=None, replace_existing=None, **kwargs):
                 self.jobs.append((id, trigger))
+                if id == 'basketball_feed':
+                    self.feed_options = kwargs
 
             def start(self):
                 self.started = True
@@ -314,7 +348,10 @@ class TestScheduler(BaseTestCase):
                 with patch.object(scheduler_module, '_acquire_scheduler_lock', return_value=True):
                     scheduler_module.init_scheduler(self.app)
         self.assertTrue(fake.started)
-        self.assertEqual(len(fake.jobs), 22)  # + event-relative prop close capture
+        self.assertEqual(len(fake.jobs), 23)  # + shared basketball feed collector
+        self.assertEqual(fake.feed_options['seconds'], 30)
+        self.assertEqual(fake.feed_options['max_instances'], 1)
+        self.assertTrue(fake.feed_options['coalesce'])
 
 
 class TestSchedulerDriftJob(BaseTestCase):
@@ -476,7 +513,7 @@ class TestSchedulerDriftJob(BaseTestCase):
                 self.jobs = []
                 self.started = False
 
-            def add_job(self, func, trigger, id=None, replace_existing=None):
+            def add_job(self, func, trigger, id=None, replace_existing=None, **kwargs):
                 self.jobs.append(id)
 
             def start(self):

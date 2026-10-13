@@ -97,6 +97,38 @@ class TestAppendFinalGame(BaseTestCase):
             self.assertEqual(n, 0)
             mock_fetch.assert_not_called()               # guard fired BEFORE fetch
 
+    def test_supplied_summary_reconciles_missing_players(self):
+        from app.models import HistoricalGameLog
+        from app.services.espn_history_append import append_final_game
+
+        partial = _summary_json()
+        partial['boxscore']['players'][0]['statistics'][0]['athletes'] = (
+            partial['boxscore']['players'][0]['statistics'][0]['athletes'][:1]
+        )
+        partial['boxscore']['players'][1]['statistics'][0]['athletes'] = []
+        with self.app.app_context():
+            self.assertEqual(append_final_game(_scoreboard_game(), summary=partial), 1)
+            self.assertEqual(append_final_game(_scoreboard_game(), summary=_summary_json()), 2)
+            self.assertEqual(HistoricalGameLog.query.count(), 3)
+            self.assertEqual(append_final_game(_scoreboard_game(), summary=_summary_json()), 0)
+
+    @patch('app.services.espn_history_append._fetch_summary')
+    def test_lookback_rechecks_partial_game_without_duplicates(self, mock_fetch):
+        from app.models import HistoricalGameLog
+        from app.services.espn_history_append import append_final_game
+
+        partial = _summary_json()
+        partial['boxscore']['players'][0]['statistics'][0]['athletes'] = (
+            partial['boxscore']['players'][0]['statistics'][0]['athletes'][:1]
+        )
+        partial['boxscore']['players'][1]['statistics'][0]['athletes'] = []
+        mock_fetch.side_effect = [partial, _summary_json(), _summary_json()]
+        with self.app.app_context():
+            self.assertEqual(append_final_game(_scoreboard_game()), 1)
+            self.assertEqual(append_final_game(_scoreboard_game(), reconcile=True), 2)
+            self.assertEqual(append_final_game(_scoreboard_game(), reconcile=True), 0)
+            self.assertEqual(HistoricalGameLog.query.count(), 3)
+
     @patch('app.services.espn_history_append._fetch_summary')
     def test_non_nba_team_skipped_entirely(self, mock_fetch):
         from app.services.espn_history_append import append_final_game

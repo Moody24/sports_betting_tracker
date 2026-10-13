@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 import requests
+from flask import Flask
 
 from app.services.espn_client import (
     ESPN_SUMMARY_URL,
@@ -14,6 +15,13 @@ from app.services.espn_client import (
 
 
 class EspnClientTests(unittest.TestCase):
+    def setUp(self):
+        app = Flask(__name__)
+        app.config['TESTING'] = True
+        context = app.app_context()
+        context.push()
+        self.addCleanup(context.pop)
+
     @patch('app.services.espn_client.requests.get')
     def test_summary_builds_request_in_one_place(self, mock_get):
         response = MagicMock()
@@ -32,7 +40,7 @@ class EspnClientTests(unittest.TestCase):
     def test_fetch_json_retries_transient_failures(self, mock_get):
         response = MagicMock()
         response.json.return_value = {'events': []}
-        mock_get.side_effect = [requests.RequestException('timeout'), response]
+        mock_get.side_effect = [requests.Timeout('timeout'), response]
 
         self.assertEqual(fetch_json('https://example.test', attempts=2), {'events': []})
         self.assertEqual(mock_get.call_count, 2)

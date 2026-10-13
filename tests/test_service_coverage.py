@@ -691,9 +691,11 @@ class TestProjectionEngine(BaseTestCase):
     def test_project_stat_with_mocked_data(self, _ctx, _pace, _pos, _adj,
                                             mock_summary, mock_logs, _find):
         from app.services.projection_engine import ProjectionEngine
+        from app.utils.time_helpers import et_today
         mock_log = MagicMock()
         mock_log.pts = 25
         mock_log.minutes = 35
+        mock_log.game_date = et_today() - timedelta(days=1)
         mock_logs.return_value = [mock_log] * 20
         mock_summary.return_value = {
             'games_played': 20,
@@ -833,6 +835,8 @@ class TestValueDetectorScoreProp(BaseTestCase):
             {'edge': 0.10, 'confidence_tier': 'moderate', 'games_played': 5},
             {'edge': 0.05, 'confidence_tier': 'slight', 'games_played': 30},
         ]
+        for play in plays:
+            play.update(quote_source='odds_api', quote_observed_at=datetime.now(timezone.utc).isoformat())
         filtered = ValueDetector.filter_plays(plays)
         self.assertEqual(len(filtered), 2)  # strong + slight (games >= 10)
 

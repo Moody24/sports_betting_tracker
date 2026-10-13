@@ -242,6 +242,11 @@ def run_projection_diagnostics(stat_type: str, include_learning_curves: bool = F
         pred_train = model.predict(X[train_idx])
         pred_val = model.predict(X[val_idx])
         metrics = regression_summary(y[train_idx], pred_train, y[val_idx], pred_val)
+        recent_baseline = [rows[i][2].get('avg_stat_last_5', 0.0)
+                           for i in val_idx]
+        metrics['recent_average_baseline_mae'] = round(
+            _mae(y[val_idx], recent_baseline), 4,
+        )
         metrics.update({
             'cutoff_date': cutoff.isoformat(),
             'train_samples': len(train_idx),
