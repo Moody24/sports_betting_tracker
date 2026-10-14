@@ -2268,6 +2268,7 @@ a:hover {
 .sa-ind-value  { border-left: 2px solid rgba(var(--amber-rgb),.4); }
 .sa-ind-slight { border-left: 2px solid rgba(var(--info-rgb),.4); }
 .sa-ind-avoid  { border-left: 2px solid rgba(var(--loss-rgb),.4); }
+.sa-ind-unavailable { border-left: 2px solid var(--border-mid); }
 
 .stat-panel {
   position: fixed;
