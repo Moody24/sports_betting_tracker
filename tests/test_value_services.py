@@ -624,6 +624,94 @@ class TestValueDetectorModel2Integration(BaseTestCase):
         }
         return engine
 
+    def test_score_prop_no_data_keeps_contract_defaults(self):
+        from app.services.value_detector import ValueDetector, devig_probs
+        cases = ((0.0, 20), (25.0, 0), (25.0, 1), (25.0, 4))
+        for projection, games in cases:
+            with self.subTest(projection=projection, games=games):
+                engine = self._make_engine_with_proj(
+                    projection=projection, games=games, confidence='high',
+                    z_score=2.0,
+                    context_notes=[' verified history ', 'VERIFIED HISTORY', ''],
+                )
+                engine.project_stat.return_value.update(
+                    history_source='espn_history',
+                    history_observed_through='2026-01-20',
+                )
+                detector = ValueDetector(engine=engine)
+                with patch('app.services.value_detector.predict_pick_quality') as quality:
+                    result = detector.score_prop(
+                        'Test Player', 'player_points', 24.5, -120, 100,
+                        game_id='dummy-game',
+                    )
+                quality.assert_not_called()
+                expected = {
+                    'player': 'Test Player',
+                    'prop_type': 'player_points',
+                    'line': 24.5,
+                    'projection': 0,
+                    'edge': 0,
+                    'edge_over': 0,
+                    'edge_under': 0,
+                    'recommended_side': 'over',
+                    'recommended_odds': -120,
+                    'confidence_tier': 'no_edge',
+                    'model_prob_over': 0.5,
+                    'model_prob_under': 0.5,
+                    'book_prob_over': devig_probs(-120, 100)[0],
+                    'book_prob_under': devig_probs(-120, 100)[1],
+                    'std_dev': 0,
+                    'z_score': 0,
+                    'games_played': 0,
+                    'confidence': 'low',
+                    'projection_source': 'heuristic',
+                    'history_source': 'espn_history',
+                    'history_observed_through': '2026-01-20',
+                    'scenario_agreement': None,
+                    'scenario_matches': None,
+                    'breakdown': {},
+                    'game_id': 'dummy-game',
+                    'win_probability': None,
+                    'pick_quality_recommendation': 'no_model',
+                }
+                self.assertEqual({key: result[key] for key in expected}, expected)
+                expected_notes = ['verified history']
+                if 0 < games < 5:
+                    expected_notes.append(
+                        f'only {games} played games; five required for a scored prop'
+                    )
+                self.assertEqual(result['context_notes'], expected_notes)
+
+    def test_score_cache_retains_no_data_contract_defaults(self):
+        from app.services import score_cache
+        from app.services.value_detector import ValueDetector
+        score_cache.invalidate_scores()
+        self.addCleanup(score_cache.invalidate_scores)
+        detector = ValueDetector(engine=self._make_engine_with_proj(projection=0.0))
+        with patch('app.services.value_detector.predict_pick_quality') as quality:
+            score = detector.score_prop(
+                'Test Player', 'player_points', 24.5, -110, -110,
+            )
+        quality.assert_not_called()
+        score.update(
+            quote_source='odds_api',
+            quote_observed_at=datetime.now(timezone.utc).isoformat(),
+        )
+        with patch('app.services.nba_service.get_todays_games', return_value=[]) as games, \
+             patch('app.services.value_detector.ValueDetector.score_all_todays_props',
+                   return_value=[score]) as score_all:
+            first = score_cache.get_todays_scores()
+            self.assertEqual(first, [score])
+            self.assertIsNone(first[0]['win_probability'])
+            self.assertEqual(first[0]['pick_quality_recommendation'], 'no_model')
+            first[0].update(win_probability=0.9, pick_quality_recommendation='take_it')
+            cached = score_cache.get_todays_scores()
+        self.assertEqual(cached, [score])
+        self.assertIsNone(cached[0]['win_probability'])
+        self.assertEqual(cached[0]['pick_quality_recommendation'], 'no_model')
+        games.assert_called_once_with(raise_on_error=True)
+        score_all.assert_called_once_with(games=[])
+
     def test_score_prop_returns_win_probability_key(self):
         """score_prop always returns win_probability (None when Model 2 unavailable)."""
         from app.services.value_detector import ValueDetector
