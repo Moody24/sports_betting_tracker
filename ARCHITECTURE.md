@@ -12,10 +12,10 @@ Browser
   -> Flask/Jinja routes
        -> application services and repositories
             -> SQLAlchemy models / provider adapters / ML artifacts
-                 -> SQLite (local) or PostgreSQL (hosted)
-                 -> ESPN and The Odds API
+                 -> PostgreSQL (project-scoped local store)
+                 -> approved sports-data providers
 
-Dedicated scheduler process
+APScheduler job owner (when enabled)
   -> the same service layer
        -> database, providers, and local model artifacts
 ```
@@ -54,8 +54,9 @@ is checked against Flask's URL map in tests.
   `distributional_model.py`, `distributional_predictor.py`,
   `projection_engine.py`, `rolling_backtest.py`, and calibration/diagnostic
   modules.
-- Automation: `scheduler.py` owns one registry of 22 jobs and must run in exactly
-  one scheduler process.
+- Automation: `scheduler.py` registers scheduled work. The exact inventory is
+  in the system contract and executable job registration. Run one scheduler
+  owner per deployment.
 
 Routes must not import private helpers from other route modules. Service modules
 must not depend on routes. Architecture tests enforce both directions.
@@ -79,17 +80,13 @@ cutover is accepted.
 
 ## Persistence
 
-`app/models.py` currently defines 16 SQLAlchemy tables:
-
-| Domain | Tables |
-|---|---|
-| Accounts and positions | `user`, `bet`, `bet_postmortem`, `pick_context` |
-| Current/live data | `game_snapshot`, `player_game_log`, `team_defense_snapshot`, `injury_report`, `odds_snapshots` |
-| Permanent training/context data | `historical_game_log`, `historical_game_odds`, `scenario_split`, `scenario_context_pack` |
-| Models and operations | `model_metadata`, `model_evaluation_run`, `job_log` |
+`app/models.py` owns the SQLAlchemy model definitions. The canonical contract
+records the verified model inventory; model count and physical table count are
+different measurements. Use the model definitions and migrations for current
+field and table names rather than a copied list here.
 
 Alembic migrations in `migrations/versions/` are the schema history. CI replays
-the full chain on SQLite and PostgreSQL 16. Application startup does not race
+the chain against PostgreSQL. Application startup does not race
 migrations; hosted deployment uses a blocking pre-deploy migration.
 
 Business slate/date decisions use Eastern Time. Persisted event timestamps use
@@ -115,7 +112,7 @@ profitability. See `docs/runbooks/ml-validation.md`.
 ## Runtime ownership
 
 - Local development: project-scoped PostgreSQL with the scheduler disabled by
-  default; tests use SQLite.
+  default; isolated tests use SQLite.
 - Hosted safe baseline: one Gunicorn web worker with scheduler disabled, plus at
   most one dedicated scheduler process.
 - Process-local rate limiting is accepted only for one web worker. Multiple web

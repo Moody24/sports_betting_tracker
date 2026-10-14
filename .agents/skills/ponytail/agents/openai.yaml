@@ -1,0 +1,5 @@
+interface:
+  display_name: "ponytail"
+  short_description: "Small, complete changes for one task"
+policy:
+  allow_implicit_invocation: false

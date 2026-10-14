@@ -1,6 +1,6 @@
 ---
 name: taste
-description: Use when Taste Skill is requested for Edge Tracker frontend work. Applies the pinned Taste Skill to public landing and informational pages, preserves Flask/Jinja and vanilla CSS/JS, and routes dashboard, data table, and product-form work to frontend-design and the project definition of done.
+description: Use only when explicitly requested for Edge Tracker public landing or informational pages; product screens use interface-design.
 ---
 
 # Taste Skill for Edge Tracker
@@ -10,7 +10,7 @@ This is the project compatibility entrypoint for Leonxlnx/taste-skill. The exact
 ## Choose the relevant surface
 
 - **Public landing, about, or marketing page:** read the upstream reference and apply its contextual typography, hierarchy, composition, spacing, and accessibility guidance through the current Jinja templates and CSS.
-- **Dashboard, bet ledger, analysis screen, data table, or product form:** load the available `frontend-design` skill and the repository's [definition-of-done](../definition-of-done/SKILL.md). Upstream Taste explicitly excludes these surfaces (lines 8 and 898-906). Preserve information density, required fields, controls, and semantic outcome colors. Shared consistency and accessibility principles remain useful, but marketing rules about removing tables, imagery, cards, or long lists do not apply.
+- **Dashboard, bet ledger, analysis screen, data table, or product form:** use [interface-design](../interface-design/SKILL.md) and the repository's [definition-of-done](../definition-of-done/SKILL.md). Upstream Taste explicitly excludes these surfaces (lines 8 and 898-906). Preserve information density, required fields, controls, and semantic outcome colors. Shared consistency and accessibility principles remain useful, but marketing rules about removing tables, imagery, cards, or long lists do not apply.
 - **Shared navigation, styles, or components:** identify every affected surface and use the stricter product regression requirements. Avoid letting landing-page presentation rules reduce tracker functionality.
 
 ## Project compatibility

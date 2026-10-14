@@ -1,12 +1,12 @@
 # Taste Skill setup
 
-Taste Skill is installed locally for this project at `.agents/skills/taste/SKILL.md`. Invoke `taste` for frontend work or read that entrypoint directly. It chooses relevant upstream guidance and preserves the application's Flask/Jinja, vanilla CSS, and vanilla JavaScript architecture.
+Taste Skill is installed locally for public-page tasks at `.agents/skills/taste/SKILL.md`. Invoke it explicitly for those tasks. Product screens use `interface-design` and `definition-of-done` instead.
 
 ## Source and installation
 
 - Repository: <https://github.com/Leonxlnx/taste-skill>
 - Exact commit: `b482f7a970abb98c4108d4a9f761e458c64cefc8`
-- Clone: `/Users/mohamoudmohamed/Documents/Codex/2026-10-07/task/skill-review/upstream`
+- Review checkout: retained in the original setup record; the source commit above is the portable reference.
 - Original skill: `skills/taste-skill/SKILL.md` in the clone.
 - Project entrypoint: `.agents/skills/taste/SKILL.md`.
 - Unchanged original: `.agents/skills/taste/references/upstream-SKILL.md`.
@@ -20,7 +20,7 @@ The clone is pinned with a detached HEAD and sparse checkout of the selected ski
 | Surface | Guidance |
 | --- | --- |
 | Landing and public information pages | Contextual Taste typography, spacing, hierarchy, concise actions, and truthful content. Implement through existing templates/CSS. |
-| Dashboard, tables, bet records, analysis, and forms | `frontend-design` plus `.agents/skills/definition-of-done/SKILL.md`; these surfaces are excluded by upstream Taste. |
+| Dashboard, tables, bet records, analysis, and forms | `.agents/skills/interface-design/SKILL.md` plus `.agents/skills/definition-of-done/SKILL.md`; these surfaces are excluded by upstream Taste. |
 | Shared shell and styles | Game/market-first top navigation, compact neutral sans type, tabular numerals, semantic tokens, functional SVGs, visible focus, and responsive controls. No permanent sidebar. |
 
 The user's updated direction replaces the earlier Bricolage/JetBrains product presentation with `Arial, Helvetica, ui-sans-serif, sans-serif` and tabular numbers. Bricolage is retained for branding and the public hero. PropFinder is the primary reference for research density, restrained panel borders, and market hierarchy. Its player rail and proprietary assets are not copied. Product pages use flat charcoal surfaces, 6-8px panel radii, 22-24px headings, and 13-14px data text.
