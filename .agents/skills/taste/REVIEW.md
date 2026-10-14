@@ -20,7 +20,7 @@ After the skill catalog refreshed, the installed agent-skillguard 0.1.5 package 
 
 | Lines | Finding | Project handling |
 | --- | --- | --- |
-| 8, 898-906 | Scope excludes dashboards, data tables, and product forms. | Route these surfaces to `frontend-design` and the project definition of done. |
+| 8, 898-906 | Scope excludes dashboards, data tables, and product forms. | Route these surfaces to the project `interface-design` and definition of done. |
 | 99-102, 127-143, 991-1025 | Framework defaults and unpinned package-install commands can expand scope. | Keep Flask/Jinja/vanilla CSS and current dependencies. Do not run reference install commands. |
 | 267-278, 626 | Image generation, external image hosts, and logo CDNs are suggested. | Prefer current assets or a real product screenshot; do not introduce external services automatically. |
 | 327-330, 616-618 | Conflicting advice about real versus realistic invented numbers. | Use verified claims and visible example labels. |
@@ -29,7 +29,7 @@ After the skill catalog refreshed, the installed agent-skillguard 0.1.5 package 
 
 ## User-authorized project overrides
 
-The user's later design feedback supersedes the original typography and sidebar direction. The wrapper now specifies compact neutral sans-serif type, tabular numerals, game/market-first top navigation, and no permanent sidebar. PropFinder is the primary hierarchy/density reference. Product tables and live context remain intact under `frontend-design` and the project definition of done.
+The user's later design feedback supersedes the original typography and sidebar direction. The wrapper now specifies compact neutral sans-serif type, tabular numerals, game/market-first top navigation, and no permanent sidebar. PropFinder is the primary hierarchy/density reference. Product tables and live context remain intact under `interface-design` and the project definition of done.
 
 The user also requested original functional SVGs, overriding upstream icon-library defaults. The wrapper requires consistent strokes, meaningful symbols, text labels/accessibility, and no copied proprietary assets. These changes affect project guidance only; the pinned upstream Markdown and MIT license remain byte-identical. The package is rescanned after the wrapper changes, with the result recorded in `docs/frontend/taste-skill-scan.md`.
 

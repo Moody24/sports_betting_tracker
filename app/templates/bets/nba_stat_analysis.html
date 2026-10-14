@@ -16,6 +16,7 @@
     <div class="slip-fact"><span>Strong</span><span class="is-up">{{ strong_ct }}</span></div>
     <div class="slip-fact"><span>Value</span><span>{{ value_ct }}</span></div>
     <div class="slip-fact"><span>Avoid</span><span class="is-down">{{ avoid_ct }}</span></div>
+    <div class="slip-fact"><span>Unavailable</span><span>{{ unavailable_ct }}</span></div>
   </div>
 </section>
 
@@ -138,15 +139,16 @@
   {% for side_label, side_props in [('Away', m.away), ('Home', m.home)] %}
     {% for s in side_props %}
     {% set pos = (s.breakdown or {}).get('player_position', '') %}
+    {% set no_model_estimate = s.indicator == 'unavailable' %}
     <button type="button" class="row-line sa-player-row sa-ind-{{ s.indicator }}" data-prop='{{ s|tojson }}'>
       <span class="row-lead">
         {{ s.player }}
         <span class="row-sub">{{ side_label }} · {{ PROP_LABELS_SHORT.get(s.prop_type, s.prop_type) }}{% if pos %} · est. {{ pos|upper }}{% endif %}</span>
-        <span class="row-meta is-compact-only">line {{ s.line }} · projection {{ '%.1f'|format(s.projection or 0) }}</span>
+        <span class="row-meta is-compact-only">line {{ s.line }} · projection {{ 'unavailable' if no_model_estimate else '%.1f'|format(s.projection or 0) }}</span>
       </span>
       <span class="row-figure is-optional">{{ s.line }}</span>
-      <span class="row-figure is-optional">{{ '%.1f'|format(s.projection or 0) }}</span>
-      <span class="row-figure is-lead">{{ '+' if (s.edge or 0) >= 0 else '' }}{{ '%.0f'|format((s.edge or 0) * 100) }}%</span>
+      <span class="row-figure is-optional">{{ '—' if no_model_estimate else '%.1f'|format(s.projection or 0) }}</span>
+      <span class="row-figure is-lead">{% if no_model_estimate %}Unavailable{% else %}{{ '+' if (s.edge or 0) >= 0 else '' }}{{ '%.0f'|format((s.edge or 0) * 100) }}%{% endif %}</span>
       <span class="row-actions">{{ indicator_badge(s.indicator) }}</span>
     </button>
     {% else %}
@@ -198,7 +200,7 @@
           <div class="sp-case-val" id="sp-wp">—</div>
         </div>
         <div class="sp-case-cell">
-          <div class="sp-case-label">Book Implied</div>
+          <div class="sp-case-label" id="sp-implied-label">Book Implied</div>
           <div class="sp-case-val" id="sp-implied">—</div>
         </div>
         <div class="sp-case-cell">
@@ -484,6 +486,7 @@ const SA_PROP_TO_COL = PROP_TO_STAT_COL;
   function openPanel(prop) {
     currentProp = prop;
     currentLog  = [];
+    const noModelEstimate = prop.indicator === 'unavailable';
     const bd = prop.breakdown || {};
     const hr = prop.hit_rates || {};
     const gc = prop.game_ctx || {};
@@ -514,22 +517,22 @@ const SA_PROP_TO_COL = PROP_TO_STAT_COL;
     // Case numbers
     setText('sp-line', prop.line != null ? prop.line : '—');
     const projEl = document.getElementById('sp-proj');
-    projEl.textContent = prop.projection != null ? (+prop.projection).toFixed(1) : '—';
-    setCaseTone(projEl, (prop.projection || 0) > (prop.line || 0) ? 'up' : 'down');
+    projEl.textContent = !noModelEstimate && prop.projection != null ? (+prop.projection).toFixed(1) : '—';
+    setCaseTone(projEl, noModelEstimate ? 'neutral' : (prop.projection || 0) > (prop.line || 0) ? 'up' : 'down');
     const edgeEl = document.getElementById('sp-edge');
     const edgePct = (prop.edge * 100);
-    edgeEl.textContent = prop.edge != null ? `${edgePct >= 0 ? '+' : ''}${edgePct.toFixed(1)}%` : '—';
-    setCaseTone(edgeEl, (prop.edge || 0) >= 0.08 ? 'up' : 'neutral');
+    edgeEl.textContent = !noModelEstimate && prop.edge != null ? `${edgePct >= 0 ? '+' : ''}${edgePct.toFixed(1)}%` : '—';
+    setCaseTone(edgeEl, !noModelEstimate && (prop.edge || 0) >= 0.08 ? 'up' : 'neutral');
     // Recommendation: show actual recommended side
     const recSide = prop.recommended_side || (prop.indicator === 'avoid' ? 'Pass' : 'Over');
-    setText('sp-rec', recSide.charAt(0).toUpperCase() + recSide.slice(1));
+    setText('sp-rec', noModelEstimate ? 'Unavailable' : recSide.charAt(0).toUpperCase() + recSide.slice(1));
 
     // Model P(rec.): show model probability for the recommended side
     const isOver = (prop.recommended_side || 'over') === 'over';
     const modelProb = isOver ? prop.model_prob_over : prop.model_prob_under;
     const wpLabel = document.getElementById('sp-wp-label');
-    if (wpLabel) wpLabel.textContent = 'Model P(' + (isOver ? 'over' : 'under') + ')';
-    setText('sp-wp', modelProb != null ? ((modelProb * 100).toFixed(0) + '%') : '—');
+    if (wpLabel) wpLabel.textContent = noModelEstimate ? 'Model P' : 'Model P(' + (isOver ? 'over' : 'under') + ')';
+    setText('sp-wp', !noModelEstimate && modelProb != null ? ((modelProb * 100).toFixed(0) + '%') : '—');
 
     // Book implied for recommended side
     let implied = '—';
@@ -539,11 +542,12 @@ const SA_PROP_TO_COL = PROP_TO_STAT_COL;
       const pct = o > 0 ? 100 / (100 + o) : Math.abs(o) / (Math.abs(o) + 100);
       implied = (pct * 100).toFixed(0) + '%';
     }
+    setText('sp-implied-label', noModelEstimate ? 'Book implied (over)' : 'Book Implied');
     setText('sp-implied', implied);
 
     // Z-score and source filled in after AJAX
-    setText('sp-zscore', '…');
-    setText('sp-source', '…');
+    setText('sp-zscore', noModelEstimate ? '—' : '…');
+    setText('sp-source', noModelEstimate ? 'Model estimate unavailable' : '…');
     setText('sp-season', '—');
 
     // Hit rate bars (from pre-computed data)
@@ -611,11 +615,13 @@ const SA_PROP_TO_COL = PROP_TO_STAT_COL;
         currentLog = data.game_log;
 
         // Z-score and source
-        setText('sp-zscore', data.z_score != null ? (+data.z_score).toFixed(2) : '—');
+        setText('sp-zscore', !noModelEstimate && data.z_score != null ? (+data.z_score).toFixed(2) : '—');
         const historyLabel = data.history_source === 'espn_history' ? 'ESPN games' :
           data.history_source === 'nba_cache' ? 'NBA cache' : 'History unavailable';
         const observed = data.history_observed_through ? ` through ${data.history_observed_through}` : '';
-        setText('sp-source', `${data.projection_source || '—'} · ${historyLabel}${observed}`);
+        setText('sp-source', noModelEstimate
+          ? `Model estimate unavailable · ${historyLabel}${observed}`
+          : `${data.projection_source || '—'} · ${historyLabel}${observed}`);
 
         // Season avg for active stat
         const seaKey = {'pts':'pts_avg','reb':'reb_avg','ast':'ast_avg','fg3m':'fg3m_avg'}[activeCol] || 'pts_avg';

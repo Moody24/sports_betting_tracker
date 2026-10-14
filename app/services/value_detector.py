@@ -687,6 +687,7 @@ class ValueDetector:
         games = projection.get('games_played') or 0
         if 0 < games < 5:
             notes.append(f'only {games} played games; five required for a scored prop')
+        book_prob_over, book_prob_under = devig_probs(over_odds, under_odds)
         return {
             'player': player,
             'prop_type': prop_type,
@@ -700,8 +701,8 @@ class ValueDetector:
             'confidence_tier': 'no_edge',
             'model_prob_over': 0.5,
             'model_prob_under': 0.5,
-            'book_prob_over': devig_probs(over_odds, under_odds)[0],
-            'book_prob_under': devig_probs(over_odds, under_odds)[1],
+            'book_prob_over': book_prob_over,
+            'book_prob_under': book_prob_under,
             'context_notes': _sanitize_context_notes(notes),
             'std_dev': 0,
             'z_score': 0,
@@ -714,6 +715,8 @@ class ValueDetector:
             'scenario_matches': None,
             'breakdown': {},
             'game_id': game_id,
+            'win_probability': None,
+            'pick_quality_recommendation': 'no_model',
         }
 
     @staticmethod

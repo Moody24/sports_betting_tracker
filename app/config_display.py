@@ -119,6 +119,11 @@ INDICATOR_TIERS: dict[str, dict[str, str]] = {
         "client_class": "sa-badge-avoid",
         "badge_class": "sa-ind-badge-avoid",
     },
+    "unavailable": {
+        "label": "UNAVAILABLE",
+        "client_class": "sa-badge-unavailable",
+        "badge_class": "sa-ind-badge-unavailable",
+    },
 }
 
 POS_EDGE_APPLICABLE_PROPS: tuple[str, ...] = ("player_points",)

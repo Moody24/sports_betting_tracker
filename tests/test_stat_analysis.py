@@ -1,5 +1,6 @@
 """Tests for the /nba/stat-analysis route and helpers."""
 
+import re
 import unittest
 from datetime import date
 from types import SimpleNamespace
@@ -10,6 +11,36 @@ from app import db
 from app.models import PlayerGameLog, TeamDefenseSnapshot
 from app.routes.nba_analysis import _compute_hit_rates
 from app.services.analysis_context import build_stat_context
+
+
+class TestStatIndicatorContract(unittest.TestCase):
+
+    def test_no_data_is_unavailable_but_scored_no_edge_is_avoid(self):
+        from app.routes.nba_analysis import _stat_indicator
+
+        self.assertEqual(_stat_indicator({
+            'games_played': 0, 'confidence_tier': 'no_edge',
+            'win_probability': 0.35,
+        }), 'unavailable')
+        self.assertEqual(_stat_indicator({
+            'games_played': 12, 'confidence_tier': 'no_edge',
+        }), 'avoid')
+        self.assertEqual(_stat_indicator({
+            'games_played': 12, 'confidence_tier': 'moderate',
+            'win_probability': 0.35,
+        }), 'avoid')
+
+    def test_unavailable_is_counted_separately_from_avoid(self):
+        from app.routes.nba_analysis import _stat_matchup_counts
+
+        counts = _stat_matchup_counts([{
+            'home': [{'indicator': 'unavailable'}, {'indicator': 'avoid'}],
+            'away': [{'indicator': 'strong'}],
+        }])
+        self.assertEqual(counts, {
+            'total': 3, 'strong_ct': 1, 'value_ct': 0,
+            'avoid_ct': 1, 'unavailable_ct': 1,
+        })
 
 
 class TestComputeHitRates(BaseTestCase):
@@ -232,6 +263,68 @@ class TestStatAnalysisRoute(BaseTestCase):
         resp = self.client.get('/nba/stat-analysis')
         self.assertEqual(resp.status_code, 200)
         self.assertIn(b'sa-ind-badge-avoid', resp.data)
+
+    @patch('app.services.nba_service.get_todays_games')
+    @patch('app.services.score_cache.get_todays_scores')
+    def test_no_data_score_does_not_present_placeholder_model_estimates(self, mock_scores, mock_games):
+        mock_scores.return_value = self._mock_scores({
+            'projection': 0, 'edge': 0, 'confidence_tier': 'no_edge',
+            'games_played': 0, 'recommended_side': 'over',
+            'model_prob_over': 0.5, 'win_probability': None,
+            'pick_quality_recommendation': 'no_model',
+        })
+        mock_games.return_value = self._mock_games()
+        self._login()
+        resp = self.client.get('/nba/stat-analysis')
+        self.assertEqual(resp.status_code, 200)
+        body = resp.data.decode()
+        row = re.search(r'<button type="button" class="row-line sa-player-row.*?</button>',
+                        body, re.S).group()
+        self.assertIn('<span>Avoid</span><span class="is-down">0</span>', body)
+        self.assertIn('<span>Unavailable</span><span>1</span>', body)
+        self.assertIn('line 25.5 · projection unavailable', row)
+        self.assertIn('<span class="row-figure is-lead">Unavailable</span>', row)
+        self.assertIn('sa-ind-badge-unavailable', row)
+        self.assertNotIn('sa-ind-badge-avoid', row)
+        self.assertNotIn('projection 0.0', row)
+        self.assertNotIn('+0%', row)
+
+    @patch('app.services.nba_service.get_todays_games')
+    @patch('app.services.score_cache.get_todays_scores')
+    def test_model1_score_remains_visible_without_model2(self, mock_scores, mock_games):
+        mock_scores.return_value = self._mock_scores({
+            'games_played': 12, 'confidence_tier': 'moderate',
+            'model_prob_over': 0.63, 'recommended_side': 'over',
+            'win_probability': None, 'pick_quality_recommendation': 'no_model',
+        })
+        mock_games.return_value = self._mock_games()
+        self._login()
+        resp = self.client.get('/nba/stat-analysis')
+        self.assertEqual(resp.status_code, 200)
+        row = re.search(r'<button type="button" class="row-line sa-player-row.*?</button>',
+                        resp.data.decode(), re.S).group()
+        self.assertIn('line 25.5 · projection 28.0', row)
+        self.assertIn('>+12%</span>', row)
+        self.assertNotIn('Unavailable', row)
+
+    @patch('app.services.nba_service.get_todays_games')
+    @patch('app.services.score_cache.get_todays_scores')
+    def test_scored_no_edge_remains_avoid(self, mock_scores, mock_games):
+        mock_scores.return_value = self._mock_scores({
+            'games_played': 12, 'confidence_tier': 'no_edge',
+            'edge': 0, 'win_probability': None,
+        })
+        mock_games.return_value = self._mock_games()
+        self._login()
+        resp = self.client.get('/nba/stat-analysis')
+        self.assertEqual(resp.status_code, 200)
+        body = resp.data.decode()
+        row = re.search(r'<button type="button" class="row-line sa-player-row.*?</button>',
+                        body, re.S).group()
+        self.assertIn('<span>Avoid</span><span class="is-down">1</span>', body)
+        self.assertIn('<span>Unavailable</span><span>0</span>', body)
+        self.assertIn('sa-ind-badge-avoid', row)
+        self.assertNotIn('sa-ind-badge-unavailable', row)
 
     @patch('app.services.nba_service.get_todays_games')
     @patch('app.services.score_cache.get_todays_scores')

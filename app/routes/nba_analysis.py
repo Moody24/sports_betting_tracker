@@ -243,6 +243,8 @@ def _latest_defense_snapshots(opponent_abbrs: set[str]) -> dict:
 
 
 def _stat_indicator(score: dict) -> str:
+    if score.get('games_played') == 0 and score.get('confidence_tier') == 'no_edge':
+        return 'unavailable'
     indicator = {
         'strong': 'strong',
         'moderate': 'value',
@@ -344,6 +346,7 @@ def _stat_matchup_counts(matchups: list[dict]) -> dict[str, int]:
         'strong_ct': sum(score.get('indicator') == 'strong' for score in scores),
         'value_ct': sum(score.get('indicator') == 'value' for score in scores),
         'avoid_ct': sum(score.get('indicator') == 'avoid' for score in scores),
+        'unavailable_ct': sum(score.get('indicator') == 'unavailable' for score in scores),
     }
 
 

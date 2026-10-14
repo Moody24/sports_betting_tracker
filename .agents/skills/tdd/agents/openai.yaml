@@ -1,0 +1,5 @@
+interface:
+  display_name: "tdd"
+  short_description: "Behavior-first regression checks with unittest"
+policy:
+  allow_implicit_invocation: false

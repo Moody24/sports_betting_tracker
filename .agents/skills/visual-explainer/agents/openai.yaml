@@ -1,0 +1,5 @@
+interface:
+  display_name: "visual-explainer"
+  short_description: "Source-linked local HTML system overview"
+policy:
+  allow_implicit_invocation: false

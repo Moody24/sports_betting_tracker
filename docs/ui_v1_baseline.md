@@ -21,6 +21,13 @@ and visual suites.
 6. Private pages emit `noindex, nofollow`. Only the deliberate public surface
    receives canonical metadata and structured data.
 7. Visual baselines are regenerated only for an intentional, reviewed UI change.
+8. Task-critical facts remain visible without relying on tooltips. Probability
+   explanations use plain language; dollar amounts reflect the user's actual
+   stake rather than a generic stake. Keep numeric columns aligned and labelled.
+9. Breadcrumbs use semantic navigation and mark the current page with
+   `aria-current`; structured breadcrumb data appears only on indexable pages.
+   Public copy and confirmations stay factual, without invented urgency or
+   gamified encouragement.
 
 Quick checks:
 

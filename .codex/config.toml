@@ -1,0 +1,7 @@
+# Disable the user-wide Ponytail plugin for this trusted checkout.
+# Plugin status and skill-catalog visibility differ; see docs/development/codex-stack.md.
+[plugins."ponytail@ponytail"]
+enabled = false
+
+[agents]
+max_concurrent_threads_per_session = 2

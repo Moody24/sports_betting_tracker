@@ -1,0 +1,5 @@
+interface:
+  display_name: apple-hig-reference
+  short_description: Optional secondary web UI review lens
+policy:
+  allow_implicit_invocation: false

@@ -369,10 +369,10 @@ actionable filter rechecks that age. Historical `GameSnapshot` fallback MUST
 NOT populate the current scoring or bet-builder market board. Recorded manual
 prices are user observations and are not refreshed from provider data.
 
-The no-data path SHOULD converge on the same shape. It currently omits
-`win_probability` and `pick_quality_recommendation`; consumers MUST treat those
-missing keys as `null` and `"no_model"` respectively until that legacy path is
-migrated. A missing classifier result is not a negative recommendation.
+The no-data path includes `win_probability=null` and
+`pick_quality_recommendation="no_model"`. Consumers MUST also interpret missing
+keys in legacy cached mappings using those same defaults. An unavailable
+classifier result is not a negative recommendation.
 The stat-analysis page may add view-only matchup context to a copy of this
 mapping. Team allowances must be labeled as team-wide, with sample size,
 source, and observation date; prior player-opponent results must include their
@@ -759,7 +759,6 @@ data to beta users.
 These are recorded exceptions, not approved patterns:
 
 - Several service boundaries still exchange undocumented dictionaries.
-- The no-data `ScoredPropV1` path omits two optional Model 2 keys.
 - JSON response envelopes are inconsistent across legacy endpoints.
 - Some provider normalization and application logic still coexist in
   `nba_service.py`; HTTP transport itself is isolated in `espn_client.py`.

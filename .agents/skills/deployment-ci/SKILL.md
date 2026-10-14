@@ -1,32 +1,21 @@
 ---
 name: deployment-ci
-description: "INVOKE when working on CI/CD, GitHub Actions, Railway deployment, pushing to main, coverage gates, gunicorn config, or Docker setup for Edge Tracker."
+description: Use for Edge Tracker CI, release configuration, migrations, security gates, Gunicorn or deployment tasks.
 ---
 
-## CI (GitHub Actions)
-- Runs on push/PR to `main`
-- Python 3.11; runtime and development requirements are installed separately
-- `SECRET_KEY=ci-test-secret-key-not-for-production`
-- Coverage gate: `python -m coverage report --include="app/*" --fail-under=80`
-- Current application coverage: 85%
-- Lint/security job: Ruff, Bandit, detect-secrets on tracked files, a redacted
-  high-confidence Git-history scan, and pip-audit for runtime dependencies
+# CI and release
 
-## Deployment (Currently Inactive)
-Railway deployment is disconnected. Config files remain in repo for restoration:
-- `railway.toml`, `gunicorn.conf.py`, `docker-entrypoint.sh`
-- Former live URL: `https://sportsbettingtracker-production.up.railway.app`
-- Former Railway project: `shimmering-youth` · Service: `sports_betting_tracker`
-- Surviving inactive runbook: `docs/deploy.md`
-- Safe web baseline: one Gunicorn worker with `SCHEDULER_ENABLED=false` and
-  `RATELIMIT_ENABLED=true`. Multiple workers require a shared limiter URI and
-  otherwise fail application startup in production.
+Read `.github/workflows/ci.yml`, [deployment runbook](../../../docs/deploy.md)
+and [the system contract](../../../docs/architecture/system-contract.md) for
+the task. CI covers Ruff, Bandit, tracked-file and history secret scans,
+dependency audit, `unittest` coverage and PostgreSQL migration parity.
+Run focused checks while editing and the required complete gates before
+integration. Record actual results; do not repeat a past coverage number as
+current state.
 
-## Model Storage in Production
-- `MODEL_STORAGE=s3` was used when deployed (AWS now disconnected)
-- Local default is `MODEL_STORAGE=local` — artifacts at `app/ml_models/*.json`
-
-## Git Workflow
-- Always `git pull --rebase origin main` before push
-- Generated caches, reports, stale virtualenvs, and backup files must not appear
-  in the working tree. Keep local database/model artifacts only while referenced.
+The safe hosted baseline is one Gunicorn web worker with the scheduler
+disabled and at most one dedicated scheduler process. Multiple web workers
+need the shared limiter store required by the app. Review migrations before
+deployment. Do not infer live hosting or provider access from retained files.
+Check branch state and working changes before a push; do not pull or rebase
+automatically. Keep generated caches, reports and real data out of commits.

@@ -1,0 +1,5 @@
+interface:
+  display_name: "taste"
+  short_description: "Public page design guidance"
+policy:
+  allow_implicit_invocation: false
